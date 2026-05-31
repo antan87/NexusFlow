@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # 1. Root npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+    open-pull-requests-limit: 10
+
+  # 2. GUI npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/gui"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+    open-pull-requests-limit: 10
+
+  # 3. VS Code Extension npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/extension"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+    open-pull-requests-limit: 10
