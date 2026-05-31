@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceRoot}/extension"
+      ],
+      "outFiles": [
+        "${workspaceRoot}/extension/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: extension-compile"
+    }
+  ]
+}
