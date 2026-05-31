@@ -176,10 +176,13 @@ Once you have created \`nexusflow-overview.md\` and compiled your questions, ask
 
 ## Guidelines
 
+- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
+- **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
 - Read each project's existing \`README.md\` and any doc files before proposing changes.
 - When modifying a shared library, check every downstream consumer for breakage.
 - Prefer small, focused commits that touch one repo at a time when possible.
 - If a change must span repos, describe the ordering and any migration steps.
+
 
 
 
