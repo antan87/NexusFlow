@@ -37,7 +37,7 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 ### Install from npm
 
 ```bash
-npm install -g nexusflow
+npm install -g @mrpatronz/nexusflow
 ```
 
 ### Install from source
