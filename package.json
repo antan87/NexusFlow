@@ -8,13 +8,15 @@
     "nexusflow": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && npm run build --prefix gui",
+    "build": "tsc && npm run build --prefix gui && npm run extension:compile",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rimraf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "extension:install": "npm install --prefix extension",
+    "extension:compile": "npm run compile --prefix extension"
   },
   "keywords": [
     "ai",

@@ -89,6 +89,7 @@ interface RunningService {
 }
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 
 export default function App() {
   const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings'>('guide');
@@ -558,14 +559,18 @@ export default function App() {
         fetchWorkspaces();
 
         if (selectedEditor) {
-          await fetch(`${API_BASE}/api/open-editor`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workspacePath: data.workspacePath,
-              command: selectedEditor.command,
-            }),
-          });
+          if (isVsCode) {
+            window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: data.workspacePath }, '*');
+          } else {
+            await fetch(`${API_BASE}/api/open-editor`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                workspacePath: data.workspacePath,
+                command: selectedEditor.command,
+              }),
+            });
+          }
         }
       } else {
         alert(`Error: ${data.error || 'Failed to create workspace'}`);
@@ -621,9 +626,18 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        navigator.clipboard.writeText(data.resumeCommand);
-        alert(`Session Resumed!\n\n1. Editor launched.\n2. Command "${data.resumeCommand}" copied to clipboard! Paste it into your terminal inside the workspace to continue.`);
-        setActiveWsId(ws.branchName);
+        if (isVsCode) {
+          window.parent.postMessage({
+            type: 'executeTerminalCommand',
+            command: data.resumeCommand,
+            cwd: ws.workspacePath
+          }, '*');
+          setActiveWsId(ws.branchName);
+        } else {
+          navigator.clipboard.writeText(data.resumeCommand);
+          alert(`Session Resumed!\n\n1. Editor launched.\n2. Command "${data.resumeCommand}" copied to clipboard! Paste it into your terminal inside the workspace to continue.`);
+          setActiveWsId(ws.branchName);
+        }
       } else {
         alert(`Error: ${data.error || 'Failed to resume session'}`);
       }
@@ -636,6 +650,10 @@ export default function App() {
   };
 
   const handleOpenInEditor = async (workspacePath: string) => {
+    if (isVsCode) {
+      window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath }, '*');
+      return;
+    }
     const editor = editors.find((e) => e.detected) || editors[0];
     if (!editor) {
       alert('No detected editors available.');
