@@ -60,8 +60,3 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish VS Code Extension
-        run: |
-          cd extension
-          npx @vscode/vsce publish -p ${{ secrets.VSCE_PAT }}
