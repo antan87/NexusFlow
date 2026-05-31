@@ -7,6 +7,7 @@ import { generateCodexConfig } from './codex.js';
 import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
+import { generateImplementationPlan } from './plan-generator.js';
 
 /** Maps each assistant to its generator function and the file it produces. */
 const GENERATORS: Record<
@@ -24,10 +25,82 @@ const GENERATORS: Record<
 };
 
 /**
+ * Builds the nexusflow-knowledge.md content — a persistent AI memory file.
+ */
+function buildKnowledgeContent(ctx: WorkspaceContext): string {
+  const { feature, repos, analysis } = ctx;
+
+  // Build repo list with tech stack info if available
+  const repoList = repos.map((r) => {
+    if (analysis && analysis.has(r.path)) {
+      const a = analysis.get(r.path)!;
+      const tech = a.techStack.frameworks.length > 0
+        ? ` (${a.techStack.languages.join(', ')} — ${a.techStack.frameworks.join(', ')})`
+        : a.techStack.languages[0] !== 'other'
+          ? ` (${a.techStack.languages.join(', ')})`
+          : '';
+      return `- **${r.name}**${tech}`;
+    }
+    return `- **${r.name}**`;
+  }).join('\n');
+
+  // Build initial progress checklist
+  const progressItems = repos.map((r) => `- [ ] ${r.name} — changes implemented and tested`).join('\n');
+
+  return `# Workspace Knowledge — ${feature.id}
+
+> **This file is a living document.** AI assistants should read this at the
+> start of each session and append new learnings at the end.
+> It preserves context across sessions so decisions aren't lost or repeated.
+
+## Feature Goal
+
+${feature.description}
+
+**Branch:** \`${feature.branchName}\`
+**Created:** ${feature.createdAt}
+
+## Repos in This Workspace
+
+${repoList}
+
+## Architecture Decisions
+
+<!-- AI assistants: append decisions here as they are made during development.
+     Format: ### YYYY-MM-DD — Decision Title
+     **Decision:** What was decided
+     **Alternatives considered:** What else was evaluated
+     **Reasoning:** Why this choice was made -->
+
+_(No decisions recorded yet.)_
+
+## Implementation Progress
+
+${progressItems}
+
+## Known Gotchas
+
+<!-- AI assistants: append any gotchas, workarounds, or "watch out for" items
+     discovered during development. These help future sessions avoid repeating
+     the same debugging. -->
+
+_(No gotchas recorded yet.)_
+
+## Open Questions
+
+<!-- Add questions that need human input before the AI can proceed. -->
+
+_(No open questions.)_
+`;
+}
+
+/**
  * Generates AI context files for each of the selected assistants.
  *
- * Iterates over the provided assistant list, invokes the corresponding
- * generator, and logs success / failure for each one.
+ * Also generates:
+ * - WORKSPACE.md — universal context file
+ * - nexusflow-knowledge.md — persistent AI memory across sessions
+ * - nexusflow-plan.md — implementation order based on dependency analysis
  *
  * @param ctx           - The workspace context (feature + repos).
  * @param assistants    - Which AI assistants to generate context files for.
@@ -48,44 +121,14 @@ export async function generateContextFiles(
       `Generated universal ${chalk.bold('WORKSPACE.md')}`,
     );
 
-    // Generate session.md template if it does not exist
-    const sessionPath = path.join(workspacePath, 'session.md');
-    if (!(await fse.pathExists(sessionPath))) {
-      const sessionContent = `# AI Session Handover Memo
-
-- **Feature Branch**: \`${ctx.feature.branchName}\`
-- **Session Started**: ${new Date().toLocaleDateString()}
-- **Last Modified Files**: None (Start of session)
-
-## Summary of Accomplished Work
-- Setup workspace with ${ctx.repos.length} mapped repositories.
-
-## Active State & Blockers
-- No active blockers.
-
-## Next Steps
-1. Open this workspace in your selected editor.
-2. Ask the assistant to read \`WORKSPACE.md\` and \`session.md\` to get started.
-`;
-      await fse.writeFile(sessionPath, sessionContent, 'utf-8');
-      console.log(chalk.green('  ✔'), `Generated initial session.md`);
-    }
-
-    // Generate plan.md template if it does not exist
-    const planPath = path.join(workspacePath, 'plan.md');
-    if (!(await fse.pathExists(planPath))) {
-      const planContent = `# Feature Development Plan
-
-## Checklist
-- [ ] Read \`WORKSPACE.md\` and analyze the codebase structure.
-- [ ] Initialize context by creating \`nexusflow-overview.md\` outlining assumptions and raising clarifying questions.
-- [ ] Review user's responses to clarifying questions.
-- [ ] Implement feature logic.
-- [ ] Verify build and run tests.
-- [ ] Compile final changes in the session handover memo.
-`;
-      await fse.writeFile(planPath, planContent, 'utf-8');
-      console.log(chalk.green('  ✔'), `Generated initial plan.md`);
+    // Generate nexusflow-knowledge.md if it does not exist
+    const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md');
+    if (!(await fse.pathExists(knowledgePath))) {
+      const knowledgeContent = buildKnowledgeContent(ctx);
+      await fse.writeFile(knowledgePath, knowledgeContent, 'utf-8');
+      console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-knowledge.md')} (persistent AI memory)`);
+    } else {
+      console.log(chalk.gray('  ○'), `nexusflow-knowledge.md already exists — preserving existing content`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -112,6 +155,17 @@ export async function generateContextFiles(
       );
     }
   }
+
+  // Generate implementation plan from dependency analysis (if analysis data available)
+  try {
+    await generateImplementationPlan(ctx, workspacePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      chalk.red('  ✖'),
+      `Failed to generate implementation plan: ${message}`,
+    );
+  }
 }
 
 // Re-export individual generators for direct use
@@ -120,3 +174,4 @@ export { generateCodexConfig } from './codex.js';
 export { generateCopilotConfig } from './copilot.js';
 export { generateCursorConfig } from './cursor.js';
 export { buildContextContent } from './base.js';
+export { generateImplementationPlan } from './plan-generator.js';

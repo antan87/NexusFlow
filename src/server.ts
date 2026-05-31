@@ -20,6 +20,7 @@ import { generateContextFiles } from './generators/index.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import { getWorkspaceRepos, rebaseRepo, commitAndPush, getRepoStatus } from './utils/multi-git.js';
 import {
   detectAllServices,
   detectOrchestrationTools,
@@ -301,6 +302,27 @@ app.get('/api/workspace/:id/changes', async (c) => {
         const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
         const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
 
+        // Get numstat to determine additions and deletions per file
+        const numstatMap = new Map<string, { additions: number; deletions: number }>();
+        try {
+          const { stdout: numstatRaw } = await execa('git', ['diff', 'HEAD', '--numstat'], {
+            cwd: worktreePath,
+          });
+          const numstatLines = numstatRaw.split('\n').filter(Boolean);
+          for (const numLine of numstatLines) {
+            const parts = numLine.trim().split(/\s+/);
+            if (parts.length >= 3) {
+              const [add, del, file] = parts;
+              numstatMap.set(file, {
+                additions: add === '-' ? 0 : parseInt(add, 10) || 0,
+                deletions: del === '-' ? 0 : parseInt(del, 10) || 0,
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore diff errors
+        }
+
         const files = lines.map((line) => {
           const status = line.slice(0, 2).trim();
           const file = line.slice(2).trim();
@@ -309,7 +331,15 @@ app.get('/api/workspace/:id/changes', async (c) => {
           if (status === 'A' || status === '??') type = 'added';
           else if (status === 'D') type = 'deleted';
 
-          return { file, type, rawStatus: status };
+          const stats = numstatMap.get(file) || { additions: 0, deletions: 0 };
+
+          return {
+            file,
+            type,
+            rawStatus: status,
+            additions: stats.additions,
+            deletions: stats.deletions,
+          };
         });
 
         results.push({
@@ -333,6 +363,127 @@ app.get('/api/workspace/:id/changes', async (c) => {
     return c.json({ error: msg }, 500);
   }
 });
+
+// 13a. Get workspace knowledge (nexusflow-knowledge.md)
+app.get('/api/workspace/:id/knowledge', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+    const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
+
+    let content = '';
+    try {
+      content = await fs.readFile(knowledgeFile, 'utf-8');
+    } catch {
+      content = '# Workspace Knowledge\n\nNo knowledge file yet.';
+    }
+
+    return c.json({ content });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 13b. Update workspace knowledge (nexusflow-knowledge.md)
+app.put('/api/workspace/:id/knowledge', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { content } = await c.req.json() as { content: string };
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+    const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
+
+    await fs.writeFile(knowledgeFile, content, 'utf-8');
+    return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 13c. Get workspace plan (nexusflow-plan.md)
+app.get('/api/workspace/:id/plan', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+    const planFile = path.join(workspacePath, 'nexusflow-plan.md');
+
+    let content = '';
+    try {
+      content = await fs.readFile(planFile, 'utf-8');
+    } catch {
+      content = '# Workspace Plan\n\nNo implementation plan file yet.';
+    }
+
+    return c.json({ content });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 13d. Sync all repositories in workspace
+app.post('/api/workspace/:id/sync', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+
+    const repos = await getWorkspaceRepos(workspacePath);
+    const results = [];
+
+    for (const repo of repos) {
+      const result = await rebaseRepo(repo.path, 'main');
+      results.push({
+        repoName: repo.name,
+        success: result.success,
+        message: result.message,
+        conflict: result.conflict,
+      });
+    }
+
+    return c.json({ results });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 13e. Commit changes in all repositories in workspace
+app.post('/api/workspace/:id/commit', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { message } = await c.req.json() as { message: string };
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+
+    const repos = await getWorkspaceRepos(workspacePath);
+    const results = [];
+
+    for (const repo of repos) {
+      const status = await getRepoStatus(repo.path);
+      if (status.hasChanges) {
+        const result = await commitAndPush(repo.path, message, repo.branchName);
+        results.push({
+          repoName: repo.name,
+          success: result.success,
+          commitHash: result.commitHash,
+          filesChanged: result.filesChanged,
+          message: result.message,
+        });
+      }
+    }
+
+    return c.json({ results });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
 
 // 14. Resume session in workspace (copies CLI resume command and opens editor)
 app.post('/api/workspace/:id/resume', async (c) => {

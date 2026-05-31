@@ -20,6 +20,10 @@ import { stopCommand } from './commands/stop.js';
 import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
 import { uiCommand } from './commands/ui.js';
+import { syncCommand } from './commands/sync.js';
+import { commitCommand } from './commands/commit.js';
+import { diffCommand } from './commands/diff.js';
+
 
 const program = new Command();
 
@@ -175,4 +179,59 @@ program
     }
   });
 
+program
+  .command('sync')
+  .description('Sync all repositories in a workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await syncCommand(workspace);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('commit')
+  .description('Commit changes across all repositories in a workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .requiredOption('-m, --message <msg>', 'Commit message')
+  .option('--no-push', 'Stage and commit changes without pushing to remote')
+  .option('--dry-run', 'Preview changes without committing')
+  .action(async (workspace: string | undefined, options: { message: string; noPush?: boolean; dryRun?: boolean }) => {
+    try {
+      await commitCommand(options.message, workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('diff')
+  .description('Display a unified summary of changes across all repositories')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await diffCommand(workspace);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
 program.parse();
+

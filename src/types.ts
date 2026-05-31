@@ -292,3 +292,20 @@ export interface RunningState {
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }
+
+// ─── Phase 3: Dependency Graph Types ──────────────────────────────────────
+
+/** A node in the workspace dependency graph. */
+export interface DependencyNode {
+  /** Repository name. */
+  repoName: string;
+  /** Absolute path to the repository. */
+  repoPath: string;
+  /** Names of repos this one depends on. */
+  dependsOn: string[];
+  /** Names of repos that depend on this one. */
+  dependedOnBy: string[];
+}
+
+/** The full dependency graph for a workspace. */
+export type DependencyGraph = Map<string, DependencyNode>;
