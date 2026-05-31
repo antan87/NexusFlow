@@ -57,6 +57,12 @@ jobs:
         run: npm run build
 
       - name: Publish to NPM
-        run: npm publish --access public
+        run: |
+          CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('./package.json', 'utf8')).version)")
+          if npm info @mrpatronz/nexusflow@$CURRENT_VERSION --json >/dev/null 2>&1; then
+            echo "Version $CURRENT_VERSION is already published on NPM. Skipping publish."
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
