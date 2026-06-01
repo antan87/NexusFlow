@@ -830,7 +830,7 @@ Core Instructions:
                   <input
                     type="text"
                     className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-xs shadow-inner"
-                    placeholder="e.g. C:\Users\patro\dev"
+                    placeholder="e.g. C:\Users\username\dev"
                     value={config.devDir}
                     onChange={(e) => setConfig({ ...config, devDir: e.target.value })}
                   />
@@ -846,7 +846,7 @@ Core Instructions:
                   <input
                     type="text"
                     className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-xs shadow-inner"
-                    placeholder="e.g. C:\Users\patro\dev\workspaces"
+                    placeholder="e.g. C:\Users\username\dev\workspaces"
                     value={config.workspacesDir}
                     onChange={(e) => setConfig({ ...config, workspacesDir: e.target.value })}
                   />
