@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -56,13 +59,32 @@ jobs:
       - name: Build Project
         run: npm run build
 
-      - name: Publish to NPM
+      - name: Check version and NPM
+        id: check-version
         run: |
           CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('./package.json', 'utf8')).version)")
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           if npm info @mrpatronz/nexusflow@$CURRENT_VERSION --json >/dev/null 2>&1; then
+            echo "is_new=false" >> $GITHUB_OUTPUT
             echo "Version $CURRENT_VERSION is already published on NPM. Skipping publish."
           else
-            npm publish --access public
+            echo "is_new=true" >> $GITHUB_OUTPUT
+            echo "Version $CURRENT_VERSION is new."
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to NPM
+        if: steps.check-version.outputs.is_new == 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.check-version.outputs.is_new == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.check-version.outputs.version }}
+          name: Release v${{ steps.check-version.outputs.version }}
+          generate_release_notes: true
+          target_commitish: ${{ github.sha }}
