@@ -39,7 +39,7 @@ export function getCurrentVersion(): string {
   } catch {
     // Fallback if filesystem access fails
   }
-  return '0.1.3'; // Sensible fallback (active release)
+  return '0.1.5'; // Sensible fallback (active release)
 }
 
 /**

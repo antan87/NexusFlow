@@ -106,7 +106,7 @@ export default function App() {
     latestVersion: string;
     updateAvailable: boolean;
   } | null>(null);
-  const [appVersion, setAppVersion] = useState('0.1.3');
+  const [appVersion, setAppVersion] = useState('0.1.5');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
 
   // Repos & Tools
