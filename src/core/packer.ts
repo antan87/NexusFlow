@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { execa } from 'execa';
+import { runCli } from 'repomix';
 import { loadFeatureConfig } from './workspace.js';
 
 export interface PackResult {
@@ -41,15 +41,14 @@ export async function packWorkspace(
 
     const tempXmlPath = path.join(workspacePath, `temp-repomix-${repoName}.xml`);
 
-    // Build repomix arguments
-    const args = ['repomix', '--style', 'xml', '--output', tempXmlPath];
-    if (compress) {
-      args.push('--compress');
-    }
-
     try {
-      // Run repomix inside the worktree directory
-      await execa('npx', args, { cwd: worktreePath });
+      // Run repomix programmatically inside the worktree directory
+      await runCli(['.'], worktreePath, {
+        style: 'xml',
+        output: tempXmlPath,
+        compress,
+        quiet: true,
+      });
 
       // Read output XML
       const xmlContent = await fs.readFile(tempXmlPath, 'utf8');
