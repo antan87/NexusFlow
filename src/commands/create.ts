@@ -14,6 +14,7 @@ import { confirm } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { createWorkspace } from '../core/workspace.js';
+import { packWorkspace } from '../core/packer.js';
 import { generateContextFiles } from '../generators/index.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { detectAIAssistants } from '../utils/detect-ai.js';
@@ -112,6 +113,18 @@ export async function createCommand(): Promise<void> {
   const ctx: WorkspaceContext = { feature, repos: selectedRepos, analysis };
   console.log(chalk.cyan('\nGenerating AI context files...'));
   await generateContextFiles(ctx, selectedAI, workspacePath);
+
+  // ── 8.5. Pack codebase context ──────────────────────────────────────
+  const packSpinner = ora('Packing codebase context with Repomix...').start();
+  try {
+    const packResult = await packWorkspace(workspacePath);
+    packSpinner.succeed(
+      `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB)`
+    );
+  } catch (error) {
+    packSpinner.fail('Failed to pack codebase context');
+    console.error(chalk.red(`  ${error}`));
+  }
 
   // ── 8. Open in editor ───────────────────────────────────────────────
   const detectedEditors = await detectEditors();
