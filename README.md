@@ -18,6 +18,7 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 
 - **Multi-repo workspaces** — group any set of local Git repos under one feature branch using worktrees
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
+- **Codebase context packing** — compress an entire multi-repo workspace into a single token-efficient XML file for web-based LLMs using Repomix
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
 - **Service orchestration** — start, stop, and tail logs for all services in a workspace with a single command
@@ -108,6 +109,7 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow list` | List all existing workspaces (alias: `ls`) |
 | `nexusflow open` | Re-open a workspace in your editor |
 | `nexusflow init` | Configure NexusFlow settings |
+| `nexusflow pack` | Pack the workspace codebase into a single token-efficient XML file |
 | `nexusflow start` | Start all services in a workspace (auto-detected) |
 | `nexusflow stop` | Stop all running services |
 | `nexusflow status` | Show running/stopped status and PIDs |
