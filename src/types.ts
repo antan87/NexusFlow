@@ -22,6 +22,12 @@ export interface NexusFlowConfig {
 
   /** How many directory levels deep to scan for git repos. Default: 2 */
   scanDepth: number;
+
+  /** ISO timestamp of the last update check. */
+  lastUpdateCheck?: string;
+
+  /** The last checked latest version from NPM. */
+  latestVersion?: string;
 }
 
 /** Result of probing for an AI assistant on the system. */

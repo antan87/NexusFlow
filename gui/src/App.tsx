@@ -99,6 +99,14 @@ export default function App() {
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+
+  // Update Check State
+  const [updateStatus, setUpdateStatus] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+  } | null>(null);
+  const [appVersion, setAppVersion] = useState('0.1.3');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
 
   // Repos & Tools
@@ -183,6 +191,7 @@ export default function App() {
     fetchAIAssistants();
     fetchEditors();
     fetchWorkspaces();
+    fetchUpdateStatus();
   }, []);
 
   // Poll logs and services status when active workspace is open
@@ -251,6 +260,21 @@ export default function App() {
   }, [serviceLogs]);
 
   // ─── API Fetches ────────────────────────────────────────────────────────
+
+  const fetchUpdateStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/update-status`);
+      if (res.ok) {
+        const data = await res.json();
+        setUpdateStatus(data);
+        if (data.currentVersion) {
+          setAppVersion(data.currentVersion);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch update status:', e);
+    }
+  };
 
   const fetchConfig = async () => {
     try {
@@ -992,7 +1016,7 @@ Core Instructions:
           </ul>
         </nav>
         <div className="pt-6 border-t border-gray-800/60 text-[11px] text-gray-500 text-center">
-          NexusFlow Engine v0.1.0
+          NexusFlow Engine v{appVersion}
         </div>
       </aside>
 
@@ -1005,6 +1029,36 @@ Core Instructions:
           </div>
         ) : (
           <>
+            {/* Update Notification Banner */}
+            {updateStatus && updateStatus.updateAvailable && (
+              <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-300">
+                      A new version of NexusFlow is available!
+                    </h4>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Upgrade from v{updateStatus.currentVersion} to v{updateStatus.latestVersion} to get the latest features and bug fixes.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText('npm install -g @mrpatronz/nexusflow');
+                      alert('Update command copied to clipboard!');
+                    }}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 cursor-pointer flex items-center gap-1.5"
+                  >
+                    Copy Update Command
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* View 0: Getting Started Guide */}
             {view === 'guide' && config && (
               <div className="max-w-4xl mx-auto">

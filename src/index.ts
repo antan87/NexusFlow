@@ -24,6 +24,7 @@ import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
+import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
 const program = new Command();
 
@@ -32,7 +33,7 @@ program
   .description(
     'Combine multiple repos into a workspace with rich AI assistant context',
   )
-  .version('0.1.0');
+  .version(getCurrentVersion());
 
 program
   .command('create')
@@ -259,6 +260,22 @@ mcp
       process.exit(1);
     }
   });
+
+program.hook('postAction', async (thisCommand, actionCommand) => {
+  // Skip update check for MCP run to prevent contaminating stdout stream
+  if (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp') {
+    return;
+  }
+
+  try {
+    const status = await checkForUpdates();
+    if (status) {
+      printUpdateBanner(status);
+    }
+  } catch {
+    // Silently ignore to prevent crashing CLI
+  }
+});
 
 program.parse();
 

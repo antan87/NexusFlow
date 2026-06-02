@@ -28,6 +28,7 @@ import {
   stopServices,
   loadRunningState,
 } from './orchestration/index.js';
+import { checkForUpdates, getCurrentVersion } from './utils/update-check.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
 
 // Resolve static files directory
@@ -584,6 +585,21 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
     const sessionId = c.req.param('sessionId');
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 17. Check for NexusFlow updates
+app.get('/api/update-status', async (c) => {
+  try {
+    const status = await checkForUpdates(false);
+    if (!status) {
+      const currentVersion = getCurrentVersion();
+      return c.json({ currentVersion, latestVersion: currentVersion, updateAvailable: false });
+    }
+    return c.json(status);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
