@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import { execa } from 'execa';
-import { select } from '@inquirer/prompts';
+import { select, confirm } from '@inquirer/prompts';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces } from '../core/workspace.js';
@@ -50,5 +50,33 @@ export async function openCommand(): Promise<void> {
     }
   } else {
     console.log(chalk.dim(`\n  To navigate: cd "${selected}"\n`));
+  }
+
+  // ── Start AI Assistant Session ──────────────────────────────────────
+  const loadedFeature = workspaces.find((ws) => ws.workspacePath === selected);
+  if (loadedFeature && loadedFeature.assistants.length > 0) {
+    const assistant = loadedFeature.assistants[0];
+    const confirmStart = await confirm({
+      message: `Do you want to start a session with ${assistant} inside the workspace now?`,
+      default: true,
+    });
+
+    if (confirmStart) {
+      console.log(chalk.cyan(`\n🚀 Starting ${assistant} session inside workspace...\n`));
+
+      let cmd = 'agy';
+      if (assistant === 'claude') cmd = 'claude';
+      else if (assistant === 'codex') cmd = 'codex';
+      else if (assistant === 'copilot') cmd = 'copilot';
+
+      try {
+        await execa(cmd, [], { cwd: selected, stdio: 'inherit' });
+        console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
+      } catch {
+        console.log(
+          chalk.yellow(`\n⚠️  Could not start ${assistant}. Please start it manually:\n  ${chalk.dim(`cd "${selected}" && ${cmd}`)}`)
+        );
+      }
+    }
   }
 }

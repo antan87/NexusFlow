@@ -9,6 +9,8 @@ import ora from 'ora';
 import path from 'node:path';
 import { execa } from 'execa';
 
+import { confirm } from '@inquirer/prompts';
+
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { createWorkspace } from '../core/workspace.js';
@@ -139,4 +141,31 @@ export async function createCommand(): Promise<void> {
     `\n  ${chalk.dim('To navigate:')} cd "${workspacePath}"`,
   );
   console.log();
+
+  // ── 9. Start AI Assistant Session ───────────────────────────────────
+  if (selectedAI.length > 0) {
+    const assistant = selectedAI[0];
+    const confirmStart = await confirm({
+      message: `Do you want to start a session with ${assistant} inside the workspace now?`,
+      default: true,
+    });
+
+    if (confirmStart) {
+      console.log(chalk.cyan(`\n🚀 Starting ${assistant} session inside workspace...\n`));
+
+      let cmd = 'agy';
+      if (assistant === 'claude') cmd = 'claude';
+      else if (assistant === 'codex') cmd = 'codex';
+      else if (assistant === 'copilot') cmd = 'copilot';
+
+      try {
+        await execa(cmd, [], { cwd: workspacePath, stdio: 'inherit' });
+        console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
+      } catch {
+        console.log(
+          chalk.yellow(`\n⚠️  Could not start ${assistant}. Please start it manually:\n  ${chalk.dim(`cd "${workspacePath}" && ${cmd}`)}`)
+        );
+      }
+    }
+  }
 }
