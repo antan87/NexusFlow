@@ -1,4 +1,6 @@
 import * as fs from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import * as path from 'node:path';
 import { runCli } from 'repomix';
 import { loadFeatureConfig } from './workspace.js';
@@ -23,8 +25,15 @@ export async function packWorkspace(
   }
 
   const compress = options.compress !== false; // default true
+  const outputPath = path.join(workspacePath, 'nexusflow-context.xml');
   
-  const reposXmlData: { repoName: string; xmlContent: string }[] = [];
+  // Use a write stream to avoid buffering huge workspaces in memory
+  const outStream = createWriteStream(outputPath, { encoding: 'utf-8' });
+  
+  outStream.write('<?xml version="1.0" encoding="UTF-8"?>\n');
+  outStream.write(`<workspace id="${feature.id}">\n`);
+  outStream.write(`  <description><![CDATA[${feature.description}]]></description>\n`);
+  outStream.write('  <repositories>\n');
   
   let totalFilesCount = 0;
   let totalCharsCount = 0;
@@ -43,25 +52,28 @@ export async function packWorkspace(
 
     try {
       // Run repomix programmatically inside the worktree directory
-      await runCli(['.'], worktreePath, {
+      const result = await runCli(['.'], worktreePath, {
         style: 'xml',
         output: tempXmlPath,
         compress,
         quiet: true,
       });
 
-      // Read output XML
-      const xmlContent = await fs.readFile(tempXmlPath, 'utf8');
+      if (result && result.packResult) {
+        totalFilesCount += result.packResult.totalFiles;
+        totalCharsCount += result.packResult.totalCharacters;
+      }
 
-      // Estimate file and character counts
-      const fileMatches = xmlContent.match(/<file\s+path=/gi) || [];
-      totalFilesCount += fileMatches.length;
-      totalCharsCount += xmlContent.length;
-
-      reposXmlData.push({
-        repoName,
-        xmlContent,
-      });
+      outStream.write(`    <repository name="${repoName}">\n`);
+      
+      // Stream output XML directly to avoid memory limits
+      await pipeline(
+        createReadStream(tempXmlPath, { encoding: 'utf-8' }),
+        outStream,
+        { end: false }
+      );
+      
+      outStream.write('\n    </repository>\n');
     } catch (error: any) {
       console.error(`Error packing repository ${repoName}:`, error.message);
     } finally {
@@ -74,26 +86,15 @@ export async function packWorkspace(
     }
   }
 
-  // Combine reposXmlData into a single XML structure
-  const xmlLines: string[] = [];
-  xmlLines.push('<?xml version="1.0" encoding="UTF-8"?>');
-  xmlLines.push(`<workspace id="${feature.id}">`);
-  xmlLines.push(`  <description><![CDATA[${feature.description}]]></description>`);
-  xmlLines.push('  <repositories>');
+  outStream.write('  </repositories>\n');
+  outStream.write('</workspace>\n');
+  outStream.end();
 
-  for (const repo of reposXmlData) {
-    xmlLines.push(`    <repository name="${repo.repoName}">`);
-    xmlLines.push(repo.xmlContent);
-    xmlLines.push('    </repository>');
-  }
-
-  xmlLines.push('  </repositories>');
-  xmlLines.push('</workspace>');
-  xmlLines.push('');
-
-  const outputXmlContent = xmlLines.join('\n');
-  const outputPath = path.join(workspacePath, 'nexusflow-context.xml');
-  await fs.writeFile(outputPath, outputXmlContent, 'utf-8');
+  // Wait for stream to finish writing
+  await new Promise<void>((resolve, reject) => {
+    outStream.on('finish', resolve);
+    outStream.on('error', reject);
+  });
 
   const stats = await fs.stat(outputPath);
 
@@ -104,3 +105,4 @@ export async function packWorkspace(
     fileSize: stats.size,
   };
 }
+
