@@ -145,3 +145,119 @@ export function printUpdateBanner(status: UpdateStatus): void {
   console.log(chalk.yellow(`└${border}┘`));
   console.log();
 }
+
+import { execa } from 'execa';
+
+export interface ToolUpdateStatus {
+  id: string;
+  name: string;
+  command: string;
+  installed: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  updateCmd: string;
+}
+
+export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]> {
+  const currentVersion = getCurrentVersion();
+  const tools = [
+    {
+      id: 'nexusflow',
+      name: 'NexusFlow Engine',
+      command: 'nexusflow',
+      npmPackage: '@mrpatronz/nexusflow',
+      updateCmd: 'npm install -g @mrpatronz/nexusflow',
+      getCurrent: async () => currentVersion,
+    },
+    {
+      id: 'repomix',
+      name: 'Repomix (Codebase Packer)',
+      command: 'repomix',
+      npmPackage: 'repomix',
+      updateCmd: 'npm install -g repomix',
+      getCurrent: async () => {
+        try {
+          const res = await execa('repomix', ['--version'], { reject: false });
+          if (res.exitCode === 0) return res.stdout.trim();
+        } catch {}
+        try {
+          const res = await execa('npx', ['repomix', '--version'], { reject: false });
+          if (res.exitCode === 0) return res.stdout.trim();
+        } catch {}
+        return '';
+      }
+    },
+    {
+      id: 'antigravity',
+      name: 'Antigravity CLI',
+      command: 'agy',
+      npmPackage: '',
+      updateCmd: 'agy update',
+      getCurrent: async () => {
+        try {
+          const res = await execa('agy', ['--version'], { reject: false });
+          if (res.exitCode === 0) return res.stdout.trim();
+        } catch {}
+        return '';
+      }
+    },
+    {
+      id: 'claude',
+      name: 'Claude Code CLI',
+      command: 'claude',
+      npmPackage: '@anthropic-ai/claude-code',
+      updateCmd: 'npm install -g @anthropic-ai/claude-code',
+      getCurrent: async () => {
+        try {
+          const res = await execa('claude', ['--version'], { reject: false });
+          if (res.exitCode === 0) return res.stdout.trim();
+        } catch {}
+        return '';
+      }
+    }
+  ];
+
+  const results: ToolUpdateStatus[] = [];
+
+  for (const t of tools) {
+    let installed = false;
+    let currentVal = '';
+    let latestVal = '';
+    
+    try {
+      currentVal = await t.getCurrent();
+      installed = currentVal !== '';
+    } catch {}
+
+    if (installed && t.npmPackage) {
+      try {
+        const response = await fetch(`https://registry.npmjs.org/${t.npmPackage}/latest`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        if (response.ok) {
+          const data = await response.json() as { version: string };
+          latestVal = data.version;
+        }
+      } catch {}
+    }
+
+    if (!latestVal) {
+      latestVal = currentVal || '1.0.0';
+    }
+
+    results.push({
+      id: t.id,
+      name: t.name,
+      command: t.command,
+      installed,
+      currentVersion: currentVal || 'Not Installed',
+      latestVersion: latestVal,
+      updateAvailable: installed && isNewerVersion(currentVal, latestVal),
+      updateCmd: t.updateCmd,
+    });
+  }
+
+  return results;
+}
+

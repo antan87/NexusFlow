@@ -30,7 +30,7 @@ import {
   stopServices,
   loadRunningState,
 } from './orchestration/index.js';
-import { checkForUpdates, getCurrentVersion } from './utils/update-check.js';
+import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
 
 // Resolve static files directory
@@ -779,6 +779,46 @@ app.get('/api/update-status', async (c) => {
       return c.json({ currentVersion, latestVersion: currentVersion, updateAvailable: false });
     }
     return c.json(status);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 17.5. Check tools updates status
+app.get('/api/updates/tools', async (c) => {
+  try {
+    const force = c.req.query('force') === 'true';
+    const status = await getToolsStatus(force);
+    return c.json(status);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 17.6. Install updates for a specific tool
+app.post('/api/updates/install', async (c) => {
+  try {
+    const { toolId } = await c.req.json() as { toolId: string };
+    const tools = [
+      { id: 'nexusflow', cmd: 'npm', args: ['install', '-g', '@mrpatronz/nexusflow'] },
+      { id: 'repomix', cmd: 'npm', args: ['install', '-g', 'repomix'] },
+      { id: 'antigravity', cmd: 'agy', args: ['update'] },
+      { id: 'claude', cmd: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
+    ];
+
+    const target = tools.find(t => t.id === toolId);
+    if (!target) {
+      return c.json({ error: 'Tool not found' }, 404);
+    }
+
+    const result = await execa(target.cmd, target.args, { reject: false });
+    if (result.exitCode === 0) {
+      return c.json({ success: true, output: result.stdout });
+    } else {
+      return c.json({ error: `Update failed: ${result.stderr || result.stdout}` }, 500);
+    }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
