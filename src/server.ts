@@ -168,6 +168,9 @@ app.post('/api/workspace', async (c) => {
     // Generate AI context files
     await generateContextFiles(ctx, body.assistants, workspacePath);
 
+    // Pack codebase context
+    await packWorkspace(workspacePath);
+
     return c.json({ success: true, workspacePath, feature });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
