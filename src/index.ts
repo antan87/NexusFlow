@@ -23,7 +23,7 @@ import { uiCommand } from './commands/ui.js';
 import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
-
+import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 
 const program = new Command();
 
@@ -228,6 +228,33 @@ program
         console.log('\nCancelled.');
         process.exit(0);
       }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+const mcp = program.command('mcp').description('Manage the NexusFlow MCP Server for AI assistants');
+
+mcp
+  .command('run')
+  .description('Start the NexusFlow MCP Server (typically called automatically by AI assistants)')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await mcpRunCommand(workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+mcp
+  .command('setup')
+  .description('Automatically configure your AI environments (Claude Desktop, Cursor, VS Code) to use the NexusFlow MCP Server')
+  .action(async () => {
+    try {
+      await mcpSetupCommand();
+    } catch (error) {
       console.error(error);
       process.exit(1);
     }
