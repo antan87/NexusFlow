@@ -23,6 +23,7 @@ import { uiCommand } from './commands/ui.js';
 import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
+import { packCommand } from './commands/pack.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
@@ -224,6 +225,24 @@ program
   .action(async (workspace?: string) => {
     try {
       await diffCommand(workspace);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('pack')
+  .description('Pack the workspace codebase into a single token-efficient XML file for AI consumption')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--no-compress', 'Do not compress files (strip comments, empty lines)')
+  .action(async (workspace: string | undefined, options: { compress?: boolean }) => {
+    try {
+      await packCommand(workspace, options);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');

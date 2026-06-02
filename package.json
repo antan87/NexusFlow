@@ -39,7 +39,8 @@
     "execa": "^9.5.0",
     "fs-extra": "^11.2.0",
     "hono": "^4.12.23",
-    "ora": "^8.1.0"
+    "ora": "^8.1.0",
+    "repomix": "^0.2.16"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",

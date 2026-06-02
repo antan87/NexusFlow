@@ -17,6 +17,7 @@ import { scanForRepos } from './core/scanner.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig } from './core/workspace.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
+import { packWorkspace } from './core/packer.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
@@ -600,6 +601,30 @@ app.get('/api/update-status', async (c) => {
       return c.json({ currentVersion, latestVersion: currentVersion, updateAvailable: false });
     }
     return c.json(status);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 18. Pack workspace codebase and download
+app.get('/api/workspace/:id/pack', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const result = await packWorkspace(workspacePath);
+    const content = await fs.readFile(result.outputPath, 'utf-8');
+
+    c.header('Content-Disposition', `attachment; filename="nexusflow-context-${id.replace(/[\/\\ ]/g, '-')}.xml"`);
+    c.header('Content-Type', 'application/xml');
+    return c.text(content);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

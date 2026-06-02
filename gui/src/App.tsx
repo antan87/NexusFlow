@@ -23,6 +23,7 @@ import {
   ListOrdered,
   Save,
   Edit,
+  Download,
 } from 'lucide-react';
 import './App.css';
 
@@ -695,6 +696,19 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleExportContext = async (wsBranchName: string) => {
+    const encodedId = encodeURIComponent(wsBranchName);
+    const downloadUrl = `${API_BASE}/api/workspace/${encodedId}/pack`;
+    
+    // Create temporary link and click it
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleCopyPrompt = (ws: Feature) => {
@@ -1606,6 +1620,12 @@ Core Instructions:
                                 onClick={() => handleCopyPrompt(ws)}
                               >
                                 <Sparkles size={12} className="text-cyan-400" /> Copy Prompt
+                              </button>
+                              <button
+                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                                onClick={() => handleExportContext(ws.branchName)}
+                              >
+                                <Download size={12} className="text-emerald-400" /> Export Context
                               </button>
                               <button
                                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
