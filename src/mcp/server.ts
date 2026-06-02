@@ -66,6 +66,42 @@ export async function startMcpServer(workspacePath?: string) {
             required: ['serviceName'],
           },
         },
+        {
+          name: 'get_workspace_graph',
+          description: 'Retrieve the structural architecture graph of the NexusFlow workspace. Contains nodes for repos, packages, API endpoints, and exposed ports, plus relation edges (CONTAINS, DEPENDS_ON, EXPOSES, CALLS). Highly token-efficient for global workspace context.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              workspaceId: {
+                type: 'string',
+                description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
+              },
+            },
+          },
+        },
+        {
+          name: 'query_workspace_graph',
+          description: 'Query the workspace architecture graph by filtering nodes or edges (e.g., node types like "repo", "package", "endpoint", "port", or edge types like "DEPENDS_ON", "EXPOSES", "CALLS"). Reduces token payload by fetching specific architectural paths.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              nodeType: {
+                type: 'string',
+                enum: ['repo', 'package', 'endpoint', 'port'],
+                description: 'Optional node type to filter.',
+              },
+              edgeType: {
+                type: 'string',
+                enum: ['DEPENDS_ON', 'EXPOSES', 'CALLS'],
+                description: 'Optional edge/relation type to filter.',
+              },
+              workspaceId: {
+                type: 'string',
+                description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
+              },
+            },
+          },
+        },
       ],
     };
   });
@@ -172,6 +208,101 @@ export async function startMcpServer(workspacePath?: string) {
             {
               type: 'text',
               text: `Error reading logs: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    if (name === 'get_workspace_graph') {
+      try {
+        const graphPath = path.join(resolvedWorkspacePath, 'nexusflow-graph.json');
+        
+        try {
+          await fs.access(graphPath);
+        } catch {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Workspace graph file not found at ${graphPath}. Run "nexusflow sync" or rebuild the workspace to generate it.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const content = await fs.readFile(graphPath, 'utf8');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: content,
+            },
+          ],
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error reading workspace graph: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    if (name === 'query_workspace_graph') {
+      const nodeType = (args as any).nodeType;
+      const edgeType = (args as any).edgeType;
+
+      try {
+        const graphPath = path.join(resolvedWorkspacePath, 'nexusflow-graph.json');
+        
+        try {
+          await fs.access(graphPath);
+        } catch {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Workspace graph file not found at ${graphPath}. Run "nexusflow sync" or rebuild the workspace to generate it.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const content = await fs.readFile(graphPath, 'utf8');
+        const graph = JSON.parse(content);
+
+        let nodes = graph.nodes;
+        let edges = graph.edges;
+
+        if (nodeType) {
+          nodes = nodes.filter((n: any) => n.type === nodeType);
+        }
+        if (edgeType) {
+          edges = edges.filter((e: any) => e.type === edgeType);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ nodes, edges }, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error querying workspace graph: ${error.message}`,
             },
           ],
           isError: true,

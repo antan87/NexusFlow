@@ -8,6 +8,7 @@ import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
+import { generateWorkspaceGraphFiles } from '../core/graph.js';
 
 /** Maps each assistant to its generator function and the file it produces. */
 const GENERATORS: Record<
@@ -154,6 +155,17 @@ export async function generateContextFiles(
         `Failed to generate ${entry.outputFile} for ${assistant}: ${message}`,
       );
     }
+  }
+
+  // Generate Workspace Architecture Graph
+  try {
+    await generateWorkspaceGraphFiles(ctx, workspacePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      chalk.red('  ✖'),
+      `Failed to generate workspace architecture graph: ${message}`,
+    );
   }
 
   // Generate implementation plan from dependency analysis (if analysis data available)
