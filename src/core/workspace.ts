@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { execa } from 'execa';
 
 import type { Feature, RepoInfo } from '../types.js';
 import { createWorktree } from './worktree.js';
@@ -46,6 +47,19 @@ export async function createWorkspace(
 
   // Ensure the workspace directory exists.
   await fs.mkdir(workspacePath, { recursive: true });
+
+  // Initialize git repository at workspace root to prevent AI assistants (like Claude)
+  // from climbing up to parent git repositories (main/master).
+  try {
+    await execa('git', ['init'], { cwd: workspacePath });
+
+    // Write a .gitignore to ignore the sub-repositories
+    const gitignoreContent = repos.map((repo) => `/${repo.name}/`).join('\n') + '\n';
+    await fs.writeFile(path.join(workspacePath, '.gitignore'), gitignoreContent, 'utf-8');
+  } catch (error) {
+    // Silently ignore or log warning if git init fails
+    console.warn('Warning: Failed to initialize git repository at workspace root:', error);
+  }
 
   // Create a worktree for each repo inside the workspace.
   for (const repo of repos) {

@@ -23,13 +23,30 @@ export async function createWorktree(
   branchName: string,
   baseBranch: string,
 ): Promise<void> {
+  let fetched = false;
   // Fetch latest remote state.
-  await execa('git', ['fetch', 'origin'], { cwd: repoPath });
+  try {
+    await execa('git', ['fetch', 'origin'], { cwd: repoPath });
+    fetched = true;
+  } catch {
+    // Silently ignore fetch failures (e.g., offline or no remote origin)
+  }
 
-  // Create the worktree with a new branch based on the remote base branch.
+  // Determine starting point: remote branch if fetched successfully and exists, else local branch.
+  let startPoint = baseBranch;
+  if (fetched) {
+    try {
+      await execa('git', ['rev-parse', '--verify', `origin/${baseBranch}`], { cwd: repoPath });
+      startPoint = `origin/${baseBranch}`;
+    } catch {
+      // remote tracking branch does not exist, fallback to local branch
+    }
+  }
+
+  // Create the worktree with a new branch based on the start point.
   await execa(
     'git',
-    ['worktree', 'add', targetPath, '-b', branchName, `origin/${baseBranch}`],
+    ['worktree', 'add', targetPath, '-b', branchName, startPoint],
     { cwd: repoPath },
   );
 }

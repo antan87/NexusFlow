@@ -176,6 +176,14 @@ Once you have created \`nexusflow-overview.md\` and compiled your questions, ask
 
 ## Guidelines
 
+- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`\${feature.branchName}\`.
+  - **All code changes** must be made within the appropriate project subdirectories.
+  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
+  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
+  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
+    - \`nexusflow diff\` — view changes across all sub-repositories.
+    - \`nexusflow commit\` — commit and push changes across modified repositories.
+    - \`nexusflow sync\` — rebase all repositories with their default base branches.
 - **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
 - Read each project's existing \`README.md\` and any doc files before proposing changes.
