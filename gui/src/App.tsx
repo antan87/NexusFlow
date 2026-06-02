@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Check,
   AlertTriangle,
+  AlertCircle,
   FolderOpen,
   ArrowRight,
   ArrowLeft,
@@ -126,6 +127,13 @@ export default function App() {
   const [selectedEditor, setSelectedEditor] = useState<DetectedEditor | null>(null);
   const [creating, setCreating] = useState(false);
   const [createdWorkspace, setCreatedWorkspace] = useState<{ path: string } | null>(null);
+  const [creationError, setCreationError] = useState<string | null>(null);
+  const [creationSteps, setCreationSteps] = useState<any[]>([
+    { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+    { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
+    { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
+    { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
+  ]);
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -561,6 +569,16 @@ export default function App() {
   const handleCreateWorkspace = async () => {
     if (!branchName || selectedRepos.length === 0) return;
     setCreating(true);
+    setCreationError(null);
+
+    // Reset steps to pending
+    setCreationSteps([
+      { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
+      { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
+      { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
+    ]);
+
     try {
       const res = await fetch(`${API_BASE}/api/workspace`, {
         method: 'POST',
@@ -579,32 +597,62 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setCreatedWorkspace({ path: data.workspacePath });
-        setActiveStep(3);
-        fetchWorkspaces();
+        const jobId = data.jobId;
 
-        if (selectedEditor) {
-          if (isVsCode) {
-            window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: data.workspacePath }, '*');
-          } else {
-            await fetch(`${API_BASE}/api/open-editor`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                workspacePath: data.workspacePath,
-                command: selectedEditor.command,
-              }),
-            });
+        // Establish EventSource SSE connection
+        const eventSource = new EventSource(`${API_BASE}/api/workspace/create-stream/${encodeURIComponent(jobId)}`);
+
+        eventSource.addEventListener('progress', (e) => {
+          try {
+            const job = JSON.parse(e.data);
+            if (job.steps) {
+              setCreationSteps(job.steps);
+            }
+            if (job.status === 'completed') {
+              eventSource.close();
+              setCreatedWorkspace({ path: job.workspacePath });
+              setActiveStep(3);
+              setCreating(false);
+              fetchWorkspaces();
+
+              if (selectedEditor) {
+                if (isVsCode) {
+                  window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: job.workspacePath }, '*');
+                } else {
+                  fetch(`${API_BASE}/api/open-editor`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      workspacePath: job.workspacePath,
+                      command: selectedEditor.command,
+                    }),
+                  }).catch(console.error);
+                }
+              }
+            } else if (job.status === 'failed') {
+              eventSource.close();
+              setCreating(false);
+              setCreationError(job.error || 'Failed to create workspace');
+            }
+          } catch (err) {
+            console.error('Failed to parse SSE data:', err);
           }
-        }
+        });
+
+        eventSource.onerror = (err) => {
+          console.error('SSE Error:', err);
+          eventSource.close();
+          setCreating(false);
+          setCreationError('Connection lost while building workspace.');
+        };
       } else {
-        alert(`Error: ${data.error || 'Failed to create workspace'}`);
+        setCreating(false);
+        setCreationError(data.error || 'Failed to initialize workspace build');
       }
     } catch (e) {
       console.error(e);
-      alert('Network error when creating workspace.');
-    } finally {
       setCreating(false);
+      setCreationError('Network error when creating workspace.');
     }
   };
 
@@ -1374,145 +1422,235 @@ Core Instructions:
                 {/* Step 2: AI & Editor Settings */}
                 {activeStep === 2 && (
                   <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
-                    <div className="mb-8">
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Target AI Assistant(s)</label>
-                      <p className="text-xs text-gray-500 mb-4">
-                        We generate context configurations matching the specifications of each checked assistant.
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {aiAssistants.map((ai) => {
-                          const isSelected = selectedAI.includes(ai.name);
-                          return (
-                            <div
-                              key={ai.name}
-                              className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-700 transition-all ${
-                                isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
-                              }`}
-                              onClick={() => handleToggleAI(ai.name)}
-                            >
-                              <div className="flex justify-between items-center">
-                                <span className="text-sm font-bold text-white">{ai.displayName}</span>
-                                <span className={`text-[9px] px-2 py-0.5 rounded font-semibold uppercase ${
-                                  ai.detected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-500'
-                                }`}>
-                                  {ai.detected ? 'Installed' : 'Missing'}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-gray-500">
-                                {ai.name === 'claude' && 'CLAUDE.md guidelines'}
-                                {ai.name === 'antigravity' && 'CLAUDE.md guidelines (harness)'}
-                                {ai.name === 'codex' && 'AGENTS.md config structure'}
-                                {ai.name === 'copilot' && 'GitHub Copilot Workspace configs'}
-                                {ai.name === 'cursor' && 'Cursor MDC rules and instructions'}
-                              </p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    {creating ? (
+                      <div className="flex flex-col items-center py-6">
+                        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2.5">
+                          <RefreshCw className="animate-spin text-indigo-400" size={20} />
+                          Building Workspace...
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-8">
+                          Setting up your multi-repo workspace. This will take a moment.
+                        </p>
 
-                    <div className="mb-8">
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Open Workspace In</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        {editors.map((ed) => {
-                          const isSelected = selectedEditor?.command === ed.command;
-                          return (
-                            <div
-                              key={ed.command}
-                              className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
-                                isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
-                              }`}
-                              onClick={() => setSelectedEditor(ed)}
+                        <div className="w-full max-w-md space-y-4">
+                          {creationSteps.map((step) => {
+                            const isPending = step.status === 'pending';
+                            const isRunning = step.status === 'running';
+                            const isCompleted = step.status === 'completed';
+                            const isFailed = step.status === 'failed';
+
+                            return (
+                              <div
+                                key={step.id}
+                                className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-300 ${
+                                  isRunning
+                                    ? 'bg-indigo-500/10 border-indigo-500/50 shadow-md shadow-indigo-500/5'
+                                    : isCompleted
+                                    ? 'bg-emerald-500/5 border-emerald-500/20 opacity-80'
+                                    : isFailed
+                                    ? 'bg-rose-500/5 border-rose-500/30'
+                                    : 'bg-gray-900/20 border-gray-800/40 opacity-40'
+                                }`}
+                              >
+                                <div className="mt-0.5">
+                                  {isRunning && (
+                                    <div className="relative flex h-5 w-5 items-center justify-center">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                      <RefreshCw className="animate-spin text-indigo-400 relative" size={16} />
+                                    </div>
+                                  )}
+                                  {isCompleted && (
+                                    <div className="h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                                      <Check size={12} />
+                                    </div>
+                                  )}
+                                  {isFailed && (
+                                    <div className="h-5 w-5 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                                      <AlertTriangle size={12} />
+                                    </div>
+                                  )}
+                                  {isPending && (
+                                    <div className="h-5 w-5 rounded-full border-2 border-gray-800 flex items-center justify-center text-gray-600">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-gray-800"></div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className={`text-sm font-bold truncate ${
+                                    isRunning ? 'text-indigo-400' : isCompleted ? 'text-emerald-400' : isFailed ? 'text-rose-400' : 'text-gray-500'
+                                  }`}>
+                                    {step.name}
+                                  </h4>
+                                  <p className="text-xs text-gray-400 mt-1 font-mono break-words leading-relaxed">
+                                    {step.message}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {creationError && (
+                          <div className="mt-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-450 rounded-xl text-xs w-full max-w-md flex flex-col gap-3">
+                            <span className="font-bold flex items-center gap-1.5">
+                              <AlertCircle size={14} className="text-rose-450" /> Build Failed
+                            </span>
+                            <span className="font-mono">{creationError}</span>
+                            <button
+                              className="w-full mt-2 py-2 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition-colors cursor-pointer"
+                              onClick={() => {
+                                setCreating(false);
+                                setCreationError(null);
+                              }}
                             >
-                              <span className="text-sm font-bold text-white">{ed.name}</span>
-                              <span className={`text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase ${
-                                ed.detected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-500'
-                              }`}>
-                                {ed.detected ? 'Detected' : 'Missing'}
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Target AI Assistant(s)</label>
+                          <p className="text-xs text-gray-500 mb-4">
+                            We generate context configurations matching the specifications of each checked assistant.
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {aiAssistants.map((ai) => {
+                              const isSelected = selectedAI.includes(ai.name);
+                              return (
+                                <div
+                                  key={ai.name}
+                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-700 transition-all ${
+                                    isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
+                                  }`}
+                                  onClick={() => handleToggleAI(ai.name)}
+                                >
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-sm font-bold text-white">{ai.displayName}</span>
+                                    <span className={`text-[9px] px-2 py-0.5 rounded font-semibold uppercase ${
+                                      ai.detected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-500'
+                                    }`}>
+                                      {ai.detected ? 'Installed' : 'Missing'}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-gray-500">
+                                    {ai.name === 'claude' && 'CLAUDE.md guidelines'}
+                                    {ai.name === 'antigravity' && 'CLAUDE.md guidelines (harness)'}
+                                    {ai.name === 'codex' && 'AGENTS.md config structure'}
+                                    {ai.name === 'copilot' && 'GitHub Copilot Workspace configs'}
+                                    {ai.name === 'cursor' && 'Cursor MDC rules and instructions'}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Open Workspace In</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {editors.map((ed) => {
+                              const isSelected = selectedEditor?.command === ed.command;
+                              return (
+                                <div
+                                  key={ed.command}
+                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
+                                    isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
+                                  }`}
+                                  onClick={() => setSelectedEditor(ed)}
+                                >
+                                  <span className="text-sm font-bold text-white">{ed.name}</span>
+                                  <span className={`text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase ${
+                                    ed.detected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-500'
+                                  }`}>
+                                    {ed.detected ? 'Detected' : 'Missing'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            <div
+                              className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
+                                selectedEditor === null ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
+                              }`}
+                              onClick={() => setSelectedEditor(null)}
+                            >
+                              <span className="text-sm font-bold text-white">None</span>
+                              <span className="text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase bg-gray-800 text-gray-500">
+                                Skip opening
                               </span>
                             </div>
-                          );
-                        })}
-                        <div
-                          className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
-                            selectedEditor === null ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
-                          }`}
-                          onClick={() => setSelectedEditor(null)}
-                        >
-                          <span className="text-sm font-bold text-white">None</span>
-                          <span className="text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase bg-gray-800 text-gray-500">
-                            Skip opening
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mb-8 border border-gray-800/80 rounded-xl p-5 bg-gray-950/20">
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <Terminal size={14} className="text-indigo-400" /> Advanced Session Resumption Settings
-                      </h4>
-                      <p className="text-[11px] text-gray-500 mb-4">
-                        Configure setup and verification test commands. AI assistants and the dashboard use these to resume your sessions green.
-                      </p>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Verification / Test Command</label>
-                          <input
-                            type="text"
-                            className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
-                            placeholder="e.g., npm run test or vitest run"
-                            value={testCommand}
-                            onChange={(e) => setTestCommand(e.target.value)}
-                          />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Mock / Database Command (Optional)</label>
-                            <input
-                              type="text"
-                              className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
-                              placeholder="e.g., docker compose up -d redis"
-                              value={mockCommand}
-                              onChange={(e) => setMockCommand(e.target.value)}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Start / Run Command (Optional)</label>
-                            <input
-                              type="text"
-                              className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
-                              placeholder="e.g., npm run start:dev"
-                              value={startCommand}
-                              onChange={(e) => setStartCommand(e.target.value)}
-                            />
                           </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="flex justify-between">
-                      <button
-                        className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
-                        onClick={() => setActiveStep(1)}
-                      >
-                        <ArrowLeft size={16} /> Back
-                      </button>
-                      <button
-                        className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                        disabled={creating}
-                        onClick={handleCreateWorkspace}
-                      >
-                        {creating ? (
-                          <>
-                            <RefreshCw className="animate-spin" size={14} /> Building...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={14} /> Build Workspace
-                          </>
-                        )}
-                      </button>
-                    </div>
+                        <div className="mb-8 border border-gray-800/80 rounded-xl p-5 bg-gray-950/20">
+                          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <Terminal size={14} className="text-indigo-400" /> Advanced Session Resumption Settings
+                          </h4>
+                          <p className="text-[11px] text-gray-500 mb-4">
+                            Configure setup and verification test commands. AI assistants and the dashboard use these to resume your sessions green.
+                          </p>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Verification / Test Command</label>
+                              <input
+                                type="text"
+                                className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
+                                placeholder="e.g., npm run test or vitest run"
+                                value={testCommand}
+                                onChange={(e) => setTestCommand(e.target.value)}
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Mock / Database Command (Optional)</label>
+                                <input
+                                  type="text"
+                                  className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
+                                  placeholder="e.g., docker compose up -d redis"
+                                  value={mockCommand}
+                                  onChange={(e) => setMockCommand(e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">Start / Run Command (Optional)</label>
+                                <input
+                                  type="text"
+                                  className="w-full bg-[#030408] border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none transition-all"
+                                  placeholder="e.g., npm run start:dev"
+                                  value={startCommand}
+                                  onChange={(e) => setStartCommand(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between">
+                          <button
+                            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                            onClick={() => setActiveStep(1)}
+                          >
+                            <ArrowLeft size={16} /> Back
+                          </button>
+                          <button
+                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                            disabled={creating}
+                            onClick={handleCreateWorkspace}
+                          >
+                            {creating ? (
+                              <>
+                                <RefreshCw className="animate-spin" size={14} /> Building...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles size={14} /> Build Workspace
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 

@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
+import { streamSSE } from 'hono/streaming';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,6 +124,131 @@ app.get('/api/editor-detect', async (c) => {
   }
 });
 
+interface JobStep {
+  id: string;
+  name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  message: string;
+}
+
+interface CreationJob {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  progress: number;
+  error?: string;
+  steps: JobStep[];
+  workspacePath?: string;
+  feature?: Feature;
+  listeners: Set<(event: { type: string; data: any }) => void>;
+}
+
+const creationJobs = new Map<string, CreationJob>();
+
+function updateJobStep(
+  jobId: string,
+  stepId: string,
+  status: 'running' | 'completed' | 'failed',
+  message: string,
+  extraData?: any
+) {
+  const job = creationJobs.get(jobId);
+  if (!job) return;
+
+  const step = job.steps.find((s) => s.id === stepId);
+  if (step) {
+    step.status = status;
+    step.message = message;
+  }
+
+  if (stepId === 'pack' && status === 'completed') {
+    job.status = 'completed';
+    job.progress = 100;
+  } else if (status === 'failed') {
+    job.status = 'failed';
+    job.error = message;
+  } else {
+    const completedCount = job.steps.filter((s) => s.status === 'completed').length;
+    const runningCount = job.steps.filter((s) => s.status === 'running').length;
+    job.progress = Math.round(((completedCount + runningCount * 0.5) / job.steps.length) * 100);
+  }
+
+  const eventPayload = {
+    type: 'progress',
+    data: {
+      id: job.id,
+      status: job.status,
+      progress: job.progress,
+      error: job.error,
+      steps: job.steps,
+      workspacePath: job.workspacePath,
+      feature: job.feature,
+      ...extraData,
+    },
+  };
+
+  for (const listener of job.listeners) {
+    listener(eventPayload);
+  }
+}
+
+async function runCreationJob(jobId: string, body: any, config: any) {
+  try {
+    const workspacePath = path.join(config.workspacesDir, body.branchName);
+    const job = creationJobs.get(jobId);
+    if (job) {
+      job.workspacePath = workspacePath;
+    }
+
+    const feature: Feature = {
+      id: body.branchName,
+      branchName: body.branchName,
+      description: body.description,
+      repos: body.repos.map((r: any) => r.path),
+      assistants: body.assistants,
+      workspacePath,
+      createdAt: new Date().toISOString(),
+      resumption: body.resumption,
+    };
+    if (job) {
+      job.feature = feature;
+    }
+
+    // Step 1: Create worktrees
+    updateJobStep(jobId, 'worktrees', 'running', 'Creating git worktrees...');
+    await createWorkspace(feature, body.repos);
+    updateJobStep(jobId, 'worktrees', 'completed', 'Git worktrees created successfully.');
+
+    // Step 2: Analyze repos
+    updateJobStep(jobId, 'analysis', 'running', 'Analyzing projects and dependencies...');
+    const analysis = await analyzeAllRepos(body.repos);
+    updateJobStep(jobId, 'analysis', 'completed', 'Project analysis complete.');
+
+    // Step 3: Generate AI context files
+    updateJobStep(jobId, 'context', 'running', 'Generating AI context files...');
+    const ctx: WorkspaceContext = {
+      feature,
+      repos: body.repos,
+      analysis,
+    };
+    await generateContextFiles(ctx, body.assistants, workspacePath);
+    updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');
+
+    // Step 4: Pack codebase context
+    updateJobStep(jobId, 'pack', 'running', 'Packing codebase context with Repomix...');
+    const packResult = await packWorkspace(workspacePath);
+    updateJobStep(jobId, 'pack', 'completed', `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB).`);
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    const job = creationJobs.get(jobId);
+    if (job) {
+      const runningStep = job.steps.find((s) => s.status === 'running');
+      const failedStepId = runningStep ? runningStep.id : 'worktrees';
+      updateJobStep(jobId, failedStepId, 'failed', msg);
+    }
+  }
+}
+
 // 7. Create workspace
 app.post('/api/workspace', async (c) => {
   try {
@@ -139,43 +265,92 @@ app.post('/api/workspace', async (c) => {
     };
 
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, body.branchName);
+    const jobId = body.branchName;
 
-    const feature: Feature = {
-      id: body.branchName,
-      branchName: body.branchName,
-      description: body.description,
-      repos: body.repos.map((r) => r.path),
-      assistants: body.assistants,
-      workspacePath,
-      createdAt: new Date().toISOString(),
-      resumption: body.resumption,
+    if (creationJobs.has(jobId)) {
+      const existing = creationJobs.get(jobId)!;
+      if (existing.status === 'running') {
+        return c.json({ success: true, jobId, message: 'Job already running' });
+      }
+    }
+
+    const steps: JobStep[] = [
+      { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
+      { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
+      { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
+    ];
+
+    const job: CreationJob = {
+      id: jobId,
+      status: 'running',
+      progress: 0,
+      steps,
+      listeners: new Set(),
     };
+    creationJobs.set(jobId, job);
 
-    // Create worktrees
-    await createWorkspace(feature, body.repos);
+    // Run the job in background
+    runCreationJob(jobId, body, config);
 
-    // Analyze repos
-    const analysis = await analyzeAllRepos(body.repos);
-
-    // Convert map to plain object for context generators if needed
-    const ctx: WorkspaceContext = {
-      feature,
-      repos: body.repos,
-      analysis,
-    };
-
-    // Generate AI context files
-    await generateContextFiles(ctx, body.assistants, workspacePath);
-
-    // Pack codebase context
-    await packWorkspace(workspacePath);
-
-    return c.json({ success: true, workspacePath, feature });
+    return c.json({ success: true, jobId });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
   }
+});
+
+// 7.5. Create workspace SSE stream
+app.get('/api/workspace/create-stream/:jobId', async (c) => {
+  const jobId = decodeURIComponent(c.req.param('jobId'));
+  const job = creationJobs.get(jobId);
+  if (!job) {
+    return c.json({ error: 'Job not found' }, 404);
+  }
+
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  return streamSSE(c, async (stream) => {
+    // Send initial state
+    await stream.writeSSE({
+      event: 'progress',
+      data: JSON.stringify({
+        id: job.id,
+        status: job.status,
+        progress: job.progress,
+        error: job.error,
+        steps: job.steps,
+        workspacePath: job.workspacePath,
+        feature: job.feature,
+      }),
+    });
+
+    if (job.status === 'completed' || job.status === 'failed') {
+      return;
+    }
+
+    const listener = async (event: { type: string; data: any }) => {
+      try {
+        await stream.writeSSE({
+          event: event.type,
+          data: JSON.stringify(event.data),
+        });
+      } catch (err) {
+        job.listeners.delete(listener);
+      }
+    };
+
+    job.listeners.add(listener);
+
+    // Keep connection alive until job finishes
+    while (job.status === 'running') {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    job.listeners.delete(listener);
+  });
 });
 
 // 8. Open workspace in editor
