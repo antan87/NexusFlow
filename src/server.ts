@@ -709,15 +709,15 @@ app.post('/api/workspace/:id/resume', async (c) => {
     } else {
       // Fallback to start command (since there's no existing session for this workspace)
       if (selectedAssistant === 'antigravity') {
-        resumeCommand = 'agy';
+        resumeCommand = 'agy --continue';
       } else if (selectedAssistant === 'claude') {
-        resumeCommand = 'claude';
+        resumeCommand = 'claude --resume';
       } else if (selectedAssistant === 'codex') {
-        resumeCommand = 'codex';
+        resumeCommand = 'codex resume';
       } else if (selectedAssistant === 'copilot') {
-        resumeCommand = 'copilot';
+        resumeCommand = 'copilot --resume';
       } else {
-        resumeCommand = 'agy';
+        resumeCommand = 'agy --continue';
       }
     }
 
