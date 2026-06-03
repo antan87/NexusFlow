@@ -7,6 +7,15 @@ updates:
       interval: "daily"
       time: "03:00"
     open-pull-requests-limit: 10
+    reviewers:
+      - "antan87"
+    groups:
+      root-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # 2. GUI npm dependencies
   - package-ecosystem: "npm"
@@ -15,6 +24,15 @@ updates:
       interval: "daily"
       time: "03:00"
     open-pull-requests-limit: 10
+    reviewers:
+      - "antan87"
+    groups:
+      gui-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # 3. VS Code Extension npm dependencies
   - package-ecosystem: "npm"
@@ -23,3 +41,12 @@ updates:
       interval: "daily"
       time: "03:00"
     open-pull-requests-limit: 10
+    reviewers:
+      - "antan87"
+    groups:
+      extension-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
