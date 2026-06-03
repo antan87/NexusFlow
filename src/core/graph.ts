@@ -128,10 +128,9 @@ export async function buildWorkspaceGraph(
 
   // 3. Add inter-repo DEPENDS_ON edges
   if (analysis) {
-    const repoAnalyses = new Map(repos.map((r) => [r.path, analysis.get(r.path)?.dependencies || []]));
     const repoNames = new Map(repos.map((r) => [r.path, r.name]));
     const { findInterRepoDependencies } = await import('../analyzers/detect-deps.js');
-    const interDeps = findInterRepoDependencies(repoAnalyses, repoNames);
+    const interDeps = findInterRepoDependencies(analysis, repoNames);
 
     for (const [caller, callees] of interDeps) {
       for (const callee of callees) {

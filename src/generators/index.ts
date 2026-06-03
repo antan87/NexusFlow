@@ -139,6 +139,23 @@ export async function generateContextFiles(
     );
   }
 
+  // Generate per-repo architecture maps
+  if (ctx.analysis) {
+    for (const repo of ctx.repos) {
+      const a = ctx.analysis.get(repo.path);
+      if (a) {
+        try {
+          const { generateRepoMap } = await import('./map-generator.js');
+          await generateRepoMap(repo, a, workspacePath);
+          console.log(chalk.green('  ✔'), `Generated Architecture Map for ${chalk.bold(repo.name)}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(chalk.red('  ✖'), `Failed to generate Architecture Map for ${repo.name}: ${message}`);
+        }
+      }
+    }
+  }
+
   for (const assistant of assistants) {
     const entry = GENERATORS[assistant];
 

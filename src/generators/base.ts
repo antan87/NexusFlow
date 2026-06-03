@@ -4,15 +4,20 @@
  * use as their foundation. Now includes rich project analysis data when available.
  */
 
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
 
 /**
  * Formats a ProjectAnalysis into a readable markdown section.
  */
-function formatProjectSection(analysis: ProjectAnalysis): string {
+function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string): string {
   const lines: string[] = [];
 
   lines.push(`### ${analysis.name}`);
+
+  const mapPath = path.join(workspacePath, `nexusflow-map-${analysis.name}.md`).replace(/\\/g, '/');
+  lines.push(`- **Architecture Map**: [nexusflow-map-${analysis.name}.md](file:///${mapPath}) — **Instruction**: You MUST read this architecture map before exploring or modifying the \`${analysis.name}\` repository to understand its layout, API endpoints, test commands, and detected usage patterns.`);
 
   // Tech stack
   const { techStack } = analysis;
@@ -74,6 +79,7 @@ function formatProjectSection(analysis: ProjectAnalysis): string {
  */
 export function buildContextContent(ctx: WorkspaceContext): string {
   const { feature, repos, analysis } = ctx;
+  const workspacePath = feature.workspacePath;
 
   // Build project sections — rich if analysis is available, simple if not
   let projectSections: string;
@@ -81,7 +87,7 @@ export function buildContextContent(ctx: WorkspaceContext): string {
   if (analysis && analysis.size > 0) {
     const sections = repos.map((r) => {
       const a = analysis.get(r.path);
-      if (a) return formatProjectSection(a);
+      if (a) return formatProjectSection(a, workspacePath);
       return `### ${r.name}\n- **Path**: \`${r.path}\``;
     });
     projectSections = sections.join('\n\n');
@@ -117,11 +123,32 @@ ${allConfigs.join('\n')}
   // Resumption commands section
   let resumptionSection = '';
   if (feature.resumption) {
-    const { testCommand, mockCommand, startCommand } = feature.resumption;
+    let { testCommand, mockCommand, startCommand } = feature.resumption;
     const parts: string[] = [];
     if (mockCommand) parts.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
     if (startCommand) parts.push(`- **Start/Run Command**: \`${startCommand}\``);
-    if (testCommand) parts.push(`- **Verification/Test Command**: \`${testCommand}\``);
+    
+    if (testCommand) {
+      if (testCommand === 'npm run test') {
+        const hasJs = repos.some(r => {
+          const a = analysis?.get(r.path);
+          return a?.techStack.languages.includes('typescript') || a?.techStack.languages.includes('javascript');
+        });
+        const hasCsharp = repos.some(r => {
+          const a = analysis?.get(r.path);
+          return a?.techStack.languages.includes('csharp');
+        });
+
+        if (hasCsharp && !hasJs) {
+          testCommand = 'dotnet test';
+        } else if (!hasJs && !hasCsharp) {
+          testCommand = undefined;
+        }
+      }
+      if (testCommand) {
+        parts.push(`- **Verification/Test Command**: \`${testCommand}\``);
+      }
+    }
 
     if (parts.length > 0) {
       resumptionSection = `
@@ -136,37 +163,22 @@ ${parts.join('\n')}
     }
   }
 
-  return `# Multi-Repo Workspace Context
+  // Check if overview.md already exists
+  const overviewFile = path.join(workspacePath, 'nexusflow-overview.md');
+  const hasOverview = fs.existsSync(overviewFile);
 
-## Feature: ${feature.id}
+  let taskSection = '';
+  if (hasOverview) {
+    taskSection = `## Task & Step-by-Step Maintenance
 
-**Description:** ${feature.description}
+The universal reference file **\`nexusflow-overview.md\`** has already been created. Your task is to:
 
-**Branch:** \`${feature.branchName}\`
-**Created:** ${feature.createdAt}
-
----
-
-## Projects
-
-This workspace contains the following projects, each checked out as a
-git worktree on the feature branch:
-
-${projectSections}
-${existingConfigsSection}
-${resumptionSection}
----
-
-## Codebase Context (Repomix)
-
-A packed, token-efficient version of the entire multi-repo codebase is automatically generated and updated at the workspace root:
-- **File**: \`nexusflow-context.xml\`
-- **Purpose**: Contains the aggregated source code and structure of all projects in the workspace.
-- **Usage**: You can read this file directly to understand relationships or search for code patterns across all projects without needing to manually traverse directories.
-
----
-
-## Task & Step-by-Step Initialization
+1. **Keep it Updated**: Maintain and update \`nexusflow-overview.md\` with any new architectural findings, layout changes, or assumptions.
+2. **Review Assumptions**: Ensure that inter-repo relationships and package dependencies documented there reflect the current codebase.
+3. **Address Open Questions**: If there are outstanding items in the "Clarifying Questions for the User" section, discuss them with the user.
+`;
+  } else {
+    taskSection = `## Task & Step-by-Step Initialization
 
 Your very first task upon entering this workspace is to analyze the codebase and document it in a universal reference file:
 
@@ -180,7 +192,32 @@ Your very first task upon entering this workspace is to analyze the codebase and
 5. **Universal Reference**: Keep this file updated. This acts as a universal reference so that any LLM assistant (Claude, Antigravity, Codex, Cursor, Copilot) joining this workspace instantly understands the project landscape.
 
 Once you have created \`nexusflow-overview.md\` and compiled your questions, ask the user to verify your assumptions and answer your questions before proceeding to write code.
+`;
+  }
 
+  const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md').replace(/\\/g, '/');
+
+  return `# Multi-Repo Workspace Context
+
+## Feature: ${feature.id}
+
+**Description:** ${feature.description}
+
+> For the detailed feature specification, architecture decisions, and session memory, see [nexusflow-knowledge.md](file:///${knowledgePath}).
+
+---
+
+## Projects
+
+This workspace contains the following projects, each checked out as a
+git worktree on the feature branch:
+
+${projectSections}
+${existingConfigsSection}
+${resumptionSection}
+---
+
+${taskSection}
 ---
 
 ## Guidelines

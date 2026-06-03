@@ -7,11 +7,12 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { globby } from 'globby';
 
-import type { RepoDependency } from '../types.js';
+import type { RepoDependency, ProjectAnalysis } from '../types.js';
 
 /**
- * Extracts declared dependencies from a repository's manifest files.
+ * Extracts declared dependencies from a repository's manifest files recursively.
  *
  * Supports:
  * - npm (package.json)
@@ -25,107 +26,246 @@ import type { RepoDependency } from '../types.js';
 export async function detectDependencies(repoPath: string): Promise<RepoDependency[]> {
   const deps: RepoDependency[] = [];
 
-  // ── npm ───────────────────────────────────────────────────────────
   try {
-    const raw = await fs.readFile(path.join(repoPath, 'package.json'), 'utf-8');
-    const pkg = JSON.parse(raw) as Record<string, unknown>;
+    const files = await globby(
+      ['**/package.json', '**/*.csproj', '**/requirements.txt', '**/go.mod'],
+      {
+        cwd: repoPath,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+      }
+    );
 
-    const allDeps: Record<string, string> = {
-      ...(pkg.dependencies as Record<string, string> | undefined),
-      ...(pkg.devDependencies as Record<string, string> | undefined),
-    };
+    for (const file of files) {
+      const filename = path.basename(file);
 
-    for (const [name, version] of Object.entries(allDeps)) {
-      deps.push({ name, type: 'npm', version });
-    }
-  } catch {
-    // No package.json or parse error
-  }
+      // ── npm ───────────────────────────────────────────────────────────
+      if (filename === 'package.json') {
+        try {
+          const raw = await fs.readFile(file, 'utf-8');
+          const pkg = JSON.parse(raw) as Record<string, unknown>;
 
-  // ── NuGet (.csproj) ───────────────────────────────────────────────
-  try {
-    const entries = await fs.readdir(repoPath);
-    const csprojFiles = entries.filter((e) => e.endsWith('.csproj'));
+          const allDeps: Record<string, string> = {
+            ...(pkg.dependencies as Record<string, string> | undefined),
+            ...(pkg.devDependencies as Record<string, string> | undefined),
+          };
 
-    for (const csproj of csprojFiles) {
-      const content = await fs.readFile(path.join(repoPath, csproj), 'utf-8');
-      const packageRefRegex = /<PackageReference\s+Include="([^"]+)"\s+Version="([^"]*)"/gi;
-      let match: RegExpExecArray | null;
-      while ((match = packageRefRegex.exec(content)) !== null) {
-        deps.push({ name: match[1]!, type: 'nuget', version: match[2] });
+          for (const [name, version] of Object.entries(allDeps)) {
+            deps.push({ name, type: 'npm', version });
+          }
+        } catch {
+          // Parse error or skip
+        }
+      }
+
+      // ── NuGet (.csproj) ───────────────────────────────────────────────
+      else if (filename.endsWith('.csproj')) {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const packageRefRegex = /<PackageReference\s+Include="([^"]+)"\s+Version="([^"]*)"/gi;
+          let match: RegExpExecArray | null;
+          while ((match = packageRefRegex.exec(content)) !== null) {
+            deps.push({ name: match[1]!, type: 'nuget', version: match[2] });
+          }
+        } catch {
+          // Skip
+        }
+      }
+
+      // ── pip (requirements.txt) ────────────────────────────────────────
+      else if (filename === 'requirements.txt') {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const lines = content.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+
+          for (const line of lines) {
+            const match = line.match(/^([a-zA-Z0-9_-]+)\s*([>=<~!]*\s*[\d.*]+)?/);
+            if (match) {
+              deps.push({
+                name: match[1]!,
+                type: 'pip',
+                version: match[2]?.trim() || undefined,
+              });
+            }
+          }
+        } catch {
+          // Skip
+        }
+      }
+
+      // ── Go (go.mod) ──────────────────────────────────────────────────
+      else if (filename === 'go.mod') {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const requireRegex = /require\s*\(([\s\S]*?)\)/g;
+          const modRegex = /^\s*([\S]+)\s+(v[\S]+)/gm;
+
+          let match: RegExpExecArray | null;
+          while ((match = requireRegex.exec(content)) !== null) {
+            const block = match[1]!;
+            let modMatch: RegExpExecArray | null;
+            modRegex.lastIndex = 0;
+            while ((modMatch = modRegex.exec(block)) !== null) {
+              deps.push({ name: modMatch[1]!, type: 'go', version: modMatch[2] });
+            }
+          }
+        } catch {
+          // Skip
+        }
       }
     }
   } catch {
-    // No .csproj files
+    // Ignore errors
   }
 
-  // ── pip (requirements.txt) ────────────────────────────────────────
-  try {
-    const content = await fs.readFile(path.join(repoPath, 'requirements.txt'), 'utf-8');
-    const lines = content.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+  // De-duplicate dependencies to keep context clean
+  const seen = new Set<string>();
+  const uniqueDeps: RepoDependency[] = [];
+  for (const dep of deps) {
+    const key = `${dep.type}:${dep.name}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueDeps.push(dep);
+    }
+  }
 
-    for (const line of lines) {
-      const match = line.match(/^([a-zA-Z0-9_-]+)\s*([>=<~!]*\s*[\d.*]+)?/);
-      if (match) {
-        deps.push({
-          name: match[1]!,
-          type: 'pip',
-          version: match[2]?.trim() || undefined,
-        });
+  return uniqueDeps;
+}
+
+/**
+ * Scans recursively for packages produced or published by the repository.
+ *
+ * @param repoPath - Absolute path to the repository root.
+ * @returns Array of produced package metadata.
+ */
+export async function detectProducedPackages(
+  repoPath: string,
+): Promise<{ name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[]> {
+  const products: { name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[] = [];
+
+  try {
+    const files = await globby(
+      ['**/package.json', '**/*.csproj'],
+      {
+        cwd: repoPath,
+        absolute: true,
+        ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+      }
+    );
+
+    for (const file of files) {
+      const filename = path.basename(file);
+
+      if (filename === 'package.json') {
+        try {
+          const raw = await fs.readFile(file, 'utf-8');
+          const pkg = JSON.parse(raw) as Record<string, unknown>;
+          if (pkg.name && pkg.name !== 'workspace' && !pkg.private) {
+            products.push({
+              name: pkg.name as string,
+              type: 'npm',
+              version: (pkg.version as string) || undefined,
+            });
+          }
+        } catch {
+          // Skip
+        }
+      } else if (filename.endsWith('.csproj')) {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const packageIdMatch = /<PackageId>([^<]+)<\/PackageId>/i.exec(content);
+          const assemblyNameMatch = /<AssemblyName>([^<]+)<\/AssemblyName>/i.exec(content);
+          const versionMatch = /<Version>([^<]+)<\/Version>/i.exec(content);
+
+          const name =
+            packageIdMatch?.[1]?.trim() ||
+            assemblyNameMatch?.[1]?.trim() ||
+            path.basename(file, '.csproj');
+
+          // Extract project references to find contributing sub-projects
+          const projRefRegex = /<ProjectReference\s+Include="([^"]+)"/gi;
+          const contributing: string[] = [];
+          let projMatch: RegExpExecArray | null;
+          while ((projMatch = projRefRegex.exec(content)) !== null) {
+            const refPath = projMatch[1];
+            const refName = path.basename(refPath, '.csproj');
+            contributing.push(refName);
+          }
+
+          products.push({
+            name,
+            type: 'nuget',
+            version: versionMatch?.[1]?.trim() || undefined,
+            contributing: contributing.length > 0 ? contributing : undefined,
+          });
+        } catch {
+          // Skip
+        }
       }
     }
   } catch {
-    // No requirements.txt
+    // Ignore errors
   }
 
-  // ── Go (go.mod) ──────────────────────────────────────────────────
-  try {
-    const content = await fs.readFile(path.join(repoPath, 'go.mod'), 'utf-8');
-    const requireRegex = /require\s*\(([\s\S]*?)\)/g;
-    const modRegex = /^\s*([\S]+)\s+(v[\S]+)/gm;
-
-    let match: RegExpExecArray | null;
-    // Parse require blocks
-    while ((match = requireRegex.exec(content)) !== null) {
-      const block = match[1]!;
-      let modMatch: RegExpExecArray | null;
-      modRegex.lastIndex = 0;
-      while ((modMatch = modRegex.exec(block)) !== null) {
-        deps.push({ name: modMatch[1]!, type: 'go', version: modMatch[2] });
-      }
-    }
-  } catch {
-    // No go.mod
-  }
-
-  return deps;
+  return products;
 }
 
 /**
  * Given analysis of multiple repos, find which repos depend on each other.
  * Returns a map of repo name → list of repo names it depends on.
  *
- * @param repoAnalyses - Map of repo path to its detected dependencies.
+ * @param repoAnalyses - Map of repo path to its full analysis result.
  * @param repoNames    - Map of repo path to its name.
  * @returns Map of repo name → list of repo names it depends on.
  */
 export function findInterRepoDependencies(
-  repoAnalyses: Map<string, RepoDependency[]>,
+  repoAnalyses: Map<string, ProjectAnalysis>,
   repoNames: Map<string, string>,
 ): Map<string, string[]> {
-  const nameSet = new Set(repoNames.values());
   const connections = new Map<string, string[]>();
 
-  for (const [repoPath, deps] of repoAnalyses) {
-    const thisName = repoNames.get(repoPath) ?? repoPath;
+  // Map each produced package name to the repo name that produces it
+  const packageToRepo = new Map<string, string>();
+  for (const [repoPath, a] of repoAnalyses) {
+    const thisName = repoNames.get(repoPath) ?? a.name;
+    // Map the repo name itself as a produced product (for direct matching)
+    packageToRepo.set(thisName.toLowerCase(), thisName);
+    
+    if (a.produces) {
+      for (const product of a.produces) {
+        packageToRepo.set(product.name.toLowerCase(), thisName);
+        // Also map basename (e.g. Hogia.EmploymentService.Client -> Client)
+        const base = product.name.split('.').pop() ?? product.name;
+        if (base && base.length > 3) {
+          packageToRepo.set(base.toLowerCase(), thisName);
+        }
+      }
+    }
+  }
+
+  for (const [repoPath, a] of repoAnalyses) {
+    const thisName = repoNames.get(repoPath) ?? a.name;
     const dependsOn: string[] = [];
 
-    for (const dep of deps) {
-      // Check if the dependency name matches another repo name
-      // (e.g., an npm package name matching a repo folder name)
-      const depBaseName = dep.name.split('/').pop() ?? dep.name;
-      if (nameSet.has(depBaseName) && depBaseName !== thisName) {
-        dependsOn.push(depBaseName);
+    for (const dep of a.dependencies) {
+      const depNameLower = dep.name.toLowerCase();
+      
+      // 1. Direct match with a produced package
+      if (packageToRepo.has(depNameLower)) {
+        const targetRepo = packageToRepo.get(depNameLower)!;
+        if (targetRepo !== thisName && !dependsOn.includes(targetRepo)) {
+          dependsOn.push(targetRepo);
+        }
+      } else {
+        // 2. Check if the dependency contains or is contained by a produced package name
+        for (const [prodPkg, targetRepo] of packageToRepo) {
+          if (targetRepo === thisName) continue;
+          if (depNameLower.includes(prodPkg) || prodPkg.includes(depNameLower)) {
+            if (!dependsOn.includes(targetRepo)) {
+              dependsOn.push(targetRepo);
+            }
+          }
+        }
       }
     }
 
@@ -135,4 +275,41 @@ export function findInterRepoDependencies(
   }
 
   return connections;
+}
+
+/**
+ * Scans for NuGet.config files recursively in the repository and extracts configured package source feeds.
+ *
+ * @param repoPath - Absolute path to the repository root.
+ * @returns Array of package sources (key, value).
+ */
+export async function detectNuGetFeeds(repoPath: string): Promise<{ name: string; url: string }[]> {
+  const feeds: { name: string; url: string }[] = [];
+  try {
+    const configFiles = await globby('**/NuGet.config', {
+      cwd: repoPath,
+      absolute: true,
+      ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+    });
+
+    for (const file of configFiles) {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
+        // Scan for <add key="..." value="..." /> elements under <packageSources>
+        const addRegex = /<add\s+key="([^"]+)"\s+value="([^"]+)"/gi;
+        let match: RegExpExecArray | null;
+        while ((match = addRegex.exec(content)) !== null) {
+          const key = match[1];
+          const value = match[2];
+          // Exclude default public nuget feed to keep output focused on private feeds
+          if (!key.toLowerCase().includes('nuget.org') && !value.toLowerCase().includes('api.nuget.org')) {
+            feeds.push({ name: key, url: value });
+          }
+        }
+      } catch {}
+    }
+  } catch {
+    // Ignore errors
+  }
+  return feeds;
 }
