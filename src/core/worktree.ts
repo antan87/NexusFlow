@@ -90,14 +90,22 @@ export async function createWorktree(
 /**
  * Removes an existing git worktree.
  *
- * Runs `git worktree remove <worktreePath>` from the main repo.
+ * Runs `git worktree remove [--force] <worktreePath>` from the main repo.
  *
  * @param repoPath     - Absolute path to the main repo checkout.
  * @param worktreePath - Absolute path to the worktree to remove.
+ * @param force        - Whether to force removal (cleanly removes modified files).
  */
 export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
+  force = false,
 ): Promise<void> {
-  await execa('git', ['worktree', 'remove', worktreePath], { cwd: repoPath });
+  const args = ['worktree', 'remove'];
+  if (force) {
+    args.push('--force');
+  }
+  args.push(worktreePath);
+  await execa('git', args, { cwd: repoPath });
 }
+

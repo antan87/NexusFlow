@@ -157,6 +157,15 @@ ${existingConfigsSection}
 ${resumptionSection}
 ---
 
+## Codebase Context (Repomix)
+
+A packed, token-efficient version of the entire multi-repo codebase is automatically generated and updated at the workspace root:
+- **File**: \`nexusflow-context.xml\`
+- **Purpose**: Contains the aggregated source code and structure of all projects in the workspace.
+- **Usage**: You can read this file directly to understand relationships or search for code patterns across all projects without needing to manually traverse directories.
+
+---
+
 ## Task & Step-by-Step Initialization
 
 Your very first task upon entering this workspace is to analyze the codebase and document it in a universal reference file:

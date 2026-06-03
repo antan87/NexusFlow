@@ -1,6 +1,6 @@
 import React from 'react';
-import { Play, RefreshCw, FolderGit2, Sparkles, ExternalLink } from 'lucide-react';
-import type { Feature, RunningService, ServiceConfig, OrchestrationDetection } from '../../types.js';
+import { Play, RefreshCw, FolderGit2, Sparkles, ExternalLink, Trash2 } from 'lucide-react';
+import type { Feature, RunningService, ServiceConfig, OrchestrationDetection, RepoInfo } from '../../types.js';
 
 // Feature subcomponents
 import { SessionHistory } from '../sessions/SessionHistory.js';
@@ -19,6 +19,13 @@ interface WorkspaceListProps {
   handleCopyPrompt: (ws: Feature) => void;
   handleOpenInEditor: (workspacePath: string) => Promise<void>;
   fetchWorkspaces: () => Promise<void>;
+  
+  // Deletion and repo addition props
+  repos: RepoInfo[];
+  deleteWsLoading: string | null;
+  addRepoLoading: boolean;
+  handleDeleteWorkspace: (wsName: string) => Promise<void>;
+  handleAddRepo: (wsName: string, repoPath: string) => Promise<void>;
   
   // ServiceConsole props
   services: ServiceConfig[];
@@ -89,6 +96,11 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
   handleCopyPrompt,
   handleOpenInEditor,
   fetchWorkspaces,
+  repos,
+  deleteWsLoading,
+  addRepoLoading,
+  handleDeleteWorkspace,
+  handleAddRepo,
 
   // ServiceConsole
   services,
@@ -225,6 +237,14 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                     >
                       {isExpanded ? 'Hide Runner' : 'Orchestrate'}
                     </button>
+                    <button
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-red-950/40 border border-red-900/60 hover:bg-red-900/60 hover:border-red-800 rounded-lg text-xs font-semibold text-red-200 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed animate-fade-in"
+                      onClick={() => handleDeleteWorkspace(ws.branchName)}
+                      disabled={deleteWsLoading === ws.branchName}
+                    >
+                      <Trash2 size={12} className={deleteWsLoading === ws.branchName ? 'animate-spin' : ''} />
+                      {deleteWsLoading === ws.branchName ? 'Deleting...' : 'Delete'}
+                    </button>
                   </div>
                 </div>
 
@@ -232,12 +252,42 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                   {ws.description}
                 </p>
 
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {ws.repos.map((repoPath) => (
-                    <span key={repoPath} className="text-[10px] px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-md font-semibold">
-                      {repoPath.split(/[\\/]/).pop()}
-                    </span>
-                  ))}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex flex-wrap gap-2">
+                    {ws.repos.map((repoPath) => (
+                      <span key={repoPath} className="text-[10px] px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-md font-semibold">
+                        {repoPath.split(/[\\/]/).pop()}
+                      </span>
+                    ))}
+                  </div>
+
+                  {repos.filter((r) => !ws.repos.includes(r.path)).length > 0 && (
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <select
+                        id={`add-repo-select-feature-${ws.branchName}`}
+                        className="bg-gray-900 border border-gray-800 text-gray-300 rounded-md text-[10px] px-2 py-1 font-semibold outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        defaultValue=""
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          if (val) {
+                            if (window.confirm(`Are you sure you want to add repository "${val.split(/[\\/]/).pop()}" to this workspace?\nThis will create a new git worktree and re-run analysis.`)) {
+                              await handleAddRepo(ws.branchName, val);
+                            }
+                            e.target.value = "";
+                          }
+                        }}
+                        disabled={addRepoLoading}
+                      >
+                        <option value="" disabled>+ Add Repository</option>
+                        {repos
+                          .filter((r) => !ws.repos.includes(r.path))
+                          .map((r) => (
+                            <option key={r.path} value={r.path}>{r.name}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Expansion: Process management console */}

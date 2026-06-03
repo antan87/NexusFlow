@@ -15,7 +15,7 @@ import { execa } from 'execa';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { scanForRepos } from './core/scanner.js';
-import { createWorkspace, listWorkspaces, loadFeatureConfig } from './core/workspace.js';
+import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import { packWorkspace } from './core/packer.js';
@@ -351,6 +351,37 @@ app.get('/api/workspace/create-stream/:jobId', async (c) => {
 
     job.listeners.delete(listener);
   });
+});
+
+// 7.6. Delete workspace
+app.delete('/api/workspace/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+
+    await deleteWorkspace(workspacePath);
+    return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 7.7. Add repo to workspace
+app.post('/api/workspace/:id/repo', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const { repoPath } = await c.req.json() as { repoPath: string };
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+
+    await addRepoToWorkspace(workspacePath, repoPath);
+    return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
 });
 
 // 8. Open workspace in editor

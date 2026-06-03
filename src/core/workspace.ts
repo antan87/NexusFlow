@@ -9,8 +9,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execa } from 'execa';
 
-import type { Feature, RepoInfo } from '../types.js';
-import { createWorktree } from './worktree.js';
+import type { Feature, RepoInfo, WorkspaceContext } from '../types.js';
+import { createWorktree, removeWorktree } from './worktree.js';
+import { detectDefaultBranch } from '../utils/git.js';
+import { analyzeAllRepos } from '../analyzers/index.js';
+import { generateContextFiles } from '../generators/index.js';
+import { packWorkspace } from './packer.js';
 
 /** Name of the per-workspace manifest file. */
 const MANIFEST_FILE = 'nexusflow.json';
@@ -160,4 +164,140 @@ export async function loadFeatureConfig(
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolves a repo path to a full RepoInfo object.
+ *
+ * @param repoPath - Absolute path to the original repository.
+ */
+export async function resolveRepoInfo(repoPath: string): Promise<RepoInfo> {
+  const defaultBranch = await detectDefaultBranch(repoPath);
+  return {
+    name: path.basename(repoPath),
+    path: repoPath,
+    defaultBranch,
+  };
+}
+
+/**
+ * Deletes a workspace cleanly, removing all associated git worktrees first,
+ * then deleting the directory from disk.
+ *
+ * @param workspacePath - Absolute path to the workspace directory.
+ */
+export async function deleteWorkspace(
+  workspacePath: string,
+): Promise<void> {
+  const feature = await loadFeatureConfig(workspacePath);
+  if (feature) {
+    for (const repoPath of feature.repos) {
+      const repoName = path.basename(repoPath);
+      const worktreePath = path.join(workspacePath, repoName);
+      try {
+        await removeWorktree(repoPath, worktreePath, true);
+      } catch (error) {
+        console.warn(`Warning: failed to remove worktree for ${repoName} in ${repoPath}:`, error);
+        try {
+          await execa('git', ['worktree', 'prune'], { cwd: repoPath });
+        } catch (pruneError) {
+          console.warn(`Warning: failed to prune worktrees in ${repoPath}:`, pruneError);
+        }
+      }
+    }
+  } else {
+    // Manifest is missing. Try to detect worktrees by scanning subdirectories
+    try {
+      const entries = await fs.readdir(workspacePath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subPath = path.join(workspacePath, entry.name);
+          const gitFilePath = path.join(subPath, '.git');
+          try {
+            const stat = await fs.stat(gitFilePath);
+            if (stat.isFile()) {
+              const content = await fs.readFile(gitFilePath, 'utf-8');
+              const match = content.match(/gitdir:\s*(.+)\.git\/worktrees/);
+              if (match && match[1]) {
+                const mainRepoPath = path.resolve(match[1].trim());
+                await removeWorktree(mainRepoPath, subPath, true);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // Delete the directory itself
+  try {
+    await fs.rm(workspacePath, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`Failed to delete workspace directory ${workspacePath}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Adds a repository to an existing workspace.
+ *
+ * @param workspacePath - Absolute path to the workspace directory.
+ * @param repoPath - Absolute path to the repository to add.
+ */
+export async function addRepoToWorkspace(
+  workspacePath: string,
+  repoPath: string,
+): Promise<void> {
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    throw new Error(`Workspace manifest not found at ${workspacePath}`);
+  }
+
+  if (feature.repos.includes(repoPath)) {
+    throw new Error(`Repository ${repoPath} is already in the workspace`);
+  }
+
+  const newRepoInfo = await resolveRepoInfo(repoPath);
+  const worktreeTarget = path.join(workspacePath, newRepoInfo.name);
+
+  // 1. Create the worktree
+  await createWorktree(
+    newRepoInfo.path,
+    worktreeTarget,
+    feature.branchName,
+    newRepoInfo.defaultBranch,
+  );
+
+  // 2. Update manifest
+  feature.repos.push(repoPath);
+  await saveFeatureConfig(workspacePath, feature);
+
+  // 3. Update .gitignore at workspace root
+  try {
+    const gitignorePath = path.join(workspacePath, '.gitignore');
+    let gitignoreContent = '';
+    try {
+      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+    } catch {}
+
+    const entry = `/${newRepoInfo.name}/`;
+    if (!gitignoreContent.includes(entry)) {
+      gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
+      await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+    }
+  } catch (error) {
+    console.warn('Warning: Failed to update .gitignore:', error);
+  }
+
+  // 4. Re-run analysis, update configs, and repack workspace
+  const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
+  const analysis = await analyzeAllRepos(allRepos);
+  const ctx: WorkspaceContext = {
+    feature,
+    repos: allRepos,
+    analysis,
+  };
+
+  await generateContextFiles(ctx, feature.assistants, workspacePath);
+  await packWorkspace(workspacePath);
 }

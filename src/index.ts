@@ -24,6 +24,8 @@ import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
 import { packCommand } from './commands/pack.js';
+import { removeCommand } from './commands/remove.js';
+import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
@@ -243,6 +245,43 @@ program
   .action(async (workspace: string | undefined, options: { compress?: boolean }) => {
     try {
       await packCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('remove')
+  .alias('rm')
+  .description('Delete a workspace and cleanly prune/remove its git worktrees')
+  .argument('[workspace]', 'Workspace name or path')
+  .action(async (workspace?: string) => {
+    try {
+      await removeCommand(workspace);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('add-repo')
+  .alias('add')
+  .description('Add a repository to an existing workspace and update configurations')
+  .argument('[repo-path]', 'Path to the repository to add')
+  .argument('[workspace]', 'Workspace name or path')
+  .action(async (repoPath?: string, workspace?: string) => {
+    try {
+      await addRepoCommand(repoPath, workspace);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');

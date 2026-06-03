@@ -25,6 +25,7 @@ import {
   Save,
   Edit,
   Download,
+  Trash2,
 } from 'lucide-react';
 import './App.css';
 
@@ -191,6 +192,8 @@ export default function App() {
   const [showCommitModal, setShowCommitModal] = useState<boolean>(false);
   const [commitLoading, setCommitLoading] = useState<boolean>(false);
   const [commitResults, setCommitResults] = useState<any[] | null>(null);
+  const [deleteWsLoading, setDeleteWsLoading] = useState<string | null>(null);
+  const [addRepoLoading, setAddRepoLoading] = useState<boolean>(false);
 
 
   // Log Viewer
@@ -828,6 +831,63 @@ Core Instructions:
     alert('Universal AI briefing prompt copied to clipboard!');
   };
 
+  const handleDeleteWorkspace = async (wsName: string) => {
+    if (!window.confirm(`Are you sure you want to delete the workspace "${wsName}"?\nThis will force remove all git worktrees inside it and delete all files in the folder.`)) {
+      return;
+    }
+    setDeleteWsLoading(wsName);
+    try {
+      const encodedId = encodeURIComponent(wsName);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (activeWsId === wsName) {
+          setActiveWsId(null);
+        }
+        await fetchWorkspaces();
+        alert(`Workspace ${wsName} successfully deleted.`);
+      } else {
+        alert(`Failed to delete workspace: ${data.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Network error while deleting workspace.');
+    } finally {
+      setDeleteWsLoading(null);
+    }
+  };
+
+  const handleAddRepo = async (wsName: string, repoPath: string) => {
+    setAddRepoLoading(true);
+    try {
+      const encodedId = encodeURIComponent(wsName);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/repo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPath }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await fetchWorkspaces();
+        if (activeWsId === wsName) {
+          fetchWorkspaceServices(wsName, true);
+          fetchGitChanges(wsName);
+          fetchWorkspaceSessions(wsName);
+        }
+        alert('Repository successfully added. Configurations and Repomix packing updated.');
+      } else {
+        alert(`Failed to add repository: ${data.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Network error while adding repository.');
+    } finally {
+      setAddRepoLoading(false);
+    }
+  };
+
   const filteredRepos = repos.filter((r) =>
     r.name.toLowerCase().includes(repoSearch.toLowerCase())
   );
@@ -1224,6 +1284,18 @@ Core Instructions:
                         <h3 className="text-sm font-semibold text-white">Align AI Context</h3>
                         <p className="text-xs text-gray-400 mt-1">
                           NexusFlow writes files like <code>CLAUDE.md</code>, <code>.cursorrules</code>, <code>AGENTS.md</code> prompting the LLM to inspect project relations and list key assumptions and questions before coding.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-4">
+                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm shrink-0">
+                        4
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">Repomix Packing</h3>
+                        <p className="text-xs text-gray-400 mt-1">
+                          NexusFlow aggregates the entire multi-repo codebase using <code>Repomix</code> into a token-efficient XML file <code>nexusflow-context.xml</code>, giving AI immediate access to the full codebase state.
                         </p>
                       </div>
                     </div>
@@ -1833,6 +1905,14 @@ Core Instructions:
                               >
                                 {isExpanded ? 'Hide Runner' : 'Orchestrate'}
                               </button>
+                              <button
+                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-red-950/40 border border-red-900/60 hover:bg-red-900/60 hover:border-red-800 rounded-lg text-xs font-semibold text-red-200 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed animate-fade-in"
+                                onClick={() => handleDeleteWorkspace(ws.branchName)}
+                                disabled={deleteWsLoading === ws.branchName}
+                              >
+                                <Trash2 size={12} className={deleteWsLoading === ws.branchName ? 'animate-spin' : ''} />
+                                {deleteWsLoading === ws.branchName ? 'Deleting...' : 'Delete'}
+                              </button>
                             </div>
                           </div>
 
@@ -1840,12 +1920,42 @@ Core Instructions:
                             {ws.description}
                           </p>
 
-                          <div className="flex flex-wrap gap-2 mb-4">
-                            {ws.repos.map((repoPath) => (
-                              <span key={repoPath} className="text-[10px] px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-md font-semibold">
-                                {repoPath.split(/[\\/]/).pop()}
-                              </span>
-                            ))}
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="flex flex-wrap gap-2">
+                              {ws.repos.map((repoPath) => (
+                                <span key={repoPath} className="text-[10px] px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-md font-semibold">
+                                  {repoPath.split(/[\\/]/).pop()}
+                                </span>
+                              ))}
+                            </div>
+
+                            {repos.filter((r) => !ws.repos.includes(r.path)).length > 0 && (
+                              <div className="flex items-center gap-1.5 ml-auto">
+                                <select
+                                  id={`add-repo-select-${ws.branchName}`}
+                                  className="bg-gray-900 border border-gray-800 text-gray-300 rounded-md text-[10px] px-2 py-1 font-semibold outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                  defaultValue=""
+                                  onChange={async (e) => {
+                                    const val = e.target.value;
+                                    if (val) {
+                                      if (window.confirm(`Are you sure you want to add repository "${val.split(/[\\/]/).pop()}" to this workspace?\nThis will create a new git worktree and re-run analysis.`)) {
+                                        await handleAddRepo(ws.branchName, val);
+                                      }
+                                      e.target.value = "";
+                                    }
+                                  }}
+                                  disabled={addRepoLoading}
+                                >
+                                  <option value="" disabled>+ Add Repository</option>
+                                  {repos
+                                    .filter((r) => !ws.repos.includes(r.path))
+                                    .map((r) => (
+                                      <option key={r.path} value={r.path}>{r.name}</option>
+                                    ))
+                                  }
+                                </select>
+                              </div>
+                            )}
                           </div>
 
                           {/* Expansion: Process management console */}
@@ -2520,9 +2630,24 @@ Core Instructions:
                                 )}
                               </button>
                             ) : tool.installed ? (
-                              <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10">
-                                <Check size={12} /> Up to Date
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10">
+                                  <Check size={12} /> Up to Date
+                                </span>
+                                <button
+                                  onClick={() => handleUpdateTool(tool.id)}
+                                  disabled={updatingToolId !== null}
+                                  className="px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-750 text-gray-300 font-bold text-xs rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                >
+                                  {updatingToolId === tool.id ? (
+                                    <>
+                                      <RefreshCw className="animate-spin" size={12} /> Reinstalling...
+                                    </>
+                                  ) : (
+                                    'Reinstall'
+                                  )}
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => handleUpdateTool(tool.id)}
