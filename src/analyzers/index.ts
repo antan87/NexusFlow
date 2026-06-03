@@ -10,7 +10,7 @@ import ora from 'ora';
 import type { ProjectAnalysis, RepoInfo } from '../types.js';
 import { detectTechStack } from './tech-stack.js';
 import { detectApis } from './detect-apis.js';
-import { detectDependencies } from './detect-deps.js';
+import { detectDependencies, detectProducedPackages, detectNuGetFeeds } from './detect-deps.js';
 import { detectPorts } from './detect-ports.js';
 import { detectExistingAIConfigs } from './detect-existing.js';
 import { extractReadmeSummary } from './readme-summarizer.js';
@@ -23,11 +23,13 @@ import { extractReadmeSummary } from './readme-summarizer.js';
  * @returns Full analysis result.
  */
 export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
-  const [techStack, endpoints, dependencies, ports, existingAIConfigs, readmeSummary] =
+  const [techStack, endpoints, dependencies, produces, nugetFeeds, ports, existingAIConfigs, readmeSummary] =
     await Promise.all([
       detectTechStack(repo.path),
       detectApis(repo.path),
       detectDependencies(repo.path),
+      detectProducedPackages(repo.path),
+      detectNuGetFeeds(repo.path),
       detectPorts(repo.path),
       detectExistingAIConfigs(repo.path),
       extractReadmeSummary(repo.path),
@@ -39,6 +41,8 @@ export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
     techStack,
     endpoints,
     dependencies,
+    produces,
+    nugetFeeds,
     ports,
     existingAIConfigs,
     readmeSummary,
@@ -79,7 +83,7 @@ export async function analyzeAllRepos(
 // Re-export individual analyzers
 export { detectTechStack } from './tech-stack.js';
 export { detectApis } from './detect-apis.js';
-export { detectDependencies, findInterRepoDependencies } from './detect-deps.js';
+export { detectDependencies, findInterRepoDependencies, detectNuGetFeeds } from './detect-deps.js';
 export { detectPorts } from './detect-ports.js';
 export { detectExistingAIConfigs } from './detect-existing.js';
 export { extractReadmeSummary } from './readme-summarizer.js';

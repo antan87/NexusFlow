@@ -64,11 +64,10 @@ describe('packWorkspace', () => {
     expect(result.totalCharacters).toBe(9001);
     expect(result.fileSize).toBeGreaterThan(0);
     
-    // Read the generated output file and verify streaming combination works
+    // Read the generated output file and verify
     const outputContent = await fs.readFile(result.outputPath, 'utf-8');
-    expect(outputContent).toContain('<workspace id="test-feature">');
-    expect(outputContent).toContain('<repository name="repo-a">');
     expect(outputContent).toContain('<file path="test.txt">mock repomix content</file>');
+    expect(result.outputPaths).toContain(result.outputPath);
     
     // Verify repomix was called correctly
     expect(repomix.runCli).toHaveBeenCalledTimes(1);
@@ -88,9 +87,8 @@ describe('packWorkspace', () => {
 
     expect(result.totalFiles).toBe(0);
     expect(result.totalCharacters).toBe(0);
-    
-    const outputContent = await fs.readFile(result.outputPath, 'utf-8');
-    expect(outputContent).not.toContain('<repository'); // Should have no repositories
+    expect(result.outputPath).toBe('');
+    expect(result.outputPaths?.length).toBe(0);
   });
 
   it('should throw if workspace feature config is not found', async () => {

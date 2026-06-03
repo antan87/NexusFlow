@@ -11,6 +11,9 @@ import * as fs from 'node:fs/promises';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
+import { analyzeAllRepos } from '../analyzers/index.js';
+import { generateContextFiles } from '../generators/index.js';
+import type { WorkspaceContext } from '../types.js';
 
 /**
  * Executes the sync command.
@@ -70,6 +73,38 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
   }
 
   console.log(`\n📊 ${chalk.bold('Summary:')} ${syncedCount} synced, ${conflictCount} conflict(s)\n`);
+
+  if (syncedCount > 0) {
+    console.log(chalk.cyan('Regenerating architecture maps and context...'));
+    try {
+      const allRepos = await Promise.all(feature.repos.map(r => {
+        const repoName = path.basename(r);
+        return {
+          name: repoName,
+          path: r,
+          defaultBranch: 'main',
+        };
+      }));
+
+      const analysis = await analyzeAllRepos(allRepos);
+      const ctx: WorkspaceContext = {
+        feature,
+        repos: allRepos,
+        analysis,
+      };
+
+      await generateContextFiles(ctx, feature.assistants, workspacePath);
+
+      const config = await loadConfig();
+      if (config.packContextXml) {
+        const { packWorkspace } = await import('../core/packer.js');
+        await packWorkspace(workspacePath);
+      }
+      console.log(chalk.green('✅ Workspace maps and contexts successfully updated.\n'));
+    } catch (error) {
+      console.error(chalk.red(`✖ Failed to regenerate maps: ${error instanceof Error ? error.message : String(error)}\n`));
+    }
+  }
 }
 
 /**

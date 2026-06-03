@@ -88,7 +88,8 @@ export async function createCommand(): Promise<void> {
     id: branchName,
     branchName,
     description,
-    repos: selectedRepos.map((r) => r.path),
+    repos: selectedRepos.map((r) => path.join(workspacePath, r.name)),
+    originalRepos: selectedRepos.map((r) => r.path),
     assistants: selectedAI,
     workspacePath,
     createdAt: new Date().toISOString(),
@@ -119,15 +120,20 @@ export async function createCommand(): Promise<void> {
   await generateContextFiles(ctx, selectedAI, workspacePath);
 
   // ── 8.5. Pack codebase context ──────────────────────────────────────
-  const packSpinner = ora('Packing codebase context with Repomix...').start();
-  try {
-    const packResult = await packWorkspace(workspacePath);
-    packSpinner.succeed(
-      `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB)`
-    );
-  } catch (error) {
-    packSpinner.fail('Failed to pack codebase context');
-    console.error(chalk.red(`  ${error}`));
+  if (config.packContextXml) {
+    const packSpinner = ora('Packing codebase context with Repomix...').start();
+    try {
+      const packResult = await packWorkspace(workspacePath);
+      const filesCount = packResult.outputPaths?.length || 1;
+      packSpinner.succeed(
+        `Packed codebase context into ${filesCount} file(s) (${packResult.totalFiles} files total, ${(packResult.fileSize / 1024).toFixed(2)} KB)`
+      );
+    } catch (error) {
+      packSpinner.fail('Failed to pack codebase context');
+      console.error(chalk.red(`  ${error}`));
+    }
+  } else {
+    console.log(chalk.gray('\n  ○ Skipping codebase context packing (packContextXml is disabled)'));
   }
 
   // ── 8. Open in editor ───────────────────────────────────────────────

@@ -1,19 +1,19 @@
 import * as fs from 'node:fs/promises';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
 import * as path from 'node:path';
 import { runCli } from 'repomix';
 import { loadFeatureConfig } from './workspace.js';
+import { loadConfig } from './config.js';
 
 export interface PackResult {
   outputPath: string;
+  outputPaths?: string[];
   totalFiles: number;
   totalCharacters: number;
   fileSize: number;
 }
 
 /**
- * Packs all repositories in a workspace into a single, compressed XML file using Repomix.
+ * Packs all repositories in a workspace into individual XML files using Repomix.
  */
 export async function packWorkspace(
   workspacePath: string,
@@ -24,19 +24,14 @@ export async function packWorkspace(
     throw new Error(`Workspace not found at ${workspacePath}`);
   }
 
+  const config = await loadConfig();
+  const ignorePatterns = (config.excludePatterns || []).join(',');
   const compress = options.compress !== false; // default true
-  const outputPath = path.join(workspacePath, 'nexusflow-context.xml');
-  
-  // Use a write stream to avoid buffering huge workspaces in memory
-  const outStream = createWriteStream(outputPath, { encoding: 'utf-8' });
-  
-  outStream.write('<?xml version="1.0" encoding="UTF-8"?>\n');
-  outStream.write(`<workspace id="${feature.id}">\n`);
-  outStream.write(`  <description><![CDATA[${feature.description}]]></description>\n`);
-  outStream.write('  <repositories>\n');
-  
+
   let totalFilesCount = 0;
   let totalCharsCount = 0;
+  let totalFileSize = 0;
+  const outputPaths: string[] = [];
 
   for (const repoPath of feature.repos) {
     const repoName = path.basename(repoPath);
@@ -48,15 +43,37 @@ export async function packWorkspace(
       continue;
     }
 
-    const tempXmlPath = path.join(workspacePath, `temp-repomix-${repoName}.xml`);
+    const outputXmlPath = path.join(workspacePath, `nexusflow-context-${repoName}.xml`);
+    const instructionsPath = path.join(worktreePath, 'repomix-instruction.md');
+
+    // Generate dynamic repomix-instruction.md for this repo
+    const mapPath = path.join(workspacePath, `nexusflow-map-${repoName}.md`).replace(/\\/g, '/');
+    const planPath = path.join(workspacePath, `nexusflow-plan.md`).replace(/\\/g, '/');
+    
+    const instructionsContent = [
+      `# AI Assistant Instructions for ${repoName}`,
+      '',
+      `This XML file contains the packed codebase for the repository \`${repoName}\` in the workspace \`${feature.id}\`.`,
+      '',
+      `When working with this code, you MUST follow these guidelines:`,
+      `1. **Explore Locally**: Do not rely on this XML snapshot as the source of truth for edits. Always use your native search, grep, and view tools on the live files in: \`${worktreePath.replace(/\\/g, '/')}\`.`,
+      `2. **Read the Architecture Map**: Before implementing any changes, read the generated map file at: [nexusflow-map-${repoName}.md](file:///${mapPath}) to understand its layout, API endpoints, test commands, and detected usage patterns.`,
+      `3. **Follow the Implementation Order**: See the phased plan at: [nexusflow-plan.md](file:///${planPath}) to avoid cross-repo dependency build ordering issues.`,
+      `4. **Git Operations**: Run git commands (status, add, commit) strictly inside the repository subdirectories (e.g. \`cd ${repoName} && git commit -m "..."\`), NOT in the workspace root.`,
+      '',
+    ].join('\n');
 
     try {
-      // Run repomix programmatically inside the worktree directory
+      // Write instructions to repo worktree root so Repomix picks it up and appends it at the end
+      await fs.writeFile(instructionsPath, instructionsContent, 'utf-8');
+
+      // Run repomix programmatically
       const result = await runCli(['.'], worktreePath, {
         style: 'xml',
-        output: tempXmlPath,
+        output: outputXmlPath,
         compress,
         quiet: true,
+        ignore: ignorePatterns,
       });
 
       if (result && result.packResult) {
@@ -64,45 +81,27 @@ export async function packWorkspace(
         totalCharsCount += result.packResult.totalCharacters;
       }
 
-      outStream.write(`    <repository name="${repoName}">\n`);
-      
-      // Stream output XML directly to avoid memory limits
-      await pipeline(
-        createReadStream(tempXmlPath, { encoding: 'utf-8' }),
-        outStream,
-        { end: false }
-      );
-      
-      outStream.write('\n    </repository>\n');
+      const stats = await fs.stat(outputXmlPath);
+      totalFileSize += stats.size;
+      outputPaths.push(outputXmlPath);
+
     } catch (error: any) {
       console.error(`Error packing repository ${repoName}:`, error.message);
     } finally {
-      // Clean up temporary XML file
+      // Clean up the temporary instruction file from the repo's worktree
       try {
-        await fs.unlink(tempXmlPath);
+        await fs.unlink(instructionsPath);
       } catch {
         // ignore
       }
     }
   }
 
-  outStream.write('  </repositories>\n');
-  outStream.write('</workspace>\n');
-  outStream.end();
-
-  // Wait for stream to finish writing
-  await new Promise<void>((resolve, reject) => {
-    outStream.on('finish', resolve);
-    outStream.on('error', reject);
-  });
-
-  const stats = await fs.stat(outputPath);
-
   return {
-    outputPath,
+    outputPath: outputPaths[0] || '',
+    outputPaths,
     totalFiles: totalFilesCount,
     totalCharacters: totalCharsCount,
-    fileSize: stats.size,
+    fileSize: totalFileSize,
   };
 }
-

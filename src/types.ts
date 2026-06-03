@@ -23,6 +23,12 @@ export interface NexusFlowConfig {
   /** How many directory levels deep to scan for git repos. Default: 2 */
   scanDepth: number;
 
+  /** Global patterns to exclude when packing/analyzing repositories. */
+  excludePatterns?: string[];
+
+  /** Whether to pack codebase context into XML format. Default: true */
+  packContextXml?: boolean;
+
   /** ISO timestamp of the last update check. */
   lastUpdateCheck?: string;
 
@@ -111,6 +117,9 @@ export interface Feature {
 
   /** Absolute paths to the repos included in this feature. */
   repos: string[];
+
+  /** Absolute paths to the original repositories. */
+  originalRepos?: string[];
 
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];
@@ -235,6 +244,10 @@ export interface ProjectAnalysis {
   readmeSummary: string | null;
   /** Existing AI config files found in the repo. */
   existingAIConfigs: ExistingAIConfig[];
+  /** Produced/published packages by this repo. */
+  produces?: { name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[];
+  /** NuGet feeds detected in the repo's NuGet.config files. */
+  nugetFeeds?: { name: string; url: string }[];
 }
 
 /** An existing AI configuration file found in a repo. */

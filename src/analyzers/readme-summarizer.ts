@@ -6,12 +6,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-/** Maximum chars to extract from README for summary. */
-const MAX_SUMMARY_LENGTH = 800;
-
 /**
  * Reads a repository's README.md and extracts the first meaningful
- * section as a summary. Looks for README.md (case-insensitive).
+ * prose paragraph as a summary. Looks for README.md (case-insensitive).
+ *
+ * It automatically strips badges, TOC lists, headers, HTML tags, and redacts ClientIDs/Secrets.
  *
  * @param repoPath - Absolute path to the repository root.
  * @returns The extracted summary text, or null if no README is found.
@@ -35,34 +34,64 @@ export async function extractReadmeSummary(
 
   if (!content) return null;
 
-  // Strip badges, images, and HTML at the top
+  // 1. Strip code blocks to avoid false matching on secrets/prose
+  content = content.replace(/```[\s\S]*?```/g, '');
+
+  // 2. Scrub ClientIDs/Secrets/Credentials
+  // Match standard secret/ID patterns: GUIDs, client_id/secret variables, hex keys
+  const clientSecretsRegex = /(client_id|client_secret|appid|secret|password|key|token|credential)\s*[:=]\s*["']?[a-zA-Z0-9-_\/\+\.]{16,}["']?/gi;
+  const guidRegex = /[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/g;
+  
+  content = content
+    .replace(clientSecretsRegex, (match, p1) => `${p1}: [REDACTED]`)
+    .replace(guidRegex, '[REDACTED_ID]');
+
+  // 3. Process line-by-line to find the first prose paragraph
   const lines = content.split('\n');
-  const meaningfulLines: string[] = [];
-  let foundContent = false;
+  const proseLines: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Skip empty lines before content starts
-    if (!foundContent && !trimmed) continue;
-
-    // Skip badge lines ([![...](...)]) and image lines (![...](...)
-    if (trimmed.startsWith('[![') || (trimmed.startsWith('![') && trimmed.includes('http'))) continue;
+    // Skip empty lines
+    if (!trimmed) {
+      if (proseLines.length > 0) {
+        // We found a paragraph and hit an empty line. Let's finish!
+        break;
+      }
+      continue;
+    }
 
     // Skip HTML tags
     if (trimmed.startsWith('<') && trimmed.endsWith('>')) continue;
 
+    // Skip badges
+    if (trimmed.startsWith('[![') || (trimmed.startsWith('![') && trimmed.includes('http'))) continue;
+
     // Skip horizontal rules
     if (/^(-{3,}|={3,}|\*{3,})$/.test(trimmed)) continue;
 
-    foundContent = true;
-    meaningfulLines.push(line);
+    // Skip headers (Markdown # )
+    if (trimmed.startsWith('#')) continue;
 
-    // Stop after we have enough content
-    const currentLength = meaningfulLines.join('\n').length;
-    if (currentLength >= MAX_SUMMARY_LENGTH) break;
+    // Detect Table of Contents (TOC) lists
+    // Skip lines that look like: - [About](#about) or * 1. [Section](#section)
+    if (/^[-*+]\s*(\d+\.)?\s*\[[^\]]+\]\(#[^)]+\)/.test(trimmed)) {
+      continue;
+    }
+
+    // Skip standard bullet lists if we are searching for prose (e.g. at the top of README before prose)
+    if (proseLines.length === 0 && /^[-*+]\s+/.test(trimmed)) {
+      continue;
+    }
+
+    // Accumulate prose lines
+    proseLines.push(line);
   }
 
-  const summary = meaningfulLines.join('\n').slice(0, MAX_SUMMARY_LENGTH).trim();
-  return summary || null;
+  const summary = proseLines.join(' ').replace(/\s+/g, ' ').trim();
+  if (!summary) return null;
+  
+  // Limit the summary to a concise paragraph (first 250 characters)
+  return summary.length > 250 ? summary.slice(0, 250) + '...' : summary;
 }

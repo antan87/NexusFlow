@@ -59,19 +59,48 @@ export function buildDependencyGraph(
     if (a) analysisByName.set(repo.name, a);
   }
 
-  const repoNames = new Set(repos.map((r) => r.name));
+  // ── 1. Produced/consumed package dependencies ──────────────────────────
+  // Map each produced package name to the repo name that produces it
+  const packageToRepo = new Map<string, string>();
+  for (const repo of repos) {
+    const a = analysisByName.get(repo.name);
+    if (!a) continue;
 
-  // ── 1. Shared-package dependencies ───────────────────────────────────
+    // Map the repo name itself as a produced product (for direct matching)
+    packageToRepo.set(repo.name.toLowerCase(), repo.name);
+
+    if (a.produces) {
+      for (const product of a.produces) {
+        packageToRepo.set(product.name.toLowerCase(), repo.name);
+        // Map basename (e.g. Hogia.EmploymentService.Client -> Client)
+        const base = product.name.split('.').pop() ?? product.name;
+        if (base && base.length > 3) {
+          packageToRepo.set(base.toLowerCase(), repo.name);
+        }
+      }
+    }
+  }
+
   for (const repo of repos) {
     const a = analysisByName.get(repo.name);
     if (!a) continue;
 
     for (const dep of a.dependencies) {
-      // Direct name match — e.g. "@acme/shared-contracts" contains "shared-contracts"
-      for (const otherName of repoNames) {
-        if (otherName === repo.name) continue;
-        if (dep.name === otherName || dep.name.includes(otherName)) {
-          addEdge(graph, repo.name, otherName);
+      const depNameLower = dep.name.toLowerCase();
+
+      // 1. Direct match with a produced package
+      if (packageToRepo.has(depNameLower)) {
+        const targetRepo = packageToRepo.get(depNameLower)!;
+        if (targetRepo !== repo.name) {
+          addEdge(graph, repo.name, targetRepo);
+        }
+      } else {
+        // 2. Check if the dependency contains or is contained by a produced package name
+        for (const [prodPkg, targetRepo] of packageToRepo) {
+          if (targetRepo === repo.name) continue;
+          if (depNameLower.includes(prodPkg) || prodPkg.includes(depNameLower)) {
+            addEdge(graph, repo.name, targetRepo);
+          }
         }
       }
     }
@@ -191,6 +220,8 @@ export function topologicalSort(graph: DependencyGraph): string[][] {
  * - A Mermaid dependency diagram
  * - Phased implementation order derived from topological sort
  * - A dependency cross-reference table
+ * - A package relations table
+ * - Actionable local dev tips
  *
  * @param ctx            The current workspace context (feature + repos + analysis).
  * @param workspacePath  Absolute path to the workspace root directory.
@@ -326,6 +357,85 @@ export async function generateImplementationPlan(
       md.push(`| ${name} | ${deps} | ${rdeps} |`);
     }
 
+    md.push('');
+
+    // ── Contracts & Clients Table ───────────────────────────────────────
+    md.push('## 📦 Contracts & Clients');
+    md.push('');
+    md.push('| Package | Contributing Projects | Producing Repo | Consuming Repos (Version) | Feed Source | Type |');
+    md.push('|:---|:---|:---|:---|:---|:---|');
+
+    // Build package relations
+    interface PackageRelation {
+      pkgName: string;
+      contributing?: string[];
+      producer: string;
+      consumers: { repoName: string; version?: string }[];
+      type: 'npm' | 'nuget' | 'other';
+      feeds?: { name: string; url: string }[];
+    }
+
+    const packageRelations: PackageRelation[] = [];
+
+    // Find all produced packages
+    for (const [repoPath, a] of analysis) {
+      if (a.produces) {
+        for (const product of a.produces) {
+          // Find consumers
+          const consumers: { repoName: string; version?: string }[] = [];
+          for (const [otherPath, otherA] of analysis) {
+            if (otherPath === repoPath) continue;
+            for (const dep of otherA.dependencies) {
+              if (dep.name.toLowerCase() === product.name.toLowerCase()) {
+                consumers.push({ repoName: otherA.name, version: dep.version });
+              }
+            }
+          }
+          packageRelations.push({
+            pkgName: product.name,
+            contributing: (product as any).contributing,
+            producer: a.name,
+            consumers,
+            type: product.type,
+            feeds: a.nugetFeeds,
+          });
+        }
+      }
+    }
+
+    if (packageRelations.length > 0) {
+      for (const rel of packageRelations) {
+        const contribStr = rel.contributing && rel.contributing.length > 0
+          ? rel.contributing.map(c => `\`${c}\``).join(', ')
+          : '—';
+        const consumerStr = rel.consumers.length > 0
+          ? rel.consumers.map(c => `\`${c.repoName}\` (${c.version || 'pinned'})`).join(', ')
+          : '_None_';
+        const feedStr = rel.feeds && rel.feeds.length > 0
+          ? rel.feeds.map(f => `\`${f.name}\` (${f.url})`).join('<br>')
+          : '—';
+        md.push(`| \`${rel.pkgName}\` | ${contribStr} | \`${rel.producer}\` | ${consumerStr} | ${feedStr} | \`${rel.type}\` |`);
+      }
+    } else {
+      md.push('| _No package relations detected_ | | | | | |');
+    }
+    md.push('');
+
+    // ── Local Package Development Loop Tip ──────────────────────────────
+    md.push('## 💡 Local Package Development Loop');
+    md.push('');
+    md.push('When making changes to a shared contract or client library package, follow this standard local feed loop to test and verify consumers before pushing:');
+    md.push('');
+    md.push('### For .NET / NuGet packages:');
+    md.push('1. **Pack locally**: Run `dotnet pack -c Release -o ./local-packages` inside the producing project folder.');
+    md.push('2. **Add local feed**: Configure a local feed in your consumer project\'s `NuGet.config` pointing to the `./local-packages` directory.');
+    md.push('3. **Reference local version**: Reference the package with a local development version (e.g. `3.41.0-local`) in the consuming `.csproj`.');
+    md.push('4. **Revert before merging**: Verify changes compile and tests pass, then **revert** the consuming project\'s package version reference to the official release before merging to master.');
+    md.push('');
+    md.push('### For Node.js / npm packages:');
+    md.push('1. **Link locally**: Run `npm link` inside the producing package folder.');
+    md.push('2. **Use link**: Run `npm link <package-name>` inside the consuming folder to link it.');
+    md.push('3. **Revert before merging**: Uninstall the linked package and install the official package version before committing.');
     md.push('');
 
     // ── Write file ──────────────────────────────────────────────────────
