@@ -51,7 +51,7 @@
     "@types/mocha": "^10.0.1",
     "@types/node": "25.x",
     "@typescript-eslint/eslint-plugin": "^5.59.8",
-    "@typescript-eslint/parser": "^5.59.8",
+    "@typescript-eslint/parser": "^8.60.1",
     "eslint": "^8.41.0",
     "glob": "^8.1.0",
     "mocha": "^10.2.0",
