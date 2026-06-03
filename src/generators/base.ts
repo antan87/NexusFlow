@@ -187,6 +187,7 @@ Once you have created \`nexusflow-overview.md\` and compiled your questions, ask
 
 - **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`\${feature.branchName}\`.
   - **All code changes** must be made within the appropriate project subdirectories.
+  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
   - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
   - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
   - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
