@@ -897,15 +897,18 @@ app.get('/', async (c) => {
 // Serve static assets from GUI build folder
 app.use('/*', serveStatic({ root: path.relative(process.cwd(), guiPath) }));
 
-/**
- * Starts the local GUI web server.
- *
- * @param port - Port to run on.
- */
 export function startServer(port = 3000): Promise<{ port: number; server: any }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port }, (info) => {
       resolve({ port: info.port, server });
+    }) as import('node:http').Server;
+    
+    server.on('error', (e: any) => {
+      if (e.code === 'EADDRINUSE') {
+        resolve(startServer(port + 1));
+      } else {
+        reject(e);
+      }
     });
   });
 }
