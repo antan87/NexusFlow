@@ -107,10 +107,14 @@ export async function createCommand(): Promise<void> {
 
   // ── 7. Analyze projects ─────────────────────────────────────────────
   console.log(chalk.cyan('\nAnalyzing projects...'));
-  const analysis = await analyzeAllRepos(selectedRepos);
+  const workspaceRepos = selectedRepos.map((repo) => ({
+    ...repo,
+    path: path.join(workspacePath, repo.name),
+  }));
+  const analysis = await analyzeAllRepos(workspaceRepos);
 
   // ── 8. Generate AI context files ────────────────────────────────────
-  const ctx: WorkspaceContext = { feature, repos: selectedRepos, analysis };
+  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis };
   console.log(chalk.cyan('\nGenerating AI context files...'));
   await generateContextFiles(ctx, selectedAI, workspacePath);
 

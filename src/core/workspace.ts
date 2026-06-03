@@ -291,10 +291,14 @@ export async function addRepoToWorkspace(
 
   // 4. Re-run analysis, update configs, and repack workspace
   const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
-  const analysis = await analyzeAllRepos(allRepos);
+  const workspaceRepos = allRepos.map((repo) => ({
+    ...repo,
+    path: path.join(workspacePath, repo.name),
+  }));
+  const analysis = await analyzeAllRepos(workspaceRepos);
   const ctx: WorkspaceContext = {
     feature,
-    repos: allRepos,
+    repos: workspaceRepos,
     analysis,
   };
 

@@ -220,14 +220,18 @@ async function runCreationJob(jobId: string, body: any, config: any) {
 
     // Step 2: Analyze repos
     updateJobStep(jobId, 'analysis', 'running', 'Analyzing projects and dependencies...');
-    const analysis = await analyzeAllRepos(body.repos);
+    const workspaceRepos = body.repos.map((repo: any) => ({
+      ...repo,
+      path: path.join(workspacePath, repo.name),
+    }));
+    const analysis = await analyzeAllRepos(workspaceRepos);
     updateJobStep(jobId, 'analysis', 'completed', 'Project analysis complete.');
 
     // Step 3: Generate AI context files
     updateJobStep(jobId, 'context', 'running', 'Generating AI context files...');
     const ctx: WorkspaceContext = {
       feature,
-      repos: body.repos,
+      repos: workspaceRepos,
       analysis,
     };
     await generateContextFiles(ctx, body.assistants, workspacePath);
