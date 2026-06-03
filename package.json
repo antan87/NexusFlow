@@ -1,6 +1,6 @@
 {
   "name": "@mrpatronz/nexusflow",
-  "version": "0.1.12",
+  "version": "0.2.0",
   "description": "Combine multiple repos into a workspace with rich AI assistant context",
   "type": "module",
   "main": "dist/index.js",
