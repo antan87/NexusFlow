@@ -86,6 +86,88 @@ interface WorkspaceListProps {
   setSubTab: (tab: any) => void;
 }
 
+const parseInlineStyles = (text: string): React.ReactNode => {
+  const tokenRegex = /(\*\*.*?\*\*|`.*?`|\*.*?\*)/g;
+  const parts = text.split(tokenRegex);
+  
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="font-bold text-gray-200">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={index} className="px-1.5 py-0.5 bg-gray-900 border border-gray-800 text-indigo-300 rounded font-mono text-[10px]">{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={index} className="italic text-gray-300">{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+};
+
+const renderFormattedDescription = (text: string) => {
+  if (!text) return null;
+  
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentList: { type: 'ul' | 'ol'; items: string[] } | null = null;
+  
+  const flushList = (key: number) => {
+    if (currentList) {
+      const ListTag = currentList.type;
+      elements.push(
+        <ListTag key={`list-${key}`} className={currentList.type === 'ul' ? 'list-disc pl-5 my-1.5 space-y-1' : 'list-decimal pl-5 my-1.5 space-y-1'}>
+          {currentList.items.map((item, idx) => (
+            <li key={`item-${idx}`} className="leading-relaxed">{parseInlineStyles(item)}</li>
+          ))}
+        </ListTag>
+      );
+      currentList = null;
+    }
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    
+    // Check for bullet list item
+    const bulletMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
+    if (bulletMatch) {
+      if (!currentList || currentList.type !== 'ul') {
+        flushList(idx);
+        currentList = { type: 'ul', items: [] };
+      }
+      currentList.items.push(bulletMatch[2]);
+      return;
+    }
+    
+    // Check for numbered list item
+    const numberMatch = line.match(/^(\s*)\d+\.\s+(.*)/);
+    if (numberMatch) {
+      if (!currentList || currentList.type !== 'ol') {
+        flushList(idx);
+        currentList = { type: 'ol', items: [] };
+      }
+      currentList.items.push(numberMatch[2]);
+      return;
+    }
+    
+    // If not a list item, flush any active list first
+    flushList(idx);
+    
+    if (trimmed === '') {
+      elements.push(<div key={`empty-${idx}`} className="h-2" />);
+    } else {
+      elements.push(
+        <div key={`line-${idx}`} className="leading-relaxed">
+          {parseInlineStyles(line)}
+        </div>
+      );
+    }
+  });
+  
+  flushList(lines.length);
+  return <div className="space-y-1">{elements}</div>;
+};
+
 export const WorkspaceList: React.FC<WorkspaceListProps> = ({
   workspacesLoading,
   workspaces,
@@ -248,9 +330,9 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                   </div>
                 </div>
 
-                <p className="text-xs text-gray-400 bg-gray-950/40 border-l-2 border-indigo-500 rounded-r-lg px-4 py-3 mb-4 font-medium italic">
-                  {ws.description}
-                </p>
+                <div className="text-xs text-gray-400 bg-gray-950/40 border-l-2 border-indigo-500 rounded-r-lg px-4 py-3 mb-4 font-medium italic">
+                  {renderFormattedDescription(ws.description)}
+                </div>
 
                 <div className="flex items-center gap-3 mb-4">
                   <div className="flex flex-wrap gap-2">
