@@ -8,7 +8,7 @@ import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
-import { generateWorkspaceGraphFiles } from '../core/graph.js';
+import { generateSkills } from './skills-generator.js';
 
 /** Maps each assistant to its generator function and the file it produces. */
 const GENERATORS: Record<
@@ -65,6 +65,18 @@ ${feature.description}
 
 ${repoList}
 
+## Project Assumptions (verify with user)
+
+<!-- AI assistants: Fill this in during your first session. List each project and describe what you assume its main purpose, tech stack, and responsibilities are. -->
+
+_(No assumptions recorded yet. AI assistant to populate.)_
+
+## Clarifying Questions for the User
+
+<!-- AI assistants: List any clarifying questions or ambiguities about requirements/architecture here. -->
+
+_(No open questions recorded yet. AI assistant to populate.)_
+
 ## Architecture Decisions
 
 <!-- AI assistants: append decisions here as they are made during development.
@@ -86,12 +98,6 @@ ${progressItems}
      the same debugging. -->
 
 _(No gotchas recorded yet.)_
-
-## Open Questions
-
-<!-- Add questions that need human input before the AI can proceed. -->
-
-_(No open questions.)_
 `;
 }
 
@@ -141,12 +147,23 @@ export async function generateContextFiles(
 
   // Generate per-repo architecture maps
   if (ctx.analysis) {
+    const allProduced = new Set<string>();
+    for (const [, a] of ctx.analysis) {
+      if (a.produces) {
+        for (const p of a.produces) {
+          allProduced.add(p.name.toLowerCase());
+        }
+      }
+      // Also treat the repository name as a produced package concept
+      allProduced.add(a.name.toLowerCase());
+    }
+
     for (const repo of ctx.repos) {
       const a = ctx.analysis.get(repo.path);
       if (a) {
         try {
           const { generateRepoMap } = await import('./map-generator.js');
-          await generateRepoMap(repo, a, workspacePath);
+          await generateRepoMap(repo, a, workspacePath, allProduced);
           console.log(chalk.green('  ✔'), `Generated Architecture Map for ${chalk.bold(repo.name)}`);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -174,16 +191,6 @@ export async function generateContextFiles(
     }
   }
 
-  // Generate Workspace Architecture Graph
-  try {
-    await generateWorkspaceGraphFiles(ctx, workspacePath);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(
-      chalk.red('  ✖'),
-      `Failed to generate workspace architecture graph: ${message}`,
-    );
-  }
 
   // Generate implementation plan from dependency analysis (if analysis data available)
   try {
@@ -193,6 +200,17 @@ export async function generateContextFiles(
     console.error(
       chalk.red('  ✖'),
       `Failed to generate implementation plan: ${message}`,
+    );
+  }
+
+  // Generate skills files for selected assistants
+  try {
+    await generateSkills(ctx, assistants, workspacePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      chalk.red('  ✖'),
+      `Failed to generate skills: ${message}`,
     );
   }
 }

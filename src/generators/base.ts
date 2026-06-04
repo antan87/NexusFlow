@@ -17,7 +17,7 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
   lines.push(`### ${analysis.name}`);
 
   const mapPath = path.join(workspacePath, `nexusflow-map-${analysis.name}.md`).replace(/\\/g, '/');
-  lines.push(`- **Architecture Map**: [nexusflow-map-${analysis.name}.md](file:///${mapPath}) — **Instruction**: You MUST read this architecture map before exploring or modifying the \`${analysis.name}\` repository to understand its layout, API endpoints, test commands, and detected usage patterns.`);
+  lines.push(`- **Architecture Map**: [nexusflow-map-${analysis.name}.md](file:///${mapPath}) — **Instruction**: Before modifying this repository, read its architecture map. For exploration, consult the map's section index on demand.`);
 
   // Tech stack
   const { techStack } = analysis;
@@ -47,15 +47,7 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
 
   // API endpoints
   if (analysis.endpoints.length > 0) {
-    lines.push(`- **API endpoints** (${analysis.endpoints.length} detected):`);
-    // Show up to 10 endpoints
-    const shown = analysis.endpoints.slice(0, 10);
-    for (const ep of shown) {
-      lines.push(`  - \`${ep.method} ${ep.path}\``);
-    }
-    if (analysis.endpoints.length > 10) {
-      lines.push(`  - _...and ${analysis.endpoints.length - 10} more_`);
-    }
+    lines.push(`- **API surface**: ${analysis.endpoints.length} endpoints — see architecture map for details`);
   }
 
   // Ports
@@ -128,24 +120,18 @@ ${allConfigs.join('\n')}
     if (mockCommand) parts.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
     if (startCommand) parts.push(`- **Start/Run Command**: \`${startCommand}\``);
     
-    if (testCommand) {
-      if (testCommand === 'npm run test') {
-        const hasJs = repos.some(r => {
-          const a = analysis?.get(r.path);
-          return a?.techStack.languages.includes('typescript') || a?.techStack.languages.includes('javascript');
-        });
-        const hasCsharp = repos.some(r => {
-          const a = analysis?.get(r.path);
-          return a?.techStack.languages.includes('csharp');
-        });
+    const standardCommands = [
+      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
+      'dotnet test',
+      'pytest', 'python -m unittest', 'python -m pytest',
+      'go test', 'go test ./...',
+      'cargo test',
+    ];
 
-        if (hasCsharp && !hasJs) {
-          testCommand = 'dotnet test';
-        } else if (!hasJs && !hasCsharp) {
-          testCommand = undefined;
-        }
-      }
-      if (testCommand) {
+    if (testCommand) {
+      const normalizedCmd = testCommand.trim().toLowerCase();
+      const isStandard = standardCommands.some(cmd => normalizedCmd === cmd || normalizedCmd.startsWith(cmd + ' '));
+      if (!isStandard) {
         parts.push(`- **Verification/Test Command**: \`${testCommand}\``);
       }
     }
@@ -163,39 +149,16 @@ ${parts.join('\n')}
     }
   }
 
-  // Check if overview.md already exists
-  const overviewFile = path.join(workspacePath, 'nexusflow-overview.md');
-  const hasOverview = fs.existsSync(overviewFile);
-
-  let taskSection = '';
-  if (hasOverview) {
-    taskSection = `## Task & Step-by-Step Maintenance
-
-The universal reference file **\`nexusflow-overview.md\`** has already been created. Your task is to:
-
-1. **Keep it Updated**: Maintain and update \`nexusflow-overview.md\` with any new architectural findings, layout changes, or assumptions.
-2. **Review Assumptions**: Ensure that inter-repo relationships and package dependencies documented there reflect the current codebase.
-3. **Address Open Questions**: If there are outstanding items in the "Clarifying Questions for the User" section, discuss them with the user.
-`;
-  } else {
-    taskSection = `## Task & Step-by-Step Initialization
-
-Your very first task upon entering this workspace is to analyze the codebase and document it in a universal reference file:
-
-1. **Create \`nexusflow-overview.md\`** at the workspace root.
-2. **Project Assumptions**: For each project, write down a clear assumption of what it does, its primary tech stack, and its core responsibilities.
-3. **Inter-Repo Relationships**: Document how the repos relate:
-   - Shared libraries/packages (producers and consumers).
-   - API boundaries (which repos expose APIs, which ones consume them).
-   - Data flows and dependencies.
-4. **Clarifying Questions**: If any feature requirements, architectural patterns, or API contracts are unclear, list them explicitly under a section called **"Clarifying Questions for the User"**.
-5. **Universal Reference**: Keep this file updated. This acts as a universal reference so that any LLM assistant (Claude, Antigravity, Codex, Cursor, Copilot) joining this workspace instantly understands the project landscape.
-
-Once you have created \`nexusflow-overview.md\` and compiled your questions, ask the user to verify your assumptions and answer your questions before proceeding to write code.
-`;
-  }
-
   const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md').replace(/\\/g, '/');
+
+  const taskSection = `## First Steps
+
+Your very first task upon entering this workspace is to explore the codebase and align with the user:
+
+1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.
+2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.
+3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.
+`;
 
   return `# Multi-Repo Workspace Context
 

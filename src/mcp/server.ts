@@ -216,98 +216,25 @@ export async function startMcpServer(workspacePath?: string) {
     }
 
     if (name === 'get_workspace_graph') {
-      try {
-        const graphPath = path.join(resolvedWorkspacePath, 'nexusflow-graph.json');
-        
-        try {
-          await fs.access(graphPath);
-        } catch {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Workspace graph file not found at ${graphPath}. Run "nexusflow sync" or rebuild the workspace to generate it.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const content = await fs.readFile(graphPath, 'utf8');
-        return {
-          content: [
-            {
-              type: 'text',
-              text: content,
-            },
-          ],
-        };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error reading workspace graph: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
+          },
+        ],
+      };
     }
 
     if (name === 'query_workspace_graph') {
-      const nodeType = (args as any).nodeType;
-      const edgeType = (args as any).edgeType;
-
-      try {
-        const graphPath = path.join(resolvedWorkspacePath, 'nexusflow-graph.json');
-        
-        try {
-          await fs.access(graphPath);
-        } catch {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Workspace graph file not found at ${graphPath}. Run "nexusflow sync" or rebuild the workspace to generate it.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const content = await fs.readFile(graphPath, 'utf8');
-        const graph = JSON.parse(content);
-
-        let nodes = graph.nodes;
-        let edges = graph.edges;
-
-        if (nodeType) {
-          nodes = nodes.filter((n: any) => n.type === nodeType);
-        }
-        if (edgeType) {
-          edges = edges.filter((e: any) => e.type === edgeType);
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ nodes, edges }, null, 2),
-            },
-          ],
-        };
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error querying workspace graph: ${error.message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
+          },
+        ],
+      };
     }
 
     throw new Error(`Tool not found: ${name}`);

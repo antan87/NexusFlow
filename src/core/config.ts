@@ -32,7 +32,7 @@ export function getDefaultConfig(): NexusFlowConfig {
     workspacesDir: path.join(os.homedir(), 'dev', 'workspaces'),
     defaultAssistant: null,
     scanDepth: 2,
-    packContextXml: true,
+    packContextXml: false,
     excludePatterns: [
       '**/node_modules/**',
       '**/bin/**',

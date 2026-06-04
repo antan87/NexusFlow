@@ -75,13 +75,18 @@ export async function extractReadmeSummary(
     if (trimmed.startsWith('#')) continue;
 
     // Detect Table of Contents (TOC) lists
-    // Skip lines that look like: - [About](#about) or * 1. [Section](#section)
-    if (/^[-*+]\s*(\d+\.)?\s*\[[^\]]+\]\(#[^)]+\)/.test(trimmed)) {
+    // Skip lines that look like: - [About](#about) or 1. [About](#about) or * 1. [Section](#section)
+    if (/^(?:[-*+]\s*|\d+\.\s*)(\d+\.)?\s*\[[^\]]+\]\(#[^)]+\)/.test(trimmed)) {
       continue;
     }
 
-    // Skip standard bullet lists if we are searching for prose (e.g. at the top of README before prose)
-    if (proseLines.length === 0 && /^[-*+]\s+/.test(trimmed)) {
+    // Skip link-only lines (e.g., "[API Docs](https://...)")
+    if (/^\[[^\]]+\]\([^)]+\)$/.test(trimmed)) {
+      continue;
+    }
+
+    // Skip standard bullet and numbered lists if we are searching for prose (e.g. at the top of README before prose)
+    if (proseLines.length === 0 && (/^[-*+]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed))) {
       continue;
     }
 

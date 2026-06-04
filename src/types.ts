@@ -248,6 +248,60 @@ export interface ProjectAnalysis {
   produces?: { name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[];
   /** NuGet feeds detected in the repo's NuGet.config files. */
   nugetFeeds?: { name: string; url: string }[];
+  /** Detected messaging topology. */
+  messaging?: MessagingTopology;
+  /** Detected run configurations. */
+  runConfig?: RunConfig;
+}
+
+export interface MessagePublisher {
+  contractType: string;
+  topicOrQueue: string;
+  publisherFile: string;
+}
+
+export interface MessageSubscriber {
+  contractType: string;
+  handlerFile: string;
+  registrationFile: string;
+}
+
+export interface MessagingTopology {
+  publishers: MessagePublisher[];
+  subscribers: MessageSubscriber[];
+}
+
+export interface RunConfigEntryPoint {
+  projectPath: string;
+  type: string;
+  command?: string;
+  port?: number;
+}
+
+export interface RunConfigDatabase {
+  provider: string;
+  host: string;
+  configFile: string;
+}
+
+export interface RunConfigSharedInfraWarning {
+  resource: string;
+  host: string;
+  configFile: string;
+  warning: string;
+}
+
+export interface RunConfigSecret {
+  file: string;
+  lineHint: string;
+}
+
+export interface RunConfig {
+  entryPoints: RunConfigEntryPoint[];
+  databases: RunConfigDatabase[];
+  sharedInfraWarnings: RunConfigSharedInfraWarning[];
+  committedSecrets: RunConfigSecret[];
+  externalDependencies: string[];
 }
 
 /** An existing AI configuration file found in a repo. */

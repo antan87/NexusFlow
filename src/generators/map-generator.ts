@@ -8,7 +8,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { globby } from 'globby';
 import type { ProjectAnalysis, RepoInfo } from '../types.js';
-import { loadConfig } from '../core/config.js';
 
 interface PatternRule {
   name: string;
@@ -119,6 +118,7 @@ export async function generateRepoMap(
   repo: RepoInfo,
   analysis: ProjectAnalysis,
   workspacePath: string,
+  allProducedPackages: Set<string> = new Set(),
 ): Promise<void> {
   const repoName = repo.name;
   const worktreePath = path.join(workspacePath, repoName);
@@ -133,13 +133,6 @@ export async function generateRepoMap(
   md.push(`> **Note**: Maps are advisory snapshots of the codebase. Always verify route parameters, patterns, and filenames before relying on them.`);
   md.push('');
 
-  const config = await loadConfig();
-  if (config.packContextXml) {
-    const contextXmlPath = path.join(workspacePath, `nexusflow-context-${repoName}.xml`).replace(/\\/g, '/');
-    md.push(`> **AI-friendly Packed Context**: [nexusflow-context-${repoName}.xml](file:///${contextXmlPath})`);
-    md.push(`> — **Instruction**: If you need a complete, AI-friendly XML snapshot of this repository's codebase, read this file.`);
-    md.push('');
-  }
 
   // 1. Solution/Project Layout
   md.push('## 🏗️ Project Layout');
@@ -191,18 +184,55 @@ export async function generateRepoMap(
     md.push('');
   }
 
+  // 1.5. Messaging Topology
+  md.push('## 📨 Messaging Topology');
+  md.push('');
+  if (analysis.messaging && (analysis.messaging.publishers.length > 0 || analysis.messaging.subscribers.length > 0)) {
+    if (analysis.messaging.publishers.length > 0) {
+      md.push('### Publishes');
+      md.push('| Message Contract | Topic/Queue/Channel | Publisher (file) |');
+      md.push('|---|---|---|');
+      for (const p of analysis.messaging.publishers) {
+        const fileLink = p.publisherFile
+          ? `[${path.basename(p.publisherFile)}](file:///${path.join(worktreePath, p.publisherFile)})`
+          : '—';
+        md.push(`| ${p.contractType} | ${p.topicOrQueue} | ${fileLink} |`);
+      }
+      md.push('');
+    }
+
+    if (analysis.messaging.subscribers.length > 0) {
+      md.push('### Subscribes');
+      md.push('| Message Contract | Handler (file) | Registered in |');
+      md.push('|---|---|---|');
+      for (const s of analysis.messaging.subscribers) {
+        const handlerLink = s.handlerFile
+          ? `[${path.basename(s.handlerFile)}](file:///${path.join(worktreePath, s.handlerFile)})`
+          : '—';
+        const regLink = s.registrationFile
+          ? `[${path.basename(s.registrationFile)}](file:///${path.join(worktreePath, s.registrationFile)})`
+          : '—';
+        md.push(`| ${s.contractType} | ${handlerLink} | ${regLink} |`);
+      }
+      md.push('');
+    }
+  } else {
+    md.push('_No pub/sub messaging patterns detected in this repository._');
+    md.push('');
+  }
+
   // 2. Extensible Usage Pattern Scanning
   md.push('## 💡 Detected Architectural Patterns & Usages');
   md.push('');
 
   const detectedLanguages = analysis.techStack.languages;
-  const patternCounts = new Map<string, { label: string; count: number; description: string }>();
+  const patternExamples = new Map<string, { label: string; firstFile?: string; description: string }>();
 
-  // Initialize counts
+  // Initialize examples
   for (const lang of detectedLanguages) {
     const rules = LANG_PATTERNS[lang] || [];
     for (const rule of rules) {
-      patternCounts.set(rule.name, { label: rule.label, count: 0, description: rule.description });
+      patternExamples.set(rule.name, { label: rule.label, description: rule.description });
     }
   }
 
@@ -231,11 +261,12 @@ export async function generateRepoMap(
         for (const lang of detectedLanguages) {
           const rules = LANG_PATTERNS[lang] || [];
           for (const rule of rules) {
+            const val = patternExamples.get(rule.name)!;
+            if (val.firstFile) continue; // Already found an example
+
             rule.regex.lastIndex = 0;
-            const matches = content.match(rule.regex);
-            if (matches) {
-              const val = patternCounts.get(rule.name)!;
-              val.count += matches.length;
+            if (rule.regex.test(content)) {
+              val.firstFile = file.replace(/\\/g, '/');
             }
           }
         }
@@ -246,22 +277,41 @@ export async function generateRepoMap(
   }
 
   md.push('### Static Analysis Findings');
-  if (patternCounts.size > 0) {
-    for (const [, v] of patternCounts) {
-      md.push(`- **${v.label}**: Found ${v.count} occurrence(s). _(${v.description})_`);
+  let hasFindings = false;
+  if (patternExamples.size > 0) {
+    for (const [, v] of patternExamples) {
+      if (v.firstFile) {
+        hasFindings = true;
+        const fileLink = `[${path.basename(v.firstFile)}](file:///${path.join(worktreePath, v.firstFile).replace(/\\/g, '/')})`;
+        md.push(`- **${v.label}** example: ${fileLink} _(${v.description})_`);
+      }
     }
-  } else {
+  }
+  if (!hasFindings) {
     md.push('_No architectural usage patterns detected via static analysis._');
   }
   md.push('');
 
   md.push('### Packages Present (Dependencies)');
-  if (analysis.dependencies.length > 0) {
-    for (const dep of analysis.dependencies) {
+  // Filter dependencies: only show internal packages produced by repos in this workspace,
+  // or those matching a common organization namespace prefix (e.g. if one package is MyOrg.Common, then MyOrg.*).
+  const internalPrefixes = Array.from(allProducedPackages).map(p => {
+    const parts = p.split('.');
+    return parts.length > 1 ? parts[0] + '.' : null;
+  }).filter((p): p is string => p !== null);
+
+  const filteredDeps = analysis.dependencies.filter(dep => {
+    const depNameLower = dep.name.toLowerCase();
+    if (allProducedPackages.has(depNameLower)) return true;
+    return internalPrefixes.some(prefix => depNameLower.startsWith(prefix));
+  });
+
+  if (filteredDeps.length > 0) {
+    for (const dep of filteredDeps) {
       md.push(`- \`${dep.name}\` (${dep.version || 'unknown version'})`);
     }
   } else {
-    md.push('_No package dependencies detected._');
+    md.push('_No cross-repo or organization-internal package dependencies detected._');
   }
   md.push('');
 
@@ -269,13 +319,46 @@ export async function generateRepoMap(
   md.push('## 🔌 API Endpoints');
   md.push('');
   if (analysis.endpoints.length > 0) {
-    md.push('| Method | Route | Controller/Source File |');
-    md.push('|:---|:---|:---|');
+    md.push('| Endpoint Group (Router/Module/File) | Route Prefix / Pattern | Verbs | Source File |');
+    md.push('|:---|:---|:---|:---|');
+
+    // Group endpoints by source file
+    const grouped = new Map<string, typeof analysis.endpoints>();
     for (const ep of analysis.endpoints) {
-      const sourceLink = ep.source
-        ? `[${path.basename(ep.source)}](file:///${path.join(worktreePath, ep.source)})`
+      const src = ep.source || 'Unknown';
+      if (!grouped.has(src)) {
+        grouped.set(src, []);
+      }
+      grouped.get(src)!.push(ep);
+    }
+
+    const findCommonPrefix = (paths: string[]): string => {
+      if (paths.length === 0) return '';
+      if (paths.length === 1) return paths[0]!;
+      const sorted = [...paths].sort();
+      const first = sorted[0]!.split('/');
+      const last = sorted[sorted.length - 1]!.split('/');
+      const common: string[] = [];
+      for (let i = 0; i < first.length; i++) {
+        if (first[i] === last[i]) {
+          common.push(first[i]!);
+        } else {
+          break;
+        }
+      }
+      const prefix = common.join('/');
+      return prefix || '/';
+    };
+
+    for (const [src, eps] of grouped) {
+      const groupName = src !== 'Unknown' ? path.basename(src, path.extname(src)) : 'Inferred';
+      const paths = eps.map(e => e.path);
+      const commonPrefix = findCommonPrefix(paths);
+      const verbs = Array.from(new Set(eps.map(e => e.method.toUpperCase()))).join(', ');
+      const sourceLink = src !== 'Unknown'
+        ? `[${path.basename(src)}](file:///${path.join(worktreePath, src).replace(/\\/g, '/')})`
         : '—';
-      md.push(`| \`${ep.method}\` | \`${ep.path}\` | ${sourceLink} |`);
+      md.push(`| ${groupName} | \`${commonPrefix}\` | \`${verbs}\` | ${sourceLink} |`);
     }
   } else {
     md.push('_No endpoints detected._');
@@ -324,6 +407,50 @@ export async function generateRepoMap(
   }
   md.push('');
 
+  // 4.5. Running Locally
+  md.push('## ▶️ Running Locally');
+  md.push('');
+  if (analysis.runConfig) {
+    const { entryPoints, databases, sharedInfraWarnings, committedSecrets } = analysis.runConfig;
+
+    if (entryPoints.length > 0) {
+      md.push('### Entry Points');
+      for (const ep of entryPoints) {
+        md.push(`- **${ep.type.toUpperCase()} App**: \`${ep.command || 'dotnet run'}\` (configured in \`${ep.projectPath}\`)`);
+      }
+      md.push('');
+    }
+
+    if (databases.length > 0) {
+      md.push('### Databases & Data Stores');
+      md.push('| Provider | Target Host | Config File |');
+      md.push('|---|---|---|');
+      for (const db of databases) {
+        md.push(`| ${db.provider} | ${db.host} | \`${db.configFile}\` |`);
+      }
+      md.push('');
+    }
+
+    if (sharedInfraWarnings.length > 0) {
+      md.push('### ⚠️ Shared Infrastructure Warnings');
+      for (const w of sharedInfraWarnings) {
+        md.push(`- ${w.warning}`);
+      }
+      md.push('');
+    }
+
+    if (committedSecrets.length > 0) {
+      md.push('### 🔒 Potential Committed Secrets');
+      for (const s of committedSecrets) {
+        md.push(`- **Warning**: Possible plaintext secret/key/password found in \`${s.file}\` (key hint: \`${s.lineHint}\`)`);
+      }
+      md.push('');
+    }
+  } else {
+    md.push('_No run configurations detected._');
+    md.push('');
+  }
+
   // 5. Custom Skills
   md.push('## 🛠️ Custom Agent Skills');
   md.push('');
@@ -363,40 +490,24 @@ export async function generateRepoMap(
   md.push('');
 
   // 7. Project-Specific Conventions (Agent-Defined)
+  md.push('## 📝 Discovered Conventions');
+  md.push('');
+  
   const conventionsFile = path.join(workspacePath, `nexusflow-conventions-${repoName}.md`);
-  let hasConventions = false;
-  try {
-    await fs.access(conventionsFile);
-    hasConventions = true;
-  } catch {}
-
-  if (!hasConventions) {
-    const starterContent = [
-      `# Project Conventions — ${repoName}`,
-      '',
-      `<!--`,
-      `This file is dedicated for the AI assistant and developers to document project-specific conventions.`,
-      `Any corrections or guidelines discovered during implementation should be appended here.`,
-      `The NexusFlow generator will automatically merge these into the architecture map during sync.`,
-      `-->`,
-      '',
-      `## 📌 Custom Rules & Discovered Conventions`,
-      '- ',
-    ].join('\n');
-    try {
-      await fs.writeFile(conventionsFile, starterContent, 'utf-8');
-    } catch {}
-  }
-
   let customConventions = '';
   try {
     customConventions = await fs.readFile(conventionsFile, 'utf-8');
+    // Strip the title from the old conventions file if present
+    customConventions = customConventions.replace(/^#\s+.+\n?/, '').trim();
   } catch {}
 
   if (customConventions) {
-    md.push('## 📝 Project-Specific Conventions (Agent-Defined)');
-    md.push('');
     md.push(customConventions);
+    md.push('');
+  } else {
+    md.push('<!-- AI assistants: Document any project-specific conventions, gotchas, or coding rules discovered here. -->');
+    md.push('');
+    md.push('- None recorded yet.');
     md.push('');
   }
 

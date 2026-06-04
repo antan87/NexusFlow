@@ -15,22 +15,11 @@ import type {
   DependencyGraph,
 } from '../types.js';
 
-// ─── Constants ────────────────────────────────────────────────────────────
-
-/** Repo-name substrings that signal a shared/foundation package. */
-const SHARED_PACKAGE_KEYWORDS = ['shared', 'common', 'contracts', 'types'];
-
-/** Project types that act as backend producers. */
-const BACKEND_TYPES = ['api', 'backend', 'service'];
-
-/** Project types that act as frontend consumers. */
-const FRONTEND_TYPES = ['frontend', 'webapp', 'app'];
-
 // ─── Dependency Graph Builder ─────────────────────────────────────────────
 
 /**
- * Build a dependency graph by analysing package dependencies, API
- * relationships and shared-package conventions across the workspace repos.
+ * Build a dependency graph by analysing package dependencies
+ * across the workspace repos.
  *
  * @param analysis  Per-repo analysis results, keyed by repo path.
  * @param repos     Metadata for every repo in the workspace.
@@ -88,64 +77,13 @@ export function buildDependencyGraph(
     for (const dep of a.dependencies) {
       const depNameLower = dep.name.toLowerCase();
 
-      // 1. Direct match with a produced package
+      // Direct match with a produced package
       if (packageToRepo.has(depNameLower)) {
         const targetRepo = packageToRepo.get(depNameLower)!;
         if (targetRepo !== repo.name) {
           addEdge(graph, repo.name, targetRepo);
         }
-      } else {
-        // 2. Check if the dependency contains or is contained by a produced package name
-        for (const [prodPkg, targetRepo] of packageToRepo) {
-          if (targetRepo === repo.name) continue;
-          if (depNameLower.includes(prodPkg) || prodPkg.includes(depNameLower)) {
-            addEdge(graph, repo.name, targetRepo);
-          }
-        }
       }
-    }
-  }
-
-  // ── 2. API relationships (frontend → backend heuristic) ─────────────
-  for (const repoA of repos) {
-    const analysisA = analysisByName.get(repoA.name);
-    if (!analysisA) continue;
-
-    const typeA = analysisA.techStack.projectType;
-
-    if (!BACKEND_TYPES.includes(typeA)) continue;
-
-    for (const repoB of repos) {
-      if (repoB.name === repoA.name) continue;
-
-      const analysisB = analysisByName.get(repoB.name);
-      if (!analysisB) continue;
-
-      const typeB = analysisB.techStack.projectType;
-      if (FRONTEND_TYPES.includes(typeB)) {
-        // B (frontend) depends on A (backend)
-        addEdge(graph, repoB.name, repoA.name);
-      }
-    }
-  }
-
-  // ── 3. Shared-type packages are always foundation ───────────────────
-  for (const repo of repos) {
-    const isShared = SHARED_PACKAGE_KEYWORDS.some((kw) =>
-      repo.name.toLowerCase().includes(kw),
-    );
-    if (!isShared) continue;
-
-    const node = graph.get(repo.name);
-    if (!node) continue;
-
-    // Ensure no outgoing deps (it's a leaf producer)
-    node.dependsOn = [];
-
-    // Every other repo that doesn't already depend on it — add edge
-    for (const other of repos) {
-      if (other.name === repo.name) continue;
-      addEdge(graph, other.name, repo.name);
     }
   }
 
@@ -297,25 +235,19 @@ export async function generateImplementationPlan(
 
     md.push('```');
     md.push('');
+    md.push('> ⚠️ This diagram is derived from detected package dependencies (`package.json`, `.csproj`, etc.) only.');
+    md.push('> If you changed a package, the producing repo must release/build before consumer repos can merge.');
+    md.push('');
 
     // ── Phase descriptions ──────────────────────────────────────────────
     md.push('## Suggested Implementation Order');
     md.push('');
 
-    const phaseLabels = [
-      'Foundation',
-      'Core Services',
-      'Integration Layer',
-      'Consumers',
-      'Final',
-    ];
-
     for (let i = 0; i < phases.length; i++) {
       const phase = phases[i];
-      const label = phaseLabels[Math.min(i, phaseLabels.length - 1)];
       const ordinal = ordinalWord(i + 1);
 
-      md.push(`### Phase ${i + 1}: ${label}`);
+      md.push(`### Phase ${i + 1}`);
       md.push('');
       md.push(`**Repos:** ${phase.join(', ')}`);
       md.push('');
@@ -418,6 +350,52 @@ export async function generateImplementationPlan(
       }
     } else {
       md.push('| _No package relations detected_ | | | | | |');
+    }
+    md.push('');
+
+    // ── Cross-Repo Messaging Roll-up ────────────────────────────────────
+    md.push('## 📨 Cross-Repo Messaging');
+    md.push('');
+    md.push('| Publisher Repo | Message | → Subscriber Repo | Handler |');
+    md.push('|---|---|---|---|');
+
+    interface CrossRepoMessage {
+      pubRepo: string;
+      message: string;
+      subRepo: string;
+      handler: string;
+    }
+    const crossRepoMessages: CrossRepoMessage[] = [];
+
+    for (const [pubPath, pubA] of analysis) {
+      if (!pubA.messaging || !pubA.messaging.publishers) continue;
+      for (const pub of pubA.messaging.publishers) {
+        // Find subscribers in other repos matching this contract type
+        for (const [subPath, subA] of analysis) {
+          if (subPath === pubPath) continue;
+          if (!subA.messaging || !subA.messaging.subscribers) continue;
+          for (const sub of subA.messaging.subscribers) {
+            const pubContract = pub.contractType.toLowerCase().trim();
+            const subContract = sub.contractType.toLowerCase().trim();
+            if (pubContract === subContract && pubContract !== 'goservicebusmessage' && pubContract !== 'servicebusmessage') {
+              crossRepoMessages.push({
+                pubRepo: pubA.name,
+                message: pub.contractType,
+                subRepo: subA.name,
+                handler: sub.handlerFile,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (crossRepoMessages.length > 0) {
+      for (const m of crossRepoMessages) {
+        md.push(`| \`${m.pubRepo}\` | \`${m.message}\` | \`${m.subRepo}\` | \`${m.handler}\` |`);
+      }
+    } else {
+      md.push('| _No cross-repo messaging detected_ | | | |');
     }
     md.push('');
 

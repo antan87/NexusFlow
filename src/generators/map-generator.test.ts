@@ -78,4 +78,82 @@ describe('generateRepoMap', () => {
     expect(content).toContain('GET');
     expect(content).toContain('/api/v1/users');
   });
+
+  it('should render messaging topology, run config, and group endpoints by module', async () => {
+    const mockRepo = {
+      name: 'test-repo',
+      path: '/original/path/test-repo',
+      defaultBranch: 'main',
+    };
+
+    const mockAnalysis: ProjectAnalysis = {
+      name: 'test-repo',
+      path: '/original/path/test-repo',
+      techStack: {
+        languages: ['typescript' as Language],
+        frameworks: ['react' as Framework],
+        buildTools: ['vite'],
+        projectType: 'frontend' as const,
+      },
+      endpoints: [
+        { method: 'GET', path: '/api/v1/users', source: 'src/routes/users.ts' },
+        { method: 'POST', path: '/api/v1/users', source: 'src/routes/users.ts' }
+      ],
+      dependencies: [
+        { name: 'my-internal-package', type: 'npm' as const },
+        { name: 'eslint', type: 'npm' as const }
+      ],
+      ports: [],
+      readmeSummary: 'A test repository.',
+      existingAIConfigs: [],
+      messaging: {
+        publishers: [
+          { contractType: 'OrderCreated', topicOrQueue: 'order-events', publisherFile: 'src/services/order.ts' }
+        ],
+        subscribers: [
+          { contractType: 'OrderCreated', handlerFile: 'src/handlers/order.ts', registrationFile: 'src/index.ts' }
+        ]
+      },
+      runConfig: {
+        entryPoints: [
+          { projectPath: 'package.json', type: 'node', command: 'npm run dev' }
+        ],
+        databases: [
+          { provider: 'PostgreSQL', host: 'localhost', configFile: '.env' }
+        ],
+        sharedInfraWarnings: [
+          { resource: 'Database', host: 'staging-db.org', configFile: '.env', warning: '⚠️ SHARED INFRA warning' }
+        ],
+        committedSecrets: [
+          { file: '.env', lineHint: 'DATABASE_PASSWORD' }
+        ],
+        externalDependencies: []
+      }
+    };
+
+    vi.spyOn(globby, 'globby').mockImplementation(async () => []);
+
+    const writtenFiles: Record<string, string> = {};
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (filePath: any, content: any) => {
+      writtenFiles[filePath as string] = content as string;
+      return Promise.resolve();
+    });
+    vi.spyOn(fs, 'readFile').mockImplementation(async () => '## custom rule here');
+
+    await generateRepoMap(mockRepo, mockAnalysis, workspacePath, new Set(['my-internal-package']));
+
+    const expectedOutPath = path.join(workspacePath, 'nexusflow-map-test-repo.md');
+    const content = writtenFiles[expectedOutPath]!;
+
+    expect(content).toContain('## 📨 Messaging Topology');
+    expect(content).toContain('OrderCreated');
+    expect(content).toContain('order-events');
+    expect(content).toContain('## ▶️ Running Locally');
+    expect(content).toContain('### Entry Points');
+    expect(content).toContain('### ⚠️ Shared Infrastructure Warnings');
+    expect(content).toContain('my-internal-package');
+    expect(content).not.toContain('eslint');
+    expect(content).toContain('Endpoint Group (Router/Module/File)');
+    expect(content).toContain('users');
+  });
 });

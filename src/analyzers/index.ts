@@ -14,6 +14,8 @@ import { detectDependencies, detectProducedPackages, detectNuGetFeeds } from './
 import { detectPorts } from './detect-ports.js';
 import { detectExistingAIConfigs } from './detect-existing.js';
 import { extractReadmeSummary } from './readme-summarizer.js';
+import { analyzeMessaging } from './messaging-analyzer.js';
+import { analyzeRunConfig } from './run-analyzer.js';
 
 /**
  * Runs all analyzers against a single repository and returns
@@ -23,7 +25,7 @@ import { extractReadmeSummary } from './readme-summarizer.js';
  * @returns Full analysis result.
  */
 export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
-  const [techStack, endpoints, dependencies, produces, nugetFeeds, ports, existingAIConfigs, readmeSummary] =
+  const [techStack, endpoints, dependencies, produces, nugetFeeds, ports, existingAIConfigs, readmeSummary, messaging, runConfig] =
     await Promise.all([
       detectTechStack(repo.path),
       detectApis(repo.path),
@@ -33,6 +35,8 @@ export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
       detectPorts(repo.path),
       detectExistingAIConfigs(repo.path),
       extractReadmeSummary(repo.path),
+      analyzeMessaging(repo.path),
+      analyzeRunConfig(repo.path),
     ]);
 
   return {
@@ -46,6 +50,8 @@ export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
     ports,
     existingAIConfigs,
     readmeSummary,
+    messaging,
+    runConfig,
   };
 }
 
@@ -87,3 +93,5 @@ export { detectDependencies, findInterRepoDependencies, detectNuGetFeeds } from 
 export { detectPorts } from './detect-ports.js';
 export { detectExistingAIConfigs } from './detect-existing.js';
 export { extractReadmeSummary } from './readme-summarizer.js';
+export { analyzeMessaging } from './messaging-analyzer.js';
+export { analyzeRunConfig } from './run-analyzer.js';
