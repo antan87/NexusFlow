@@ -151,14 +151,20 @@ ${parts.join('\n')}
 
   const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md').replace(/\\/g, '/');
 
-  const taskSection = `## First Steps
+  let setupDone = false;
+  try {
+    const realKnowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md');
+    if (fs.existsSync(realKnowledgePath)) {
+      const content = fs.readFileSync(realKnowledgePath, 'utf-8');
+      if (!content.includes('No assumptions recorded yet') && !content.includes('AI assistant to populate')) {
+        setupDone = true;
+      }
+    }
+  } catch {}
 
-Your very first task upon entering this workspace is to explore the codebase and align with the user:
-
-1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.
-2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.
-3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.
-`;
+  const taskSection = setupDone
+    ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
+    : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
 
   return `# Multi-Repo Workspace Context
 
@@ -194,6 +200,8 @@ ${taskSection}
     - \`nexusflow diff\` — view changes across all sub-repositories.
     - \`nexusflow commit\` — commit and push changes across modified repositories.
     - \`nexusflow sync\` — rebase all repositories with their default base branches.
+    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
+    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
 - **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
 - Read each project's existing \`README.md\` and any doc files before proposing changes.

@@ -1,0 +1,285 @@
+import chalk from 'chalk';
+import { select } from '@inquirer/prompts';
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import { execa } from 'execa';
+
+import { loadConfig } from '../core/config.js';
+import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
+import { getRepoStatus } from '../utils/multi-git.js';
+import { analyzeAllRepos } from '../analyzers/index.js';
+import { globby } from 'globby';
+
+/**
+ * Runs the doctor command to diagnose workspace state.
+ *
+ * @param workspaceArg - Optional workspace path.
+ */
+export async function doctorCommand(workspaceArg?: string): Promise<void> {
+  console.log(chalk.bold.cyan('\n🩺 NexusFlow — Workspace Doctor\n'));
+
+  const workspacePath = await resolveWorkspace(workspaceArg);
+  if (!workspacePath) return;
+
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    return;
+  }
+
+  const allRepos = await Promise.all(
+    feature.repos.map(async (r) => {
+      const repoName = path.basename(r);
+      return {
+        name: repoName,
+        path: r,
+        defaultBranch: 'main',
+      };
+    })
+  );
+
+  console.log(chalk.cyan('Running diagnostics...\n'));
+
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // ── 1. Worktree Paths Check ──────────────────────────────────────────
+  console.log(chalk.bold('📁 Worktree Paths:'));
+  let worktreeErrors = false;
+  for (const repo of allRepos) {
+    try {
+      const stat = await fs.stat(repo.path);
+      if (!stat.isDirectory()) {
+        errors.push(`Worktree path for "${repo.name}" is not a directory.`);
+        console.log(`  ${chalk.red('✖')} ${repo.name}: Path is not a directory`);
+        worktreeErrors = true;
+      } else {
+        console.log(`  ${chalk.green('✔')} ${repo.name}: Directory exists`);
+      }
+    } catch {
+      errors.push(`Worktree path for "${repo.name}" does not exist: ${repo.path}`);
+      console.log(`  ${chalk.red('✖')} ${repo.name}: Path does not exist`);
+      worktreeErrors = true;
+    }
+  }
+  console.log();
+
+  if (worktreeErrors) {
+    console.error(chalk.red('✖ Worktree errors detected. Cannot complete diagnostics.\n'));
+    return;
+  }
+
+  // ── 2. Run Analysis for detailed checks ────────────────────────────────
+  const analysis = await analyzeAllRepos(allRepos);
+  console.log();
+
+  // ── 3. Branch & Git Status Checks ──────────────────────────────────────
+  console.log(chalk.bold('🌿 Branch Alignment & Git Status:'));
+  for (const repo of allRepos) {
+    let branch = 'unknown';
+    try {
+      const { stdout } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo.path });
+      branch = stdout.trim();
+    } catch {}
+
+    if (branch !== feature.branchName) {
+      warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${feature.branchName}".`);
+      console.log(`  ${chalk.yellow('⚠')} ${repo.name}: Branch mismatch (${chalk.bold(branch)} vs expected ${chalk.bold(feature.branchName)})`);
+    } else {
+      console.log(`  ${chalk.green('✔')} ${repo.name}: Aligned on branch "${branch}"`);
+    }
+
+    const status = await getRepoStatus(repo.path);
+    if (status.hasChanges) {
+      warnings.push(`Repository "${repo.name}" has uncommitted changes.`);
+      console.log(`    ${chalk.dim(`↳ Has uncommitted changes (${status.summary})`)}`);
+    }
+  }
+  console.log();
+
+  // ── 4. Package Registry, Local Feeds, and Temporary Local Versions ─────
+  console.log(chalk.bold('📦 Local Package Setup & Reference Versioning:'));
+  let hasCsharp = false;
+  let hasNode = false;
+
+  for (const repo of allRepos) {
+    const a = analysis.get(repo.path);
+    if (!a) continue;
+
+    if (a.techStack.languages.includes('csharp')) hasCsharp = true;
+    if (a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript')) hasNode = true;
+
+    // Check for temporary/uncommitted versions in C# csproj
+    if (a.techStack.languages.includes('csharp')) {
+      try {
+        const csprojs = await globby('**/*.csproj', {
+          cwd: repo.path,
+          absolute: true,
+          ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+        });
+
+        for (const csproj of csprojs) {
+          const content = await fs.readFile(csproj, 'utf-8');
+          if (content.toLowerCase().includes('-local') || content.toLowerCase().includes('-dev')) {
+            warnings.push(`Temporary package version (e.g. ending in "-local" or "-dev") found in "${path.basename(csproj)}".`);
+            console.log(`  ${chalk.yellow('⚠')} ${repo.name}: Temporary local package version found in "${path.basename(csproj)}"`);
+          }
+        }
+      } catch {}
+
+      // NuGet local feed checks: check if any local NuGet source is defined in local NuGet.configs
+      if (a.nugetFeeds && a.nugetFeeds.length === 0) {
+        // Find if there are NuGet.config files
+        try {
+          const nugetConfigs = await globby('**/NuGet.config', {
+            cwd: repo.path,
+            ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+          });
+          if (nugetConfigs.length === 0) {
+            warnings.push(`Repository "${repo.name}" does not have a NuGet.config. It might not resolve local package dependencies.`);
+            console.log(`  ${chalk.yellow('⚠')} ${repo.name}: No NuGet.config found (needed to configure local package feeds)`);
+          }
+        } catch {}
+      }
+    }
+
+    // Check for relative path/file: dependencies in Node package.json
+    if (a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript')) {
+      try {
+        const pjs = await globby('**/package.json', {
+          cwd: repo.path,
+          absolute: true,
+          ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+        });
+
+        for (const pj of pjs) {
+          const content = await fs.readFile(pj, 'utf-8');
+          if (content.includes('"file:') || content.includes('"link:')) {
+            warnings.push(`Temporary package link/file reference (e.g., "file:../") found in "${path.basename(pj)}".`);
+            console.log(`  ${chalk.yellow('⚠')} ${repo.name}: Temporary local dependency reference ("file:" or "link:") found in "${path.basename(pj)}"`);
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (hasCsharp || hasNode) {
+    console.log(`  ${chalk.green('✔')} Local registry feeds/link validation completed.`);
+  } else {
+    console.log(`  ${chalk.dim('No C# or Node.js repositories to validate.')}`);
+  }
+  console.log();
+
+  // ── 5. Test Commands & Fallbacks ───────────────────────────────────────
+  console.log(chalk.bold('🧪 Test Commands:'));
+  for (const repo of allRepos) {
+    const a = analysis.get(repo.path);
+    if (!a) continue;
+
+    const testCommand = getTestCommand(a);
+    if (testCommand === 'npm test' && !a.techStack.languages.includes('typescript') && !a.techStack.languages.includes('javascript')) {
+      warnings.push(`Repository "${repo.name}" fell back to default test command "npm test".`);
+      console.log(`  ${chalk.yellow('⚠')} ${repo.name}: Using default fallback test command "npm test"`);
+    } else {
+      console.log(`  ${chalk.green('✔')} ${repo.name}: Test command is "${testCommand}"`);
+    }
+  }
+  console.log();
+
+  // ── 6. Missing Core Files ──────────────────────────────────────────────
+  console.log(chalk.bold('📄 Core Artifacts:'));
+  const coreFiles = [
+    { name: 'WORKSPACE.md', required: true },
+    { name: 'nexusflow-knowledge.md', required: true },
+    { name: 'nexusflow-plan.md', required: true },
+  ];
+
+  // Add expected maps
+  for (const repo of allRepos) {
+    coreFiles.push({ name: `nexusflow-map-${repo.name}.md`, required: true });
+  }
+
+  for (const file of coreFiles) {
+    const filePath = path.join(workspacePath, file.name);
+    try {
+      await fs.access(filePath);
+      console.log(`  ${chalk.green('✔')} ${file.name} exists`);
+    } catch {
+      warnings.push(`Missing core workspace artifact: "${file.name}".`);
+      console.log(`  ${chalk.yellow('⚠')} ${file.name} is missing`);
+    }
+  }
+  console.log();
+
+  // ── Summary Report ────────────────────────────────────────────────────
+  console.log(chalk.bold('📊 Diagnostic Summary:'));
+  if (errors.length === 0 && warnings.length === 0) {
+    console.log(chalk.bold.green('  ✔ All checks passed! Workspace is healthy.\n'));
+  } else {
+    if (errors.length > 0) {
+      console.log(chalk.bold.red(`  ✖ ${errors.length} error(s) found. Fix them before proceeding.`));
+      for (const err of errors) console.log(`    - ${err}`);
+    }
+    if (warnings.length > 0) {
+      console.log(chalk.bold.yellow(`  ⚠ ${warnings.length} warning(s) found.`));
+      for (const warn of warnings) console.log(`    - ${warn}`);
+    }
+    console.log();
+  }
+}
+
+/**
+ * Resolves correct test command candidate.
+ */
+function getTestCommand(analysis: any): string {
+  if (analysis.techStack.languages.includes('csharp')) {
+    return 'dotnet test';
+  }
+  if (analysis.techStack.languages.includes('typescript') || analysis.techStack.languages.includes('javascript')) {
+    return 'npm test';
+  }
+  if (analysis.techStack.languages.includes('python')) {
+    return 'pytest';
+  }
+  if (analysis.techStack.languages.includes('go')) {
+    return 'go test ./...';
+  }
+  return 'npm test'; // fallback
+}
+
+/**
+ * Resolves a workspace path.
+ */
+async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
+  if (workspaceArg) {
+    const absolutePath = path.resolve(workspaceArg);
+    try {
+      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+      return absolutePath;
+    } catch {
+      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
+      return null;
+    }
+  }
+
+  const cwdFeature = await loadFeatureConfig(process.cwd());
+  if (cwdFeature) return process.cwd();
+
+  const config = await loadConfig();
+  const workspaces = await listWorkspaces(config.workspacesDir);
+
+  if (workspaces.length === 0) {
+    console.log(chalk.yellow('No workspaces found.\n'));
+    return null;
+  }
+
+  const selected = await select({
+    message: 'Select a workspace to diagnose:',
+    choices: workspaces.map((ws) => ({
+      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+      value: ws.workspacePath,
+    })),
+  });
+
+  return selected;
+}

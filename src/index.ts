@@ -27,6 +27,9 @@ import { packCommand } from './commands/pack.js';
 import { removeCommand } from './commands/remove.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
+import { handoffCommand } from './commands/handoff.js';
+import { refreshCommand } from './commands/refresh.js';
+import { doctorCommand } from './commands/doctor.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
 const program = new Command();
@@ -287,6 +290,46 @@ program
         console.log('\nCancelled.');
         process.exit(0);
       }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('handoff')
+  .description('Generate a compact handoff bundle (nexusflow-handoff.md) for session resumption')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await handoffCommand(workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('refresh')
+  .description('Refresh workspace context, maps, plans and handoff files')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
+  .action(async (workspace: string | undefined, options: { repo?: string }) => {
+    try {
+      await refreshCommand(options, workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('doctor')
+  .description('Run diagnostics to verify workspace health and check for local loop issues')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await doctorCommand(workspace);
+    } catch (error) {
       console.error(error);
       process.exit(1);
     }

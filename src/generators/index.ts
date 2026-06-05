@@ -117,6 +117,7 @@ export async function generateContextFiles(
   ctx: WorkspaceContext,
   assistants: AIAssistant[],
   workspacePath: string,
+  onlyRepo?: string,
 ): Promise<void> {
   // Always generate a universal WORKSPACE.md at the workspace root
   try {
@@ -159,6 +160,9 @@ export async function generateContextFiles(
     }
 
     for (const repo of ctx.repos) {
+      if (onlyRepo && repo.name !== onlyRepo) {
+        continue;
+      }
       const a = ctx.analysis.get(repo.path);
       if (a) {
         try {

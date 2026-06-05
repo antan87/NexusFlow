@@ -129,7 +129,7 @@ export async function generateRepoMap(
   md.push('');
   md.push(`> **Repository Path**: \`${worktreePath}\``);
   md.push(`> **Generated At**: ${new Date().toISOString()} (UTC)`);
-  md.push(`> **Regeneration Command**: Run \`nexusflow sync\` to update this map and workspace planning files.`);
+  md.push(`> **Regeneration Command**: Run \`nexusflow refresh\` to update this map.`);
   md.push(`> **Note**: Maps are advisory snapshots of the codebase. Always verify route parameters, patterns, and filenames before relying on them.`);
   md.push('');
 
@@ -495,18 +495,44 @@ export async function generateRepoMap(
   
   const conventionsFile = path.join(workspacePath, `nexusflow-conventions-${repoName}.md`);
   let customConventions = '';
+  
+  let conventionsExist = false;
   try {
-    customConventions = await fs.readFile(conventionsFile, 'utf-8');
-    // Strip the title from the old conventions file if present
-    customConventions = customConventions.replace(/^#\s+.+\n?/, '').trim();
+    await fs.access(conventionsFile);
+    conventionsExist = true;
   } catch {}
+
+  if (!conventionsExist) {
+    const starterContent = `# Repository Conventions — ${repoName}
+
+Use this file to record project-specific coding conventions, patterns, gotchas, and constraints learned during development.
+Future AI assistant sessions will read these conventions from the repository map.
+
+## Coding Patterns
+<!-- E.g., Use ErrorContent structure for errors instead of plain strings -->
+
+- None recorded yet.
+
+## Gotchas & Watch-outs
+<!-- E.g., Non-nullable enum required attributes gotchas -->
+
+- None recorded yet.
+`;
+    try {
+      await fs.writeFile(conventionsFile, starterContent, 'utf-8');
+      customConventions = starterContent.replace(/^#\s+.+\n?/, '').trim();
+    } catch {}
+  } else {
+    try {
+      customConventions = await fs.readFile(conventionsFile, 'utf-8');
+      customConventions = customConventions.replace(/^#\s+.+\n?/, '').trim();
+    } catch {}
+  }
 
   if (customConventions) {
     md.push(customConventions);
     md.push('');
   } else {
-    md.push('<!-- AI assistants: Document any project-specific conventions, gotchas, or coding rules discovered here. -->');
-    md.push('');
     md.push('- None recorded yet.');
     md.push('');
   }
