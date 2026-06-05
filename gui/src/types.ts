@@ -5,6 +5,7 @@ export interface NexusFlowConfig {
   devDir: string;
   workspacesDir: string;
   defaultAssistant: string | null;
+  defaultEditor?: string | null;
   scanDepth: number;
 }
 

@@ -20,6 +20,9 @@ export interface NexusFlowConfig {
   /** The user's preferred AI assistant, or null if none chosen yet. */
   defaultAssistant: AIAssistant | null;
 
+  /** The user's preferred editor command, or null if none chosen yet. */
+  defaultEditor?: string | null;
+
   /** How many directory levels deep to scan for git repos. Default: 2 */
   scanDepth: number;
 

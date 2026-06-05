@@ -36,6 +36,7 @@ interface NexusFlowConfig {
   devDir: string;
   workspacesDir: string;
   defaultAssistant: string | null;
+  defaultEditor?: string | null;
   scanDepth: number;
 }
 
@@ -287,7 +288,6 @@ export default function App() {
   useEffect(() => {
     fetchConfig();
     fetchAIAssistants();
-    fetchEditors();
     fetchWorkspaces();
     fetchUpdateStatus();
   }, []);
@@ -427,6 +427,8 @@ export default function App() {
       setConfig(data.config);
       setConfigExists(data.exists);
       
+      fetchEditors(data.config?.defaultEditor);
+      
       if (data.exists && data.config.devDir) {
         fetchRepos();
       } else {
@@ -495,13 +497,20 @@ export default function App() {
     }
   };
 
-  const fetchEditors = async () => {
+  const fetchEditors = async (savedDefaultEditorCode?: string | null) => {
     try {
       const res = await fetch(`${API_BASE}/api/editor-detect`);
       const data = await res.json();
       setEditors(data);
-      const defaultEditor = data.find((ed: DetectedEditor) => ed.detected);
-      if (defaultEditor) setSelectedEditor(defaultEditor);
+      
+      let initialEditor = null;
+      if (savedDefaultEditorCode) {
+        initialEditor = data.find((ed: DetectedEditor) => ed.command === savedDefaultEditorCode);
+      }
+      if (!initialEditor) {
+        initialEditor = data.find((ed: DetectedEditor) => ed.detected);
+      }
+      if (initialEditor) setSelectedEditor(initialEditor);
     } catch (e) {
       console.error(e);
     }
@@ -862,7 +871,17 @@ export default function App() {
       window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath }, '*');
       return;
     }
-    const editor = editors.find((e) => e.detected) || editors[0];
+    if (config?.defaultEditor === 'none') {
+      alert('Your preferred editor is set to "None" (skip opening). You can change this in Settings.');
+      return;
+    }
+    let editor = null;
+    if (config?.defaultEditor) {
+      editor = editors.find((e) => e.command === config.defaultEditor);
+    }
+    if (!editor) {
+      editor = editors.find((e) => e.detected) || editors[0];
+    }
     if (!editor) {
       alert('No detected editors available.');
       return;
@@ -1762,7 +1781,14 @@ Core Instructions:
                                   className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
                                     isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                                   }`}
-                                  onClick={() => setSelectedEditor(ed)}
+                                  onClick={() => {
+                                    setSelectedEditor(ed);
+                                    if (config) {
+                                      const updatedConfig = { ...config, defaultEditor: ed.command };
+                                      setConfig(updatedConfig);
+                                      saveAppConfig(updatedConfig);
+                                    }
+                                  }}
                                 >
                                   <span className="text-sm font-bold text-white">{ed.name}</span>
                                   <span className={`text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase ${
@@ -1777,7 +1803,14 @@ Core Instructions:
                               className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
                                 selectedEditor === null ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                               }`}
-                              onClick={() => setSelectedEditor(null)}
+                              onClick={() => {
+                                setSelectedEditor(null);
+                                if (config) {
+                                  const updatedConfig = { ...config, defaultEditor: 'none' };
+                                  setConfig(updatedConfig);
+                                  saveAppConfig(updatedConfig);
+                                }
+                              }}
                             >
                               <span className="text-sm font-bold text-white">None</span>
                               <span className="text-[9px] mt-2 w-max px-2 py-0.5 rounded font-semibold uppercase bg-gray-800 text-gray-500">
@@ -2638,6 +2671,23 @@ Core Instructions:
                       <option value="cursor">Cursor</option>
                     </select>
                     <span className="text-[10px] text-gray-500 mt-1">Your preferred workspace context manager.</span>
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Default Editor</label>
+                    <select
+                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
+                      value={config.defaultEditor || ''}
+                      onChange={(e) => setConfig({ ...config, defaultEditor: e.target.value || null })}
+                    >
+                      <option value="">None (Skip opening)</option>
+                      {editors.map((ed) => (
+                        <option key={ed.command} value={ed.command}>
+                          {ed.name} {ed.detected ? '(Detected)' : '(Not found)'}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-gray-500 mt-1">Your preferred code editor for opening workspaces.</span>
                   </div>
                 </div>
 

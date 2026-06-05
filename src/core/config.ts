@@ -31,6 +31,7 @@ export function getDefaultConfig(): NexusFlowConfig {
     devDir: path.join(os.homedir(), 'dev'),
     workspacesDir: path.join(os.homedir(), 'dev', 'workspaces'),
     defaultAssistant: null,
+    defaultEditor: null,
     scanDepth: 2,
     packContextXml: false,
     excludePatterns: [
