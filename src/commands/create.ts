@@ -120,7 +120,7 @@ export async function createCommand(): Promise<void> {
   const analysis = await analyzeAllRepos(workspaceRepos);
 
   // ── 8. Generate AI context files ────────────────────────────────────
-  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis };
+  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis, localLlm: config.localLlm };
   console.log(chalk.cyan('\nGenerating AI context files...'));
   await generateContextFiles(ctx, selectedAI, workspacePath);
 

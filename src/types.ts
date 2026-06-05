@@ -160,6 +160,9 @@ export interface WorkspaceContext {
 
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
+
+  /** The global local LLM config, to provide model context. */
+  localLlm?: LocalLlmConfig;
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────

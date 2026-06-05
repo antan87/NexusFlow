@@ -279,6 +279,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       feature,
       repos: workspaceRepos,
       analysis,
+      localLlm: config.localLlm,
     };
     await generateContextFiles(ctx, body.assistants, workspacePath);
     updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');

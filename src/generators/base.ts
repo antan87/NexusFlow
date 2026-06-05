@@ -208,7 +208,13 @@ ${taskSection}
     - \`nexusflow doctor\` — run diagnostics to verify workspace health.
 - **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
-${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.
+${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
+  ctx.localLlm ? `\n  - **Model Capacity**: The local agent is running \`${ctx.localLlm.model}\`. ${
+    ctx.localLlm.model.match(/70b|72b|32b|14b/i)
+      ? 'This is a highly capable model; you can delegate complex reasoning and larger code generation tasks.'
+      : 'This is a smaller model; it is best suited for targeted search, log parsing, summarization, and simple boilerplate.'
+  }` : ''
+}
   - **Usage rule**: Whenever you need to perform high-token tasks (like searching large chunks of code, analyzing raw service logs to debug, or generating repetitive boilerplate), **always use \`delegate_to_local_agent\`** first.
   - The local model is free and fast. Pass the instruction and any logs/source files in \`filesToRead\` (relative paths). Use the distilled summary returned to formulate your final output, saving up to 90% in remote context tokens.
 ` : ''}- Read each project's existing \`README.md\` and any doc files before proposing changes.
