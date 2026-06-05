@@ -78,10 +78,10 @@ export async function createWorktree(
       { cwd: repoPath },
     );
   } else {
-    // If the branch does not exist, create a new branch based on the start point
+    // If the branch does not exist, create a new branch based on the start point without tracking it
     await execa(
       'git',
-      ['worktree', 'add', targetPath, '-b', branchName, startPoint],
+      ['worktree', 'add', '--no-track', targetPath, '-b', branchName, startPoint],
       { cwd: repoPath },
     );
   }
