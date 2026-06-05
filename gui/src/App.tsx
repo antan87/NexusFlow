@@ -26,11 +26,19 @@ import {
   Edit,
   Download,
   Trash2,
+  Cpu,
 } from 'lucide-react';
 import './App.css';
 
 
 // Types matched with src/types.ts
+interface LocalLlmConfig {
+  enabled: boolean;
+  provider: 'ollama' | 'openai-compatible';
+  endpoint: string;
+  model: string;
+}
+
 interface NexusFlowConfig {
   version: string;
   devDir: string;
@@ -38,6 +46,7 @@ interface NexusFlowConfig {
   defaultAssistant: string | null;
   defaultEditor?: string | null;
   scanDepth: number;
+  localLlm?: LocalLlmConfig;
 }
 
 interface DetectedAI {
@@ -209,6 +218,7 @@ export default function App() {
   const [selectedRepos, setSelectedRepos] = useState<RepoInfo[]>([]);
   const [selectedAI, setSelectedAI] = useState<string[]>([]);
   const [selectedEditor, setSelectedEditor] = useState<DetectedEditor | null>(null);
+  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createdWorkspace, setCreatedWorkspace] = useState<{ path: string } | null>(null);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -284,6 +294,11 @@ export default function App() {
   const [serviceLogs, setServiceLogs] = useState<string>('');
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Local LLM states
+  const [recommendation, setRecommendation] = useState<{ totalRamGb: number; gpuName: string; recommendedModel: string } | null>(null);
+  const [testStatus, setTestStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [testingLlm, setTestingLlm] = useState(false);
+
   // Initial loads
   useEffect(() => {
     fetchConfig();
@@ -292,10 +307,11 @@ export default function App() {
     fetchUpdateStatus();
   }, []);
 
-  // Load tool updates status when settings view is open
+  // Load tool updates status and LLM recommendations when settings view is open
   useEffect(() => {
     if (view === 'settings') {
       fetchToolsStatus();
+      fetchLlmRecommendation();
     }
   }, [view]);
 
@@ -420,12 +436,48 @@ export default function App() {
     }
   };
 
+  const fetchLlmRecommendation = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/local-llm/recommend`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecommendation(data);
+      }
+    } catch (e) {
+      console.error('Error fetching LLM recommendation:', e);
+    }
+  };
+
+  const testLlmConnection = async () => {
+    if (!config?.localLlm) return;
+    setTestingLlm(true);
+    setTestStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/local-llm/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config.localLlm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestStatus({ success: true, message: data.message });
+      } else {
+        setTestStatus({ success: false, message: data.error || 'Connection failed.' });
+      }
+    } catch (e: any) {
+      setTestStatus({ success: false, message: e.message || 'Network error.' });
+    } finally {
+      setTestingLlm(false);
+    }
+  };
+
   const fetchConfig = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/config`);
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
+      setLocalLlmEnabled(data.config?.localLlm?.enabled || false);
       
       fetchEditors(data.config?.defaultEditor);
       
@@ -462,6 +514,7 @@ export default function App() {
         setSaveStatus('success');
         setConfig(newConfig);
         setConfigExists(true);
+        setLocalLlmEnabled(newConfig.localLlm?.enabled || false);
         fetchRepos();
         fetchWorkspaces();
       } else {
@@ -732,6 +785,7 @@ export default function App() {
           description,
           repos: selectedRepos,
           assistants: selectedAI,
+          localLlmEnabled,
           resumption: {
             testCommand,
             mockCommand: mockCommand || undefined,
@@ -1248,6 +1302,7 @@ Core Instructions:
                   setBranchName('');
                   setDescription('');
                   setSelectedRepos([]);
+                  setLocalLlmEnabled(config?.localLlm?.enabled || false);
                 }}
               >
                 <PlusCircle size={18} className="text-indigo-400" />
@@ -1817,6 +1872,33 @@ Core Instructions:
                                 Skip opening
                               </span>
                             </div>
+                          </div>
+                        </div>
+
+                        <div className={`mb-8 border rounded-xl p-5 ${config?.localLlm?.enabled ? 'border-gray-800/80 bg-gray-950/20' : 'border-gray-800/40 bg-gray-950/10 opacity-60'}`}>
+                          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <Cpu size={14} className="text-indigo-400" /> Local AI Co-processor
+                          </h4>
+                          <p className="text-[11px] text-gray-500 mb-4">
+                            Enabling the Local AI Co-processor inserts guidelines in the workspace context files, instructing remote agents to delegate heavy tasks (such as searching, log analysis, and boilerplate generation) to your local Ollama/LM Studio model.
+                          </p>
+                          {!config?.localLlm?.enabled && (
+                            <p className="text-[11px] text-amber-400/80 mb-3 flex items-center gap-1.5">
+                              <AlertTriangle size={12} /> Enable a local LLM provider in Settings first.
+                            </p>
+                          )}
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              id="wizardLocalLlmEnabled"
+                              className="w-4 h-4 rounded border-gray-800 text-indigo-600 bg-gray-950/20 focus:ring-indigo-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              checked={localLlmEnabled}
+                              onChange={(e) => setLocalLlmEnabled(e.target.checked)}
+                              disabled={!config?.localLlm?.enabled}
+                            />
+                            <label htmlFor="wizardLocalLlmEnabled" className={`text-xs font-semibold cursor-pointer select-none ${config?.localLlm?.enabled ? 'text-white' : 'text-gray-500 cursor-not-allowed'}`}>
+                              Include Local AI Co-processor in this workspace context
+                            </label>
                           </div>
                         </div>
 
@@ -2689,6 +2771,120 @@ Core Instructions:
                     </select>
                     <span className="text-[10px] text-gray-500 mt-1">Your preferred code editor for opening workspaces.</span>
                   </div>
+                </div>
+
+                {/* Local AI Co-Processor Settings */}
+                <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mb-6 mt-6">
+                  <h3 className="text-lg font-bold text-white mb-2">Local AI Co-Processor Settings</h3>
+                  <p className="text-xs text-gray-450 mb-6 font-semibold">Enable a local LLM to handle simple tasks like log analysis, git diff summaries, and boilerplate code generation without using remote tokens.</p>
+
+                  {recommendation && (
+                    <div className="bg-[#0c1020]/80 border border-indigo-500/20 text-xs text-gray-300 rounded-xl p-4 mb-6 flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2 text-indigo-400 font-bold">
+                        <Cpu size={14} /> Local System Scan Results
+                      </div>
+                      <div>• Detected Memory: <strong>{recommendation.totalRamGb} GB RAM</strong></div>
+                      <div>• Detected GPU: <strong>{recommendation.gpuName}</strong></div>
+                      <div>• Recommended Model: <span className="bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded font-mono text-[11px] border border-indigo-500/20">{recommendation.recommendedModel}</span></div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 mb-6">
+                    <input
+                      type="checkbox"
+                      id="localLlmEnabled"
+                      className="w-4 h-4 rounded border-gray-800 bg-[#111827] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      checked={config.localLlm?.enabled || false}
+                      onChange={(e) => {
+                        const defaultLlm = { enabled: e.target.checked, provider: 'ollama' as const, endpoint: 'http://localhost:11434', model: recommendation?.recommendedModel || 'qwen2.5-coder:1.5b' };
+                        setConfig({
+                          ...config,
+                          localLlm: config.localLlm ? { ...config.localLlm, enabled: e.target.checked } : defaultLlm
+                        });
+                      }}
+                    />
+                    <label htmlFor="localLlmEnabled" className="text-sm font-semibold text-white cursor-pointer select-none">
+                      Enable Local AI Delegation Tool
+                    </label>
+                  </div>
+
+                  {config.localLlm?.enabled && (
+                    <div className="space-y-6 border-t border-gray-800/60 pt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="flex flex-col">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Local Provider</label>
+                          <select
+                            className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
+                            value={config.localLlm.provider}
+                            onChange={(e) => setConfig({
+                              ...config,
+                              localLlm: { ...config.localLlm!, provider: e.target.value as any }
+                            })}
+                          >
+                            <option value="ollama">Ollama</option>
+                            <option value="openai-compatible">OpenAI-Compatible (e.g. LM Studio)</option>
+                          </select>
+                          <span className="text-[10px] text-gray-500 mt-1">Provider protocol to connect to.</span>
+                        </div>
+
+                        <div className="flex flex-col">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Endpoint URL</label>
+                          <input
+                            type="text"
+                            className={`w-full bg-[#111827] border focus:ring-1 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner ${
+                              config.localLlm.endpoint && !config.localLlm.endpoint.trim().startsWith('http://') && !config.localLlm.endpoint.trim().startsWith('https://')
+                                ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
+                                : 'border-gray-800 focus:border-indigo-500 focus:ring-indigo-500'
+                            }`}
+                            value={config.localLlm.endpoint}
+                            onChange={(e) => setConfig({
+                              ...config,
+                              localLlm: { ...config.localLlm!, endpoint: e.target.value }
+                            })}
+                          />
+                          {config.localLlm.endpoint && !config.localLlm.endpoint.trim().startsWith('http://') && !config.localLlm.endpoint.trim().startsWith('https://') && (
+                            <span className="text-[10px] text-rose-400 mt-1">Endpoint must start with http:// or https://</span>
+                          )}
+                          <span className="text-[10px] text-gray-500 mt-1">API base address of the local runner.</span>
+                        </div>
+
+                        <div className="flex flex-col md:col-span-2">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Model Name</label>
+                          <input
+                            type="text"
+                            className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                            value={config.localLlm.model}
+                            onChange={(e) => setConfig({
+                              ...config,
+                              localLlm: { ...config.localLlm!, model: e.target.value }
+                            })}
+                          />
+                          <span className="text-[10px] text-gray-500 mt-1">Exact name of the model registered on the server (e.g., <code>qwen2.5-coder:1.5b</code>).</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-800/40">
+                        <button
+                          type="button"
+                          disabled={testingLlm}
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-indigo-500/20 rounded-lg text-xs font-semibold bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-400 transition-all cursor-pointer disabled:opacity-40"
+                          onClick={testLlmConnection}
+                        >
+                          {testingLlm ? 'Testing...' : 'Test Connection'}
+                        </button>
+
+                        {testStatus && (
+                          <div className={`text-xs px-3 py-1.5 rounded-lg border ${
+                            testStatus.success
+                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                              : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                          }`}>
+                            {testStatus.message}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end">

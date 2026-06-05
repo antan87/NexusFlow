@@ -58,6 +58,12 @@ export function getDefaultConfig(): NexusFlowConfig {
       '**/.vscode/**',
       '**/.idea/**',
     ],
+    localLlm: {
+      enabled: false,
+      provider: 'ollama',
+      endpoint: 'http://localhost:11434',
+      model: 'qwen2.5-coder:1.5b',
+    },
   };
 }
 

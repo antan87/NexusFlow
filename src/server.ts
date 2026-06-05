@@ -19,9 +19,11 @@ import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, ad
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import { packWorkspace } from './core/packer.js';
+import { isOllamaModelAvailable } from './utils/local-ai.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getWorkspaceRepos, rebaseRepo, commitAndPush, getRepoStatus } from './utils/multi-git.js';
 import {
   detectAllServices,
@@ -124,6 +126,49 @@ app.get('/api/editor-detect', async (c) => {
   }
 });
 
+// 6.5. Local LLM test & recommendation
+app.post('/api/local-llm/test', async (c) => {
+  try {
+    const { provider, endpoint, model } = await c.req.json();
+    const cleanEndpoint = endpoint.replace(/\/$/, '');
+    
+    if (provider === 'ollama') {
+      const res = await fetch(`${cleanEndpoint}/api/tags`);
+      if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
+      const data: any = await res.json();
+      const models = data?.models || [];
+      const isModelLoaded = isOllamaModelAvailable(models, model);
+      return c.json({ 
+        success: true, 
+        modelReady: isModelLoaded,
+        message: isModelLoaded ? 'Connected successfully! Model is ready.' : `Connected successfully, but model "${model}" is not pulled. Run "ollama pull ${model}" to install it.`
+      });
+    } else {
+      let testUrl = `${cleanEndpoint}/v1/models`;
+      if (cleanEndpoint.includes('/v1')) {
+        testUrl = `${cleanEndpoint}/models`;
+      }
+      const res = await fetch(testUrl);
+      if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
+      return c.json({ success: true, modelReady: true, message: 'Connected successfully to OpenAI-compatible server!' });
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ success: false, error: msg });
+  }
+});
+
+app.get('/api/local-llm/recommend', async (c) => {
+  try {
+    const specs = await scanSystemSpecs();
+    return c.json(specs);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+
 interface JobStep {
   id: string;
   name: string;
@@ -208,6 +253,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       workspacePath,
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
+      localLlmEnabled: body.localLlmEnabled,
     };
     if (job) {
       job.feature = feature;
@@ -261,6 +307,7 @@ app.post('/api/workspace', async (c) => {
       description: string;
       repos: RepoInfo[];
       assistants: any[];
+      localLlmEnabled?: boolean;
       resumption?: {
         testCommand?: string;
         mockCommand?: string;
