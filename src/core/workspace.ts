@@ -66,6 +66,22 @@ export async function createWorkspace(
     console.warn('Warning: Failed to initialize git repository at workspace root:', error);
   }
 
+  // Create .vscode/settings.json to allow VS Code search to query inside ignored sub-repos
+  try {
+    const vscodeDir = path.join(workspacePath, '.vscode');
+    await fs.mkdir(vscodeDir, { recursive: true });
+    const settings = {
+      "search.useIgnoreFiles": false
+    };
+    await fs.writeFile(
+      path.join(vscodeDir, 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (error) {
+    console.warn('Warning: Failed to create .vscode/settings.json:', error);
+  }
+
   // Create a worktree for each repo inside the workspace.
   for (const repo of repos) {
     const worktreeTarget = path.join(workspacePath, repo.name);

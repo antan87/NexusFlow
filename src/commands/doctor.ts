@@ -209,6 +209,22 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
       console.log(`  ${chalk.yellow('⚠')} ${file.name} is missing`);
     }
   }
+
+  // Check VS Code Settings for search.useIgnoreFiles: false
+  const vscodeSettingsPath = path.join(workspacePath, '.vscode', 'settings.json');
+  try {
+    const content = await fs.readFile(vscodeSettingsPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    if (parsed['search.useIgnoreFiles'] === false) {
+      console.log(`  ${chalk.green('✔')} .vscode/settings.json is configured correctly (search.useIgnoreFiles: false)`);
+    } else {
+      warnings.push('.vscode/settings.json search.useIgnoreFiles is not set to false. VS Code global search may ignore repository files.');
+      console.log(`  ${chalk.yellow('⚠')} .vscode/settings.json: search.useIgnoreFiles is not set to false`);
+    }
+  } catch {
+    warnings.push('Missing .vscode/settings.json. VS Code search might not work properly inside sub-repos.');
+    console.log(`  ${chalk.yellow('⚠')} .vscode/settings.json is missing or invalid`);
+  }
   console.log();
 
   // ── Summary Report ────────────────────────────────────────────────────
