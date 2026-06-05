@@ -32,20 +32,29 @@ export async function createWorktree(
     // Silently ignore fetch failures (e.g., offline or no remote origin)
   }
 
-  // Update local baseBranch to keep it in sync with remote before branching
+  // Update local base branch, main, and master to keep them in sync with remote before branching
   if (fetched) {
     try {
-      // Find out if the main repo currently has baseBranch checked out
-      const { stdout: currentBranch } = await execa('git', ['branch', '--show-current'], { cwd: repoPath });
-      if (currentBranch.trim() === baseBranch) {
-        // Safe fast-forward pull
-        await execa('git', ['pull', '--ff-only'], { cwd: repoPath });
-      } else {
-        // Fast-forward local ref from remote ref without checkout
-        await execa('git', ['fetch', 'origin', `${baseBranch}:${baseBranch}`], { cwd: repoPath });
+      const { stdout: currentBranchRaw } = await execa('git', ['branch', '--show-current'], { cwd: repoPath });
+      const currentBranch = currentBranchRaw.trim();
+      
+      const branchesToUpdate = Array.from(new Set([baseBranch, 'main', 'master']));
+      
+      for (const branch of branchesToUpdate) {
+        try {
+          if (currentBranch === branch) {
+            // Safe fast-forward pull for the currently checked-out branch
+            await execa('git', ['pull', '--ff-only'], { cwd: repoPath });
+          } else {
+            // Fast-forward local ref from remote ref without checkout
+            await execa('git', ['fetch', 'origin', `${branch}:${branch}`], { cwd: repoPath });
+          }
+        } catch {
+          // Ignore individual branch update failures
+        }
       }
     } catch {
-      // Ignore failures (e.g. non-fast-forward, uncommitted changes, or no upstream tracking branch)
+      // Ignore failures
     }
   }
 
