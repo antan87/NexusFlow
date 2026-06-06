@@ -19,7 +19,7 @@ import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, ad
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import { packWorkspace } from './core/packer.js';
-import { isOllamaModelAvailable } from './utils/local-ai.js';
+import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './utils/local-ai.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
@@ -68,10 +68,32 @@ app.get('/api/config', async (c) => {
   }
 });
 
+function isSafeLocalEndpoint(urlStr: string): boolean {
+  try {
+    const url = new URL(urlStr);
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
+      return true;
+    }
+    const ipv4Pattern = /^(?:10|127|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))\.\d+\.\d+\.\d+$/;
+    if (ipv4Pattern.test(hostname)) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // 2. Save configuration
 app.post('/api/config', async (c) => {
   try {
     const newConfig = await c.req.json();
+    if (newConfig?.localLlm?.enabled && newConfig.localLlm.endpoint) {
+      if (!isSafeLocalEndpoint(newConfig.localLlm.endpoint)) {
+        return c.json({ error: 'Local AI endpoint must be localhost, 127.0.0.1, or a private LAN IP.' }, 400);
+      }
+    }
     await saveConfig(newConfig);
     return c.json({ success: true, config: newConfig });
   } catch (error) {
@@ -129,9 +151,25 @@ app.get('/api/editor-detect', async (c) => {
 // 6.5. Local LLM test & recommendation
 app.post('/api/local-llm/test', async (c) => {
   try {
-    const { provider, endpoint, model } = await c.req.json();
+    const { provider, endpoint, model, shoot } = await c.req.json();
+    if (!endpoint || !isSafeLocalEndpoint(endpoint)) {
+      return c.json({ success: false, error: 'Local AI endpoint must be localhost, 127.0.0.1, or a private LAN IP.' }, 400);
+    }
     const cleanEndpoint = endpoint.replace(/\/$/, '');
     
+    if (shoot) {
+      const responseText = await callLocalLlm(
+        { enabled: true, provider, endpoint, model },
+        [{ role: 'user', content: 'Respond with the exact word "OK" and nothing else.' }]
+      );
+      const cleanResponse = responseText.trim();
+      return c.json({
+        success: true,
+        modelReady: true,
+        message: `Inference test succeeded! Response from model: "${cleanResponse}"`
+      });
+    }
+
     if (provider === 'ollama') {
       const res = await fetch(`${cleanEndpoint}/api/tags`);
       if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
@@ -144,17 +182,14 @@ app.post('/api/local-llm/test', async (c) => {
         message: isModelLoaded ? 'Connected successfully! Model is ready.' : `Connected successfully, but model "${model}" is not pulled. Run "ollama pull ${model}" to install it.`
       });
     } else {
-      let testUrl = `${cleanEndpoint}/v1/models`;
-      if (cleanEndpoint.includes('/v1')) {
-        testUrl = `${cleanEndpoint}/models`;
-      }
+      const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
       const res = await fetch(testUrl);
       if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
       return c.json({ success: true, modelReady: true, message: 'Connected successfully to OpenAI-compatible server!' });
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ success: false, error: msg });
+    return c.json({ success: false, error: msg }, 400);
   }
 });
 
@@ -163,8 +198,12 @@ app.get('/api/local-llm/recommend', async (c) => {
     const specs = await scanSystemSpecs();
     return c.json(specs);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return c.json({
+      totalRamGb: 8,
+      gpuName: 'Unknown/Integrated',
+      hasHardwareAcceleration: false,
+      recommendedModel: 'qwen2.5-coder:1.5b',
+    });
   }
 });
 
@@ -248,7 +287,8 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       id: body.branchName,
       branchName: body.branchName,
       description: body.description,
-      repos: body.repos.map((r: any) => r.path),
+      repos: body.repos.map((r: any) => path.join(workspacePath, r.name)),
+      originalRepos: body.repos.map((r: any) => r.path),
       assistants: body.assistants,
       workspacePath,
       createdAt: new Date().toISOString(),
@@ -285,9 +325,11 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');
 
     // Step 4: Pack codebase context
-    updateJobStep(jobId, 'pack', 'running', 'Packing codebase context with Repomix...');
-    const packResult = await packWorkspace(workspacePath);
-    updateJobStep(jobId, 'pack', 'completed', `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB).`);
+    if (config.packContextXml) {
+      updateJobStep(jobId, 'pack', 'running', 'Packing codebase context with Repomix...');
+      const packResult = await packWorkspace(workspacePath);
+      updateJobStep(jobId, 'pack', 'completed', `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB).`);
+    }
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -330,8 +372,10 @@ app.post('/api/workspace', async (c) => {
       { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
-      { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
     ];
+    if (config.packContextXml) {
+      steps.push({ id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' });
+    }
 
     const job: CreationJob = {
       id: jobId,
@@ -443,6 +487,11 @@ app.post('/api/open-editor', async (c) => {
       workspacePath: string;
       command: string;
     };
+
+    const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
+    if (!ALLOWED_EDITORS.has(command)) {
+      return c.json({ error: 'Forbidden editor command' }, 400);
+    }
 
     // Spawn editor process
     execa(command, [workspacePath], { detached: true, stdio: 'ignore' }).unref();

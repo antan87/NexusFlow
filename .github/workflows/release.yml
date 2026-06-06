@@ -36,6 +36,13 @@ jobs:
       - name: Run Tests
         run: npm test
 
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+        working-directory: gui
+
+      - name: Run GUI E2E Tests
+        run: npm run test:gui
+
   publish:
     needs: build-and-test
     runs-on: ubuntu-latest

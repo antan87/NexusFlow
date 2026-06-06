@@ -89,7 +89,11 @@ export async function loadConfig(): Promise<NexusFlowConfig> {
     const parsed = JSON.parse(raw) as Partial<NexusFlowConfig>;
 
     // Merge with defaults so newly-added keys are always present.
-    return { ...getDefaultConfig(), ...parsed };
+    const merged = { ...getDefaultConfig(), ...parsed };
+    if (parsed.localLlm) {
+      merged.localLlm = { ...getDefaultConfig().localLlm, ...parsed.localLlm };
+    }
+    return merged;
   } catch {
     // File doesn't exist or is unreadable — return defaults.
     return getDefaultConfig();

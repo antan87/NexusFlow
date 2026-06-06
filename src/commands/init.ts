@@ -44,7 +44,17 @@ export async function initCommand(): Promise<void> {
 
   // ── 2. Local AI Scanner & Config ──────────────────────────────────────
   console.log(chalk.cyan('\nProbing system hardware for local AI capabilities...'));
-  const specs = await scanSystemSpecs();
+  let specs;
+  try {
+    specs = await scanSystemSpecs();
+  } catch (error) {
+    specs = {
+      totalRamGb: 8,
+      gpuName: 'Unknown/Integrated',
+      hasHardwareAcceleration: false,
+      recommendedModel: 'qwen2.5-coder:1.5b',
+    };
+  }
   console.log(chalk.dim(`  RAM Detected: ${specs.totalRamGb} GB`));
   console.log(chalk.dim(`  GPU Detected: ${specs.gpuName}`));
   console.log(chalk.dim(`  Recommended model: ${chalk.bold(specs.recommendedModel)}`));

@@ -5,8 +5,6 @@ import {
   Settings as SettingsIcon,
   Terminal,
   Play,
-  Square,
-  ExternalLink,
   Check,
   AlertTriangle,
   AlertCircle,
@@ -18,17 +16,10 @@ import {
   Sparkles,
   Copy,
   X,
-  MessageSquare,
-  MessageSquareCode,
-  BookOpen,
-  ListOrdered,
-  Save,
-  Edit,
-  Download,
-  Trash2,
   Cpu,
 } from 'lucide-react';
 import './App.css';
+import { WorkspaceList } from './features/workspace/WorkspaceList.js';
 
 
 // Types matched with src/types.ts
@@ -47,6 +38,7 @@ interface NexusFlowConfig {
   defaultEditor?: string | null;
   scanDepth: number;
   localLlm?: LocalLlmConfig;
+  packContextXml?: boolean;
 }
 
 interface DetectedAI {
@@ -103,88 +95,6 @@ interface RunningService {
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-
-const parseInlineStyles = (text: string): React.ReactNode => {
-  const tokenRegex = /(\*\*.*?\*\*|`.*?`|\*.*?\*)/g;
-  const parts = text.split(tokenRegex);
-  
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-bold text-gray-200">{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={index} className="px-1.5 py-0.5 bg-gray-900 border border-gray-800 text-indigo-300 rounded font-mono text-[10px]">{part.slice(1, -1)}</code>;
-    }
-    if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={index} className="italic text-gray-300">{part.slice(1, -1)}</em>;
-    }
-    return part;
-  });
-};
-
-const renderFormattedDescription = (text: string) => {
-  if (!text) return null;
-  
-  const lines = text.split('\n');
-  const elements: React.ReactNode[] = [];
-  let currentList: { type: 'ul' | 'ol'; items: string[] } | null = null;
-  
-  const flushList = (key: number) => {
-    if (currentList) {
-      const ListTag = currentList.type;
-      elements.push(
-        <ListTag key={`list-${key}`} className={currentList.type === 'ul' ? 'list-disc pl-5 my-1.5 space-y-1' : 'list-decimal pl-5 my-1.5 space-y-1'}>
-          {currentList.items.map((item, idx) => (
-            <li key={`item-${idx}`} className="leading-relaxed">{parseInlineStyles(item)}</li>
-          ))}
-        </ListTag>
-      );
-      currentList = null;
-    }
-  };
-
-  lines.forEach((line, idx) => {
-    const trimmed = line.trim();
-    
-    // Check for bullet list item
-    const bulletMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
-    if (bulletMatch) {
-      if (!currentList || currentList.type !== 'ul') {
-        flushList(idx);
-        currentList = { type: 'ul', items: [] };
-      }
-      currentList.items.push(bulletMatch[2]);
-      return;
-    }
-    
-    // Check for numbered list item
-    const numberMatch = line.match(/^(\s*)\d+\.\s+(.*)/);
-    if (numberMatch) {
-      if (!currentList || currentList.type !== 'ol') {
-        flushList(idx);
-        currentList = { type: 'ol', items: [] };
-      }
-      currentList.items.push(numberMatch[2]);
-      return;
-    }
-    
-    // If not a list item, flush any active list first
-    flushList(idx);
-    
-    if (trimmed === '') {
-      elements.push(<div key={`empty-${idx}`} className="h-2" />);
-    } else {
-      elements.push(
-        <div key={`line-${idx}`} className="leading-relaxed">
-          {parseInlineStyles(line)}
-        </div>
-      );
-    }
-  });
-  
-  flushList(lines.length);
-  return <div className="space-y-1">{elements}</div>;
-};
 
 export default function App() {
   const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings'>('guide');
@@ -298,6 +208,18 @@ export default function App() {
   const [recommendation, setRecommendation] = useState<{ totalRamGb: number; gpuName: string; recommendedModel: string } | null>(null);
   const [testStatus, setTestStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [testingLlm, setTestingLlm] = useState(false);
+
+  const isSettingsFormValid = (() => {
+    if (!config) return false;
+    if (!config.devDir || config.devDir.trim() === '' || !config.workspacesDir || config.workspacesDir.trim() === '') return false;
+    if (config.localLlm?.enabled) {
+      const endpoint = config.localLlm.endpoint?.trim() || '';
+      if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+        return false;
+      }
+    }
+    return true;
+  })();
 
   // Initial loads
   useEffect(() => {
@@ -954,18 +876,7 @@ export default function App() {
     }
   };
 
-  const handleExportContext = async (wsBranchName: string) => {
-    const encodedId = encodeURIComponent(wsBranchName);
-    const downloadUrl = `${API_BASE}/api/workspace/${encodedId}/pack`;
-    
-    // Create temporary link and click it
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.setAttribute('download', '');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+
 
   const handleCopyPrompt = (ws: Feature) => {
     const repoNames = ws.repos.map((r) => r.split(/[\\/]/).pop()).join(', ');
@@ -1206,6 +1117,24 @@ Core Instructions:
                       <span>Suggested: <code>{defaultPaths.workspacesDir}</code></span>
                     </div>
                   )}
+                </div>
+
+                <div className="pt-2">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="onboardingPackContextXml"
+                      className="w-4 h-4 rounded border-gray-800 bg-[#111827] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      checked={config.packContextXml || false}
+                      onChange={(e) => setConfig({ ...config, packContextXml: e.target.checked })}
+                    />
+                    <label htmlFor="onboardingPackContextXml" className="text-xs font-semibold text-white cursor-pointer select-none">
+                      Pack Codebase Context with Repomix (XML)
+                    </label>
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-1 block">
+                    Aggregates all repository files into a single token-efficient XML file (<code>nexusflow-context.xml</code>) at the workspace root, giving AI assistants immediate access to the full codebase state.
+                  </span>
                 </div>
 
                 {/* Form Buttons */}
@@ -1449,9 +1378,9 @@ Core Instructions:
                         4
                       </div>
                       <div>
-                        <h3 className="text-sm font-semibold text-white">Repomix Packing</h3>
+                        <h3 className="text-sm font-semibold text-white">Repomix Packing (Optional)</h3>
                         <p className="text-xs text-gray-400 mt-1">
-                          NexusFlow aggregates the entire multi-repo codebase using <code>Repomix</code> into a token-efficient XML file <code>nexusflow-context.xml</code>, giving AI immediate access to the full codebase state.
+                          If enabled, NexusFlow aggregates the entire multi-repo codebase using <code>Repomix</code> into a token-efficient XML file <code>nexusflow-context.xml</code>, giving AI immediate access to the full codebase state. You can toggle this setting in Settings.
                         </p>
                       </div>
                     </div>
@@ -2020,667 +1949,67 @@ Core Instructions:
 
             {/* View 2: Active Workspaces Panel */}
             {view === 'workspaces' && (
-              <div className="max-w-5xl mx-auto">
-                <header className="flex justify-between items-center mb-8">
-                  <div>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2">Active Workspaces</h1>
-                    <p className="text-sm text-gray-400">Monitor running servers, libraries, and processes on your development branches.</p>
-                  </div>
-                  <button
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                    onClick={fetchWorkspaces}
-                    disabled={workspacesLoading}
-                  >
-                    <RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-indigo-400' : ''} /> Refresh
-                  </button>
-                </header>
-
-                {workspacesLoading ? (
-                  <div className="flex flex-col items-center py-40 gap-4 text-gray-400">
-                    <RefreshCw className="animate-spin text-indigo-400" size={32} />
-                    <span className="text-sm">Fetching workspace details...</span>
-                  </div>
-                ) : workspaces.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-24 bg-[#111827]/20 border border-gray-800/80 rounded-xl text-center">
-                    <FolderGit2 size={44} className="text-gray-600 mb-4" />
-                    <h3 className="text-lg font-bold text-white">No Active Workspaces</h3>
-                    <p className="text-xs text-gray-500 max-w-sm mt-1">
-                      No feature workspaces were detected in your development folder. Create a workspace to start.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-6">
-                    {workspaces.map((ws) => {
-                      const isExpanded = activeWsId === ws.branchName;
-                      return (
-                        <div key={ws.id} className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-6 shadow-md">
-                          <div className="flex justify-between items-start gap-4 mb-4">
-                            <div>
-                              <h3 className="text-lg font-bold text-white hover:text-indigo-400 transition-colors">{ws.branchName}</h3>
-                              <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
-                                <span>Created: {new Date(ws.createdAt).toLocaleDateString()}</span>
-                                <span className="h-1 w-1 rounded-full bg-gray-700"></span>
-                                <span>{ws.repos.length} repos</span>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-md shadow-emerald-600/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                                onClick={() => handleResumeSession(ws)}
-                                disabled={resumingWs === ws.branchName}
-                              >
-                                <Play size={12} className={resumingWs === ws.branchName ? 'animate-spin' : ''} />
-                                {resumingWs === ws.branchName ? 'Resuming...' : 'Resume Session'}
-                              </button>
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                                onClick={() => handleCopyPrompt(ws)}
-                              >
-                                <Sparkles size={12} className="text-cyan-400" /> Copy Prompt
-                              </button>
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                                onClick={() => handleExportContext(ws.branchName)}
-                              >
-                                <Download size={12} className="text-emerald-400" /> Export Context
-                              </button>
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                                onClick={() => handleOpenInEditor(ws.workspacePath)}
-                              >
-                                <ExternalLink size={12} /> Open
-                              </button>
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-md shadow-indigo-500/10"
-                                onClick={() => {
-                                  if (isExpanded) {
-                                    setActiveWsId(null);
-                                  } else {
-                                    setActiveWsId(ws.branchName);
-                                  }
-                                }}
-                              >
-                                {isExpanded ? 'Hide Runner' : 'Orchestrate'}
-                              </button>
-                              <button
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-red-950/40 border border-red-900/60 hover:bg-red-900/60 hover:border-red-800 rounded-lg text-xs font-semibold text-red-200 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed animate-fade-in"
-                                onClick={() => handleDeleteWorkspace(ws.branchName)}
-                                disabled={deleteWsLoading === ws.branchName}
-                              >
-                                <Trash2 size={12} className={deleteWsLoading === ws.branchName ? 'animate-spin' : ''} />
-                                {deleteWsLoading === ws.branchName ? 'Deleting...' : 'Delete'}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="text-xs text-gray-400 bg-gray-950/40 border-l-2 border-indigo-500 rounded-r-lg px-4 py-3 mb-4 font-medium italic">
-                            {renderFormattedDescription(ws.description)}
-                          </div>
-
-                          <div className="flex items-center gap-3 mb-4">
-                            <div className="flex flex-wrap gap-2">
-                              {ws.repos.map((repoPath) => (
-                                <span key={repoPath} className="text-[10px] px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-md font-semibold">
-                                  {repoPath.split(/[\\/]/).pop()}
-                                </span>
-                              ))}
-                            </div>
-
-                            {repos.filter((r) => !ws.repos.includes(r.path)).length > 0 && (
-                              <div className="flex items-center gap-1.5 ml-auto">
-                                <select
-                                  id={`add-repo-select-${ws.branchName}`}
-                                  className="bg-gray-900 border border-gray-800 text-gray-300 rounded-md text-[10px] px-2 py-1 font-semibold outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                                  defaultValue=""
-                                  onChange={async (e) => {
-                                    const val = e.target.value;
-                                    if (val) {
-                                      if (window.confirm(`Are you sure you want to add repository "${val.split(/[\\/]/).pop()}" to this workspace?\nThis will create a new git worktree and re-run analysis.`)) {
-                                        await handleAddRepo(ws.branchName, val);
-                                      }
-                                      e.target.value = "";
-                                    }
-                                  }}
-                                  disabled={addRepoLoading}
-                                >
-                                  <option value="" disabled>+ Add Repository</option>
-                                  {repos
-                                    .filter((r) => !ws.repos.includes(r.path))
-                                    .map((r) => (
-                                      <option key={r.path} value={r.path}>{r.name}</option>
-                                    ))
-                                  }
-                                </select>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Expansion: Process management console */}
-                          {isExpanded && (
-                            <div className="mt-6 pt-6 border-t border-gray-800/80">
-                              
-                              {/* Telemetry Dashboard Grid */}
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                                {/* Telemetry 1: CPU */}
-                                <div className="bg-gray-950/40 border border-gray-800/60 rounded-xl p-4 flex flex-col justify-between">
-                                  <div className="flex justify-between items-center text-xs font-semibold text-gray-400 mb-2">
-                                    <span>Simulated CPU Load</span>
-                                    <span className={runningServices.length > 0 ? "text-emerald-400" : "text-gray-500"}>{runningServices.length > 0 ? '4.8%' : '0%'}</span>
-                                  </div>
-                                  <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2 overflow-hidden">
-                                    <div 
-                                      className={`h-1.5 rounded-full transition-all duration-500 ${runningServices.length > 0 ? "bg-gradient-to-r from-emerald-500 to-teal-400 animate-pulse" : "bg-gray-700"}`}
-                                      style={{ width: runningServices.length > 0 ? '48%' : '0%' }}
-                                    ></div>
-                                  </div>
-                                  <span className="text-[10px] text-gray-500">Fluctuating active worker processes</span>
-                                </div>
-
-                                {/* Telemetry 2: Memory */}
-                                <div className="bg-gray-950/40 border border-gray-800/60 rounded-xl p-4 flex flex-col justify-between">
-                                  <div className="flex justify-between items-center text-xs font-semibold text-gray-400 mb-2">
-                                    <span>Simulated Memory Allocation</span>
-                                    <span className={runningServices.length > 0 ? "text-cyan-400" : "text-gray-500"}>{runningServices.length > 0 ? '192 MB' : '0 MB'}</span>
-                                  </div>
-                                  <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2 overflow-hidden">
-                                    <div 
-                                      className={`h-1.5 rounded-full transition-all duration-500 ${runningServices.length > 0 ? "bg-gradient-to-r from-cyan-500 to-indigo-400" : "bg-gray-700"}`}
-                                      style={{ width: runningServices.length > 0 ? '65%' : '0%' }}
-                                    ></div>
-                                  </div>
-                                  <span className="text-[10px] text-gray-500">Working set size for spawned servers</span>
-                                </div>
-
-                                {/* Telemetry 3: Environment Health */}
-                                <div className="bg-gray-950/40 border border-gray-800/60 rounded-xl p-4 flex flex-col justify-between">
-                                  <div className="flex justify-between items-center text-xs font-semibold text-gray-400 mb-2">
-                                    <span>Active Workspace Status</span>
-                                    <span className={`inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider ${runningServices.length > 0 ? "text-emerald-400" : "text-gray-500"}`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${runningServices.length > 0 ? "bg-emerald-500 animate-ping" : "bg-gray-600"}`}></span>
-                                      {runningServices.length > 0 ? "Online" : "Idle"}
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-white font-medium truncate">
-                                    {runningServices.length > 0 ? `${runningServices.length} processes active` : "All processes offline"}
-                                  </div>
-                                  <span className="text-[10px] text-gray-500">Service state mapping</span>
-                                </div>
-                              </div>
-
-                              {/* Sub-tab Navigation */}
-                              <div className="flex border-b border-gray-800/80 mb-6 gap-2">
-                                <button
-                                  className={`px-4 py-2 border-b-2 text-xs font-bold transition-all cursor-pointer ${
-                                    subTab === 'sessions'
-                                      ? 'border-indigo-500 text-white'
-                                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                                  }`}
-                                  onClick={() => setSubTab('sessions')}
-                                >
-                                  AI Session History
-                                </button>
-                                <button
-                                  className={`px-4 py-2 border-b-2 text-xs font-bold transition-all cursor-pointer ${
-                                    subTab === 'services'
-                                      ? 'border-indigo-500 text-white'
-                                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                                  }`}
-                                  onClick={() => setSubTab('services')}
-                                >
-                                  Orchestrated Services
-                                </button>
-                                <button
-                                  className={`px-4 py-2 border-b-2 text-xs font-bold transition-all cursor-pointer ${
-                                    subTab === 'changes'
-                                      ? 'border-indigo-500 text-white'
-                                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                                  }`}
-                                  onClick={() => setSubTab('changes')}
-                                >
-                                  Active Changes (AI Diffs)
-                                </button>
-                                <button
-                                  className={`px-4 py-2 border-b-2 text-xs font-bold transition-all cursor-pointer ${
-                                    subTab === 'knowledge'
-                                      ? 'border-indigo-500 text-white'
-                                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                                  }`}
-                                  onClick={() => setSubTab('knowledge')}
-                                >
-                                  Knowledge Base
-                                </button>
-                                <button
-                                  className={`px-4 py-2 border-b-2 text-xs font-bold transition-all cursor-pointer ${
-                                    subTab === 'plan'
-                                      ? 'border-indigo-500 text-white'
-                                      : 'border-transparent text-gray-500 hover:text-gray-300'
-                                  }`}
-                                  onClick={() => setSubTab('plan')}
-                                >
-                                  Implementation Plan
-                                </button>
-                              </div>
-
-                              {subTab === 'sessions' && (
-                                sessionsLoading ? (
-                                  <div className="flex justify-center py-10">
-                                    <RefreshCw className="animate-spin text-indigo-400" size={20} />
-                                  </div>
-                                ) : sessions.length === 0 ? (
-                                  <div className="text-center py-10 bg-gray-950/20 border border-gray-800/60 rounded-xl p-6">
-                                    <MessageSquareCode size={36} className="text-gray-650 mx-auto mb-3" />
-                                    <h4 className="text-sm font-bold text-gray-400 mb-1">No Past AI Sessions Found</h4>
-                                    <p className="text-xs text-gray-505 max-w-md mx-auto leading-relaxed">
-                                      Start a conversation with your AI assistant (e.g. running <code>claude</code>, <code>agy</code>, <code>codex</code>, or <code>copilot</code> inside this directory) to track session history here.
-                                    </p>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-3 mb-6">
-                                    {sessions.map((sess) => (
-                                      <div key={sess.id} className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-950/20 border border-gray-800/60 rounded-xl p-4 hover:border-gray-700/80 transition-all">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2.5 mb-1.5">
-                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                              sess.assistant === 'antigravity' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' :
-                                              sess.assistant === 'claude' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
-                                              sess.assistant === 'codex' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                                              'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                                            }`}>
-                                              {sess.assistant === 'antigravity' ? 'Antigravity' :
-                                               sess.assistant === 'claude' ? 'Claude Code' :
-                                               sess.assistant === 'codex' ? 'OpenAI Codex' : 'GitHub Copilot'}
-                                            </span>
-                                            <span className="text-[10px] text-gray-500">
-                                              Updated: {new Date(sess.updatedAt).toLocaleString()}
-                                            </span>
-                                            <span className="text-[10px] text-gray-500">•</span>
-                                            <span className="text-[10px] text-gray-550 font-medium">
-                                              {sess.messageCount} messages
-                                            </span>
-                                          </div>
-                                          <h4 className="text-xs font-semibold text-white truncate pr-4" title={sess.title}>
-                                            {sess.title}
-                                          </h4>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <button
-                                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 text-indigo-300 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                                            onClick={() => {
-                                              setActiveSession(sess);
-                                              setTranscript([]);
-                                              fetchSessionTranscript(sess.assistant, sess.id);
-                                            }}
-                                          >
-                                            <MessageSquare size={13} /> View Chat Log
-                                          </button>
-                                          <button
-                                            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
-                                            onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}
-                                          >
-                                            <Play size={11} /> Resume
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )
-                              )}
-
-                              {subTab === 'services' && (
-                                servicesLoading ? (
-                                  <div className="flex justify-center py-10">
-                                    <RefreshCw className="animate-spin text-indigo-400" size={20} />
-                                  </div>
-                                ) : (
-                                  <div>
-                                    {orchTools.length > 0 && (
-                                      <div className="flex items-center gap-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 mb-4 text-xs text-indigo-300">
-                                        <AlertTriangle size={16} className="text-indigo-400 shrink-0" />
-                                        <div>
-                                          <strong>Orchestration manifest detected:</strong> {orchTools.map((t) => t.tool).join(', ')}. You can start them inside sub-repos.
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    <div className="flex flex-col gap-2 mb-4">
-                                      {services.map((svc) => {
-                                        const isRunning = runningServices.some((rs) => rs.name === svc.name);
-                                        return (
-                                          <div key={svc.name} className="flex justify-between items-center bg-gray-950/20 border border-gray-800/60 rounded-xl px-4 py-3 text-xs">
-                                            <div className="flex items-center gap-3">
-                                              <span className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-gray-700'}`}></span>
-                                              <div>
-                                                <span className="font-bold text-white">{svc.name}</span>
-                                                <span className="text-[10px] text-gray-500 ml-3">
-                                                  {svc.command} {svc.args.join(' ')} {svc.port ? `• port ${svc.port}` : ''}
-                                                </span>
-                                              </div>
-                                            </div>
-                                            <span className="text-[9px] px-2 py-0.5 rounded bg-gray-800 text-gray-500 font-bold uppercase">{svc.source}</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-
-                                    <div className="flex gap-2 mb-6">
-                                      <button
-                                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-emerald-500/10 hover:-translate-y-0.5 active:translate-y-0"
-                                        onClick={() => handleStartServices(ws.branchName)}
-                                        disabled={runningServices.length > 0}
-                                      >
-                                        <Play size={14} /> Start All Services
-                                      </button>
-                                      <button
-                                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-rose-600/10 hover:-translate-y-0.5 active:translate-y-0"
-                                        onClick={() => handleStopServices(ws.branchName)}
-                                        disabled={runningServices.length === 0}
-                                      >
-                                        <Square size={14} /> Stop All
-                                      </button>
-                                    </div>
-
-                                    {/* Interactive Console Screen */}
-                                    {services.length > 0 && (
-                                      <div className="border border-gray-800/80 rounded-xl overflow-hidden shadow-2xl bg-gray-950/60">
-                                        {/* Terminal Window Header */}
-                                        <div className="flex items-center justify-between bg-gray-900/80 px-4 py-3 border-b border-gray-800/60">
-                                          <div className="flex items-center gap-2">
-                                            <div className="flex gap-1.5">
-                                              <span className="w-3 h-3 rounded-full bg-rose-500/20 border border-rose-500/30"></span>
-                                              <span className="w-3 h-3 rounded-full bg-amber-500/20 border border-amber-500/30"></span>
-                                              <span className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/30"></span>
-                                            </div>
-                                            <span className="text-[11px] font-mono text-gray-400 font-semibold ml-2">nexusflow-terminal: {selectedLogService}</span>
-                                          </div>
-                                          <div className="flex gap-1 bg-gray-950/40 p-1 rounded-lg border border-gray-800/60">
-                                            {services.map((svc) => (
-                                              <button
-                                                key={svc.name}
-                                                className={`px-3 py-1 rounded-md text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                                                  selectedLogService === svc.name
-                                                    ? 'bg-slate-800 text-white shadow-sm'
-                                                    : 'text-gray-500 hover:text-gray-300'
-                                                }`}
-                                                onClick={() => setSelectedLogService(svc.name)}
-                                              >
-                                                {svc.name}
-                                              </button>
-                                            ))}
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Terminal Screen Body */}
-                                        <div className="bg-[#030408] p-5 font-mono text-[11px] text-cyan-400/90 h-80 overflow-y-auto whitespace-pre-wrap shadow-inner relative scrollbar-thin scrollbar-thumb-gray-800">
-                                          <div className="absolute top-3 right-3 text-[9px] bg-slate-900/60 border border-gray-800 text-cyan-500/60 px-2 py-0.5 rounded font-mono select-none uppercase tracking-wider">
-                                            LIVE LOGS
-                                          </div>
-                                          {serviceLogs}
-                                          <div ref={logsEndRef}></div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              )}
-
-                              {/* Active Changes View */}
-                              {subTab === 'changes' && (
-                                <div>
-                                  <header className="flex justify-between items-center mb-4 flex-wrap gap-2">
-                                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                      <FolderGit2 size={16} className="text-cyan-400" /> Active Workspace Git Diffs
-                                    </h4>
-                                    <div className="flex gap-2">
-                                      <button
-                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-300"
-                                        onClick={() => fetchGitChanges(ws.branchName)}
-                                        disabled={gitChangesLoading}
-                                      >
-                                        <RefreshCw size={11} className={gitChangesLoading ? 'animate-spin text-indigo-400' : ''} /> Refresh Changes
-                                      </button>
-                                      <button
-                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                                        onClick={() => handleSyncAll(ws.branchName)}
-                                        disabled={syncLoading}
-                                      >
-                                        {syncLoading ? <RefreshCw size={11} className="animate-spin text-indigo-300" /> : <RefreshCw size={11} />} Sync All
-                                      </button>
-                                      <button
-                                        className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                                        onClick={() => setShowCommitModal(true)}
-                                        disabled={gitChanges.every(repo => repo.files.length === 0) || commitLoading}
-                                      >
-                                        Commit & Push All
-                                      </button>
-                                    </div>
-                                  </header>
-
-                                  {syncResults && (
-                                    <div className="bg-[#090d1a]/60 border border-gray-800 rounded-xl p-4 mb-4 text-xs">
-                                      <div className="flex justify-between items-center mb-2 border-b border-gray-800/80 pb-2">
-                                        <h5 className="font-bold text-white font-mono text-[11px]">Rebase/Sync Results</h5>
-                                        <button className="text-gray-500 hover:text-gray-300 text-[10px] cursor-pointer" onClick={() => setSyncResults(null)}>Dismiss</button>
-                                      </div>
-                                      <div className="space-y-1.5">
-                                        {syncResults.map((r: any) => (
-                                          <div key={r.repoName} className="flex justify-between items-center font-mono text-[10px]">
-                                            <span className="text-gray-300">{r.repoName}</span>
-                                            <span className={r.success ? "text-emerald-400" : "text-rose-400"}>
-                                              {r.success ? `✅ Synced (${r.message})` : `⚠️ Conflict: ${r.message}`}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {commitResults && (
-                                    <div className="bg-[#090d1a]/60 border border-gray-800 rounded-xl p-4 mb-4 text-xs">
-                                      <div className="flex justify-between items-center mb-2 border-b border-gray-800/80 pb-2">
-                                        <h5 className="font-bold text-white font-mono text-[11px]">Commit/Push Results</h5>
-                                        <button className="text-gray-500 hover:text-gray-300 text-[10px] cursor-pointer" onClick={() => setCommitResults(null)}>Dismiss</button>
-                                      </div>
-                                      <div className="space-y-1.5">
-                                        {commitResults.map((r: any) => (
-                                          <div key={r.repoName} className="flex justify-between items-center font-mono text-[10px]">
-                                            <span className="text-gray-300">{r.repoName}</span>
-                                            <span className={r.success ? "text-emerald-400" : "text-rose-400"}>
-                                              {r.success ? `✅ Committed ${r.filesChanged} file(s) (${r.commitHash || 'no hash'})` : `⚠️ Error: ${r.message}`}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {showCommitModal && (
-                                    <div className="bg-[#0b0f19] border border-gray-800 rounded-xl p-4 mb-4">
-                                      <h5 className="text-xs font-bold text-white mb-2">Enter Commit Message</h5>
-                                      <input
-                                        type="text"
-                                        className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs font-mono text-gray-350 focus:outline-none focus:border-indigo-500 mb-3"
-                                        placeholder="feat: implement logic..."
-                                        value={commitMessage}
-                                        onChange={(e) => setCommitMessage(e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') handleCommitAll(ws.branchName);
-                                        }}
-                                      />
-                                      <div className="flex justify-end gap-2">
-                                        <button
-                                          className="px-3 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-850 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-400"
-                                          onClick={() => {
-                                            setShowCommitModal(false);
-                                            setCommitMessage('');
-                                          }}
-                                          disabled={commitLoading}
-                                        >
-                                          Cancel
-                                        </button>
-                                        <button
-                                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-[10px] font-semibold text-white transition-all cursor-pointer"
-                                          onClick={() => handleCommitAll(ws.branchName)}
-                                          disabled={commitLoading || !commitMessage.trim()}
-                                        >
-                                          {commitLoading ? 'Committing...' : 'Commit & Push'}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {gitChangesLoading ? (
-                                    <div className="flex justify-center py-10">
-                                      <RefreshCw className="animate-spin text-indigo-400" size={20} />
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-4">
-                                      {gitChanges.every(repo => repo.files.length === 0) ? (
-                                        <div className="flex flex-col items-center justify-center py-12 bg-gray-950/20 border border-gray-800/40 rounded-xl text-center">
-                                          <Check size={28} className="text-emerald-500 mb-2" />
-                                          <h5 className="text-xs font-bold text-white">No Uncommitted Changes</h5>
-                                          <p className="text-[10px] text-gray-500 mt-0.5">Workspace is completely synced with Git feature branches.</p>
-                                        </div>
-                                      ) : (
-                                        gitChanges.map((repo) => {
-                                          if (repo.files.length === 0) return null;
-                                          const totalFilesChanged = repo.files.length;
-                                          const repoAdditions = repo.files.reduce((acc: number, f: any) => acc + (f.additions || 0), 0);
-                                          const repoDeletions = repo.files.reduce((acc: number, f: any) => acc + (f.deletions || 0), 0);
-
-                                          return (
-                                            <div key={repo.repoName} className="bg-gray-950/20 border border-gray-800/60 rounded-xl p-4">
-                                              <div className="flex justify-between items-center mb-3">
-                                                <div className="flex items-center gap-2">
-                                                  <h5 className="text-xs font-bold text-white font-mono">{repo.repoName}</h5>
-                                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-900 border border-gray-800 text-gray-400 font-mono">
-                                                    {totalFilesChanged} file{totalFilesChanged === 1 ? '' : 's'} changed
-                                                  </span>
-                                                  {(repoAdditions > 0 || repoDeletions > 0) && (
-                                                    <span className="text-[9px] font-mono">
-                                                      <span className="text-emerald-400 font-bold">+{repoAdditions}</span>{' '}
-                                                      <span className="text-rose-400 font-bold">-{repoDeletions}</span>
-                                                    </span>
-                                                  )}
-                                                </div>
-                                                <span className="text-[9px] text-gray-500 font-mono truncate max-w-[280px]">{repo.repoPath}</span>
-                                              </div>
-                                              <div className="space-y-1.5">
-                                                {repo.files.map((fileInfo: any) => (
-                                                  <div key={fileInfo.file} className="flex justify-between items-center bg-[#090d1a]/40 px-3 py-2 rounded-lg border border-gray-800/30 text-xs">
-                                                    <div className="flex flex-col min-w-0">
-                                                      <span className="font-mono text-gray-300 text-[11px] truncate max-w-[320px]">{fileInfo.file}</span>
-                                                      {(fileInfo.additions > 0 || fileInfo.deletions > 0) && (
-                                                        <span className="text-[9px] font-mono mt-0.5">
-                                                          <span className="text-emerald-500">+{fileInfo.additions}</span>{' '}
-                                                          <span className="text-rose-500">-{fileInfo.deletions}</span>
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                    <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
-                                                      fileInfo.type === 'added' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                                                      fileInfo.type === 'deleted' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                                                      'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                                                    }`}>
-                                                      {fileInfo.type}
-                                                    </span>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          );
-                                        })
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Knowledge Base View */}
-                              {subTab === 'knowledge' && (
-                                <div className="bg-[#090d1a]/20 border border-gray-800/60 rounded-xl p-4">
-                                  <header className="flex justify-between items-center mb-4">
-                                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                      <BookOpen size={16} className="text-cyan-400" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
-                                    </h4>
-                                    <div className="flex gap-2">
-                                      {isEditingKnowledge ? (
-                                        <>
-                                          <button
-                                            className="px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-850 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-400"
-                                            onClick={() => {
-                                              setEditedKnowledge(knowledgeContent);
-                                              setIsEditingKnowledge(false);
-                                            }}
-                                            disabled={saveKnowledgeLoading}
-                                          >
-                                            Cancel
-                                          </button>
-                                          <button
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-semibold transition-all cursor-pointer"
-                                            onClick={() => handleSaveKnowledge(ws.branchName)}
-                                            disabled={saveKnowledgeLoading}
-                                          >
-                                            {saveKnowledgeLoading ? <RefreshCw className="animate-spin" size={10} /> : <Save size={10} />} Save
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <button
-                                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-350"
-                                          onClick={() => setIsEditingKnowledge(true)}
-                                          disabled={knowledgeLoading}
-                                        >
-                                          <Edit size={10} /> Edit Knowledge
-                                        </button>
-                                      )}
-                                    </div>
-                                  </header>
-
-                                  {knowledgeLoading ? (
-                                    <div className="flex justify-center py-10">
-                                      <RefreshCw className="animate-spin text-indigo-400" size={20} />
-                                    </div>
-                                  ) : isEditingKnowledge ? (
-                                    <textarea
-                                      className="w-full h-96 bg-gray-950/60 border border-gray-800/80 rounded-xl p-4 text-xs font-mono text-gray-305 focus:outline-none focus:border-indigo-500/80 resize-y"
-                                      value={editedKnowledge}
-                                      onChange={(e) => setEditedKnowledge(e.target.value)}
-                                    />
-                                  ) : (
-                                    <div className="bg-gray-950/40 border border-gray-800/30 rounded-xl p-4 text-gray-350 text-xs leading-relaxed overflow-auto font-mono whitespace-pre-wrap max-h-96">
-                                      {knowledgeContent || "No knowledge file generated yet."}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Implementation Plan View */}
-                              {subTab === 'plan' && (
-                                <div className="bg-[#090d1a]/20 border border-gray-800/60 rounded-xl p-4">
-                                  <header className="flex justify-between items-center mb-4">
-                                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                      <ListOrdered size={16} className="text-cyan-400" /> Inter-Repo Implementation Plan (nexusflow-plan.md)
-                                    </h4>
-                                  </header>
-
-                                  {planLoading ? (
-                                    <div className="flex justify-center py-10">
-                                      <RefreshCw className="animate-spin text-indigo-400" size={20} />
-                                    </div>
-                                  ) : (
-                                    <div className="bg-gray-950/40 border border-gray-800/30 rounded-xl p-4 text-gray-350 text-xs leading-relaxed overflow-auto font-mono whitespace-pre-wrap max-h-96">
-                                      {planContent || "No implementation plan generated yet."}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <WorkspaceList
+                workspacesLoading={workspacesLoading}
+                workspaces={workspaces}
+                activeWsId={activeWsId}
+                setActiveWsId={setActiveWsId}
+                resumingWs={resumingWs}
+                handleResumeSession={handleResumeSession}
+                handleCopyPrompt={handleCopyPrompt}
+                handleOpenInEditor={handleOpenInEditor}
+                fetchWorkspaces={fetchWorkspaces}
+                repos={repos}
+                deleteWsLoading={deleteWsLoading}
+                addRepoLoading={addRepoLoading}
+                handleDeleteWorkspace={handleDeleteWorkspace}
+                handleAddRepo={handleAddRepo}
+                services={services}
+                runningServices={runningServices}
+                selectedLogService={selectedLogService}
+                serviceLogs={serviceLogs}
+                logsEndRef={logsEndRef}
+                setSelectedLogService={setSelectedLogService}
+                handleStartServices={handleStartServices}
+                handleStopServices={handleStopServices}
+                orchTools={orchTools}
+                servicesLoading={servicesLoading}
+                gitChanges={gitChanges}
+                gitChangesLoading={gitChangesLoading}
+                syncLoading={syncLoading}
+                syncResults={syncResults}
+                commitMessage={commitMessage}
+                showCommitModal={showCommitModal}
+                commitLoading={commitLoading}
+                commitResults={commitResults}
+                setSyncResults={setSyncResults}
+                setCommitResults={setCommitResults}
+                setCommitMessage={setCommitMessage}
+                setShowCommitModal={setShowCommitModal}
+                fetchGitChanges={fetchGitChanges}
+                handleSyncAll={handleSyncAll}
+                handleCommitAll={handleCommitAll}
+                knowledgeContent={knowledgeContent}
+                knowledgeLoading={knowledgeLoading}
+                isEditingKnowledge={isEditingKnowledge}
+                editedKnowledge={editedKnowledge}
+                saveKnowledgeLoading={saveKnowledgeLoading}
+                setEditedKnowledge={setEditedKnowledge}
+                setIsEditingKnowledge={setIsEditingKnowledge}
+                handleSaveKnowledge={handleSaveKnowledge}
+                planContent={planContent}
+                planLoading={planLoading}
+                sessions={sessions}
+                sessionsLoading={sessionsLoading}
+                activeSession={activeSession}
+                transcript={transcript}
+                transcriptLoading={transcriptLoading}
+                setActiveSession={setActiveSession}
+                setTranscript={setTranscript}
+                fetchSessionTranscript={fetchSessionTranscript}
+                subTab={subTab}
+                setSubTab={setSubTab}
+              />
             )}
 
             {/* View 3: Settings View */}
@@ -2770,6 +2099,25 @@ Core Instructions:
                       ))}
                     </select>
                     <span className="text-[10px] text-gray-500 mt-1">Your preferred code editor for opening workspaces.</span>
+                  </div>
+
+                  <div className="flex flex-col md:col-span-2 border-t border-gray-800/60 pt-6 mt-2">
+                    <h3 className="text-sm font-bold text-white mb-2">Codebase Context Settings</h3>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="packContextXml"
+                        className="w-4 h-4 rounded border-gray-800 bg-[#111827] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        checked={config.packContextXml || false}
+                        onChange={(e) => setConfig({ ...config, packContextXml: e.target.checked })}
+                      />
+                      <label htmlFor="packContextXml" className="text-xs font-semibold text-white cursor-pointer select-none">
+                        Pack Codebase Context with Repomix (XML)
+                      </label>
+                    </div>
+                    <span className="text-[10px] text-gray-500 mt-1">
+                      Aggregates files of all repositories in a workspace into a single token-efficient XML file (<code>nexusflow-context.xml</code>) at the workspace root, giving AI assistants immediate access to the full codebase state.
+                    </span>
                   </div>
                 </div>
 
@@ -2889,7 +2237,8 @@ Core Instructions:
 
                 <div className="flex justify-end">
                   <button
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                    disabled={!isSettingsFormValid}
                     onClick={() => saveAppConfig(config)}
                   >
                     Save Configuration

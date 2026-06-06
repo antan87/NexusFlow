@@ -119,10 +119,14 @@ export async function startMcpServer(workspacePath?: string) {
         }
 
         const contextFiles: { path: string; content: string }[] = [];
+        const normalizedWorkspace = resolvedWorkspacePath.endsWith(path.sep)
+          ? resolvedWorkspacePath
+          : resolvedWorkspacePath + path.sep;
+
         for (const relativePath of filesToRead) {
           const filePath = path.resolve(resolvedWorkspacePath, relativePath);
           
-          if (!filePath.startsWith(resolvedWorkspacePath)) {
+          if (!filePath.startsWith(normalizedWorkspace)) {
             contextFiles.push({
               path: relativePath,
               content: '[Access denied: path is outside workspace boundary]',
@@ -131,7 +135,6 @@ export async function startMcpServer(workspacePath?: string) {
           }
 
           try {
-            await fs.access(filePath);
             const content = await fs.readFile(filePath, 'utf-8');
             // Truncate file content if it's too large to prevent overloading local SLM
             const truncatedContent = content.length > 50000
@@ -282,28 +285,7 @@ export async function startMcpServer(workspacePath?: string) {
       }
     }
 
-    if (name === 'get_workspace_graph') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
-          },
-        ],
-      };
-    }
-
-    if (name === 'query_workspace_graph') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
-          },
-        ],
-      };
-    }
-
+    // Unknown tool
     throw new Error(`Tool not found: ${name}`);
   });
 

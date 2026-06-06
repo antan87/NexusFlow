@@ -9,7 +9,7 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { globby } from 'globby';
-import { isOllamaModelAvailable } from '../utils/local-ai.js';
+import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
 
 /**
  * Runs the doctor command to diagnose workspace state.
@@ -239,33 +239,40 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
 
     try {
       const cleanEndpoint = endpoint.replace(/\/$/, '');
-      if (provider === 'ollama') {
-        const res = await fetch(`${cleanEndpoint}/api/tags`);
-        if (!res.ok) {
-          throw new Error(`Ollama responded with status ${res.status}`);
-        }
-        const data: any = await res.json();
-        const models = data?.models || [];
-        const isModelLoaded = isOllamaModelAvailable(models, model);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
 
-        if (isModelLoaded) {
-          console.log(`  ${chalk.green('✔')} Ollama service is active and model "${model}" is ready`);
+      try {
+        if (provider === 'ollama') {
+          const res = await fetch(`${cleanEndpoint}/api/tags`, { signal: controller.signal });
+          if (!res.ok) {
+            throw new Error(`Ollama responded with status ${res.status}`);
+          }
+          const data: any = await res.json();
+          const models = data?.models || [];
+          const isModelLoaded = isOllamaModelAvailable(models, model);
+
+          if (isModelLoaded) {
+            console.log(`  ${chalk.green('✔')} Ollama service is active and model "${model}" is ready`);
+          } else {
+            const availableList = models.map((m: any) => m.name).join(', ') || 'none';
+            warnings.push(`Local model "${model}" is not pulled in Ollama. Available: [${availableList}]. Run "ollama pull ${model}" to install it.`);
+            console.log(`  ${chalk.yellow('⚠')} Ollama service is active, but model "${model}" is not pulled`);
+          }
         } else {
-          const availableList = models.map((m: any) => m.name).join(', ') || 'none';
-          warnings.push(`Local model "${model}" is not pulled in Ollama. Available: [${availableList}]. Run "ollama pull ${model}" to install it.`);
-          console.log(`  ${chalk.yellow('⚠')} Ollama service is active, but model "${model}" is not pulled`);
+          // OpenAI-compatible endpoint ping
+          const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
+          const res = await fetch(testUrl, { signal: controller.signal });
+          if (!res.ok) {
+            throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
+          }
+          console.log(`  ${chalk.green('✔')} OpenAI-compatible server at "${endpoint}" is active`);
         }
-      } else {
-        // OpenAI-compatible endpoint ping
-        let testUrl = `${cleanEndpoint}/v1/models`;
-        if (cleanEndpoint.includes('/v1')) {
-          testUrl = `${cleanEndpoint}/models`;
-        }
-        const res = await fetch(testUrl);
-        if (!res.ok) {
-          throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
-        }
-        console.log(`  ${chalk.green('✔')} OpenAI-compatible server at "${endpoint}" is active`);
+      } catch (e: any) {
+        const errorMsg = e.name === 'AbortError' ? 'Request timed out after 5 seconds' : e.message;
+        throw new Error(errorMsg);
+      } finally {
+        clearTimeout(timeout);
       }
     } catch (e: any) {
       warnings.push(`Local LLM server at "${endpoint}" is offline or unreachable: ${e.message}`);

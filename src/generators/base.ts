@@ -168,8 +168,6 @@ ${parts.join('\n')}
     ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
     : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
 
-  // Note: In the template below, \${feature.branchName} on the 'Multi-Repo Workspace Structure'
-  // guideline line is intentionally escaped to render as a literal placeholder in the AI-facing output.
   return `# Multi-Repo Workspace Context
 
 ## Feature: ${feature.id}
@@ -195,7 +193,7 @@ ${taskSection}
 
 ## Guidelines
 
-- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`\${feature.branchName}\`.
+- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
   - **All code changes** must be made within the appropriate project subdirectories.
   - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
   - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
