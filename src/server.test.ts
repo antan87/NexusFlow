@@ -7,6 +7,9 @@ import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
 import * as localAi from './utils/local-ai.js';
 import * as updateCheck from './utils/update-check.js';
+import * as analyzers from './analyzers/index.js';
+import * as generators from './generators/index.js';
+import * as packer from './core/packer.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -16,6 +19,9 @@ vi.mock('./core/config.js');
 vi.mock('./utils/system-scanner.js');
 vi.mock('./utils/local-ai.js');
 vi.mock('./utils/update-check.js');
+vi.mock('./analyzers/index.js');
+vi.mock('./generators/index.js');
+vi.mock('./core/packer.js');
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -362,6 +368,42 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.success).toBe(true);
       expect(data.output).toBe('Successfully updated');
       expect(execa).toHaveBeenCalledWith('npm', ['install', '-g', 'repomix'], expect.any(Object));
+    });
+  });
+
+  describe('POST /api/workspace', () => {
+    it('should trigger workspace creation and run the job successfully', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+        packContextXml: false
+      } as any);
+
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: 'test-ws-creation',
+          description: 'A test workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['antigravity']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.jobId).toBe('test-ws-creation');
+
+      // Wait a brief tick for the background job to execute
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(workspace.createWorkspace).toHaveBeenCalled();
+      expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
+      expect(generators.generateContextFiles).toHaveBeenCalled();
     });
   });
 });
