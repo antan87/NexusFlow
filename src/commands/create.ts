@@ -82,6 +82,10 @@ export async function createCommand(): Promise<void> {
   const detectedAI = await detectAIAssistants();
   const selectedAI = await promptSelectAI(detectedAI);
 
+  const localLlmEnabled = config.localLlm?.enabled
+    ? await confirm({ message: 'Enable Local AI Co-processor in this workspace context?', default: true })
+    : false;
+
   // ── 6. Create workspace ─────────────────────────────────────────────
   const workspacePath = path.join(config.workspacesDir, branchName);
   const feature: Feature = {
@@ -93,6 +97,7 @@ export async function createCommand(): Promise<void> {
     assistants: selectedAI,
     workspacePath,
     createdAt: new Date().toISOString(),
+    localLlmEnabled,
   };
 
   const wsSpinner = ora('Creating workspace with git worktrees...').start();
@@ -115,7 +120,7 @@ export async function createCommand(): Promise<void> {
   const analysis = await analyzeAllRepos(workspaceRepos);
 
   // ── 8. Generate AI context files ────────────────────────────────────
-  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis };
+  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis, localLlm: config.localLlm };
   console.log(chalk.cyan('\nGenerating AI context files...'));
   await generateContextFiles(ctx, selectedAI, workspacePath);
 
@@ -160,6 +165,7 @@ export async function createCommand(): Promise<void> {
   console.log(`  ${chalk.dim('Branch:')} ${branchName}`);
   console.log(`  ${chalk.dim('Repos:')}  ${selectedRepos.map((r) => r.name).join(', ')}`);
   console.log(`  ${chalk.dim('AI:')}     ${selectedAI.join(', ')}`);
+  console.log(`  ${chalk.dim('Local AI:')} ${localLlmEnabled ? 'Enabled' : 'Disabled'}`);
   console.log(
     `\n  ${chalk.dim('To navigate:')} cd "${workspacePath}"`,
   );

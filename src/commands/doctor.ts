@@ -9,6 +9,7 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { globby } from 'globby';
+import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
 
 /**
  * Runs the doctor command to diagnose workspace state.
@@ -224,6 +225,61 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
   } catch {
     warnings.push('Missing .vscode/settings.json. VS Code search might not work properly inside sub-repos.');
     console.log(`  ${chalk.yellow('⚠')} .vscode/settings.json is missing or invalid`);
+  }
+  console.log();
+
+  // ── 7. Local AI Agent Connection Check ─────────────────────────────────
+  console.log(chalk.bold('🤖 Local AI Agent:'));
+  const config = await loadConfig();
+  if (config.localLlm?.enabled) {
+    const { provider, endpoint, model } = config.localLlm;
+    console.log(`  Provider: ${provider}`);
+    console.log(`  Endpoint: ${endpoint}`);
+    console.log(`  Model: ${model}`);
+
+    try {
+      const cleanEndpoint = endpoint.replace(/\/$/, '');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      try {
+        if (provider === 'ollama') {
+          const res = await fetch(`${cleanEndpoint}/api/tags`, { signal: controller.signal });
+          if (!res.ok) {
+            throw new Error(`Ollama responded with status ${res.status}`);
+          }
+          const data: any = await res.json();
+          const models = data?.models || [];
+          const isModelLoaded = isOllamaModelAvailable(models, model);
+
+          if (isModelLoaded) {
+            console.log(`  ${chalk.green('✔')} Ollama service is active and model "${model}" is ready`);
+          } else {
+            const availableList = models.map((m: any) => m.name).join(', ') || 'none';
+            warnings.push(`Local model "${model}" is not pulled in Ollama. Available: [${availableList}]. Run "ollama pull ${model}" to install it.`);
+            console.log(`  ${chalk.yellow('⚠')} Ollama service is active, but model "${model}" is not pulled`);
+          }
+        } else {
+          // OpenAI-compatible endpoint ping
+          const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
+          const res = await fetch(testUrl, { signal: controller.signal });
+          if (!res.ok) {
+            throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
+          }
+          console.log(`  ${chalk.green('✔')} OpenAI-compatible server at "${endpoint}" is active`);
+        }
+      } catch (e: any) {
+        const errorMsg = e.name === 'AbortError' ? 'Request timed out after 5 seconds' : e.message;
+        throw new Error(errorMsg);
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (e: any) {
+      warnings.push(`Local LLM server at "${endpoint}" is offline or unreachable: ${e.message}`);
+      console.log(`  ${chalk.yellow('⚠')} Local LLM server is offline or unreachable (${e.message})`);
+    }
+  } else {
+    console.log(`  ${chalk.dim('Local AI agent is disabled in config.')}`);
   }
   console.log();
 

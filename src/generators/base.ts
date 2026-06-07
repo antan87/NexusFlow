@@ -6,6 +6,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
 
 /**
@@ -72,6 +73,7 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
 export function buildContextContent(ctx: WorkspaceContext): string {
   const { feature, repos, analysis } = ctx;
   const workspacePath = feature.workspacePath;
+  const localLlmEnabled = feature.localLlmEnabled ?? false;
 
   // Build project sections — rich if analysis is available, simple if not
   let projectSections: string;
@@ -191,7 +193,7 @@ ${taskSection}
 
 ## Guidelines
 
-- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`\${feature.branchName}\`.
+- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
   - **All code changes** must be made within the appropriate project subdirectories.
   - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
   - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
@@ -204,7 +206,16 @@ ${taskSection}
     - \`nexusflow doctor\` — run diagnostics to verify workspace health.
 - **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
-- Read each project's existing \`README.md\` and any doc files before proposing changes.
+${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
+  ctx.localLlm ? `\n  - **Model Capacity**: The local agent is running \`${ctx.localLlm.model}\`. ${
+    ctx.localLlm.model.match(/70b|72b|32b|14b/i)
+      ? 'This is a highly capable model; you can delegate complex reasoning and larger code generation tasks.'
+      : 'This is a smaller model; it is best suited for targeted search, log parsing, summarization, and simple boilerplate.'
+  }` : ''
+}
+  - **Usage rule**: Whenever you need to perform high-token tasks (like searching large chunks of code, analyzing raw service logs to debug, or generating repetitive boilerplate), **always use \`delegate_to_local_agent\`** first.
+  - The local model is free and fast. Pass the instruction and any logs/source files in \`filesToRead\` (relative paths). Use the distilled summary returned to formulate your final output, saving up to 90% in remote context tokens.
+` : ''}- Read each project's existing \`README.md\` and any doc files before proposing changes.
 - When modifying a shared library, check every downstream consumer for breakage.
 - Prefer small, focused commits that touch one repo at a time when possible.
 - If a change must span repos, describe the ordering and any migration steps.

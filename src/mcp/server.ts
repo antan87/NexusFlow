@@ -9,6 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig } from '../core/workspace.js';
+import { callLocalLlm } from '../utils/local-ai.js';
 
 export async function startMcpServer(workspacePath?: string) {
   const server = new Server(
@@ -24,86 +25,73 @@ export async function startMcpServer(workspacePath?: string) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: 'search_workspace',
-          description: 'Search for a string or regex across all repositories in the NexusFlow workspace. Extremely fast and useful for finding where a specific variable, function, or concept is used across microservices.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'The search query or regular expression',
-              },
-              workspaceId: {
-                type: 'string',
-                description: 'Optional ID/branchName of the workspace to search. If omitted, uses the currently active workspace.',
-              },
+    const config = await loadConfig();
+    const tools: any[] = [
+      {
+        name: 'search_workspace',
+        description: 'Search for a string or regex across all repositories in the NexusFlow workspace. Extremely fast and useful for finding where a specific variable, function, or concept is used across microservices.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'The search query or regular expression',
             },
-            required: ['query'],
-          },
-        },
-        {
-          name: 'get_service_logs',
-          description: 'Get the recent logs for a specific running service in the workspace to debug runtime issues.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              serviceName: {
-                type: 'string',
-                description: 'The name of the service to fetch logs for (e.g. "frontend", "backend-api")',
-              },
-              lines: {
-                type: 'number',
-                description: 'Number of lines to fetch. Default 50.',
-              },
-              workspaceId: {
-                type: 'string',
-                description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
-              },
-            },
-            required: ['serviceName'],
-          },
-        },
-        {
-          name: 'get_workspace_graph',
-          description: 'Retrieve the structural architecture graph of the NexusFlow workspace. Contains nodes for repos, packages, API endpoints, and exposed ports, plus relation edges (CONTAINS, DEPENDS_ON, EXPOSES, CALLS). Highly token-efficient for global workspace context.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              workspaceId: {
-                type: 'string',
-                description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
-              },
+            workspaceId: {
+              type: 'string',
+              description: 'Optional ID/branchName of the workspace to search. If omitted, uses the currently active workspace.',
             },
           },
+          required: ['query'],
         },
-        {
-          name: 'query_workspace_graph',
-          description: 'Query the workspace architecture graph by filtering nodes or edges (e.g., node types like "repo", "package", "endpoint", "port", or edge types like "DEPENDS_ON", "EXPOSES", "CALLS"). Reduces token payload by fetching specific architectural paths.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              nodeType: {
-                type: 'string',
-                enum: ['repo', 'package', 'endpoint', 'port'],
-                description: 'Optional node type to filter.',
-              },
-              edgeType: {
-                type: 'string',
-                enum: ['DEPENDS_ON', 'EXPOSES', 'CALLS'],
-                description: 'Optional edge/relation type to filter.',
-              },
-              workspaceId: {
-                type: 'string',
-                description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
-              },
+      },
+      {
+        name: 'get_service_logs',
+        description: 'Get the recent logs for a specific running service in the workspace to debug runtime issues.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            serviceName: {
+              type: 'string',
+              description: 'The name of the service to fetch logs for (e.g. "frontend", "backend-api")',
+            },
+            lines: {
+              type: 'number',
+              description: 'Number of lines to fetch. Default 50.',
+            },
+            workspaceId: {
+              type: 'string',
+              description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
             },
           },
+          required: ['serviceName'],
         },
-      ],
-    };
+      },
+    ];
+
+    if (config.localLlm?.enabled) {
+      tools.push({
+        name: 'delegate_to_local_agent',
+        description: 'Delegate simple, high-volume, or repetitive tasks (like searching code, parsing raw service logs, or generating boilerplate) to the local Small Language Model (SLM) running on the user\'s machine to save remote tokens.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            instruction: {
+              type: 'string',
+              description: 'The specific instruction for the local agent (e.g., "Scan the last 50 lines of logs and explain the database error").',
+            },
+            filesToRead: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional list of workspace-relative file paths or log files that the local agent should read and use as context.',
+            },
+          },
+          required: ['instruction'],
+        },
+      });
+    }
+
+    return { tools };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -118,6 +106,90 @@ export async function startMcpServer(workspacePath?: string) {
       } else {
         // Fallback to CWD
         resolvedWorkspacePath = process.cwd();
+      }
+    }
+
+    if (name === 'delegate_to_local_agent') {
+      const instruction = (args as any).instruction;
+      const filesToRead = (args as any).filesToRead || [];
+
+      try {
+        if (!config.localLlm || !config.localLlm.enabled) {
+          throw new Error('Local AI agent delegation is disabled. Enable it in ~/.nexusflow/config.json or settings.');
+        }
+
+        const contextFiles: { path: string; content: string }[] = [];
+        const normalizedWorkspace = resolvedWorkspacePath.endsWith(path.sep)
+          ? resolvedWorkspacePath
+          : resolvedWorkspacePath + path.sep;
+
+        for (const relativePath of filesToRead) {
+          const filePath = path.resolve(resolvedWorkspacePath, relativePath);
+          
+          if (!filePath.startsWith(normalizedWorkspace)) {
+            contextFiles.push({
+              path: relativePath,
+              content: '[Access denied: path is outside workspace boundary]',
+            });
+            continue;
+          }
+
+          try {
+            const content = await fs.readFile(filePath, 'utf-8');
+            // Truncate file content if it's too large to prevent overloading local SLM
+            const truncatedContent = content.length > 50000
+              ? content.substring(0, 50000) + '\n\n[Content truncated by NexusFlow to save local context size...]'
+              : content;
+
+            contextFiles.push({
+              path: relativePath,
+              content: truncatedContent,
+            });
+          } catch (e: any) {
+            contextFiles.push({
+              path: relativePath,
+              content: `[Error reading file: ${e.message || 'unknown error'}]`,
+            });
+          }
+        }
+
+        // Build messages
+        const messages: import('../utils/local-ai.js').LocalLlmMessage[] = [];
+        let systemPrompt = 'You are the NexusFlow local assistant. You are running locally on the user\'s machine to help the remote supervisor agent solve a specific sub-task in a multi-repo workspace.\n';
+        systemPrompt += 'Your goal is to be extremely precise, concise, and return only the distilled findings/code to save remote network tokens. Keep your response short, focused, and directly address the instruction.';
+
+        messages.push({ role: 'system', content: systemPrompt });
+
+        let userPrompt = '';
+        if (contextFiles.length > 0) {
+          userPrompt += 'Here is the local file/log context:\n\n';
+          for (const file of contextFiles) {
+            userPrompt += `--- FILE: ${file.path} ---\n${file.content}\n\n`;
+          }
+        }
+        userPrompt += `Instruction: ${instruction}`;
+        messages.push({ role: 'user', content: userPrompt });
+
+        const result = await callLocalLlm(config.localLlm, messages);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: result,
+            },
+          ],
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error delegating to local agent: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
       }
     }
 
@@ -142,9 +214,7 @@ export async function startMcpServer(workspacePath?: string) {
               allResults += lines.join('\n') + '\n';
             }
           } catch (e: any) {
-            if (e.exitCode !== 1) {
-              console.error(`Error searching in ${repoName}:`, e);
-            }
+            // Ignore error or exitCode 1 (no match)
           }
         }
 
@@ -215,28 +285,7 @@ export async function startMcpServer(workspacePath?: string) {
       }
     }
 
-    if (name === 'get_workspace_graph') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
-          },
-        ],
-      };
-    }
-
-    if (name === 'query_workspace_graph') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'This tool has been deprecated. Use nexusflow-plan.md for dependency information.',
-          },
-        ],
-      };
-    }
-
+    // Unknown tool
     throw new Error(`Tool not found: ${name}`);
   });
 
