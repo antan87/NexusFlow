@@ -45,6 +45,9 @@ const guiPath = path.join(__dirname, 'gui');
 
 export const app = new Hono();
 
+// Allowed editor binaries/scripts to prevent command injection
+const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
+
 // Enable CORS for frontend dev server
 app.use('/api/*', cors());
 
@@ -488,13 +491,33 @@ app.post('/api/open-editor', async (c) => {
       command: string;
     };
 
-    const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
     if (!ALLOWED_EDITORS.has(command)) {
       return c.json({ error: 'Forbidden editor command' }, 400);
     }
 
+    // Validate path exists and is a directory
+    try {
+      const stats = await fs.stat(workspacePath);
+      if (!stats.isDirectory()) {
+        return c.json({ error: 'Workspace path is not a directory' }, 400);
+      }
+    } catch {
+      return c.json({ error: 'Workspace path does not exist' }, 400);
+    }
+
     // Spawn editor process
-    execa(command, [workspacePath], { detached: true, stdio: 'ignore' }).unref();
+    const isWin = process.platform === 'win32';
+    const child = execa(command, [workspacePath], {
+      detached: true,
+      stdio: 'ignore',
+      shell: isWin,
+      cleanup: false,
+    });
+    child.unref();
+    child.catch((err) => {
+      console.error(`Failed to launch editor ${command} for path ${workspacePath}:`, err);
+    });
+
     return c.json({ success: true });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -855,11 +878,20 @@ app.post('/api/workspace/:id/resume', async (c) => {
 
     // Open in editor if command is provided
     if (body.command) {
-      try {
-        execa(body.command, [workspacePath], { detached: true, stdio: 'ignore' }).unref();
-      } catch (e) {
-        console.error('Failed to launch editor:', e);
+      if (!ALLOWED_EDITORS.has(body.command)) {
+        return c.json({ error: 'Forbidden editor command' }, 400);
       }
+      const isWin = process.platform === 'win32';
+      const child = execa(body.command, [workspacePath], {
+        detached: true,
+        stdio: 'ignore',
+        shell: isWin,
+        cleanup: false,
+      });
+      child.unref();
+      child.catch((err) => {
+        console.error(`Failed to launch editor ${body.command} for path ${workspacePath}:`, err);
+      });
     }
 
     return c.json({ success: true, resumeCommand, workspacePath });
