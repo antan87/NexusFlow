@@ -4,7 +4,7 @@
  * dynamically based on workspace analysis.
  */
 
-import * as fse from 'fs-extra';
+import fse from 'fs-extra';
 import * as path from 'node:path';
 import type { AIAssistant, WorkspaceContext, ProjectAnalysis } from '../types.js';
 
