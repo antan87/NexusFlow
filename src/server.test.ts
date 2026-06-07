@@ -378,7 +378,7 @@ describe('Server API Endpoints Unit Tests', () => {
         packContextXml: false
       } as any);
 
-      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/test-ws-creation-no-pack');
       vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
       vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
 
@@ -419,12 +419,13 @@ describe('Server API Endpoints Unit Tests', () => {
         packContextXml: true
       } as any);
 
-      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/test-ws-creation-with-pack');
       vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
       vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
       vi.spyOn(packer, 'packWorkspace').mockResolvedValue({
         outputPath: '/mock/workspace/nexusflow-context.xml',
         totalFiles: 5,
+        totalCharacters: 1000,
         fileSize: 5120
       });
 
