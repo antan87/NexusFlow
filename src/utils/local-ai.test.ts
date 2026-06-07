@@ -39,7 +39,7 @@ describe('local-ai utilities', () => {
 
     const configOpenAi = {
       enabled: true,
-      provider: 'openai' as const,
+      provider: 'openai-compatible' as const,
       endpoint: 'http://localhost:1234/v1',
       model: 'custom-model',
     };

@@ -98,6 +98,22 @@ const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vsc
 
 export default function App() {
   const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings'>('guide');
+
+  // Toast State
+  interface Toast {
+    id: string;
+    message: string;
+    type: 'success' | 'error' | 'info';
+    duration?: number;
+  }
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 5000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type, duration }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  };
   
   // App Config
   const [config, setConfig] = useState<NexusFlowConfig | null>(null);
@@ -344,15 +360,15 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        alert(`${toolId} updated successfully!\n\nOutput:\n${data.output}`);
+        showToast(`${toolId} updated successfully!\n\nOutput:\n${data.output}`, 'success');
         fetchToolsStatus(true);
         fetchUpdateStatus();
       } else {
-        alert(`Error: ${data.error || 'Failed to update tool'}`);
+        showToast(`Error: ${data.error || 'Failed to update tool'}`, 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Network error when updating tool.');
+      showToast('Network error when updating tool.', 'error');
     } finally {
       setUpdatingToolId(null);
     }
@@ -828,15 +844,15 @@ export default function App() {
           setActiveWsId(ws.branchName);
         } else {
           navigator.clipboard.writeText(data.resumeCommand);
-          alert(`Session Resumed!\n\n1. Editor launched.\n2. Command "${data.resumeCommand}" copied to clipboard! Paste it into your terminal inside the workspace to continue.`);
+          showToast(`Session Resumed!\n\n1. Editor launched.\n2. Command "${data.resumeCommand}" copied to clipboard! Paste it into your terminal inside the workspace to continue.`, 'success');
           setActiveWsId(ws.branchName);
         }
       } else {
-        alert(`Error: ${data.error || 'Failed to resume session'}`);
+        showToast(`Error: ${data.error || 'Failed to resume session'}`, 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Network error when resuming session.');
+      showToast('Network error when resuming session.', 'error');
     } finally {
       setResumingWs(null);
     }
@@ -848,7 +864,7 @@ export default function App() {
       return;
     }
     if (config?.defaultEditor === 'none') {
-      alert('Your preferred editor is set to "None" (skip opening). You can change this in Settings.');
+      showToast('Your preferred editor is set to "None" (skip opening). You can change this in Settings.', 'info');
       return;
     }
     let editor = null;
@@ -859,7 +875,7 @@ export default function App() {
       editor = editors.find((e) => e.detected) || editors[0];
     }
     if (!editor) {
-      alert('No detected editors available.');
+      showToast('No detected editors available.', 'error');
       return;
     }
     try {
@@ -894,7 +910,7 @@ Core Instructions:
 3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" in sub-repositories.
 `;
     navigator.clipboard.writeText(prompt);
-    alert('Universal AI briefing prompt copied to clipboard!');
+    showToast('Universal AI briefing prompt copied to clipboard!', 'success');
   };
 
   const handleDeleteWorkspace = async (wsName: string) => {
@@ -913,13 +929,13 @@ Core Instructions:
           setActiveWsId(null);
         }
         await fetchWorkspaces();
-        alert(`Workspace ${wsName} successfully deleted.`);
+        showToast(`Workspace ${wsName} successfully deleted.`, 'success');
       } else {
-        alert(`Failed to delete workspace: ${data.error || 'Unknown error'}`);
+        showToast(`Failed to delete workspace: ${data.error || 'Unknown error'}`, 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Network error while deleting workspace.');
+      showToast('Network error while deleting workspace.', 'error');
     } finally {
       setDeleteWsLoading(null);
     }
@@ -942,13 +958,13 @@ Core Instructions:
           fetchGitChanges(wsName);
           fetchWorkspaceSessions(wsName);
         }
-        alert('Repository successfully added. Configurations and Repomix packing updated.');
+        showToast('Repository successfully added. Configurations and Repomix packing updated.', 'success');
       } else {
-        alert(`Failed to add repository: ${data.error || 'Unknown error'}`);
+        showToast(`Failed to add repository: ${data.error || 'Unknown error'}`, 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Network error while adding repository.');
+      showToast('Network error while adding repository.', 'error');
     } finally {
       setAddRepoLoading(false);
     }
@@ -1306,7 +1322,7 @@ Core Instructions:
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText('npm install -g @mrpatronz/nexusflow');
-                      alert('Update command copied to clipboard!');
+                      showToast('Update command copied to clipboard!', 'success');
                     }}
                     className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 cursor-pointer flex items-center gap-1.5"
                   >
@@ -2428,7 +2444,7 @@ Core Instructions:
                                 activeSession.assistant === 'codex' ? `codex resume ${activeSession.id}` :
                                 `copilot --resume ${activeSession.id}`;
                     navigator.clipboard.writeText(cmd);
-                    alert(`Copied run command to clipboard:\n\n${cmd}`);
+                    showToast(`Copied run command to clipboard:\n\n${cmd}`, 'success');
                   }}
                 >
                   <Copy size={13} /> Copy Resume Command
@@ -2448,6 +2464,35 @@ Core Instructions:
           </div>
         </div>
       )}
+
+      {/* Toast Notifications Container */}
+      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-3 pointer-events-none max-w-md w-full">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start justify-between gap-3 px-4 py-3 rounded-xl border shadow-2xl transition-all duration-300 animate-slide-in ${
+              toast.type === 'success'
+                ? 'bg-[#062c1b]/95 border-emerald-800/80 text-emerald-100'
+                : toast.type === 'error'
+                ? 'bg-[#2c0e0e]/95 border-red-900/80 text-red-100'
+                : 'bg-[#131926]/95 border-slate-800/80 text-slate-100'
+            }`}
+          >
+            <div className="flex items-start gap-2.5 text-xs font-semibold flex-1">
+              {toast.type === 'success' && <Check className="text-emerald-400 shrink-0 mt-0.5" size={16} />}
+              {toast.type === 'error' && <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />}
+              {toast.type === 'info' && <Sparkles className="text-indigo-400 shrink-0 mt-0.5" size={16} />}
+              <span className="whitespace-pre-line text-left leading-relaxed">{toast.message}</span>
+            </div>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0 mt-0.5"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

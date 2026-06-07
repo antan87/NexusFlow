@@ -10,7 +10,7 @@ describe('detectAIAssistants', () => {
   });
 
   it('should detect claude and antigravity when commands exit with 0', async () => {
-    vi.mocked(execa).mockImplementation((command, args, options) => {
+    vi.mocked(execa).mockImplementation((command: any, args?: any, options?: any): any => {
       if (command === 'claude' || command === 'agy') {
         return Promise.resolve({ exitCode: 0 } as any);
       }

@@ -10,7 +10,7 @@ describe('detectEditors', () => {
   });
 
   it('should return detected = true for editors whose commands exit with 0', async () => {
-    vi.mocked(execa).mockImplementation((command, args, options) => {
+    vi.mocked(execa).mockImplementation((command: any, args?: any, options?: any): any => {
       if (command === 'code' || command === 'cursor') {
         return Promise.resolve({ exitCode: 0 } as any);
       }
