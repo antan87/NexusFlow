@@ -247,7 +247,8 @@ function updateJobStep(
     step.message = message;
   }
 
-  if (stepId === 'pack' && status === 'completed') {
+  const isLastStep = job.steps[job.steps.length - 1]?.id === stepId;
+  if (isLastStep && status === 'completed') {
     job.status = 'completed';
     job.progress = 100;
   } else if (status === 'failed') {
