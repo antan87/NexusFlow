@@ -372,7 +372,7 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('POST /api/workspace', () => {
-    it('should trigger workspace creation and run the job successfully', async () => {
+    it('should complete workspace creation successfully when packContextXml is false', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
         workspacesDir: '/mock/workspaces',
         packContextXml: false
@@ -386,7 +386,7 @@ describe('Server API Endpoints Unit Tests', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          branchName: 'test-ws-creation',
+          branchName: 'test-ws-creation-no-pack',
           description: 'A test workspace',
           repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
           assistants: ['antigravity']
@@ -396,7 +396,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.jobId).toBe('test-ws-creation');
+      expect(data.jobId).toBe('test-ws-creation-no-pack');
 
       // Wait a brief tick for the background job to execute
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -404,6 +404,60 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(workspace.createWorkspace).toHaveBeenCalled();
       expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalled();
+
+      // Read status via SSE stream route
+      const streamResponse = await app.request('/api/workspace/create-stream/test-ws-creation-no-pack');
+      expect(streamResponse.status).toBe(200);
+      const text = await streamResponse.text();
+      expect(text).toContain('"status":"completed"');
+      expect(text).toContain('"progress":100');
+    });
+
+    it('should complete workspace creation successfully when packContextXml is true', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+        packContextXml: true
+      } as any);
+
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue(undefined);
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+      vi.spyOn(packer, 'packWorkspace').mockResolvedValue({
+        outputPath: '/mock/workspace/nexusflow-context.xml',
+        totalFiles: 5,
+        fileSize: 5120
+      });
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: 'test-ws-creation-with-pack',
+          description: 'A test workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['antigravity']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.jobId).toBe('test-ws-creation-with-pack');
+
+      // Wait a brief tick for the background job to execute
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(workspace.createWorkspace).toHaveBeenCalled();
+      expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
+      expect(generators.generateContextFiles).toHaveBeenCalled();
+      expect(packer.packWorkspace).toHaveBeenCalled();
+
+      // Read status via SSE stream route
+      const streamResponse = await app.request('/api/workspace/create-stream/test-ws-creation-with-pack');
+      expect(streamResponse.status).toBe(200);
+      const text = await streamResponse.text();
+      expect(text).toContain('"status":"completed"');
+      expect(text).toContain('"progress":100');
     });
   });
 });
