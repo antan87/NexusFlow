@@ -43,7 +43,7 @@
     "globby": "^14.1.0",
     "hono": "^4.12.23",
     "ora": "^8.1.0",
-    "repomix": "^0.2.16"
+    "repomix": "^1.14.1"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
