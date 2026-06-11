@@ -148,7 +148,10 @@ export async function createCommand(): Promise<void> {
   if (editor) {
     const editorSpinner = ora(`Opening in ${editor.name}...`).start();
     try {
-      await execa(editor.command, [workspacePath], { stdio: 'ignore' });
+      await execa(editor.command, [workspacePath], {
+        stdio: 'ignore',
+        shell: process.platform === 'win32',
+      });
       editorSpinner.succeed(`Opened in ${editor.name}`);
     } catch {
       editorSpinner.warn(
@@ -188,7 +191,11 @@ export async function createCommand(): Promise<void> {
       else if (assistant === 'copilot') cmd = 'copilot';
 
       try {
-        await execa(cmd, [], { cwd: workspacePath, stdio: 'inherit' });
+        await execa(cmd, [], {
+          cwd: workspacePath,
+          stdio: 'inherit',
+          shell: process.platform === 'win32',
+        });
         console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
       } catch {
         console.log(

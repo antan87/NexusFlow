@@ -21,7 +21,10 @@ const EDITOR_CANDIDATES: ReadonlyArray<{ name: string; command: string }> = [
  */
 async function commandExists(command: string): Promise<boolean> {
   try {
-    const result = await execa(command, ['--version'], { reject: false });
+    const result = await execa(command, ['--version'], {
+      reject: false,
+      shell: process.platform === 'win32',
+    });
     return result.exitCode === 0;
   } catch {
     return false;

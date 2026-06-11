@@ -13,7 +13,10 @@ import type { AIAssistant, DetectedAI } from '../types.js';
  */
 async function commandExists(command: string): Promise<boolean> {
   try {
-    const result = await execa(command, ['--version'], { reject: false });
+    const result = await execa(command, ['--version'], {
+      reject: false,
+      shell: process.platform === 'win32',
+    });
     return result.exitCode === 0;
   } catch {
     // The command could not be spawned at all (not in PATH).

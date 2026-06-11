@@ -175,8 +175,12 @@ async function deploySkill(
   };
   const title = titleMap[skillName] || skillName;
 
-  if (assistant === 'claude' || assistant === 'antigravity') {
+  if (assistant === 'claude') {
     const skillDir = path.join(workspacePath, '.claude', 'skills', skillName);
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
+  } else if (assistant === 'antigravity') {
+    const skillDir = path.join(workspacePath, '.agents', 'skills', skillName);
     await fse.ensureDir(skillDir);
     await fse.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
   } else if (assistant === 'cursor') {

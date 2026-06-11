@@ -978,7 +978,10 @@ app.post('/api/updates/install', async (c) => {
       return c.json({ error: 'Tool not found' }, 404);
     }
 
-    const result = await execa(target.cmd, target.args, { reject: false });
+    const result = await execa(target.cmd, target.args, {
+      reject: false,
+      shell: process.platform === 'win32',
+    });
     if (result.exitCode === 0) {
       return c.json({ success: true, output: result.stdout });
     } else {

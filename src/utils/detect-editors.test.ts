@@ -26,10 +26,11 @@ describe('detectEditors', () => {
       { name: 'Antigravity', command: 'agy', detected: false },
     ]);
 
-    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false });
-    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false });
-    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false });
-    expect(execa).toHaveBeenCalledWith('agy', ['--version'], { reject: false });
+    const isWin = process.platform === 'win32';
+    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin });
+    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin });
+    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin });
+    expect(execa).toHaveBeenCalledWith('agy', ['--version'], { reject: false, shell: isWin });
   });
 
   it('should return detected = false for all editors if execa throws an error', async () => {

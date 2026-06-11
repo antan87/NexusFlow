@@ -43,7 +43,10 @@ export async function openCommand(): Promise<void> {
 
   if (editor) {
     try {
-      await execa(editor.command, [selected], { stdio: 'ignore' });
+      await execa(editor.command, [selected], {
+        stdio: 'ignore',
+        shell: process.platform === 'win32',
+      });
       console.log(chalk.green(`\n✅ Opened ${selected} in ${editor.name}\n`));
     } catch {
       console.log(chalk.yellow(`\n⚠️  Could not open editor. Navigate manually:`));
@@ -101,7 +104,11 @@ export async function openCommand(): Promise<void> {
       }
 
       try {
-        await execa(cmdName, cmdArgs, { cwd: selected, stdio: 'inherit' });
+        await execa(cmdName, cmdArgs, {
+          cwd: selected,
+          stdio: 'inherit',
+          shell: process.platform === 'win32',
+        });
         console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
       } catch {
         const fullCmd = [cmdName, ...cmdArgs].join(' ');

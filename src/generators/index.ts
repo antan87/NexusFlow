@@ -3,6 +3,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import type { AIAssistant, WorkspaceContext } from '../types.js';
 import { generateClaudeConfig } from './claude.js';
+import { generateAntigravityConfig } from './antigravity.js';
 import { generateCodexConfig } from './codex.js';
 import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
@@ -19,7 +20,7 @@ const GENERATORS: Record<
   }
 > = {
   claude: { generate: generateClaudeConfig, outputFile: 'CLAUDE.md' },
-  antigravity: { generate: generateClaudeConfig, outputFile: 'CLAUDE.md' },
+  antigravity: { generate: generateAntigravityConfig, outputFile: 'AGENTS.md' },
   codex: { generate: generateCodexConfig, outputFile: 'AGENTS.md' },
   copilot: { generate: generateCopilotConfig, outputFile: '.github/copilot-instructions.md' },
   cursor: { generate: generateCursorConfig, outputFile: '.cursor/rules/nexusflow.mdc' },
@@ -221,6 +222,7 @@ export async function generateContextFiles(
 
 // Re-export individual generators for direct use
 export { generateClaudeConfig } from './claude.js';
+export { generateAntigravityConfig } from './antigravity.js';
 export { generateCodexConfig } from './codex.js';
 export { generateCopilotConfig } from './copilot.js';
 export { generateCursorConfig } from './cursor.js';

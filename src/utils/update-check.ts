@@ -178,11 +178,17 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
       updateCmd: 'npm install -g repomix',
       getCurrent: async () => {
         try {
-          const res = await execa('repomix', ['--version'], { reject: false });
+          const res = await execa('repomix', ['--version'], {
+            reject: false,
+            shell: process.platform === 'win32',
+          });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}
         try {
-          const res = await execa('npx', ['repomix', '--version'], { reject: false });
+          const res = await execa('npx', ['repomix', '--version'], {
+            reject: false,
+            shell: process.platform === 'win32',
+          });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}
         return '';
@@ -196,7 +202,10 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
       updateCmd: 'agy update',
       getCurrent: async () => {
         try {
-          const res = await execa('agy', ['--version'], { reject: false });
+          const res = await execa('agy', ['--version'], {
+            reject: false,
+            shell: process.platform === 'win32',
+          });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}
         return '';
@@ -210,7 +219,10 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
       updateCmd: 'npm install -g @anthropic-ai/claude-code',
       getCurrent: async () => {
         try {
-          const res = await execa('claude', ['--version'], { reject: false });
+          const res = await execa('claude', ['--version'], {
+            reject: false,
+            shell: process.platform === 'win32',
+          });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}
         return '';
