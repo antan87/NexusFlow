@@ -1,6 +1,6 @@
 {
   "name": "@mrpatronz/nexusflow",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Combine multiple repos into a workspace with rich AI assistant context",
   "type": "module",
   "main": "dist/index.js",
@@ -43,6 +43,7 @@
     "globby": "^14.1.0",
     "hono": "^4.12.23",
     "ora": "^8.1.0",
+    "pm2": "^7.0.1",
     "repomix": "^1.14.1"
   },
   "devDependencies": {

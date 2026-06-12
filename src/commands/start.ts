@@ -93,7 +93,7 @@ async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
 
   // Check if CWD is a workspace
   const cwdFeature = await loadFeatureConfig(process.cwd());
-  if (cwdFeature) return process.cwd();
+  if (cwdFeature) return cwdFeature.workspacePath;
 
   // Otherwise, list workspaces and let user pick
   const config = await loadConfig();

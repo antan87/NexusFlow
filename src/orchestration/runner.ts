@@ -1,21 +1,18 @@
 /**
  * @module orchestration/runner
  * Manages the lifecycle of services — start, stop, status, and log streaming.
- * Spawns child processes and tracks them via a state file.
+ * Uses PM2 for process management.
  */
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
 import chalk from 'chalk';
+import { execa } from 'execa';
 
 import type { ServiceConfig, RunningService, RunningState } from '../types.js';
 
 /** Name of the state file that tracks running services. */
 const STATE_FILE = '.nexusflow-running.json';
-
-/** Active child processes tracked in memory. */
-const activeProcesses = new Map<string, ChildProcess>();
 
 /**
  * Returns the path to the running-state file for a workspace.
@@ -25,12 +22,39 @@ function getStatePath(workspacePath: string): string {
 }
 
 /**
- * Loads the running state from disk.
+ * Loads the running state from disk, syncing active status with PM2.
  */
 export async function loadRunningState(workspacePath: string): Promise<RunningState | null> {
   try {
     const raw = await fs.readFile(getStatePath(workspacePath), 'utf-8');
-    return JSON.parse(raw) as RunningState;
+    const state = JSON.parse(raw) as RunningState;
+
+    try {
+      // Query current PM2 process list to verify actual running status
+      const { stdout } = await execa('npx', ['pm2', 'jlist']);
+      const pm2List = JSON.parse(stdout);
+      const workspaceId = path.basename(workspacePath);
+      const prefix = `nexusflow-${workspaceId}-`;
+
+      const activeServices = state.services.map((service) => {
+        const uniqueName = `${prefix}${service.name}`;
+        const pm2App = pm2List.find((app: any) => app.name === uniqueName);
+        const running = pm2App && pm2App.pm2_env?.status === 'online';
+        return {
+          ...service,
+          pid: running ? (pm2App.pid || service.pid) : 0,
+        };
+      }).filter((service) => service.pid > 0);
+
+      return {
+        ...state,
+        services: activeServices,
+        updatedAt: new Date().toISOString(),
+      };
+    } catch {
+      // Fallback to cached state on disk if PM2 query fails
+      return state;
+    }
   } catch {
     return null;
   }
@@ -56,20 +80,7 @@ async function clearRunningState(workspacePath: string): Promise<void> {
 }
 
 /**
- * Checks if a process with the given PID is still running.
- */
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Starts all services in the given list.
- * Each service is spawned as a detached child process.
+ * Starts all services in the given list using PM2.
  *
  * @param services      - Services to start.
  * @param workspacePath - Workspace root path.
@@ -84,63 +95,66 @@ export async function startServices(
   await fs.mkdir(logDir, { recursive: true });
 
   const runningServices: RunningService[] = [];
+  const workspaceId = path.basename(workspacePath);
 
   for (const service of services) {
     const logFile = path.join(logDir, `${service.name}.log`);
     const portStr = service.port ? ` on port ${service.port}` : '';
+    const uniqueName = `nexusflow-${workspaceId}-${service.name}`;
 
     console.log(
-      chalk.cyan(`  Starting ${chalk.bold(service.name)}${portStr}...`),
+      chalk.cyan(`  Starting ${chalk.bold(service.name)}${portStr} under PM2...`),
     );
     console.log(
       chalk.dim(`    ${service.command} ${service.args.join(' ')} (in ${service.cwd})`),
     );
 
     try {
-      // Ensure parent directory for this log file exists (supports nested names)
+      // Ensure parent directory for this log file exists
       await fs.mkdir(path.dirname(logFile), { recursive: true });
-      // Open log file for writing
-      const logFd = await fs.open(logFile, 'w');
-      const logStream = logFd.createWriteStream();
 
-      const child = spawn(service.command, service.args, {
-        cwd: service.cwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true,
-        shell: true,
-      });
+      // Delete any existing PM2 configuration with the same name to avoid duplicate starts
+      await execa('npx', ['pm2', 'delete', uniqueName], { reject: false });
 
-      // Pipe stdout and stderr to log file
-      child.stdout?.pipe(logStream);
-      child.stderr?.pipe(logStream);
+      // Start the service using PM2 as a direct process execution
+      await execa('npx', [
+        'pm2',
+        'start',
+        service.command,
+        '--name',
+        uniqueName,
+        '--cwd',
+        service.cwd,
+        '-o',
+        logFile,
+        '-e',
+        logFile,
+        '--interpreter',
+        'none',
+        '--',
+        ...service.args
+      ]);
 
-      child.on('error', (err) => {
-        console.error(chalk.red(`  ✖ ${service.name} error: ${err.message}`));
-      });
+      // Retrieve the real PID from PM2
+      const { stdout } = await execa('npx', ['pm2', 'jlist']);
+      const pm2List = JSON.parse(stdout);
+      const pm2App = pm2List.find((app: any) => app.name === uniqueName);
+      const pid = pm2App?.pid || 0;
 
-      child.on('exit', (code) => {
-        if (code !== null && code !== 0) {
-          console.log(chalk.yellow(`  ⚠ ${service.name} exited with code ${code}`));
-        }
-        activeProcesses.delete(service.name);
-      });
-
-      // Don't wait for the child to finish
-      child.unref();
-
-      if (child.pid) {
-        activeProcesses.set(service.name, child);
+      if (pid) {
         runningServices.push({
           name: service.name,
-          pid: child.pid,
+          pid,
           config: service,
           startedAt: new Date().toISOString(),
         });
-        console.log(chalk.green(`  ✔ ${service.name} started (PID: ${child.pid})`));
+        console.log(chalk.green(`  ✔ ${service.name} started under PM2 (PID: ${pid})`));
+      } else {
+        console.warn(chalk.yellow(`  ⚠ Started ${service.name} but could not resolve PID from PM2.`));
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red(`  ✖ Failed to start ${service.name}: ${msg}`));
+      console.error(chalk.red(`  ✖ Failed to start ${service.name} via PM2: ${msg}`));
     }
   }
 
@@ -155,79 +169,69 @@ export async function startServices(
 }
 
 /**
- * Stops all services for a workspace.
+ * Stops all services for a workspace under PM2.
  *
  * @param workspacePath - Workspace root path.
  */
 export async function stopServices(workspacePath: string): Promise<void> {
-  const state = await loadRunningState(workspacePath);
+  const workspaceId = path.basename(workspacePath);
+  const prefix = `nexusflow-${workspaceId}-`;
 
-  if (!state || state.services.length === 0) {
-    console.log(chalk.yellow('  No running services found.'));
-    return;
-  }
+  console.log(chalk.cyan(`  Stopping all services under PM2 for workspace: ${workspaceId}...`));
 
-  for (const service of state.services) {
-    // Try in-memory process first
-    const child = activeProcesses.get(service.name);
-    if (child && child.pid) {
-      try {
-        // Kill the process group (negative PID kills group on Unix, taskkill on Windows)
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(child.pid), '/f', '/t'], { stdio: 'ignore' });
-        } else {
-          process.kill(-child.pid, 'SIGTERM');
-        }
-        console.log(chalk.green(`  ✔ Stopped ${service.name} (PID: ${service.pid})`));
-        activeProcesses.delete(service.name);
-        continue;
-      } catch {
-        // Fall through to PID-based kill
-      }
-    }
+  try {
+    const { stdout } = await execa('npx', ['pm2', 'jlist']);
+    const pm2List = JSON.parse(stdout);
+    const targetApps = pm2List.filter((app: any) => app.name && app.name.startsWith(prefix));
 
-    // Fall back to PID from state file
-    if (isProcessRunning(service.pid)) {
-      try {
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(service.pid), '/f', '/t'], { stdio: 'ignore' });
-        } else {
-          process.kill(service.pid, 'SIGTERM');
-        }
-        console.log(chalk.green(`  ✔ Stopped ${service.name} (PID: ${service.pid})`));
-      } catch {
-        console.log(chalk.yellow(`  ⚠ Could not stop ${service.name} (PID: ${service.pid})`));
-      }
+    if (targetApps.length === 0) {
+      console.log(chalk.yellow('  No running services found for this workspace.'));
     } else {
-      console.log(chalk.dim(`  ${service.name} already stopped`));
+      for (const app of targetApps) {
+        console.log(chalk.dim(`    Stopping PM2 process: ${app.name}`));
+        await execa('npx', ['pm2', 'delete', app.name], { reject: false });
+      }
+      console.log(chalk.green(`  ✔ All services stopped.`));
     }
+  } catch (error: any) {
+    console.error(chalk.red(`  ✖ Failed to stop services via PM2: ${error.message}`));
   }
 
   await clearRunningState(workspacePath);
 }
 
 /**
- * Shows the status of all services in a workspace.
+ * Shows the status of all services in a workspace by querying PM2.
  *
  * @param workspacePath - Workspace root path.
  */
 export async function getServiceStatus(workspacePath: string): Promise<void> {
-  const state = await loadRunningState(workspacePath);
+  const workspaceId = path.basename(workspacePath);
+  const prefix = `nexusflow-${workspaceId}-`;
 
-  if (!state || state.services.length === 0) {
-    console.log(chalk.yellow('  No services tracked for this workspace.'));
-    return;
-  }
+  try {
+    const { stdout } = await execa('npx', ['pm2', 'jlist']);
+    const pm2List = JSON.parse(stdout);
+    const targetApps = pm2List.filter((app: any) => app.name && app.name.startsWith(prefix));
 
-  for (const service of state.services) {
-    const running = isProcessRunning(service.pid);
-    const status = running ? chalk.green('● running') : chalk.red('● stopped');
-    const portStr = service.config.port ? ` :${service.config.port}` : '';
-    const since = new Date(service.startedAt).toLocaleTimeString();
+    if (targetApps.length === 0) {
+      console.log(chalk.yellow('  No running services found for this workspace in PM2.'));
+      return;
+    }
 
-    console.log(
-      `  ${status} ${chalk.bold(service.name)}${chalk.dim(portStr)} (PID: ${service.pid}, since ${since})`,
-    );
+    for (const app of targetApps) {
+      const name = app.name.substring(prefix.length);
+      const running = app.pm2_env?.status === 'online';
+      const status = running ? chalk.green('● running') : chalk.red(`● ${app.pm2_env?.status || 'stopped'}`);
+      const pid = app.pid || 'N/A';
+      const uptime = app.pm2_env?.pm_uptime ? new Date(app.pm2_env.pm_uptime).toLocaleTimeString() : 'unknown';
+
+      console.log(
+        `  ${status} ${chalk.bold(name)} (PID: ${pid}, since ${uptime})`,
+      );
+    }
+  } catch (error: any) {
+    console.error(chalk.red(`  ✖ Failed to query PM2 status: ${error.message}`));
   }
 }
 

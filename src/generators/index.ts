@@ -178,6 +178,7 @@ export async function generateContextFiles(
     }
   }
 
+  // Generate configuration for each selected assistant
   for (const assistant of assistants) {
     const entry = GENERATORS[assistant];
 
@@ -192,6 +193,25 @@ export async function generateContextFiles(
       console.error(
         chalk.red('  ✖'),
         `Failed to generate ${entry.outputFile} for ${assistant}: ${message}`,
+      );
+    }
+  }
+
+  // Ensure AGENTS.md is always generated if any assistant is selected (as fallback or primary harness context),
+  // since tools like agy and copilot do not read CLAUDE.md.
+  const hasAgentsGen = assistants.includes('antigravity') || assistants.includes('codex');
+  if (assistants.length > 0 && !hasAgentsGen) {
+    try {
+      await generateAntigravityConfig(ctx, workspacePath);
+      console.log(
+        chalk.green('  ✔'),
+        `Generated fallback ${chalk.bold('AGENTS.md')} for harness context`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        chalk.red('  ✖'),
+        `Failed to generate fallback AGENTS.md: ${message}`,
       );
     }
   }

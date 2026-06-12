@@ -41,7 +41,7 @@ async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) return workspaceArg;
 
   const cwdFeature = await loadFeatureConfig(process.cwd());
-  if (cwdFeature) return process.cwd();
+  if (cwdFeature) return cwdFeature.workspacePath;
 
   const config = await loadConfig();
   const workspaces = await listWorkspaces(config.workspacesDir);

@@ -65,6 +65,34 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
+    // Register MCP Server Definition Provider if supported by the VS Code version
+    if (typeof (vscode as any).lm?.registerMcpServerDefinitionProvider === 'function') {
+        const mcpProvider = {
+            provideMcpServerDefinitions: async () => {
+                const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                const args = [serverScript, 'mcp', 'run'];
+                if (workspaceFolders && workspaceFolders.length > 0) {
+                    args.push(workspaceFolders[0].uri.fsPath);
+                }
+                
+                return [
+                    new (vscode as any).McpStdioServerDefinition({
+                        label: 'NexusFlow MCP Server',
+                        command: 'node',
+                        args: args
+                    })
+                ];
+            }
+        };
+        context.subscriptions.push(
+            (vscode as any).lm.registerMcpServerDefinitionProvider('nexusflow-mcp', mcpProvider)
+        );
+        console.log('NexusFlow MCP Server Definition Provider registered successfully.');
+    } else {
+        console.log('registerMcpServerDefinitionProvider is not supported on this VS Code version.');
+    }
+
     // Register Focus Dashboard Command
     context.subscriptions.push(
         vscode.commands.registerCommand('nexusflow.openDashboard', () => {
@@ -131,6 +159,14 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
+        let workspaceParam = '';
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders && workspaceFolders.length > 0) {
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const workspaceId = path.basename(workspacePath);
+            workspaceParam = `&workspaceId=${encodeURIComponent(workspaceId)}`;
+        }
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -154,7 +190,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
     </style>
 </head>
 <body>
-    <iframe src="http://localhost:3000?env=vscode"></iframe>
+    <iframe src="http://localhost:3000?env=vscode${workspaceParam}"></iframe>
     <script>
         const vscode = acquireVsCodeApi();
         window.addEventListener('message', event => {
