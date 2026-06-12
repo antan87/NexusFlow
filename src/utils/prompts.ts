@@ -3,7 +3,7 @@
  * Interactive CLI prompts for NexusFlow using @inquirer/prompts.
  */
 
-import { input, checkbox, confirm, select } from '@inquirer/prompts';
+import { input, checkbox, confirm, select, search } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
@@ -66,6 +66,20 @@ export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> 
 
   const selectedPaths = new Set<string>();
 
+  // If there are only a few repos (e.g. <= 10), we can just show a checkbox prompt directly to save time
+  if (repos.length <= 10) {
+    const toggled = await checkbox({
+      message: 'Select repositories to include in workspace:',
+      choices: repos.map((repo) => ({
+        name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
+        value: repo.path,
+        checked: false,
+      })),
+    });
+    return repos.filter((r) => toggled.includes(r.path));
+  }
+
+  // Otherwise, use a loop with the search prompt to make it extremely easy to filter and toggle selection
   while (true) {
     console.log(chalk.bold(`\n📁 Selected Repositories (${selectedPaths.size}/${repos.length}):`));
     if (selectedPaths.size === 0) {
@@ -79,16 +93,43 @@ export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> 
     }
     console.log();
 
-    const action = await select({
-      message: 'Choose repository selection mode:',
-      choices: [
-        { name: '🔍 Search & toggle repositories by name', value: 'search' },
-        { name: '📋 View & toggle full repository list', value: 'toggle_all' },
-        { name: `✅ Done selecting (${selectedPaths.size} repo(s) selected)`, value: 'done' },
-      ],
+    const result = await search({
+      message: 'Search and select repositories (type to filter, select to toggle, choose Done to finish):',
+      source: async (input) => {
+        const query = (input || '').toLowerCase();
+        const filtered = repos.filter(
+          (r) =>
+            r.name.toLowerCase().includes(query) ||
+            r.path.toLowerCase().includes(query)
+        );
+
+        const choices = [
+          {
+            name: chalk.green(`✅ Done selecting (${selectedPaths.size} repo(s) selected)`),
+            value: 'done',
+          },
+        ];
+
+        if (selectedPaths.size > 0) {
+          choices.push({
+            name: chalk.yellow('🧹 Clear all selections'),
+            value: 'clear',
+          });
+        }
+
+        filtered.forEach((r) => {
+          const isSelected = selectedPaths.has(r.path);
+          choices.push({
+            name: `${isSelected ? chalk.green('✓') : ' '} ${r.name} ${chalk.dim(`(${r.path})`)}`,
+            value: r.path,
+          });
+        });
+
+        return choices;
+      },
     });
 
-    if (action === 'done') {
+    if (result === 'done') {
       if (selectedPaths.size === 0) {
         console.log(chalk.red('  Please select at least one repository.'));
         continue;
@@ -96,53 +137,16 @@ export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> 
       break;
     }
 
-    if (action === 'search') {
-      const searchTerm = await input({
-        message: 'Enter search term (name or path):',
-      });
-
-      const filtered = repos.filter(
-        (r) =>
-          r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          r.path.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-
-      if (filtered.length === 0) {
-        console.log(chalk.yellow(`  No repositories found matching "${searchTerm}".`));
-        continue;
-      }
-
-      const toggled = await checkbox({
-        message: `Toggle matching repositories (found ${filtered.length}):`,
-        choices: filtered.map((repo) => ({
-          name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
-          value: repo.path,
-          checked: selectedPaths.has(repo.path),
-        })),
-      });
-
-      // Update selections for the filtered set
-      filtered.forEach((repo) => {
-        if (toggled.includes(repo.path)) {
-          selectedPaths.add(repo.path);
-        } else {
-          selectedPaths.delete(repo.path);
-        }
-      });
+    if (result === 'clear') {
+      selectedPaths.clear();
+      continue;
     }
 
-    if (action === 'toggle_all') {
-      const toggled = await checkbox({
-        message: 'Select projects to include (full list):',
-        choices: repos.map((repo) => ({
-          name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
-          value: repo.path,
-          checked: selectedPaths.has(repo.path),
-        })),
-      });
-
-      selectedPaths.clear();
-      toggled.forEach((p) => selectedPaths.add(p));
+    // Toggle selected state
+    if (selectedPaths.has(result)) {
+      selectedPaths.delete(result);
+    } else {
+      selectedPaths.add(result);
     }
   }
 

@@ -23,14 +23,14 @@ describe('detectEditors', () => {
       { name: 'VS Code', command: 'code', detected: true },
       { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
       { name: 'Cursor', command: 'cursor', detected: true },
-      { name: 'Antigravity', command: 'agy', detected: false },
+      { name: 'Antigravity', command: 'antigravity', detected: false },
     ]);
 
     const isWin = process.platform === 'win32';
     expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin });
     expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin });
     expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin });
-    expect(execa).toHaveBeenCalledWith('agy', ['--version'], { reject: false, shell: isWin });
+    expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, shell: isWin });
   });
 
   it('should return detected = false for all editors if execa throws an error', async () => {
@@ -42,7 +42,7 @@ describe('detectEditors', () => {
       { name: 'VS Code', command: 'code', detected: false },
       { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
       { name: 'Cursor', command: 'cursor', detected: false },
-      { name: 'Antigravity', command: 'agy', detected: false },
+      { name: 'Antigravity', command: 'antigravity', detected: false },
     ]);
   });
 });

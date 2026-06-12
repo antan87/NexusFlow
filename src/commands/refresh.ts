@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { select } from '@inquirer/prompts';
+import { select, search } from '@inquirer/prompts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
@@ -127,12 +127,20 @@ async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
     return null;
   }
 
-  const selected = await select({
-    message: 'Select a workspace to refresh:',
-    choices: workspaces.map((ws) => ({
-      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
-      value: ws.workspacePath,
-    })),
+  const selected = await search({
+    message: 'Search and select a workspace to refresh:',
+    source: async (input) => {
+      const query = (input || '').toLowerCase();
+      const filtered = workspaces.filter(
+        (ws) =>
+          ws.branchName.toLowerCase().includes(query) ||
+          ws.workspacePath.toLowerCase().includes(query)
+      );
+      return filtered.map((ws) => ({
+        name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+        value: ws.workspacePath,
+      }));
+    },
   });
 
   return selected;

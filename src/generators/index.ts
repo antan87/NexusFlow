@@ -197,10 +197,10 @@ export async function generateContextFiles(
     }
   }
 
-  // Ensure AGENTS.md is always generated if any assistant is selected (as fallback or primary harness context),
-  // since tools like agy and copilot do not read CLAUDE.md.
+  // Ensure AGENTS.md is always generated if it is not already generated as a primary assistant file,
+  // since it is the universal standard for AI coding agents.
   const hasAgentsGen = assistants.includes('antigravity') || assistants.includes('codex');
-  if (assistants.length > 0 && !hasAgentsGen) {
+  if (!hasAgentsGen) {
     try {
       await generateAntigravityConfig(ctx, workspacePath);
       console.log(

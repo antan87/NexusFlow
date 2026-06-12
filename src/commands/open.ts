@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import { execa } from 'execa';
-import { select, confirm } from '@inquirer/prompts';
+import { select, confirm, search } from '@inquirer/prompts';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces } from '../core/workspace.js';
@@ -29,12 +29,20 @@ export async function openCommand(): Promise<void> {
   console.log(chalk.bold.cyan('\n📂 Open Workspace\n'));
 
   // Let user pick a workspace
-  const selected = await select({
-    message: 'Select a workspace to open:',
-    choices: workspaces.map((ws) => ({
-      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos, ${ws.assistants.join(', ')})`)}`,
-      value: ws.workspacePath,
-    })),
+  const selected = await search({
+    message: 'Search and select a workspace to open:',
+    source: async (input) => {
+      const query = (input || '').toLowerCase();
+      const filtered = workspaces.filter(
+        (ws) =>
+          ws.branchName.toLowerCase().includes(query) ||
+          ws.workspacePath.toLowerCase().includes(query)
+      );
+      return filtered.map((ws) => ({
+        name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos, ${ws.assistants.join(', ')})`)}`,
+        value: ws.workspacePath,
+      }));
+    },
   });
 
   // Let user pick an editor
