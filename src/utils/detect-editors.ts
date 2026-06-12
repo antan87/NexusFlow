@@ -12,7 +12,7 @@ const EDITOR_CANDIDATES: ReadonlyArray<{ name: string; command: string }> = [
   { name: 'VS Code', command: 'code' },
   { name: 'VS Code Insiders', command: 'code-insiders' },
   { name: 'Cursor', command: 'cursor' },
-  { name: 'Antigravity', command: 'agy' },
+  { name: 'Antigravity', command: 'antigravity' },
 ];
 
 /**

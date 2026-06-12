@@ -82,6 +82,27 @@ export async function createWorkspace(
     console.warn('Warning: Failed to create .vscode/settings.json:', error);
   }
 
+  // Create .cursor/mcp.json for workspace-local Cursor MCP configuration
+  try {
+    const cursorDir = path.join(workspacePath, '.cursor');
+    await fs.mkdir(cursorDir, { recursive: true });
+    const cursorMcp = {
+      "mcpServers": {
+        "nexusflow": {
+          "command": "npx",
+          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run", workspacePath]
+        }
+      }
+    };
+    await fs.writeFile(
+      path.join(cursorDir, 'mcp.json'),
+      JSON.stringify(cursorMcp, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (error) {
+    console.warn('Warning: Failed to create .cursor/mcp.json:', error);
+  }
+
   // Create a worktree for each repo inside the workspace.
   for (const repo of repos) {
     const worktreeTarget = path.join(workspacePath, repo.name);
@@ -173,14 +194,40 @@ export async function saveFeatureConfig(
 export async function loadFeatureConfig(
   workspacePath: string,
 ): Promise<Feature | null> {
-  const manifestPath = path.join(workspacePath, MANIFEST_FILE);
+  const rootDir = await findWorkspaceRoot(workspacePath);
+  if (!rootDir) return null;
 
+  const manifestPath = path.join(rootDir, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(manifestPath, 'utf-8');
     return JSON.parse(raw) as Feature;
   } catch {
     return null;
   }
+}
+
+/**
+ * Traverses up parent directories to find a directory containing `nexusflow.json`.
+ *
+ * @param startPath - Path to start searching from.
+ * @returns Absolute path to the workspace root directory, or null if not found.
+ */
+export async function findWorkspaceRoot(startPath: string): Promise<string | null> {
+  let current = path.resolve(startPath);
+  while (true) {
+    const manifestPath = path.join(current, MANIFEST_FILE);
+    try {
+      await fs.access(manifestPath);
+      return current;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        break; // Reached root directory
+      }
+      current = parent;
+    }
+  }
+  return null;
 }
 
 /**

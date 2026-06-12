@@ -46,7 +46,7 @@ const guiPath = path.join(__dirname, 'gui');
 export const app = new Hono();
 
 // Allowed editor binaries/scripts to prevent command injection
-const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
+const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
 
 // Enable CORS for frontend dev server
 app.use('/api/*', cors());
@@ -694,6 +694,63 @@ app.get('/api/workspace/:id/changes', async (c) => {
     }
 
     return c.json({ changes: results });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 13_diff. Get git diff for a specific file in workspace sub-repositories
+app.get('/api/workspace/:id/changes/diff', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const repoName = c.req.query('repo');
+    const filePath = c.req.query('file');
+
+    if (!repoName || !filePath) {
+      return c.json({ error: 'Missing repo or file query parameter.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = path.join(config.workspacesDir, id);
+    const worktreePath = path.join(workspacePath, repoName);
+
+    // Security check: ensure path is within workspace directory
+    const resolvedPath = path.resolve(worktreePath);
+    if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
+      return c.json({ error: 'Invalid repository path.' }, 400);
+    }
+
+    let diff = '';
+    
+    // Check git status for the file to know if it's untracked
+    try {
+      const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', filePath], { cwd: worktreePath });
+      const statusLine = statusOut.trim();
+      const isUntracked = statusLine.startsWith('??');
+      
+      if (isUntracked) {
+        const result = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
+          cwd: worktreePath,
+          reject: false
+        });
+        diff = result.stdout || result.stderr || '';
+      } else {
+        const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
+          cwd: worktreePath,
+          reject: false
+        });
+        diff = result.stdout || result.stderr || '';
+      }
+    } catch (e) {
+      const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
+        cwd: worktreePath,
+        reject: false
+      });
+      diff = result.stdout || result.stderr || '';
+    }
+
+    return c.json({ diff });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

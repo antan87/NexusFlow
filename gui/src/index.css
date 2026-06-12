@@ -1,17 +1,110 @@
 @import "tailwindcss";
 
+/* Custom Sleek Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.15);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.3);
+}
+
+/* Glassmorphism and Modern UI Helpers */
+@utility glass-card {
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+@utility glass-card-glow {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.1), inset 0 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+@utility text-glow-indigo {
+  text-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+
 @utility animate-slide-in {
-  animation: slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+@utility animate-spin-slow {
+  animation: spin 8s linear infinite;
+}
+
+@utility animate-pulse-glow-green {
+  animation: pulse-glow-green 2s infinite ease-in-out;
+}
+
+@utility animate-pulse-glow-indigo {
+  animation: pulse-glow-indigo 2.5s infinite ease-in-out;
 }
 
 @keyframes slide-in {
   from {
-    transform: translateY(1rem);
+    transform: translateY(0.75rem);
     opacity: 0;
   }
   to {
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow-green {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(52, 211, 153, 0.2);
+    opacity: 0.8;
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow-indigo {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(99, 102, 241, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(99, 102, 241, 0.5);
+  }
+}
+
+/* Custom terminal colors */
+.term-matrix {
+  color: #10b981;
+  background-color: #030712;
+}
+.term-dracula {
+  color: #f8f8f2;
+  background-color: #282a36;
+}
+.term-classic {
+  color: #e5e7eb;
+  background-color: #0b0f19;
 }
 

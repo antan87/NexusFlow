@@ -3,7 +3,7 @@
  * Interactive CLI prompts for NexusFlow using @inquirer/prompts.
  */
 
-import { input, checkbox, confirm } from '@inquirer/prompts';
+import { input, checkbox, confirm, select } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
@@ -57,26 +57,96 @@ export async function promptDescription(): Promise<string> {
 
 /**
  * Prompts the user to select repos from a list of discovered repos.
+ * Supports searching/filtering by term, viewing all, and incremental selection.
  */
 export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> {
   if (repos.length === 0) {
     return [];
   }
 
-  const selected = await checkbox({
-    message: 'Select projects to include:',
-    choices: repos.map((repo) => ({
-      name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
-      value: repo.path,
-      checked: false,
-    })),
-    validate: (items) => {
-      if (items.length === 0) return 'Please select at least one project';
-      return true;
-    },
-  });
+  const selectedPaths = new Set<string>();
 
-  return repos.filter((r) => selected.includes(r.path));
+  while (true) {
+    console.log(chalk.bold(`\n📁 Selected Repositories (${selectedPaths.size}/${repos.length}):`));
+    if (selectedPaths.size === 0) {
+      console.log(chalk.dim('  (None selected yet)'));
+    } else {
+      repos.forEach((r) => {
+        if (selectedPaths.has(r.path)) {
+          console.log(`  ${chalk.green('✓')} ${r.name} ${chalk.dim(`(${r.path})`)}`);
+        }
+      });
+    }
+    console.log();
+
+    const action = await select({
+      message: 'Choose repository selection mode:',
+      choices: [
+        { name: '🔍 Search & toggle repositories by name', value: 'search' },
+        { name: '📋 View & toggle full repository list', value: 'toggle_all' },
+        { name: `✅ Done selecting (${selectedPaths.size} repo(s) selected)`, value: 'done' },
+      ],
+    });
+
+    if (action === 'done') {
+      if (selectedPaths.size === 0) {
+        console.log(chalk.red('  Please select at least one repository.'));
+        continue;
+      }
+      break;
+    }
+
+    if (action === 'search') {
+      const searchTerm = await input({
+        message: 'Enter search term (name or path):',
+      });
+
+      const filtered = repos.filter(
+        (r) =>
+          r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          r.path.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+
+      if (filtered.length === 0) {
+        console.log(chalk.yellow(`  No repositories found matching "${searchTerm}".`));
+        continue;
+      }
+
+      const toggled = await checkbox({
+        message: `Toggle matching repositories (found ${filtered.length}):`,
+        choices: filtered.map((repo) => ({
+          name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
+          value: repo.path,
+          checked: selectedPaths.has(repo.path),
+        })),
+      });
+
+      // Update selections for the filtered set
+      filtered.forEach((repo) => {
+        if (toggled.includes(repo.path)) {
+          selectedPaths.add(repo.path);
+        } else {
+          selectedPaths.delete(repo.path);
+        }
+      });
+    }
+
+    if (action === 'toggle_all') {
+      const toggled = await checkbox({
+        message: 'Select projects to include (full list):',
+        choices: repos.map((repo) => ({
+          name: `${repo.name} ${chalk.dim(`(${repo.path})`)}`,
+          value: repo.path,
+          checked: selectedPaths.has(repo.path),
+        })),
+      });
+
+      selectedPaths.clear();
+      toggled.forEach((p) => selectedPaths.add(p));
+    }
+  }
+
+  return repos.filter((r) => selectedPaths.has(r.path));
 }
 
 /**

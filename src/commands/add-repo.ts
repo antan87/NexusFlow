@@ -57,7 +57,7 @@ export async function addRepoCommand(
   } else {
     const cwdFeature = await loadFeatureConfig(process.cwd());
     if (cwdFeature) {
-      workspacePath = process.cwd();
+      workspacePath = cwdFeature.workspacePath;
       workspaceName = cwdFeature.branchName;
     } else {
       const workspaces = await listWorkspaces(config.workspacesDir);
