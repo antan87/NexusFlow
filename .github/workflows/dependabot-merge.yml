@@ -1,0 +1,53 @@
+name: Dependabot Auto-Merge and Version Bump
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump Version
+        run: |
+          # Configure Git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fetch main to compare versions
+          git fetch origin main:main
+          
+          MAIN_VERSION=$(git show main:package.json | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf-8')).version)")
+          PR_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json', 'utf-8')).version)")
+          
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "Version has not been bumped yet. Bumping patch version..."
+            npm version patch --no-git-tag-version
+            git add package.json package-lock.json
+            git commit -m "chore: bump version for dependabot update"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          else
+            echo "Version is already bumped ($PR_VERSION vs main $MAIN_VERSION). Skipping bump."
+          fi
+
+      - name: Enable Auto-Merge
+        run: gh pr merge --auto --merge "${{ github.event.pull_request.html_url }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
