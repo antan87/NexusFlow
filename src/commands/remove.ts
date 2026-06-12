@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { select, confirm } from '@inquirer/prompts';
+import { select, confirm, search } from '@inquirer/prompts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
@@ -52,12 +52,20 @@ export async function removeCommand(workspaceArg?: string): Promise<void> {
       return;
     }
 
-    const selected = await select({
-      message: 'Select a workspace to delete:',
-      choices: workspaces.map((ws) => ({
-        name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
-        value: ws,
-      })),
+    const selected = await search({
+      message: 'Search and select a workspace to delete:',
+      source: async (input) => {
+        const query = (input || '').toLowerCase();
+        const filtered = workspaces.filter(
+          (ws) =>
+            ws.branchName.toLowerCase().includes(query) ||
+            ws.workspacePath.toLowerCase().includes(query)
+        );
+        return filtered.map((ws) => ({
+          name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+          value: ws,
+        }));
+      },
     });
 
     workspacePath = selected.workspacePath;

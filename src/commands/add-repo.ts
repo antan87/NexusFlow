@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { select } from '@inquirer/prompts';
+import { select, search } from '@inquirer/prompts';
 import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';
@@ -66,12 +66,20 @@ export async function addRepoCommand(
         return;
       }
 
-      const selected = await select({
-        message: 'Select a workspace to add a repository to:',
-        choices: workspaces.map((ws) => ({
-          name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
-          value: ws,
-        })),
+      const selected = await search({
+        message: 'Search and select a workspace to add a repository to:',
+        source: async (input) => {
+          const query = (input || '').toLowerCase();
+          const filtered = workspaces.filter(
+            (ws) =>
+              ws.branchName.toLowerCase().includes(query) ||
+              ws.workspacePath.toLowerCase().includes(query)
+          );
+          return filtered.map((ws) => ({
+            name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+            value: ws,
+          }));
+        },
       });
 
       workspacePath = selected.workspacePath;
@@ -113,12 +121,20 @@ export async function addRepoCommand(
       return;
     }
 
-    repoPathToAdd = await select({
-      message: 'Select a repository to add:',
-      choices: availableRepos.map((r) => ({
-        name: `${r.name} ${chalk.dim(`(${r.path})`)}`,
-        value: r.path,
-      })),
+    repoPathToAdd = await search({
+      message: 'Search and select a repository to add:',
+      source: async (input) => {
+        const query = (input || '').toLowerCase();
+        const filtered = availableRepos.filter(
+          (r) =>
+            r.name.toLowerCase().includes(query) ||
+            r.path.toLowerCase().includes(query)
+        );
+        return filtered.map((r) => ({
+          name: `${r.name} ${chalk.dim(`(${r.path})`)}`,
+          value: r.path,
+        }));
+      },
     });
   }
 
