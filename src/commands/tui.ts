@@ -26,6 +26,7 @@ interface TuiState {
   inputValue: string;
   cursorIndex: number;
   activeCommandRunning: boolean;
+  activeSuggestionIndex: number;
 }
 
 export async function tuiCommand(options: { workspace?: string }): Promise<void> {
@@ -76,6 +77,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     inputValue: '',
     cursorIndex: 0,
     activeCommandRunning: false,
+    activeSuggestionIndex: 0,
   };
 
   // Helper to append log lines
@@ -211,11 +213,18 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
       const cmd = state.inputValue.trim().toLowerCase();
       const matches = COMMANDS.filter(c => c.startsWith(cmd));
       
+      // Keep active index in bounds
+      if (matches.length > 0) {
+        state.activeSuggestionIndex = (state.activeSuggestionIndex + matches.length) % matches.length;
+      } else {
+        state.activeSuggestionIndex = 0;
+      }
+      
       let suggestionLine = '';
       if (matches.length > 0) {
         suggestionLine = chalk.dim(' Suggestions: ') + matches.map((m, idx) => {
-          if (idx === 0) return chalk.cyan.underline(m); // Highlight first match as Tab target
-          return chalk.gray(m);
+          if (idx === state.activeSuggestionIndex) return chalk.black.bgCyan(` ${m} `); // Highlight active selection
+          return chalk.cyan(m);
         }).join('  ');
       } else {
         suggestionLine = chalk.red(' No matching commands.');
@@ -315,14 +324,32 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         const cmd = state.inputValue.trim().toLowerCase();
         const matches = COMMANDS.filter(c => c.startsWith(cmd));
         if (matches.length > 0) {
-          state.inputValue = matches[0];
+          const selected = matches[state.activeSuggestionIndex % matches.length];
+          state.inputValue = selected + ' ';
+          state.activeSuggestionIndex = 0;
+          draw();
+        }
+      } else if (key.name === 'right' || key.name === 'down') {
+        const cmd = state.inputValue.trim().toLowerCase();
+        const matches = COMMANDS.filter(c => c.startsWith(cmd));
+        if (matches.length > 0) {
+          state.activeSuggestionIndex = (state.activeSuggestionIndex + 1) % matches.length;
+          draw();
+        }
+      } else if (key.name === 'left' || key.name === 'up') {
+        const cmd = state.inputValue.trim().toLowerCase();
+        const matches = COMMANDS.filter(c => c.startsWith(cmd));
+        if (matches.length > 0) {
+          state.activeSuggestionIndex = (state.activeSuggestionIndex - 1 + matches.length) % matches.length;
           draw();
         }
       } else if (key.name === 'backspace') {
         state.inputValue = state.inputValue.slice(0, -1);
+        state.activeSuggestionIndex = 0;
         draw();
       } else if (str && str.length === 1 && !key.ctrl && !key.meta) {
         state.inputValue += str;
+        state.activeSuggestionIndex = 0;
         draw();
       }
     } else {
