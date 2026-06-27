@@ -48,9 +48,7 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
 
   for (const repo of repos) {
     console.log(`Repository: ${chalk.bold(repo.name)}`);
-    // Ideally we rebase on the repo's default branch, which is often 'main' or 'master'
-    // Let's assume 'main' as default unless we fetch/read it.
-    const defaultBranch = 'main'; // We can default to 'main' as specified in requirements
+    const defaultBranch = repo.defaultBranch || 'main';
 
     const spinner = chalk.dim('  Rebasing...');
     process.stdout.write(spinner);

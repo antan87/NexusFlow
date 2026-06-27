@@ -829,7 +829,7 @@ app.post('/api/workspace/:id/sync', async (c) => {
     const results = [];
 
     for (const repo of repos) {
-      const result = await rebaseRepo(repo.path, 'main');
+      const result = await rebaseRepo(repo.path, repo.defaultBranch || 'main');
       results.push({
         repoName: repo.name,
         success: result.success,

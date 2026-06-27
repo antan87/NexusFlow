@@ -132,7 +132,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        webviewView.webview.onDidReceiveMessage(data => {
+        webviewView.webview.onDidReceiveMessage((data: any) => {
             switch (data.type) {
                 case 'openWorkspaceFolder': {
                     const uri = vscode.Uri.file(data.workspacePath);
@@ -140,7 +140,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'executeTerminalCommand': {
-                    let terminal = vscode.window.terminals.find(t => t.name === "NexusFlow Runner");
+                    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
                     if (!terminal) {
                         terminal = vscode.window.createTerminal({
                             name: "NexusFlow Runner",

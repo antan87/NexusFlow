@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 
 import type { Feature } from '../types.js';
+import { detectDefaultBranch } from './git.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface WorkspaceRepo {
   path: string;
   /** Feature branch name shared across the workspace. */
   branchName: string;
+  /** Default branch of the repo (e.g. 'main' or 'master'). */
+  defaultBranch: string;
 }
 
 /** Result of inspecting the working-tree status of a repo. */
@@ -109,15 +112,19 @@ export async function getWorkspaceRepos(
   const raw = await fs.readFile(manifestPath, 'utf-8');
   const feature = JSON.parse(raw) as Feature;
 
-  return feature.repos.map((repoPath) => {
-    const name = path.basename(repoPath);
-    const absolutePath = path.resolve(workspacePath, name);
-    return {
-      name,
-      path: absolutePath,
-      branchName: feature.branchName,
-    };
-  });
+  return Promise.all(
+    feature.repos.map(async (repoPath) => {
+      const name = path.basename(repoPath);
+      const absolutePath = path.resolve(workspacePath, name);
+      const defaultBranch = await detectDefaultBranch(absolutePath);
+      return {
+        name,
+        path: absolutePath,
+        branchName: feature.branchName,
+        defaultBranch,
+      };
+    })
+  );
 }
 
 /**
