@@ -284,9 +284,15 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     if (state.inputMode) {
       // --- Handle input text writing mode ---
       if (key.name === 'return') {
-        const cmd = state.inputValue.trim();
+        let cmd = state.inputValue.trim();
+        const matches = COMMANDS.filter(c => c.startsWith(cmd.toLowerCase()));
+        if (matches.length > 0) {
+          cmd = matches[state.activeSuggestionIndex % matches.length];
+        }
+
         state.inputMode = false;
         state.inputValue = '';
+        state.activeSuggestionIndex = 0;
         
         if (cmd) {
           state.activeCommandRunning = true;
