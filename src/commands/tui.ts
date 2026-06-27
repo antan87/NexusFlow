@@ -6,6 +6,7 @@
 import readline from 'node:readline';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 import { execa } from 'execa';
 
@@ -266,7 +267,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
 
           try {
             // Run command via execa
-            const script = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'index.js');
+            const script = fileURLToPath(new URL('../index.js', import.meta.url));
             const args = cmd.split(' ');
             const { stdout, stderr } = await execa('node', [script, ...args], { cwd: workspacePath });
 
@@ -313,7 +314,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         draw();
         
         try {
-          const script = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'index.js');
+          const script = fileURLToPath(new URL('../index.js', import.meta.url));
           const { stdout } = await execa('node', [script, 'sync'], { cwd: workspacePath });
           stdout.split('\n').filter(Boolean).forEach((l) => log(`  ${l}`));
           log(chalk.green('✔ Sync completed successfully.'));
@@ -330,7 +331,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         draw();
         
         try {
-          const script = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'index.js');
+          const script = fileURLToPath(new URL('../index.js', import.meta.url));
           const { stdout } = await execa('node', [script, 'doctor'], { cwd: workspacePath });
           stdout.split('\n').filter(Boolean).forEach((l) => log(`  ${l}`));
           log(chalk.green('✔ Diagnostics check complete.'));
@@ -347,7 +348,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         draw();
         
         try {
-          const script = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'index.js');
+          const script = fileURLToPath(new URL('../index.js', import.meta.url));
           const { stdout } = await execa('node', [script, 'refresh'], { cwd: workspacePath });
           stdout.split('\n').filter(Boolean).forEach((l) => log(`  ${l}`));
           log(chalk.green('✔ Context successfully refreshed.'));
