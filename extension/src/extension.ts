@@ -100,6 +100,13 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Register Open TUI Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.openTui', () => {
+            runNexusFlowCommand(context, 'tui');
+        })
+    );
+
     // Register Sync Workspace Command
     context.subscriptions.push(
         vscode.commands.registerCommand('nexusflow.syncWorkspace', () => {

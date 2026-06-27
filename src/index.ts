@@ -20,6 +20,7 @@ import { stopCommand } from './commands/stop.js';
 import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
 import { uiCommand } from './commands/ui.js';
+import { tuiCommand } from './commands/tui.js';
 import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
@@ -180,6 +181,19 @@ program
   .action(async (options: { port?: string }) => {
     try {
       await uiCommand(options);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('tui')
+  .description('Open the interactive terminal GUI (TUI) dashboard')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await tuiCommand({ workspace });
     } catch (error) {
       console.error(error);
       process.exit(1);
