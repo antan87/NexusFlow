@@ -14,6 +14,8 @@ import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig, listWorkspaces } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, type WorkspaceRepo, type RepoStatus } from '../utils/multi-git.js';
 
+const COMMANDS = ['sync', 'doctor', 'refresh', 'status', 'start', 'stop', 'logs', 'list', 'create', 'open', 'pack', 'remove', 'add-repo', 'help'];
+
 interface TuiState {
   workspacePath: string;
   branchName: string;
@@ -127,7 +129,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     // Grid Panel Calculations
     const leftWidth = Math.floor(cols * 0.35);
     const rightWidth = cols - leftWidth - 1;
-    const mainHeight = rows - 13; // Space reserved for log window and headers
+    const mainHeight = rows - (state.inputMode ? 14 : 13); // Adjust height when suggestion line is visible
 
     // Left Panel contents array
     const leftLines: string[] = [];
@@ -205,6 +207,23 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
 
     // Bottom Panel Prompt
     if (state.inputMode) {
+      // Find matches
+      const cmd = state.inputValue.trim().toLowerCase();
+      const matches = COMMANDS.filter(c => c.startsWith(cmd));
+      
+      let suggestionLine = '';
+      if (matches.length > 0) {
+        suggestionLine = chalk.dim(' Suggestions: ') + matches.map((m, idx) => {
+          if (idx === 0) return chalk.cyan.underline(m); // Highlight first match as Tab target
+          return chalk.gray(m);
+        }).join('  ');
+      } else {
+        suggestionLine = chalk.red(' No matching commands.');
+      }
+      
+      const filledSuggestion = suggestionLine + ' '.repeat(Math.max(0, cols - stripAnsi(suggestionLine).length));
+      process.stdout.write(filledSuggestion + '\n');
+
       // Focus Input mode
       const promptText = ` nexusflow > ${state.inputValue}`;
       process.stdout.write(chalk.bold.cyan(promptText) + ' '.repeat(Math.max(0, cols - promptText.length - 12)) + chalk.dim('[ESC] Cancel') + '\n');
@@ -292,6 +311,13 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         state.inputMode = false;
         state.inputValue = '';
         draw();
+      } else if (key.name === 'tab') {
+        const cmd = state.inputValue.trim().toLowerCase();
+        const matches = COMMANDS.filter(c => c.startsWith(cmd));
+        if (matches.length > 0) {
+          state.inputValue = matches[0];
+          draw();
+        }
       } else if (key.name === 'backspace') {
         state.inputValue = state.inputValue.slice(0, -1);
         draw();
