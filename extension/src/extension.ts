@@ -100,6 +100,13 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Register Open Browser Dashboard Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.openBrowserDashboard', () => {
+            vscode.env.openExternal(vscode.Uri.parse('http://localhost:3000'));
+        })
+    );
+
     // Register Open TUI Command
     context.subscriptions.push(
         vscode.commands.registerCommand('nexusflow.openTui', () => {

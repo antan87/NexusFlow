@@ -42,7 +42,11 @@
     "commands": [
       {
         "command": "nexusflow.openDashboard",
-        "title": "NexusFlow: Open Dashboard"
+        "title": "NexusFlow: Open Sidebar Dashboard"
+      },
+      {
+        "command": "nexusflow.openBrowserDashboard",
+        "title": "NexusFlow: Open Web Dashboard (Browser)"
       },
       {
         "command": "nexusflow.openTui",
