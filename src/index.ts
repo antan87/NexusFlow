@@ -191,7 +191,8 @@ program
   });
 
 program
-  .command('open')
+  .command('dashboard')
+  .alias('dash')
   .description('Instantly open the web GUI dashboard in your default browser')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
   .action(async (options: { port?: string }) => {
@@ -202,6 +203,7 @@ program
       process.exit(1);
     }
   });
+
 
 program
   .command('tui')
