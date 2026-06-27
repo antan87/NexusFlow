@@ -93,7 +93,7 @@ interface RunningService {
   startedAt: string;
 }
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const API_BASE = (import.meta.env.DEV || (typeof window !== 'undefined' && (window as any).Neutralino)) ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
 
