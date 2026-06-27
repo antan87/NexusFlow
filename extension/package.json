@@ -43,6 +43,18 @@
       {
         "command": "nexusflow.openDashboard",
         "title": "NexusFlow: Open Dashboard"
+      },
+      {
+        "command": "nexusflow.syncWorkspace",
+        "title": "NexusFlow: Sync Workspace"
+      },
+      {
+        "command": "nexusflow.runDoctor",
+        "title": "NexusFlow: Run Doctor Diagnostics"
+      },
+      {
+        "command": "nexusflow.commitWorkspace",
+        "title": "NexusFlow: Commit Workspace Changes"
       }
     ]
   },

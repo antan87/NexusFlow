@@ -99,6 +99,57 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.commands.executeCommand('workbench.view.extension.nexusflow-sidebar');
         })
     );
+
+    // Register Sync Workspace Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.syncWorkspace', () => {
+            runNexusFlowCommand(context, 'sync');
+        })
+    );
+
+    // Register Run Doctor Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.runDoctor', () => {
+            runNexusFlowCommand(context, 'doctor');
+        })
+    );
+
+    // Register Commit Workspace Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.commitWorkspace', async () => {
+            const message = await vscode.window.showInputBox({
+                prompt: 'Enter commit message for all changed repositories in the workspace:',
+                placeHolder: 'e.g., feat: implement new UI components'
+            });
+            if (message) {
+                runNexusFlowCommand(context, `commit "${message.replace(/"/g, '\\"')}"`);
+            }
+        })
+    );
+}
+
+function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        vscode.window.showErrorMessage('No active workspace folders found.');
+        return;
+    }
+    const cwd = folders[0].uri.fsPath;
+    const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
+    
+    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
+    if (!terminal) {
+        terminal = vscode.window.createTerminal({
+            name: "NexusFlow Runner",
+            cwd: cwd
+        });
+    } else {
+        // send Ctrl+C to cancel any active operations
+        terminal.sendText('\u0003', true);
+    }
+    terminal.show(true);
+    const escapedScriptPath = `"${serverScript}"`;
+    terminal.sendText(`node ${escapedScriptPath} ${command}`);
 }
 
 export function deactivate() {
