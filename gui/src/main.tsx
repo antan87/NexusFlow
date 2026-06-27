@@ -6,6 +6,7 @@ import App from './App.tsx'
 declare global {
   interface Window {
     Neutralino?: any;
+    NL_PATH?: string;
   }
 }
 
@@ -25,7 +26,33 @@ if (typeof window !== 'undefined' && window.Neutralino) {
     } catch {
       console.log('NexusFlow Hono backend not detected. Launching...');
       try {
-        await window.Neutralino.os.execCommand('node ../NexusFlow/dist/index.js ui --server-only --port 3000', { background: true });
+        const isWin = navigator.platform.includes('Win') || navigator.userAgent.includes('Windows');
+        const nlPath = window.NL_PATH || '.';
+        
+        // Construct paths for packaged mode
+        const nodeBinary = isWin ? `${nlPath}/node/node.exe` : `${nlPath}/node/bin/node`;
+        const serverScript = `${nlPath}/server/dist/index.js`;
+        
+        // Check if we are running in packaged mode by testing if the embedded node exists
+        let isPackaged = false;
+        try {
+          await window.Neutralino.filesystem.getStats(nodeBinary);
+          isPackaged = true;
+        } catch {
+          // File doesn't exist or filesystem API failed, meaning dev mode
+        }
+
+        let cmd: string;
+        if (isPackaged) {
+          console.log('Running in packaged mode, using embedded node and server...');
+          cmd = `"${nodeBinary}" "${serverScript}" ui --server-only --port 3000`;
+        } else {
+          console.log('Running in development mode, using global node and relative path...');
+          cmd = 'node ../NexusFlow/dist/index.js ui --server-only --port 3000';
+        }
+
+        console.log('Spawning backend command:', cmd);
+        await window.Neutralino.os.execCommand(cmd, { background: true });
         console.log('Hono backend successfully spawned.');
       } catch (err) {
         console.error('Failed to spawn Hono backend:', err);
