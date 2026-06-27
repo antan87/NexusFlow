@@ -44,6 +44,8 @@ export interface NexusFlowConfig {
 
   /** The last checked latest version from NPM. */
   latestVersion?: string;
+  latestDownloadUrl?: string | null;
+  latestReleaseNotes?: string;
 
   /** Local LLM settings for delegating simple tasks. */
   localLlm?: LocalLlmConfig;

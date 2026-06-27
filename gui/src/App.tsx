@@ -127,6 +127,8 @@ export default function App() {
     currentVersion: string;
     latestVersion: string;
     updateAvailable: boolean;
+    downloadUrl?: string | null;
+    releaseNotes?: string;
   } | null>(null);
   const [appVersion, setAppVersion] = useState('0.1.5');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
@@ -159,6 +161,10 @@ export default function App() {
   const [toolsStatus, setToolsStatus] = useState<any[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [updatingToolId, setUpdatingToolId] = useState<string | null>(null);
+
+  // App Autoupdate State
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -293,6 +299,55 @@ export default function App() {
       showToast('Network error when updating tool.', 'error');
     } finally {
       setUpdatingToolId(null);
+    }
+  };
+
+  const handleAutoUpdate = async () => {
+    if (!updateStatus || !updateStatus.downloadUrl) {
+      showToast('No update download URL found.', 'error');
+      return;
+    }
+
+    setUpdatingApp(true);
+    setUpdateStep('downloading');
+
+    try {
+      // 1. Download the installer
+      const downloadRes = await fetch(`${API_BASE}/api/updates/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downloadUrl: updateStatus.downloadUrl }),
+      });
+      const downloadData = await downloadRes.json();
+
+      if (!downloadRes.ok || !downloadData.success) {
+        throw new Error(downloadData.error || 'Failed to download installer binary');
+      }
+
+      // 2. Apply the installer
+      setUpdateStep('applying');
+      const applyRes = await fetch(`${API_BASE}/api/updates/apply`, {
+        method: 'POST',
+      });
+      const applyData = await applyRes.json();
+
+      if (!applyRes.ok || !applyData.success) {
+        throw new Error(applyData.error || 'Failed to trigger application update');
+      }
+
+      showToast('Update downloaded! App is restarting...', 'success');
+
+      // 3. Exit Neutralino client window to unlock files on disk
+      if (typeof window !== 'undefined' && (window as any).Neutralino) {
+        setTimeout(() => {
+          (window as any).Neutralino.app.exit();
+        }, 800);
+      }
+    } catch (err: any) {
+      console.error('Update failed:', err);
+      setUpdateStep('error');
+      showToast(`Update Failed: ${err.message || 'Unknown error'}`, 'error');
+      setUpdatingApp(false);
     }
   };
 
@@ -1533,24 +1588,46 @@ Core Instructions:
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                    <Sparkles size={20} />
+                    {updatingApp ? (
+                      <RefreshCw size={20} className="animate-spin text-amber-400" />
+                    ) : (
+                      <Sparkles size={20} />
+                    )}
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-amber-300">
-                      A new version of NexusFlow is available!
+                      {updatingApp ? (
+                        updateStep === 'downloading' ? 'Downloading Update...' : 'Applying Update...'
+                      ) : (
+                        'A new version of NexusFlow is available!'
+                      )}
                     </h4>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Upgrade from v{updateStatus.currentVersion} to v{updateStatus.latestVersion} to get the latest features and bug fixes.
+                      {updatingApp ? (
+                        updateStep === 'downloading' ? 'Fetching installer from GitHub Releases...' : 'Closing app and launching silent installer setup...'
+                      ) : (
+                        `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`
+                      )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
+                  {typeof window !== 'undefined' && (window as any).Neutralino && updateStatus.downloadUrl && (
+                    <button
+                      onClick={handleAutoUpdate}
+                      disabled={updatingApp}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-lg transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                    >
+                      {updatingApp ? 'Installing...' : 'Install Automatically'}
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText('npm install -g @mrpatronz/nexusflow');
                       showToast('Update command copied to clipboard!', 'success');
                     }}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 cursor-pointer flex items-center gap-1.5"
+                    disabled={updatingApp}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                   >
                     Copy Update Command
                   </button>

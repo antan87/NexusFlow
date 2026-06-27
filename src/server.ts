@@ -9,9 +9,13 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import * as fs from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
+import * as os from 'node:os';
+import { pipeline } from 'node:stream/promises';
+import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { scanForRepos } from './core/scanner.js';
@@ -1047,6 +1051,73 @@ app.post('/api/updates/install', async (c) => {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
+  }
+});
+
+let downloadedInstallerPath: string | null = null;
+
+// 17.7. Download matching GitHub Release installer to temporary folder
+app.post('/api/updates/download', async (c) => {
+  try {
+    const { downloadUrl } = await c.req.json() as { downloadUrl: string };
+    if (!downloadUrl) {
+      return c.json({ error: 'Download URL is required' }, 400);
+    }
+
+    const tempDir = os.tmpdir();
+    const fileName = 'NexusFlowSetup_Update.exe';
+    const targetPath = path.join(tempDir, fileName);
+
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+
+    // Node fetch body stream download
+    const fileStream = createWriteStream(targetPath);
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+    
+    // Convert ReadableStream to Node stream
+    await pipeline(response.body as any, fileStream);
+
+    downloadedInstallerPath = targetPath;
+    return c.json({ success: true, path: targetPath });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `Download failed: ${msg}` }, 500);
+  }
+});
+
+// 17.8. Launch the silent installer detached and exit server
+app.post('/api/updates/apply', async (c) => {
+  if (!downloadedInstallerPath || !existsSync(downloadedInstallerPath)) {
+    return c.json({ error: 'No downloaded installer found on disk' }, 400);
+  }
+
+  try {
+    const isWin = process.platform === 'win32';
+    if (isWin) {
+      // Inno Setup silent install flags
+      console.log(`Applying update: Spawning detached installer at: ${downloadedInstallerPath}`);
+      const child = spawn(downloadedInstallerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+    }
+
+    // Gracefully exit server process in 1 second to release file locks
+    setTimeout(() => {
+      console.log('Update installer successfully spawned. Exiting Hono server process...');
+      process.exit(0);
+    }, 1000);
+
+    return c.json({ success: true, message: 'Installer spawned, app shutting down...' });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `Failed to execute update: ${msg}` }, 500);
   }
 });
 
