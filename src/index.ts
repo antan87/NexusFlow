@@ -178,9 +178,24 @@ program
   .command('ui')
   .description('Open the web GUI dashboard for NexusFlow')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
-  .action(async (options: { port?: string }) => {
+  .option('-d, --daemon', 'Run the dashboard server in the background (daemon mode)')
+  .option('--server-only', 'Start the dashboard server without opening the browser')
+  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean }) => {
     try {
       await uiCommand(options);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('open')
+  .description('Instantly open the web GUI dashboard in your default browser')
+  .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
+  .action(async (options: { port?: string }) => {
+    try {
+      await uiCommand({ ...options, daemon: true });
     } catch (error) {
       console.error(error);
       process.exit(1);
