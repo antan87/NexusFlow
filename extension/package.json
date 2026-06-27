@@ -49,6 +49,10 @@
         "title": "NexusFlow: Open Terminal GUI (TUI)"
       },
       {
+        "command": "nexusflow.createWorkspace",
+        "title": "NexusFlow: Create Workspace"
+      },
+      {
         "command": "nexusflow.syncWorkspace",
         "title": "NexusFlow: Sync Workspace"
       },

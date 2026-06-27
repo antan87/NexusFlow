@@ -107,6 +107,13 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Register Create Workspace Command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nexusflow.createWorkspace', () => {
+            runNexusFlowCommand(context, 'create');
+        })
+    );
+
     // Register Sync Workspace Command
     context.subscriptions.push(
         vscode.commands.registerCommand('nexusflow.syncWorkspace', () => {
@@ -137,11 +144,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) {
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) {
+    const isCreate = command.startsWith('create');
+    
+    if (!isCreate && (!folders || folders.length === 0)) {
         vscode.window.showErrorMessage('No active workspace folders found.');
         return;
     }
-    const cwd = folders[0].uri.fsPath;
+    
+    const cwd = (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
     const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
     
     let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
