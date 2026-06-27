@@ -1428,40 +1428,43 @@ Core Instructions:
   }
 
   return (
-    <div className="flex min-h-screen bg-[#060813] bg-gradient-to-br from-[#0c0f24] via-[#060813] to-[#04050a] text-gray-100 font-sans">
+    <div className="flex min-h-screen bg-[#05070c] text-slate-300 font-mono crt-screen">
       {/* Sidebar Navigation */}
-      <aside className="w-64 bg-slate-950/40 border-r border-slate-900 flex flex-col p-6 shrink-0 shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-xl relative z-10">
+      <aside className="w-64 bg-[#05070c] border-r border-slate-900 flex flex-col p-6 shrink-0 relative z-10 neon-border">
         <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-9 h-9 bg-gradient-to-tr from-cyan-400 via-indigo-500 to-purple-650 rounded-lg flex items-center justify-center font-extrabold text-white shadow-lg shadow-indigo-500/25 text-lg select-none">
-            N
+          <div className="w-9 h-9 bg-gradient-to-tr from-cyan-500 to-violet-600 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/10 text-lg select-none">
+            NF
           </div>
-          <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            NexusFlow
-          </span>
+          <div>
+            <span className="text-sm font-bold tracking-wider text-white">
+              NexusFlow
+            </span>
+            <span className="block text-[8px] text-cyan-400 font-semibold tracking-widest uppercase mt-0.5">COMMAND_CENTER</span>
+          </div>
         </div>
         <nav className="flex-1">
-          <ul className="flex flex-col gap-2.5">
+          <ul className="flex flex-col gap-2">
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'guide'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('guide');
                 }}
               >
-                <Sparkles size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <Sparkles size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Getting Started
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'create'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('create');
@@ -1473,51 +1476,51 @@ Core Instructions:
                   setLocalLlmEnabled(config?.localLlm?.enabled || false);
                 }}
               >
-                <PlusCircle size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <PlusCircle size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 New Workspace
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'workspaces'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('workspaces');
                   fetchWorkspaces();
                 }}
               >
-                <FolderGit2 size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <FolderGit2 size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Active Workspaces
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'settings'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('settings');
                   fetchConfig();
                 }}
               >
-                <SettingsIcon size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <SettingsIcon size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Settings
               </button>
             </li>
           </ul>
         </nav>
         <div className="pt-6 border-t border-slate-900 text-[10px] text-slate-500 text-center tracking-wider font-semibold uppercase">
-          NexusFlow Engine v{appVersion}
+          SYSTEM_UI: ONLINE v{appVersion}
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-10 overflow-y-auto max-w-7xl w-full mx-auto">
+      <main className="flex-1 p-8 overflow-y-auto max-w-7xl w-full mx-auto">
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-gray-400">
             <RefreshCw className="animate-spin text-indigo-400" size={32} />
