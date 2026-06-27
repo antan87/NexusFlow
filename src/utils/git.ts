@@ -59,3 +59,59 @@ export async function detectDefaultBranch(repoPath: string): Promise<string> {
     return 'main';
   }
 }
+
+/**
+ * Checks if the given branch name matches Git branch conventions (based on git-check-ref-format):
+ * - No spaces, backslashes, or control characters.
+ * - At least 1 character long.
+ * - Is not exactly '@'.
+ * - Does not start with a dash.
+ * - Does not start or end with a forward slash.
+ * - Does not contain consecutive dots, consecutive slashes, or '@{'.
+ * - Does not end with '.'.
+ * - Does not contain forbidden characters: ~, ^, :, ?, *, [
+ * - No component starts with a dot, ends with '.lock', or is exactly 'HEAD'.
+ *
+ * @param name - The branch name to validate.
+ * @returns `true` if the branch name is valid.
+ */
+export function isValidBranchName(name: string): boolean {
+  if (!name || name.length === 0) {
+    return false;
+  }
+  if (name === '@') {
+    return false;
+  }
+  if (name.startsWith('-')) {
+    return false;
+  }
+  const forbiddenCharsOrSpaces = /[\x00-\x20\x7F~^:?*[\\]/;
+  if (forbiddenCharsOrSpaces.test(name)) {
+    return false;
+  }
+  if (name.includes('..') || name.includes('@{') || name.includes('//')) {
+    return false;
+  }
+  if (name.startsWith('/') || name.endsWith('/')) {
+    return false;
+  }
+  if (name.endsWith('.')) {
+    return false;
+  }
+  
+  const components = name.split('/');
+  for (const component of components) {
+    if (component.startsWith('.')) {
+      return false;
+    }
+    if (component.endsWith('.lock')) {
+      return false;
+    }
+    if (component === 'HEAD') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
