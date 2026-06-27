@@ -4,6 +4,7 @@ import * as child_process from 'child_process';
 import * as path from 'path';
 
 let serverProcess: child_process.ChildProcess | null = null;
+let myStatusBarItem: vscode.StatusBarItem | null = null;
 
 function checkServerRunning(): Promise<boolean> {
     return new Promise((resolve) => {
@@ -55,6 +56,13 @@ export function activate(context: vscode.ExtensionContext) {
     
     // Start Hono server in background if not running
     startHonoServer(context);
+
+    // Initialize Status Bar Item
+    myStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    myStatusBarItem.command = 'nexusflow.openTui';
+    context.subscriptions.push(myStatusBarItem);
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateStatusBarItem));
+    updateStatusBarItem();
 
     // Register Webview Provider
     const provider = new NexusFlowSidebarProvider(context.extensionUri);
@@ -214,6 +222,13 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                     vscode.commands.executeCommand('vscode.openFolder', uri, false);
                     break;
                 }
+                case 'openFile': {
+                    const uri = vscode.Uri.file(data.filePath);
+                    vscode.workspace.openTextDocument(uri).then((doc) => {
+                        vscode.window.showTextDocument(doc);
+                    });
+                    break;
+                }
                 case 'executeTerminalCommand': {
                     let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
                     if (!terminal) {
@@ -277,3 +292,19 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 </html>`;
     }
 }
+
+function updateStatusBarItem() {
+    if (!myStatusBarItem) {
+        return;
+    }
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        const branchName = path.basename(folders[0].uri.fsPath);
+        myStatusBarItem.text = `$(git-branch) NexusFlow: ${branchName}`;
+        myStatusBarItem.tooltip = 'Click to open NexusFlow Terminal Console (TUI)';
+        myStatusBarItem.show();
+    } else {
+        myStatusBarItem.hide();
+    }
+}
+
