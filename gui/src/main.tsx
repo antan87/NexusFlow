@@ -10,6 +10,31 @@ declare global {
   }
 }
 
+async function waitForBackend(url: string, maxRetries = 25, delay = 200): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        console.log(`Backend connection established on attempt ${i + 1}`);
+        return true;
+      }
+    } catch {
+      // Ignored, retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  console.warn(`Backend connection timed out after ${maxRetries} attempts`);
+  return false;
+}
+
+function renderApp() {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
 if (typeof window !== 'undefined' && window.Neutralino) {
   window.Neutralino.init();
   window.Neutralino.events.on('windowClose', () => {
@@ -17,10 +42,12 @@ if (typeof window !== 'undefined' && window.Neutralino) {
   });
 
   (async () => {
+    const backendUrl = 'http://localhost:3000/api/config';
     try {
-      const res = await fetch('http://localhost:3000/api/config');
+      const res = await fetch(backendUrl);
       if (res.ok) {
         console.log('NexusFlow Hono backend is already running.');
+        renderApp();
         return;
       }
     } catch {
@@ -53,16 +80,15 @@ if (typeof window !== 'undefined' && window.Neutralino) {
 
         console.log('Spawning backend command:', cmd);
         await window.Neutralino.os.execCommand(cmd, { background: true });
-        console.log('Hono backend successfully spawned.');
+        console.log('Hono backend successfully spawned. Waiting for port 3000...');
+        await waitForBackend(backendUrl);
       } catch (err) {
         console.error('Failed to spawn Hono backend:', err);
+      } finally {
+        renderApp();
       }
     }
   })();
+} else {
+  renderApp();
 }
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
