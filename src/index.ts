@@ -31,6 +31,7 @@ import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
+import { desktopCommand } from './commands/desktop.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
 const program = new Command();
@@ -358,6 +359,18 @@ program
   .action(async (workspace?: string) => {
     try {
       await doctorCommand(workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('desktop')
+  .description('Launch the NexusFlow desktop application')
+  .action(async () => {
+    try {
+      await desktopCommand();
     } catch (error) {
       console.error(error);
       process.exit(1);
