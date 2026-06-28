@@ -7,6 +7,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Resolve parent project directory dynamically supporting both nested and sibling structures
+let parentDir = path.resolve(__dirname, '..');
+if (!fs.existsSync(path.join(parentDir, 'package.json')) || 
+    JSON.parse(fs.readFileSync(path.join(parentDir, 'package.json'), 'utf8')).name !== '@mrpatronz/nexusflow') {
+  parentDir = path.resolve(__dirname, '../NexusFlow');
+}
+
 const distInstallerDir = path.resolve(__dirname, 'dist-installer');
 const nodeStagingDir = path.resolve(distInstallerDir, 'node');
 const serverStagingDir = path.resolve(distInstallerDir, 'server');
@@ -138,8 +145,8 @@ async function build() {
 
     // 3. Copy Hono backend server files
     console.log('Copying Hono server dist and package.json...');
-    const serverDistSrc = path.resolve(__dirname, '../NexusFlow/dist');
-    const serverPackageJsonSrc = path.resolve(__dirname, '../NexusFlow/package.json');
+    const serverDistSrc = path.resolve(parentDir, 'dist');
+    const serverPackageJsonSrc = path.resolve(parentDir, 'package.json');
 
     if (!fs.existsSync(serverDistSrc) || !fs.existsSync(serverPackageJsonSrc)) {
       throw new Error('NexusFlow server build outputs not found. Please run "npm run build" first in NexusFlow.');
@@ -149,7 +156,7 @@ async function build() {
     fs.copyFileSync(serverPackageJsonSrc, path.resolve(serverStagingDir, 'package.json'));
 
     // Copy templates/resources
-    const serverResourcesSrc = path.resolve(__dirname, '../NexusFlow/resources');
+    const serverResourcesSrc = path.resolve(parentDir, 'resources');
     if (fs.existsSync(serverResourcesSrc)) {
       copyDir(serverResourcesSrc, path.resolve(serverStagingDir, 'resources'));
     }

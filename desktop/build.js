@@ -6,7 +6,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const parentDir = path.resolve(__dirname, '../NexusFlow');
+// Resolve parent project directory dynamically supporting both nested and sibling structures
+let parentDir = path.resolve(__dirname, '..');
+if (!fs.existsSync(path.join(parentDir, 'package.json')) || 
+    JSON.parse(fs.readFileSync(path.join(parentDir, 'package.json'), 'utf8')).name !== '@mrpatronz/nexusflow') {
+  parentDir = path.resolve(__dirname, '../NexusFlow');
+}
+
 const guiAssetsDir = path.resolve(parentDir, 'dist/gui');
 const resourcesDir = path.resolve(__dirname, 'resources');
 
