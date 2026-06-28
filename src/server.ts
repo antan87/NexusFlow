@@ -37,7 +37,7 @@ import {
   loadRunningState,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
-import { getWorkflowTemplates } from './utils/workflows.js';
+import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
 
 // Resolve static files directory
@@ -1129,6 +1129,71 @@ app.get('/api/workflows/templates', async (c) => {
   try {
     const templates = await getWorkflowTemplates();
     return c.json({ templates });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Save or update custom teamwork template
+app.post('/api/workflows/templates', async (c) => {
+  try {
+    const { name, content } = await c.req.json();
+    if (!name || !content) {
+      return c.json({ error: 'Name and content are required.' }, 400);
+    }
+    const template = await saveWorkflowTemplate(name, content);
+    return c.json({ success: true, template });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Delete custom teamwork template
+app.delete('/api/workflows/templates/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const templates = await getWorkflowTemplates();
+    const target = templates.find(t => t.id === id);
+    if (!target) {
+      return c.json({ error: 'Template not found.' }, 404);
+    }
+    if (!target.custom) {
+      return c.json({ error: 'Cannot delete built-in templates.' }, 403);
+    }
+    await deleteWorkflowTemplate(id);
+    return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Analyze teamwork template rules via Local LLM
+app.post('/api/workflows/templates/:id/analyze', async (c) => {
+  try {
+    const { content } = await c.req.json();
+    const config = await loadConfig();
+    
+    if (!config.localLlm || !config.localLlm.enabled) {
+      return c.json({
+        error: 'Local AI is disabled or not configured. Please configure it in Settings.'
+      }, 400);
+    }
+
+    const systemPrompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
+Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).`;
+
+    const responseText = await callLocalLlm(
+      config.localLlm,
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Analyze this teamwork strategy:\n\n${content}` }
+      ]
+    );
+
+    return c.json({ analysis: responseText });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
