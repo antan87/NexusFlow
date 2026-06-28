@@ -1189,16 +1189,20 @@ Evaluate its instructions, identify any ambiguities or contradictions, rate its 
 ${content}
 --- GUIDELINES END ---`;
 
-    if (selectedAssistant === 'claude') {
-      command = 'claude';
-      args = ['-p', prompt];
-    } else if (selectedAssistant === 'antigravity') {
-      command = 'agy';
+    const assistants = await detectAIAssistants();
+    const target = assistants.find(ai => ai.name === selectedAssistant);
+    
+    if (!target || !target.detected || !target.command) {
+      return c.json({
+        error: `AI assistant harness '${selectedAssistant}' is not detected or does not support command-line execution.`
+      }, 400);
+    }
+
+    command = target.command;
+    if (command === 'claude' || command === 'agy') {
       args = ['-p', prompt];
     } else {
-      return c.json({
-        error: `AI assistant harness '${selectedAssistant}' does not support command-line prompt analysis. Please choose Claude Code or Antigravity.`
-      }, 400);
+      args = [prompt];
     }
 
     const isWin = process.platform === 'win32';

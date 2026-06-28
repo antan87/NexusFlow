@@ -477,6 +477,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/ai-detect`);
       const data = await res.json();
       setAiAssistants(data);
+      const firstHarness = data.find((ai: any) => ai.detected && ai.command);
+      if (firstHarness) {
+        setSelectedInspectAssistant(firstHarness.name);
+      }
       setSelectedAI(data.filter((ai: DetectedAI) => ai.detected).map((ai: DetectedAI) => ai.name));
     } catch (e) {
       console.error(e);
@@ -2834,23 +2838,21 @@ Core Instructions:
                                 <div className="flex items-center gap-2">
                                   <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider font-sans">Harness:</span>
                                   <select
-                                    className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none"
+                                    className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none disabled:opacity-40"
                                     value={selectedInspectAssistant}
                                     onChange={(e) => setSelectedInspectAssistant(e.target.value)}
+                                    disabled={aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
                                   >
-                                    {aiAssistants.length > 0 ? (
+                                    {aiAssistants.filter(ai => ai.detected && ai.command).length > 0 ? (
                                       aiAssistants
-                                        .filter(ai => ai.name === 'antigravity' || ai.name === 'claude')
+                                        .filter(ai => ai.detected && ai.command)
                                         .map(ai => (
-                                          <option key={ai.name} value={ai.name} disabled={!ai.detected}>
-                                            {ai.displayName} {!ai.detected && '(Not Detected)'}
+                                          <option key={ai.name} value={ai.name}>
+                                            {ai.displayName}
                                           </option>
                                         ))
                                     ) : (
-                                      <>
-                                        <option value="antigravity">Antigravity</option>
-                                        <option value="claude">Claude Code</option>
-                                      </>
+                                      <option value="">No Harness Found</option>
                                     )}
                                   </select>
                                 </div>
@@ -2858,7 +2860,7 @@ Core Instructions:
                                 <button
                                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10 disabled:opacity-40"
                                   onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent, selectedInspectAssistant)}
-                                  disabled={analyzingTemplate}
+                                  disabled={analyzingTemplate || aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
                                 >
                                   {analyzingTemplate ? (
                                     <>
