@@ -1199,16 +1199,17 @@ ${content}
     }
 
     command = target.command;
-    if (command === 'claude' || command === 'agy') {
+    if (command === 'claude') {
       args = ['-p', prompt];
+    } else if (command === 'agy') {
+      args = [prompt];
     } else {
       args = [prompt];
     }
 
-    const isWin = process.platform === 'win32';
     const result = await execa(command, args, {
       input: '',
-      shell: isWin,
+      shell: false,
       reject: false
     });
 
