@@ -852,7 +852,7 @@ export default function App() {
             if (job.status === 'completed') {
               eventSource.close();
               setCreatedWorkspace({ path: job.workspacePath });
-              setActiveStep(3);
+              setActiveStep(4);
               setCreating(false);
               fetchWorkspaces();
 
