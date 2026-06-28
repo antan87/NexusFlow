@@ -20,6 +20,7 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
 - **Codebase context packing** — compress an entire multi-repo workspace into a single token-efficient XML file for web-based LLMs using Repomix
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
+- **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
 - **Service orchestration** — start, stop, and tail logs for all services in a workspace with a single command
 - **Interactive Web Dashboard** — rich dark-themed GUI for managing workspaces, viewing sessions, and streaming logs
@@ -115,6 +116,11 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow status` | Show running/stopped status and PIDs |
 | `nexusflow logs` | Tail aggregated logs from all services |
 | `nexusflow ui` | Launch the interactive Web Dashboard (port 3000) |
+| `nexusflow diff` | View changes across all sub-repositories in the active workspace |
+| `nexusflow commit` | Commit and push changes across all modified repositories |
+| `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
+| `nexusflow refresh`| Regenerate codebase maps, plan, and AI context files without rebasing |
+| `nexusflow doctor` | Run health checks and diagnostics to verify workspace integrity |
 
 ## 🤖 Supported AI Assistants
 
@@ -150,6 +156,25 @@ Access sessions via the Web Dashboard's **Sessions** tab or through the API:
 GET /api/workspace/:id/sessions
 GET /api/session/:assistant/:sessionId/transcript
 ```
+
+## 👥 Teamwork Strategy Workflows
+
+NexusFlow allows you to predefine orchestration workflows and cooperation rules that govern how multiple AI subagents coordinate when solving complex, multi-repo software engineering tasks.
+
+You can select a strategy workflow when creating a workspace (or define custom ones). Built-in templates include:
+- **Plan-Implement-Review** — A structured, multi-agent flow where an Orchestrator coordinates planning, implementation, review, and documentation.
+- **Research-Verify** — A fast iteration strategy centered on research, drafting code, and immediately running verification test suites.
+- **Solo Developer** — A simplified, lightweight direct-action workflow for minor tweaks and linear tasks.
+
+### Custom Strategies & AI Inspection
+
+You can create, edit, or delete custom strategies directly via the Web Dashboard's **Team Strategies** tab. Strategies are written in clean Markdown guidelines and stored in:
+`~/.nexusflow/workflows/`
+
+The dashboard integrates an **AI Strategy Analysis** inspector:
+1. Select an AI assistant harness installed on your machine (e.g. *Claude Code*, *Antigravity*).
+2. (Optional) Provide a comment or specific evaluation focus (e.g. *"Ensure subagent roles are distinct"*).
+3. Click **Inspect Strategy** to have the AI analyze the strategy rules, identify ambiguities/contradictions, rate its orchestration effectiveness, and generate an optimized rewritten guideline.
 
 ## 🌐 Web Dashboard
 

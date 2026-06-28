@@ -107,3 +107,8 @@ Here is a summary of the command-line interface:
 | **`nexusflow logs`** | `nexusflow logs [path] [-n <lines>]` | Tails output log files for all service processes in the workspace. |
 | **`nexusflow status`** | `nexusflow status [path]` | Displays running/stopped statuses and PIDs for each service. |
 | **`nexusflow init`** | `nexusflow init` | Creates or edits the global config file. |
+| **`nexusflow diff`** | `nexusflow diff` | Displays pending code changes across all active workspace repositories. |
+| **`nexusflow commit`** | `nexusflow commit` | Automates cross-repository git commit and branch pushes in the workspace. |
+| **`nexusflow sync`** | `nexusflow sync` | Syncs and rebases all workspace worktrees with default base branches. |
+| **`nexusflow refresh`**| `nexusflow refresh` | Regenerates architecture maps, task plans, and AI context files. |
+| **`nexusflow doctor`** | `nexusflow doctor` | Assesses and reports diagnostics of the current workspace setup. |
