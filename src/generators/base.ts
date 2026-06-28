@@ -164,6 +164,18 @@ ${parts.join('\n')}
     }
   } catch {}
 
+  // Teamwork strategy section
+  let teamworkSection = '';
+  if (feature.teamworkInstructions) {
+    teamworkSection = `
+---
+
+## Team Collaboration Strategy
+
+${feature.teamworkInstructions}
+`;
+  }
+
   const taskSection = setupDone
     ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
     : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
@@ -189,6 +201,7 @@ ${resumptionSection}
 ---
 
 ${taskSection}
+${teamworkSection}
 ---
 
 ## Guidelines

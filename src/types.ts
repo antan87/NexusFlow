@@ -150,6 +150,9 @@ export interface Feature {
 
   /** Whether the Local LLM Co-processor is active for this workspace. */
   localLlmEnabled?: boolean;
+
+  /** Custom teamwork coordination instructions for the agent team. */
+  teamworkInstructions?: string;
 }
 
 /** Runtime context for an active workspace — now includes analysis data. */

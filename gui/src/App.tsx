@@ -166,6 +166,11 @@ export default function App() {
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
 
+  // Workflow Strategy State
+  const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('plan-implement-review');
+  const [customTeamworkInstructions, setCustomTeamworkInstructions] = useState<string>('');
+
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
   const [mockCommand, setMockCommand] = useState('');
@@ -497,6 +502,24 @@ export default function App() {
     }
   };
 
+  const fetchWorkflowTemplates = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/workflows/templates`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorkflowTemplates(data.templates || []);
+        
+        // Default to plan-implement-review template
+        const pir = data.templates?.find((t: any) => t.id === 'plan-implement-review');
+        if (pir) {
+          setCustomTeamworkInstructions(pir.content);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch workflow templates:', e);
+    }
+  };
+
   const fetchWorkspaceServices = async (wsId: string, silent = false) => {
     if (!silent) setServicesLoading(true);
     try {
@@ -701,6 +724,7 @@ export default function App() {
           repos: selectedRepos,
           assistants: selectedAI,
           localLlmEnabled,
+          teamworkInstructions: customTeamworkInstructions || undefined,
           resumption: {
             testCommand,
             mockCommand: mockCommand || undefined,
@@ -889,6 +913,7 @@ export default function App() {
     fetchAIAssistants();
     fetchWorkspaces();
     fetchUpdateStatus();
+    fetchWorkflowTemplates();
 
     // Support auto-loading workspace from VS Code or URL params
     const queryParams = new URLSearchParams(window.location.search);
@@ -1802,11 +1827,11 @@ Core Instructions:
                 </header>
 
                 {/* Progress Circle bar */}
-                <div className="flex justify-between items-center max-w-xl mx-auto mb-14 relative px-4">
+                <div className="flex justify-between items-center max-w-2xl mx-auto mb-14 relative px-4">
                   <div className="absolute top-4 left-6 right-6 h-[2px] bg-gray-800 -z-10"></div>
                   <div
                     className="absolute top-4 left-6 h-[2px] bg-gradient-to-r from-cyan-400 to-indigo-500 -z-10 transition-all duration-300"
-                    style={{ width: `${(activeStep / 3) * 92}%` }}
+                    style={{ width: `${(activeStep / 4) * 95}%` }}
                   ></div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
@@ -1834,11 +1859,19 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep === 3 ? 'border-emerald-500 bg-[#0b0f19] text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 3 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 3 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
-                      4
+                      {activeStep > 3 ? <Check size={14} /> : '4'}
                     </div>
-                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 3 ? 'text-emerald-400' : 'text-gray-500'}`}>Complete</span>
+                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 3 ? 'text-white' : 'text-gray-500'}`}>Strategy</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
+                      activeStep === 4 ? 'border-emerald-500 bg-[#0b0f19] text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                    }`}>
+                      5
+                    </div>
+                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 4 ? 'text-emerald-400' : 'text-gray-500'}`}>Complete</span>
                   </div>
                 </div>
 
@@ -2201,6 +2234,158 @@ Core Instructions:
                             <ArrowLeft size={16} /> Back
                           </button>
                           <button
+                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                            onClick={() => setActiveStep(3)}
+                          >
+                            Next Step <ArrowRight size={16} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Step 3: Team Strategy */}
+                {activeStep === 3 && (
+                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                    {creating ? (
+                      <div className="flex flex-col items-center py-6">
+                        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2.5">
+                          <RefreshCw className="animate-spin text-indigo-400" size={20} />
+                          Building Workspace...
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-8">
+                          Setting up your multi-repo workspace. This will take a moment.
+                        </p>
+
+                        <div className="w-full max-w-md space-y-4">
+                          {creationSteps.map((step) => {
+                            const isPending = step.status === 'pending';
+                            const isRunning = step.status === 'running';
+                            const isCompleted = step.status === 'completed';
+                            const isFailed = step.status === 'failed';
+
+                            return (
+                              <div
+                                key={step.id}
+                                className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-300 ${
+                                  isRunning
+                                    ? 'bg-indigo-500/10 border-indigo-500/50 shadow-md shadow-indigo-500/5'
+                                    : isCompleted
+                                    ? 'bg-emerald-500/5 border-emerald-500/20 opacity-80'
+                                    : isFailed
+                                    ? 'bg-rose-500/5 border-rose-500/30'
+                                    : 'bg-gray-900/20 border-gray-800/40 opacity-40'
+                                }`}
+                              >
+                                <div className="mt-0.5">
+                                  {isRunning && (
+                                    <div className="relative flex h-5 w-5 items-center justify-center">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                      <RefreshCw className="animate-spin text-indigo-400 relative" size={16} />
+                                    </div>
+                                  )}
+                                  {isCompleted && (
+                                    <div className="h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                                      <Check size={12} />
+                                    </div>
+                                  )}
+                                  {isFailed && (
+                                    <div className="h-5 w-5 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                                      <AlertTriangle size={12} />
+                                    </div>
+                                  )}
+                                  {isPending && (
+                                    <div className="h-5 w-5 rounded-full border-2 border-gray-800 flex items-center justify-center text-gray-600">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-gray-800"></div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className={`text-sm font-bold truncate ${
+                                    isRunning ? 'text-indigo-400' : isCompleted ? 'text-emerald-400' : isFailed ? 'text-rose-400' : 'text-gray-500'
+                                  }`}>
+                                    {step.name}
+                                  </h4>
+                                  <p className="text-xs text-gray-400 mt-1 font-mono break-words leading-relaxed">
+                                    {step.message}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {creationError && (
+                          <div className="mt-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-450 rounded-xl text-xs w-full max-w-md flex flex-col gap-3">
+                            <span className="font-bold flex items-center gap-1.5">
+                              <AlertCircle size={14} className="text-rose-450" /> Build Failed
+                            </span>
+                            <span className="font-mono">{creationError}</span>
+                            <button
+                              className="w-full mt-2 py-2 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition-colors cursor-pointer"
+                              onClick={() => {
+                                setCreating(false);
+                                setCreationError(null);
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Team Collaboration Strategy</label>
+                          <p className="text-xs text-gray-500 mb-4">
+                            Select an agent cooperation pattern. This writes instructions to <code>AGENTS.md</code> directing how the team coordinates.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            {workflowTemplates.map((template) => {
+                              const isSelected = selectedWorkflowId === template.id;
+                              return (
+                                <div
+                                  key={template.id}
+                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-2 cursor-pointer hover:border-gray-700 transition-all ${
+                                    isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedWorkflowId(template.id);
+                                    setCustomTeamworkInstructions(template.content);
+                                  }}
+                                >
+                                  <span className="text-sm font-bold text-white">{template.name}</span>
+                                  <p className="text-[11px] text-gray-500 leading-relaxed font-sans">
+                                    {template.description}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Cooperation Instructions (AGENTS.md)</label>
+                          <p className="text-xs text-gray-500 mb-3 font-sans">
+                            You can customize these instructions directly. They will be saved in the workspace context.
+                          </p>
+                          <textarea
+                            className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-xs font-mono min-h-[220px] resize-y shadow-inner leading-relaxed"
+                            value={customTeamworkInstructions}
+                            onChange={(e) => setCustomTeamworkInstructions(e.target.value)}
+                            placeholder="Enter custom instructions for how the AI agents should coordinate..."
+                          />
+                        </div>
+
+                        <div className="flex justify-between">
+                          <button
+                            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                            onClick={() => setActiveStep(2)}
+                          >
+                            <ArrowLeft size={16} /> Back
+                          </button>
+                          <button
                             className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed"
                             disabled={creating}
                             onClick={handleCreateWorkspace}
@@ -2221,8 +2406,8 @@ Core Instructions:
                   </div>
                 )}
 
-                {/* Step 3: Success Screen */}
-                {activeStep === 3 && createdWorkspace && (
+                {/* Step 4: Success Screen */}
+                {activeStep === 4 && createdWorkspace && (
                   <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-10 text-center shadow-xl backdrop-blur-sm">
                     <div className="inline-flex items-center justify-center p-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mb-6">
                       <Check size={36} />

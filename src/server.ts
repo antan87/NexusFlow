@@ -37,6 +37,7 @@ import {
   loadRunningState,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
+import { getWorkflowTemplates } from './utils/workflows.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
 
 // Resolve static files directory
@@ -302,6 +303,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
       localLlmEnabled: body.localLlmEnabled,
+      teamworkInstructions: body.teamworkInstructions,
     };
     if (job) {
       job.feature = feature;
@@ -359,6 +361,7 @@ app.post('/api/workspace', async (c) => {
       repos: RepoInfo[];
       assistants: any[];
       localLlmEnabled?: boolean;
+      teamworkInstructions?: string;
       resumption?: {
         testCommand?: string;
         mockCommand?: string;
@@ -1118,6 +1121,17 @@ app.post('/api/updates/apply', async (c) => {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: `Failed to execute update: ${msg}` }, 500);
+  }
+});
+
+// 17.9. Get available workflow templates
+app.get('/api/workflows/templates', async (c) => {
+  try {
+    const templates = await getWorkflowTemplates();
+    return c.json({ templates });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
   }
 });
 
