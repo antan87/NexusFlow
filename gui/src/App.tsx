@@ -182,6 +182,7 @@ export default function App() {
   const [analyzingTemplate, setAnalyzingTemplate] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState(false);
+  const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -587,14 +588,14 @@ export default function App() {
     }
   };
 
-  const handleAnalyzeTemplate = async (id: string, content: string) => {
+  const handleAnalyzeTemplate = async (id: string, content: string, assistant: string) => {
     setAnalyzingTemplate(true);
     setAnalysisResult(null);
     try {
       const res = await fetch(`${API_BASE}/api/workflows/templates/${encodeURIComponent(id)}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, assistant }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -602,7 +603,7 @@ export default function App() {
         showToast('Strategy analysis completed successfully!', 'success');
       } else {
         const err = await res.json();
-        showToast(err.error || 'Failed to analyze template. Please make sure Local AI is enabled and configured.', 'error');
+        showToast(err.error || 'Failed to analyze template using the selected assistant harness.', 'error');
       }
     } catch (e: any) {
       showToast(e.message || 'Error analyzing template', 'error');
@@ -2821,28 +2822,55 @@ Core Instructions:
 
                         {!isEditingTemplate && selectedMgtTemplateId && (
                           <div className="border-t border-gray-800/60 pt-5 flex flex-col gap-4">
-                            <div className="flex justify-between items-center">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                               <div className="flex flex-col">
                                 <span className="text-xs font-bold text-white flex items-center gap-1.5">
                                   <Sparkles size={14} className="text-indigo-400" /> AI Strategy Analysis
                                 </span>
-                                <span className="text-[10px] text-gray-500 mt-0.5 font-sans">Let local LLM evaluate the strategy's effectiveness and structure.</span>
+                                <span className="text-[10px] text-gray-500 mt-0.5 font-sans">Select an AI assistant harness installed on your system to inspect these guidelines.</span>
                               </div>
-                              <button
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 text-indigo-400 transition-all cursor-pointer disabled:opacity-40"
-                                onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent)}
-                                disabled={analyzingTemplate}
-                              >
-                                {analyzingTemplate ? (
-                                  <>
-                                    <RefreshCw className="animate-spin" size={12} /> Analyzing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Cpu size={12} /> Inspect Strategy
-                                  </>
-                                )}
-                              </button>
+
+                              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider font-sans">Harness:</span>
+                                  <select
+                                    className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none"
+                                    value={selectedInspectAssistant}
+                                    onChange={(e) => setSelectedInspectAssistant(e.target.value)}
+                                  >
+                                    {aiAssistants.length > 0 ? (
+                                      aiAssistants
+                                        .filter(ai => ai.name === 'antigravity' || ai.name === 'claude')
+                                        .map(ai => (
+                                          <option key={ai.name} value={ai.name} disabled={!ai.detected}>
+                                            {ai.displayName} {!ai.detected && '(Not Detected)'}
+                                          </option>
+                                        ))
+                                    ) : (
+                                      <>
+                                        <option value="antigravity">Antigravity</option>
+                                        <option value="claude">Claude Code</option>
+                                      </>
+                                    )}
+                                  </select>
+                                </div>
+
+                                <button
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10 disabled:opacity-40"
+                                  onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent, selectedInspectAssistant)}
+                                  disabled={analyzingTemplate}
+                                >
+                                  {analyzingTemplate ? (
+                                    <>
+                                      <RefreshCw className="animate-spin" size={12} /> Inspecting...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Cpu size={12} /> Inspect Strategy
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
 
                             {analysisResult && (

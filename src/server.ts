@@ -1170,30 +1170,57 @@ app.delete('/api/workflows/templates/:id', async (c) => {
   }
 });
 
-// Analyze teamwork template rules via Local LLM
+// Analyze teamwork template rules via selected AI coding assistant harness
 app.post('/api/workflows/templates/:id/analyze', async (c) => {
   try {
-    const { content } = await c.req.json();
-    const config = await loadConfig();
-    
-    if (!config.localLlm || !config.localLlm.enabled) {
+    const { content, assistant } = await c.req.json();
+    if (!content) {
+      return c.json({ error: 'Content is required.' }, 400);
+    }
+
+    const selectedAssistant = assistant || 'antigravity';
+    let command = '';
+    let args: string[] = [];
+
+    const prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
+Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
+
+--- GUIDELINES START ---
+${content}
+--- GUIDELINES END ---`;
+
+    if (selectedAssistant === 'claude') {
+      command = 'claude';
+      args = ['-p', prompt];
+    } else if (selectedAssistant === 'antigravity') {
+      command = 'agy';
+      args = ['-p', prompt];
+    } else {
       return c.json({
-        error: 'Local AI is disabled or not configured. Please configure it in Settings.'
+        error: `AI assistant harness '${selectedAssistant}' does not support command-line prompt analysis. Please choose Claude Code or Antigravity.`
       }, 400);
     }
 
-    const systemPrompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
-Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).`;
+    const isWin = process.platform === 'win32';
+    const result = await execa(command, args, {
+      input: '',
+      shell: isWin,
+      reject: false
+    });
 
-    const responseText = await callLocalLlm(
-      config.localLlm,
-      [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Analyze this teamwork strategy:\n\n${content}` }
-      ]
-    );
+    if (result.exitCode !== 0) {
+      return c.json({
+        error: `AI Assistant harness execution failed (exit code ${result.exitCode}): ${result.stderr || result.stdout || 'Unknown error'}`
+      }, 500);
+    }
 
-    return c.json({ analysis: responseText });
+    // Clean potential warning lines or stdout prefixes if present
+    let cleanText = result.stdout;
+    if (cleanText.includes('Warning: no stdin data received')) {
+      cleanText = cleanText.replace(/Warning: no stdin data received in \d+s, proceeding without it\. If piping from a slow command, redirect stdin explicitly: < \/dev\/null to skip, or wait longer\.\r?\n?/, '');
+    }
+
+    return c.json({ analysis: cleanText.trim() });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
