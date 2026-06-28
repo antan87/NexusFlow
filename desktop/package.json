@@ -1,0 +1,14 @@
+{
+  "name": "nexusflow-desktop",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "build:installer": "node build-installer.js",
+    "start": "npx neu run",
+    "update": "npx neu update"
+  },
+  "devDependencies": {
+    "@neutralinojs/neu": "^11.1.0"
+  }
+}
