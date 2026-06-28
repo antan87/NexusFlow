@@ -11,9 +11,10 @@ export interface WorkflowTemplate {
   name: string;
   description: string;
   content: string;
+  custom: boolean;
 }
 
-function parseMarkdownTemplate(id: string, content: string): Omit<WorkflowTemplate, 'id'> {
+function parseMarkdownTemplate(id: string, content: string): Omit<WorkflowTemplate, 'id' | 'custom'> {
   const lines = content.split('\n');
   let name = id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   let description = '';
@@ -64,7 +65,7 @@ function parseMarkdownTemplate(id: string, content: string): Omit<WorkflowTempla
   return { name, description, content };
 }
 
-async function loadTemplatesFromDir(dirPath: string): Promise<WorkflowTemplate[]> {
+async function loadTemplatesFromDir(dirPath: string, custom: boolean): Promise<WorkflowTemplate[]> {
   const templates: WorkflowTemplate[] = [];
   try {
     const files = await fs.readdir(dirPath);
@@ -75,6 +76,7 @@ async function loadTemplatesFromDir(dirPath: string): Promise<WorkflowTemplate[]
       const parsed = parseMarkdownTemplate(id, content);
       templates.push({
         id,
+        custom,
         ...parsed,
       });
     }
@@ -97,8 +99,8 @@ export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   } catch {}
 
   const [builtInTemplates, userTemplates] = await Promise.all([
-    loadTemplatesFromDir(builtInDir),
-    loadTemplatesFromDir(userDir)
+    loadTemplatesFromDir(builtInDir, false),
+    loadTemplatesFromDir(userDir, true)
   ]);
 
   // Merge templates (user custom templates override built-in if they share the same ID)
@@ -112,4 +114,65 @@ export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   }
 
   return Array.from(templateMap.values());
+}
+
+export async function saveWorkflowTemplate(name: string, content: string, originalId?: string): Promise<WorkflowTemplate> {
+  const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
+  await fs.mkdir(userDir, { recursive: true });
+
+  // Extract name from the first H1 header (# Name) in content if present
+  let parsedName = name;
+  const lines = content.split('\n');
+  for (const line of lines) {
+    if (line.trim().startsWith('# ')) {
+      parsedName = line.trim().substring(2).trim();
+      break;
+    }
+  }
+
+  const id = parsedName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+  if (!id) {
+    throw new Error('Invalid template name');
+  }
+
+  // Ensure content starts with "# <Name>" header so it parses correctly next time
+  let fileContent = content.trim();
+  if (!fileContent.startsWith('# ')) {
+    fileContent = `# ${parsedName}\n\n${fileContent}`;
+  }
+
+  const filePath = path.join(userDir, `${id}.md`);
+  await fs.writeFile(filePath, fileContent, 'utf-8');
+
+  // If we are editing an existing custom template and the ID changed, delete the old file
+  if (originalId && originalId !== id) {
+    const oldPath = path.join(userDir, `${originalId}.md`);
+    try {
+      await fs.unlink(oldPath);
+    } catch {}
+  }
+
+  const parsed = parseMarkdownTemplate(id, fileContent);
+  return {
+    id,
+    custom: true,
+    ...parsed,
+  };
+}
+
+export async function deleteWorkflowTemplate(id: string): Promise<void> {
+  const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
+  const filePath = path.join(userDir, `${id}.md`);
+  
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if ((error as any).code !== 'ENOENT') {
+      throw error;
+    }
+  }
 }

@@ -1138,11 +1138,11 @@ app.get('/api/workflows/templates', async (c) => {
 // Save or update custom teamwork template
 app.post('/api/workflows/templates', async (c) => {
   try {
-    const { name, content } = await c.req.json();
+    const { id, name, content } = await c.req.json();
     if (!name || !content) {
       return c.json({ error: 'Name and content are required.' }, 400);
     }
-    const template = await saveWorkflowTemplate(name, content);
+    const template = await saveWorkflowTemplate(name, content, id);
     return c.json({ success: true, template });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

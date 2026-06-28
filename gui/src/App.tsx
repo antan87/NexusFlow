@@ -549,7 +549,11 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/workflows/templates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: mgtTemplateName, content: mgtTemplateContent }),
+        body: JSON.stringify({
+          id: selectedMgtTemplateId,
+          name: mgtTemplateName,
+          content: mgtTemplateContent,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
