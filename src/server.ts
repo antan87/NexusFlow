@@ -1185,6 +1185,12 @@ app.post('/api/workflows/templates/:id/analyze', async (c) => {
     const prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
 Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
 
+After your analysis, provide a fully rewritten, optimized, and complete version of the strategy guidelines incorporating all your recommendations. This rewritten version must be suitable for production orchestration.
+You MUST prefix the rewritten version with the exact delimiter line:
+=== SUGGESTED IMPROVEMENT START ===
+and suffix it with:
+=== SUGGESTED IMPROVEMENT END ===
+
 --- GUIDELINES START ---
 ${content}
 --- GUIDELINES END ---`;
@@ -1225,7 +1231,21 @@ ${content}
       cleanText = cleanText.replace(/Warning: no stdin data received in \d+s, proceeding without it\. If piping from a slow command, redirect stdin explicitly: < \/dev\/null to skip, or wait longer\.\r?\n?/, '');
     }
 
-    return c.json({ analysis: cleanText.trim() });
+    let analysis = cleanText.trim();
+    let suggestedImprovement = '';
+
+    const startDelimiter = '=== SUGGESTED IMPROVEMENT START ===';
+    const endDelimiter = '=== SUGGESTED IMPROVEMENT END ===';
+
+    const startIdx = cleanText.indexOf(startDelimiter);
+    const endIdx = cleanText.indexOf(endDelimiter);
+
+    if (startIdx !== -1 && endIdx !== -1) {
+      analysis = cleanText.substring(0, startIdx).trim();
+      suggestedImprovement = cleanText.substring(startIdx + startDelimiter.length, endIdx).trim();
+    }
+
+    return c.json({ analysis, suggestedImprovement });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

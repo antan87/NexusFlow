@@ -19,6 +19,7 @@ import {
   Cpu,
   Workflow,
   Trash2,
+  CheckCircle,
 } from 'lucide-react';
 import './App.css';
 import { WorkspaceList } from './features/workspace/WorkspaceList.js';
@@ -183,6 +184,7 @@ export default function App() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState(false);
   const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
+  const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -595,6 +597,7 @@ export default function App() {
   const handleAnalyzeTemplate = async (id: string, content: string, assistant: string) => {
     setAnalyzingTemplate(true);
     setAnalysisResult(null);
+    setSuggestedImprovement(null);
     try {
       const res = await fetch(`${API_BASE}/api/workflows/templates/${encodeURIComponent(id)}/analyze`, {
         method: 'POST',
@@ -604,6 +607,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setAnalysisResult(data.analysis);
+        setSuggestedImprovement(data.suggestedImprovement || null);
         showToast('Strategy analysis completed successfully!', 'success');
       } else {
         const err = await res.json();
@@ -2876,8 +2880,26 @@ Core Instructions:
                             </div>
 
                             {analysisResult && (
-                              <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-5 text-xs text-gray-300 leading-relaxed font-sans max-h-[300px] overflow-y-auto text-left whitespace-pre-wrap select-text">
-                                {analysisResult}
+                              <div className="flex flex-col gap-4">
+                                <div className="bg-[#1e1e38]/20 border border-indigo-500/10 rounded-xl p-5 text-xs text-gray-300 leading-relaxed font-sans max-h-[300px] overflow-y-auto text-left whitespace-pre-wrap select-text">
+                                  {analysisResult}
+                                </div>
+                                {suggestedImprovement && (
+                                  <div className="flex justify-end">
+                                    <button
+                                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-xs font-bold bg-green-600 hover:bg-green-700 text-white transition-all cursor-pointer shadow-md shadow-green-600/10"
+                                      onClick={() => {
+                                        setMgtTemplateContent(suggestedImprovement);
+                                        setIsEditingTemplate(true);
+                                        setSuggestedImprovement(null);
+                                        setAnalysisResult(null);
+                                        showToast('Suggested improvements applied! Click Save to persist changes.', 'success');
+                                      }}
+                                    >
+                                      <CheckCircle size={14} /> Apply Suggested Improvements
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
