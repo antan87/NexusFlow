@@ -9,9 +9,13 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import * as fs from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
+import * as os from 'node:os';
+import { pipeline } from 'node:stream/promises';
+import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { scanForRepos } from './core/scanner.js';
@@ -33,6 +37,7 @@ import {
   loadRunningState,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
+import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
 
 // Resolve static files directory
@@ -298,6 +303,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
       localLlmEnabled: body.localLlmEnabled,
+      teamworkInstructions: body.teamworkInstructions,
     };
     if (job) {
       job.feature = feature;
@@ -355,6 +361,7 @@ app.post('/api/workspace', async (c) => {
       repos: RepoInfo[];
       assistants: any[];
       localLlmEnabled?: boolean;
+      teamworkInstructions?: string;
       resumption?: {
         testCommand?: string;
         mockCommand?: string;
@@ -829,7 +836,7 @@ app.post('/api/workspace/:id/sync', async (c) => {
     const results = [];
 
     for (const repo of repos) {
-      const result = await rebaseRepo(repo.path, 'main');
+      const result = await rebaseRepo(repo.path, repo.defaultBranch || 'main');
       results.push({
         repoName: repo.name,
         success: result.success,
@@ -1044,6 +1051,203 @@ app.post('/api/updates/install', async (c) => {
     } else {
       return c.json({ error: `Update failed: ${result.stderr || result.stdout}` }, 500);
     }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+let downloadedInstallerPath: string | null = null;
+
+// 17.7. Download matching GitHub Release installer to temporary folder
+app.post('/api/updates/download', async (c) => {
+  try {
+    const { downloadUrl } = await c.req.json() as { downloadUrl: string };
+    if (!downloadUrl) {
+      return c.json({ error: 'Download URL is required' }, 400);
+    }
+
+    const tempDir = os.tmpdir();
+    const fileName = 'NexusFlowSetup_Update.exe';
+    const targetPath = path.join(tempDir, fileName);
+
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+
+    // Node fetch body stream download
+    const fileStream = createWriteStream(targetPath);
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+    
+    // Convert ReadableStream to Node stream
+    await pipeline(response.body as any, fileStream);
+
+    downloadedInstallerPath = targetPath;
+    return c.json({ success: true, path: targetPath });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `Download failed: ${msg}` }, 500);
+  }
+});
+
+// 17.8. Launch the silent installer detached and exit server
+app.post('/api/updates/apply', async (c) => {
+  if (!downloadedInstallerPath || !existsSync(downloadedInstallerPath)) {
+    return c.json({ error: 'No downloaded installer found on disk' }, 400);
+  }
+
+  try {
+    const isWin = process.platform === 'win32';
+    if (isWin) {
+      // Inno Setup silent install flags
+      console.log(`Applying update: Spawning detached installer at: ${downloadedInstallerPath}`);
+      const child = spawn(downloadedInstallerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+    }
+
+    // Gracefully exit server process in 1 second to release file locks
+    setTimeout(() => {
+      console.log('Update installer successfully spawned. Exiting Hono server process...');
+      process.exit(0);
+    }, 1000);
+
+    return c.json({ success: true, message: 'Installer spawned, app shutting down...' });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: `Failed to execute update: ${msg}` }, 500);
+  }
+});
+
+// 17.9. Get available workflow templates
+app.get('/api/workflows/templates', async (c) => {
+  try {
+    const templates = await getWorkflowTemplates();
+    return c.json({ templates });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Save or update custom teamwork template
+app.post('/api/workflows/templates', async (c) => {
+  try {
+    const { id, name, content } = await c.req.json();
+    if (!name || !content) {
+      return c.json({ error: 'Name and content are required.' }, 400);
+    }
+    const template = await saveWorkflowTemplate(name, content, id);
+    return c.json({ success: true, template });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Delete custom teamwork template
+app.delete('/api/workflows/templates/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const templates = await getWorkflowTemplates();
+    const target = templates.find(t => t.id === id);
+    if (!target) {
+      return c.json({ error: 'Template not found.' }, 404);
+    }
+    if (!target.custom) {
+      return c.json({ error: 'Cannot delete built-in templates.' }, 403);
+    }
+    await deleteWorkflowTemplate(id);
+    return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Analyze teamwork template rules via selected AI coding assistant harness
+app.post('/api/workflows/templates/:id/analyze', async (c) => {
+  try {
+    const { content, assistant, comment } = await c.req.json();
+    if (!content) {
+      return c.json({ error: 'Content is required.' }, 400);
+    }
+
+    const selectedAssistant = assistant || 'antigravity';
+    let command = '';
+    let args: string[] = [];
+
+    let prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
+Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
+
+After your analysis, provide a fully rewritten, optimized, and complete version of the strategy guidelines incorporating all your recommendations. This rewritten version must be suitable for production orchestration.
+You MUST prefix the rewritten version with the exact delimiter line:
+=== SUGGESTED IMPROVEMENT START ===
+and suffix it with:
+=== SUGGESTED IMPROVEMENT END ===`;
+
+    if (comment && comment.trim()) {
+      prompt += `\n\nIMPORTANT: The user has provided the following specific instruction/comment that you MUST consider and prioritize during your evaluation and when rewriting the guidelines:\n"${comment.trim()}"`;
+    }
+
+    prompt += `\n\n--- GUIDELINES START ---\n${content}\n--- GUIDELINES END ---`;
+
+    const assistants = await detectAIAssistants();
+    const target = assistants.find(ai => ai.name === selectedAssistant);
+    
+    if (!target || !target.detected || !target.command) {
+      return c.json({
+        error: `AI assistant harness '${selectedAssistant}' is not detected or does not support command-line execution.`
+      }, 400);
+    }
+
+    command = target.command;
+    if (command === 'claude') {
+      args = ['-p', prompt];
+    } else if (command === 'agy') {
+      args = [prompt];
+    } else {
+      args = [prompt];
+    }
+
+    const result = await execa(command, args, {
+      input: '',
+      shell: false,
+      reject: false
+    });
+
+    if (result.exitCode !== 0) {
+      return c.json({
+        error: `AI Assistant harness execution failed (exit code ${result.exitCode}): ${result.stderr || result.stdout || 'Unknown error'}`
+      }, 500);
+    }
+
+    // Clean potential warning lines or stdout prefixes if present
+    let cleanText = result.stdout;
+    if (cleanText.includes('Warning: no stdin data received')) {
+      cleanText = cleanText.replace(/Warning: no stdin data received in \d+s, proceeding without it\. If piping from a slow command, redirect stdin explicitly: < \/dev\/null to skip, or wait longer\.\r?\n?/, '');
+    }
+
+    let analysis = cleanText.trim();
+    let suggestedImprovement = '';
+
+    const startDelimiter = '=== SUGGESTED IMPROVEMENT START ===';
+    const endDelimiter = '=== SUGGESTED IMPROVEMENT END ===';
+
+    const startIdx = cleanText.indexOf(startDelimiter);
+    const endIdx = cleanText.indexOf(endDelimiter);
+
+    if (startIdx !== -1 && endIdx !== -1) {
+      analysis = cleanText.substring(0, startIdx).trim();
+      suggestedImprovement = cleanText.substring(startIdx + startDelimiter.length, endIdx).trim();
+    }
+
+    return c.json({ analysis, suggestedImprovement });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

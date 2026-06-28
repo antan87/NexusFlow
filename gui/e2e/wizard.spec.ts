@@ -197,6 +197,22 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       });
     });
 
+    await page.route('**/api/workflows/templates', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'plan-implement-review',
+            name: 'Plan Implement Review',
+            description: 'Lead planner designs, Code Implementer subagent writes edits, and Code Reviewer subagent tests & reviews in a loop.',
+            content: '# Plan Implement Review\n\nInstructions...',
+            custom: false
+          }
+        ]),
+      });
+    });
+
     await page.route('**/api/workspace', async (route) => {
       await route.fulfill({
         status: 200,
@@ -218,6 +234,9 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     // 6. Select a Repo
     await page.getByText('nexus-frontend', { exact: true }).click();
+    await page.locator('button:has-text("Next Step")').click();
+
+    // 6.5. Click Next Step on Assistant screen (new step)
     await page.locator('button:has-text("Next Step")').click();
 
     // 7. Click Build Workspace

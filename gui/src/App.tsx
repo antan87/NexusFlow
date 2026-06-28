@@ -17,6 +17,9 @@ import {
   Copy,
   X,
   Cpu,
+  Workflow,
+  Trash2,
+  CheckCircle,
 } from 'lucide-react';
 import './App.css';
 import { WorkspaceList } from './features/workspace/WorkspaceList.js';
@@ -93,12 +96,12 @@ interface RunningService {
   startedAt: string;
 }
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
+const API_BASE = (import.meta.env.DEV || (typeof window !== 'undefined' && (window as any).Neutralino)) ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
 
 export default function App() {
-  const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings'>('guide');
+  const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings' | 'workflows'>('guide');
 
   // Toast State
   interface Toast {
@@ -127,6 +130,8 @@ export default function App() {
     currentVersion: string;
     latestVersion: string;
     updateAvailable: boolean;
+    downloadUrl?: string | null;
+    releaseNotes?: string;
   } | null>(null);
   const [appVersion, setAppVersion] = useState('0.1.5');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
@@ -159,6 +164,28 @@ export default function App() {
   const [toolsStatus, setToolsStatus] = useState<any[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [updatingToolId, setUpdatingToolId] = useState<string | null>(null);
+
+  // App Autoupdate State
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
+
+  // Workflow Strategy State
+  const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('plan-implement-review');
+  const [customTeamworkInstructions, setCustomTeamworkInstructions] = useState<string>('');
+
+  // Workflow Strategy Management State
+  const [selectedMgtTemplateId, setSelectedMgtTemplateId] = useState<string | null>(null);
+  const [isEditingTemplate, setIsEditingTemplate] = useState(false);
+  const [mgtTemplateName, setMgtTemplateName] = useState('');
+  const [mgtTemplateContent, setMgtTemplateContent] = useState('');
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [analyzingTemplate, setAnalyzingTemplate] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [deletingTemplate, setDeletingTemplate] = useState(false);
+  const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
+  const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
+  const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -296,6 +323,55 @@ export default function App() {
     }
   };
 
+  const handleAutoUpdate = async () => {
+    if (!updateStatus || !updateStatus.downloadUrl) {
+      showToast('No update download URL found.', 'error');
+      return;
+    }
+
+    setUpdatingApp(true);
+    setUpdateStep('downloading');
+
+    try {
+      // 1. Download the installer
+      const downloadRes = await fetch(`${API_BASE}/api/updates/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downloadUrl: updateStatus.downloadUrl }),
+      });
+      const downloadData = await downloadRes.json();
+
+      if (!downloadRes.ok || !downloadData.success) {
+        throw new Error(downloadData.error || 'Failed to download installer binary');
+      }
+
+      // 2. Apply the installer
+      setUpdateStep('applying');
+      const applyRes = await fetch(`${API_BASE}/api/updates/apply`, {
+        method: 'POST',
+      });
+      const applyData = await applyRes.json();
+
+      if (!applyRes.ok || !applyData.success) {
+        throw new Error(applyData.error || 'Failed to trigger application update');
+      }
+
+      showToast('Update downloaded! App is restarting...', 'success');
+
+      // 3. Exit Neutralino client window to unlock files on disk
+      if (typeof window !== 'undefined' && (window as any).Neutralino) {
+        setTimeout(() => {
+          (window as any).Neutralino.app.exit();
+        }, 800);
+      }
+    } catch (err: any) {
+      console.error('Update failed:', err);
+      setUpdateStep('error');
+      showToast(`Update Failed: ${err.message || 'Unknown error'}`, 'error');
+      setUpdatingApp(false);
+    }
+  };
+
   const fetchLlmRecommendation = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/local-llm/recommend`);
@@ -404,6 +480,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/ai-detect`);
       const data = await res.json();
       setAiAssistants(data);
+      const firstHarness = data.find((ai: any) => ai.detected && ai.command);
+      if (firstHarness) {
+        setSelectedInspectAssistant(firstHarness.name);
+      }
       setSelectedAI(data.filter((ai: DetectedAI) => ai.detected).map((ai: DetectedAI) => ai.name));
     } catch (e) {
       console.error(e);
@@ -439,6 +519,109 @@ export default function App() {
       console.error(e);
     } finally {
       setWorkspacesLoading(false);
+    }
+  };
+
+  const fetchWorkflowTemplates = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/workflows/templates`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorkflowTemplates(data.templates || []);
+        
+        // Default to plan-implement-review template
+        const pir = data.templates?.find((t: any) => t.id === 'plan-implement-review');
+        if (pir) {
+          setCustomTeamworkInstructions(pir.content);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch workflow templates:', e);
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!mgtTemplateName.trim() || !mgtTemplateContent.trim()) {
+      showToast('Name and content are required.', 'error');
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/workflows/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedMgtTemplateId,
+          name: mgtTemplateName,
+          content: mgtTemplateContent,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast('Strategy template saved successfully!', 'success');
+        await fetchWorkflowTemplates();
+        setSelectedMgtTemplateId(data.template.id);
+        setIsEditingTemplate(false);
+        setAnalysisResult(null);
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Failed to save template', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error saving template', 'error');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this custom strategy template?')) {
+      return;
+    }
+    setDeletingTemplate(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/workflows/templates/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        showToast('Strategy template deleted successfully!', 'success');
+        await fetchWorkflowTemplates();
+        setSelectedMgtTemplateId(null);
+        setAnalysisResult(null);
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Failed to delete template', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error deleting template', 'error');
+    } finally {
+      setDeletingTemplate(false);
+    }
+  };
+
+  const handleAnalyzeTemplate = async (id: string, content: string, assistant: string) => {
+    setAnalyzingTemplate(true);
+    setAnalysisResult(null);
+    setSuggestedImprovement(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/workflows/templates/${encodeURIComponent(id)}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, assistant, comment: mgtAnalysisComment }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAnalysisResult(data.analysis);
+        setSuggestedImprovement(data.suggestedImprovement || null);
+        showToast('Strategy analysis completed successfully!', 'success');
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Failed to analyze template using the selected assistant harness.', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error analyzing template', 'error');
+    } finally {
+      setAnalyzingTemplate(false);
     }
   };
 
@@ -646,6 +829,7 @@ export default function App() {
           repos: selectedRepos,
           assistants: selectedAI,
           localLlmEnabled,
+          teamworkInstructions: customTeamworkInstructions || undefined,
           resumption: {
             testCommand,
             mockCommand: mockCommand || undefined,
@@ -669,7 +853,7 @@ export default function App() {
             if (job.status === 'completed') {
               eventSource.close();
               setCreatedWorkspace({ path: job.workspacePath });
-              setActiveStep(3);
+              setActiveStep(4);
               setCreating(false);
               fetchWorkspaces();
 
@@ -834,6 +1018,7 @@ export default function App() {
     fetchAIAssistants();
     fetchWorkspaces();
     fetchUpdateStatus();
+    fetchWorkflowTemplates();
 
     // Support auto-loading workspace from VS Code or URL params
     const queryParams = new URLSearchParams(window.location.search);
@@ -1428,40 +1613,43 @@ Core Instructions:
   }
 
   return (
-    <div className="flex min-h-screen bg-[#060813] bg-gradient-to-br from-[#0c0f24] via-[#060813] to-[#04050a] text-gray-100 font-sans">
+    <div className="flex min-h-screen bg-[#05070c] text-slate-300 font-mono crt-screen">
       {/* Sidebar Navigation */}
-      <aside className="w-64 bg-slate-950/40 border-r border-slate-900 flex flex-col p-6 shrink-0 shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-xl relative z-10">
+      <aside className="w-64 bg-[#05070c] border-r border-slate-900 flex flex-col p-6 shrink-0 relative z-10 neon-border">
         <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-9 h-9 bg-gradient-to-tr from-cyan-400 via-indigo-500 to-purple-650 rounded-lg flex items-center justify-center font-extrabold text-white shadow-lg shadow-indigo-500/25 text-lg select-none">
-            N
+          <div className="w-9 h-9 bg-gradient-to-tr from-cyan-500 to-violet-600 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/10 text-lg select-none">
+            NF
           </div>
-          <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            NexusFlow
-          </span>
+          <div>
+            <span className="text-sm font-bold tracking-wider text-white">
+              NexusFlow
+            </span>
+            <span className="block text-[8px] text-cyan-400 font-semibold tracking-widest uppercase mt-0.5">COMMAND_CENTER</span>
+          </div>
         </div>
         <nav className="flex-1">
-          <ul className="flex flex-col gap-2.5">
+          <ul className="flex flex-col gap-2">
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'guide'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('guide');
                 }}
               >
-                <Sparkles size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <Sparkles size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Getting Started
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'create'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('create');
@@ -1473,51 +1661,74 @@ Core Instructions:
                   setLocalLlmEnabled(config?.localLlm?.enabled || false);
                 }}
               >
-                <PlusCircle size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <PlusCircle size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 New Workspace
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'workspaces'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('workspaces');
                   fetchWorkspaces();
                 }}
               >
-                <FolderGit2 size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <FolderGit2 size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Active Workspaces
               </button>
             </li>
             <li>
               <button
-                className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-semibold transition-all cursor-pointer border relative overflow-hidden group ${
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
+                  view === 'workflows'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
+                }`}
+                onClick={() => {
+                  setView('workflows');
+                  fetchWorkflowTemplates();
+                  if (workflowTemplates.length > 0) {
+                    const first = workflowTemplates[0];
+                    setSelectedMgtTemplateId(first.id);
+                    setMgtTemplateName(first.name);
+                    setMgtTemplateContent(first.content);
+                  }
+                  setAnalysisResult(null);
+                }}
+              >
+                <Workflow size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
+                Team Strategies
+              </button>
+            </li>
+            <li>
+              <button
+                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
                   view === 'settings'
-                    ? 'text-white bg-indigo-500/10 border-indigo-500/25 shadow-[0_0_20px_rgba(99,102,241,0.08)] before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3.5px] before:bg-indigo-500 before:rounded-r'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40 hover:-translate-x-0.5'
+                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
                 }`}
                 onClick={() => {
                   setView('settings');
                   fetchConfig();
                 }}
               >
-                <SettingsIcon size={18} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                <SettingsIcon size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                 Settings
               </button>
             </li>
           </ul>
         </nav>
         <div className="pt-6 border-t border-slate-900 text-[10px] text-slate-500 text-center tracking-wider font-semibold uppercase">
-          NexusFlow Engine v{appVersion}
+          SYSTEM_UI: ONLINE v{appVersion}
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-10 overflow-y-auto max-w-7xl w-full mx-auto">
+      <main className="flex-1 p-8 overflow-y-auto max-w-7xl w-full mx-auto">
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-gray-400">
             <RefreshCw className="animate-spin text-indigo-400" size={32} />
@@ -1530,24 +1741,46 @@ Core Instructions:
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                    <Sparkles size={20} />
+                    {updatingApp ? (
+                      <RefreshCw size={20} className="animate-spin text-amber-400" />
+                    ) : (
+                      <Sparkles size={20} />
+                    )}
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-amber-300">
-                      A new version of NexusFlow is available!
+                      {updatingApp ? (
+                        updateStep === 'downloading' ? 'Downloading Update...' : 'Applying Update...'
+                      ) : (
+                        'A new version of NexusFlow is available!'
+                      )}
                     </h4>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Upgrade from v{updateStatus.currentVersion} to v{updateStatus.latestVersion} to get the latest features and bug fixes.
+                      {updatingApp ? (
+                        updateStep === 'downloading' ? 'Fetching installer from GitHub Releases...' : 'Closing app and launching silent installer setup...'
+                      ) : (
+                        `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`
+                      )}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
+                  {typeof window !== 'undefined' && (window as any).Neutralino && updateStatus.downloadUrl && (
+                    <button
+                      onClick={handleAutoUpdate}
+                      disabled={updatingApp}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-lg transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                    >
+                      {updatingApp ? 'Installing...' : 'Install Automatically'}
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText('npm install -g @mrpatronz/nexusflow');
                       showToast('Update command copied to clipboard!', 'success');
                     }}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 cursor-pointer flex items-center gap-1.5"
+                    disabled={updatingApp}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                   >
                     Copy Update Command
                   </button>
@@ -1722,11 +1955,11 @@ Core Instructions:
                 </header>
 
                 {/* Progress Circle bar */}
-                <div className="flex justify-between items-center max-w-xl mx-auto mb-14 relative px-4">
+                <div className="flex justify-between items-center max-w-2xl mx-auto mb-14 relative px-4">
                   <div className="absolute top-4 left-6 right-6 h-[2px] bg-gray-800 -z-10"></div>
                   <div
                     className="absolute top-4 left-6 h-[2px] bg-gradient-to-r from-cyan-400 to-indigo-500 -z-10 transition-all duration-300"
-                    style={{ width: `${(activeStep / 3) * 92}%` }}
+                    style={{ width: `${(activeStep / 4) * 95}%` }}
                   ></div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
@@ -1754,11 +1987,19 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep === 3 ? 'border-emerald-500 bg-[#0b0f19] text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 3 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 3 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
-                      4
+                      {activeStep > 3 ? <Check size={14} /> : '4'}
                     </div>
-                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 3 ? 'text-emerald-400' : 'text-gray-500'}`}>Complete</span>
+                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 3 ? 'text-white' : 'text-gray-500'}`}>Strategy</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
+                      activeStep === 4 ? 'border-emerald-500 bg-[#0b0f19] text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                    }`}>
+                      5
+                    </div>
+                    <span className={`text-[11px] font-semibold tracking-wide uppercase ${activeStep === 4 ? 'text-emerald-400' : 'text-gray-500'}`}>Complete</span>
                   </div>
                 </div>
 
@@ -2121,6 +2362,158 @@ Core Instructions:
                             <ArrowLeft size={16} /> Back
                           </button>
                           <button
+                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                            onClick={() => setActiveStep(3)}
+                          >
+                            Next Step <ArrowRight size={16} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Step 3: Team Strategy */}
+                {activeStep === 3 && (
+                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                    {creating ? (
+                      <div className="flex flex-col items-center py-6">
+                        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2.5">
+                          <RefreshCw className="animate-spin text-indigo-400" size={20} />
+                          Building Workspace...
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-8">
+                          Setting up your multi-repo workspace. This will take a moment.
+                        </p>
+
+                        <div className="w-full max-w-md space-y-4">
+                          {creationSteps.map((step) => {
+                            const isPending = step.status === 'pending';
+                            const isRunning = step.status === 'running';
+                            const isCompleted = step.status === 'completed';
+                            const isFailed = step.status === 'failed';
+
+                            return (
+                              <div
+                                key={step.id}
+                                className={`flex items-start gap-4 p-4 rounded-xl border transition-all duration-300 ${
+                                  isRunning
+                                    ? 'bg-indigo-500/10 border-indigo-500/50 shadow-md shadow-indigo-500/5'
+                                    : isCompleted
+                                    ? 'bg-emerald-500/5 border-emerald-500/20 opacity-80'
+                                    : isFailed
+                                    ? 'bg-rose-500/5 border-rose-500/30'
+                                    : 'bg-gray-900/20 border-gray-800/40 opacity-40'
+                                }`}
+                              >
+                                <div className="mt-0.5">
+                                  {isRunning && (
+                                    <div className="relative flex h-5 w-5 items-center justify-center">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                      <RefreshCw className="animate-spin text-indigo-400 relative" size={16} />
+                                    </div>
+                                  )}
+                                  {isCompleted && (
+                                    <div className="h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                                      <Check size={12} />
+                                    </div>
+                                  )}
+                                  {isFailed && (
+                                    <div className="h-5 w-5 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                                      <AlertTriangle size={12} />
+                                    </div>
+                                  )}
+                                  {isPending && (
+                                    <div className="h-5 w-5 rounded-full border-2 border-gray-800 flex items-center justify-center text-gray-600">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-gray-800"></div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className={`text-sm font-bold truncate ${
+                                    isRunning ? 'text-indigo-400' : isCompleted ? 'text-emerald-400' : isFailed ? 'text-rose-400' : 'text-gray-500'
+                                  }`}>
+                                    {step.name}
+                                  </h4>
+                                  <p className="text-xs text-gray-400 mt-1 font-mono break-words leading-relaxed">
+                                    {step.message}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {creationError && (
+                          <div className="mt-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-450 rounded-xl text-xs w-full max-w-md flex flex-col gap-3">
+                            <span className="font-bold flex items-center gap-1.5">
+                              <AlertCircle size={14} className="text-rose-450" /> Build Failed
+                            </span>
+                            <span className="font-mono">{creationError}</span>
+                            <button
+                              className="w-full mt-2 py-2 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition-colors cursor-pointer"
+                              onClick={() => {
+                                setCreating(false);
+                                setCreationError(null);
+                              }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Team Collaboration Strategy</label>
+                          <p className="text-xs text-gray-500 mb-4">
+                            Select an agent cooperation pattern. This writes instructions to <code>AGENTS.md</code> directing how the team coordinates.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            {workflowTemplates.map((template) => {
+                              const isSelected = selectedWorkflowId === template.id;
+                              return (
+                                <div
+                                  key={template.id}
+                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-2 cursor-pointer hover:border-gray-700 transition-all ${
+                                    isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedWorkflowId(template.id);
+                                    setCustomTeamworkInstructions(template.content);
+                                  }}
+                                >
+                                  <span className="text-sm font-bold text-white">{template.name}</span>
+                                  <p className="text-[11px] text-gray-500 leading-relaxed font-sans">
+                                    {template.description}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="mb-8">
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Cooperation Instructions (AGENTS.md)</label>
+                          <p className="text-xs text-gray-500 mb-3 font-sans">
+                            You can customize these instructions directly. They will be saved in the workspace context.
+                          </p>
+                          <textarea
+                            className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-xs font-mono min-h-[220px] resize-y shadow-inner leading-relaxed"
+                            value={customTeamworkInstructions}
+                            onChange={(e) => setCustomTeamworkInstructions(e.target.value)}
+                            placeholder="Enter custom instructions for how the AI agents should coordinate..."
+                          />
+                        </div>
+
+                        <div className="flex justify-between">
+                          <button
+                            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                            onClick={() => setActiveStep(2)}
+                          >
+                            <ArrowLeft size={16} /> Back
+                          </button>
+                          <button
                             className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-lg shadow-indigo-500/20 transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-40 disabled:cursor-not-allowed"
                             disabled={creating}
                             onClick={handleCreateWorkspace}
@@ -2141,8 +2534,8 @@ Core Instructions:
                   </div>
                 )}
 
-                {/* Step 3: Success Screen */}
-                {activeStep === 3 && createdWorkspace && (
+                {/* Step 4: Success Screen */}
+                {activeStep === 4 && createdWorkspace && (
                   <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-10 text-center shadow-xl backdrop-blur-sm">
                     <div className="inline-flex items-center justify-center p-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mb-6">
                       <Check size={36} />
@@ -2250,6 +2643,298 @@ Core Instructions:
                 subTab={subTab}
                 setSubTab={setSubTab}
               />
+            )}
+
+            {/* View: Workflows View */}
+            {view === 'workflows' && (
+              <div className="max-w-6xl mx-auto">
+                <header className="mb-8">
+                  <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2">Team Collaboration Strategies</h1>
+                  <p className="text-sm text-gray-400 font-sans">Predefine and review custom teamwork guidelines injected into workspaces' AGENTS.md files.</p>
+                </header>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 text-left">
+                  {/* Left sidebar: Strategy List */}
+                  <div className="lg:col-span-4 flex flex-col gap-4">
+                    <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-5 shadow-md flex flex-col gap-4">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Strategies</h3>
+                        <button
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10"
+                          onClick={() => {
+                            setIsEditingTemplate(true);
+                            setMgtTemplateName('New Strategy');
+                            setMgtTemplateContent('# New Strategy\n\nWrite custom teamwork rules here for subagent orchestration...');
+                            setSelectedMgtTemplateId(null);
+                            setAnalysisResult(null);
+                          }}
+                        >
+                          <PlusCircle size={12} /> Add New
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col gap-2 max-h-[480px] overflow-y-auto pr-1">
+                        {workflowTemplates.map((template) => {
+                          const isSelected = selectedMgtTemplateId === template.id;
+                          return (
+                            <div
+                              key={template.id}
+                              className={`p-3 rounded-lg border text-left cursor-pointer transition-all flex flex-col gap-1.5 ${
+                                isSelected
+                                  ? 'border-indigo-500 bg-indigo-500/5'
+                                  : 'border-gray-800/80 bg-gray-900/10 hover:border-gray-700/60 hover:bg-gray-800/10'
+                              }`}
+                              onClick={() => {
+                                setSelectedMgtTemplateId(template.id);
+                                setIsEditingTemplate(false);
+                                setMgtTemplateName(template.name);
+                                setMgtTemplateContent(template.content);
+                                setAnalysisResult(null);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-xs font-bold ${isSelected ? 'text-indigo-400' : 'text-white'}`}>
+                                  {template.name}
+                                </span>
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider font-semibold border ${
+                                    template.custom
+                                      ? 'text-cyan-400 border-cyan-500/20 bg-cyan-500/5'
+                                      : 'text-gray-400 border-gray-800 bg-gray-800/20'
+                                  }`}
+                                >
+                                  {template.custom ? 'Custom' : 'Built-in'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-gray-500 line-clamp-2 leading-relaxed font-sans">
+                                {template.description}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right side: Strategy Detail / Edit Panel */}
+                  <div className="lg:col-span-8 flex flex-col gap-6">
+                    {(selectedMgtTemplateId || isEditingTemplate) ? (
+                      <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-6 shadow-md flex flex-col gap-5">
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex-1">
+                            {isEditingTemplate ? (
+                              <div className="flex flex-col gap-2">
+                                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Strategy Name</label>
+                                <input
+                                  type="text"
+                                  className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white text-sm outline-none transition-all"
+                                  value={mgtTemplateName}
+                                  onChange={(e) => setMgtTemplateName(e.target.value)}
+                                  placeholder="e.g. Test-Driven Development"
+                                />
+                              </div>
+                            ) : (
+                              <div>
+                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                  {mgtTemplateName}
+                                  {workflowTemplates.find(t => t.id === selectedMgtTemplateId)?.custom && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 uppercase">
+                                      Custom Template
+                                    </span>
+                                  )}
+                                </h2>
+                                <p className="text-xs text-gray-500 mt-1 font-sans">
+                                  {workflowTemplates.find(t => t.id === selectedMgtTemplateId)?.description || 'Custom strategy template.'}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex gap-2">
+                            {isEditingTemplate ? (
+                              <>
+                                <button
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                                  onClick={() => {
+                                    if (selectedMgtTemplateId) {
+                                      const original = workflowTemplates.find(t => t.id === selectedMgtTemplateId);
+                                      if (original) {
+                                        setMgtTemplateName(original.name);
+                                        setMgtTemplateContent(original.content);
+                                      }
+                                      setIsEditingTemplate(false);
+                                    } else {
+                                      setIsEditingTemplate(false);
+                                      if (workflowTemplates.length > 0) {
+                                        const first = workflowTemplates[0];
+                                        setSelectedMgtTemplateId(first.id);
+                                        setMgtTemplateName(first.name);
+                                        setMgtTemplateContent(first.content);
+                                      }
+                                    }
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10"
+                                  onClick={handleSaveTemplate}
+                                  disabled={savingTemplate}
+                                >
+                                  {savingTemplate ? 'Saving...' : 'Save Strategy'}
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {workflowTemplates.find(t => t.id === selectedMgtTemplateId)?.custom && (
+                                  <>
+                                    <button
+                                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                                      onClick={() => setIsEditingTemplate(true)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 text-rose-400 transition-all cursor-pointer"
+                                      onClick={() => handleDeleteTemplate(selectedMgtTemplateId!)}
+                                      disabled={deletingTemplate}
+                                    >
+                                      <Trash2 size={12} /> Delete
+                                    </button>
+                                  </>
+                                )}
+                                {!workflowTemplates.find(t => t.id === selectedMgtTemplateId)?.custom && (
+                                  <button
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
+                                    onClick={() => {
+                                      setIsEditingTemplate(true);
+                                      setMgtTemplateName(`${mgtTemplateName} Copy`);
+                                      setMgtTemplateContent(mgtTemplateContent);
+                                      setSelectedMgtTemplateId(null);
+                                      setAnalysisResult(null);
+                                    }}
+                                  >
+                                    Duplicate & Customize
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Guidelines Markdown</label>
+                          <textarea
+                            className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-xs font-mono min-h-[250px] resize-y shadow-inner leading-relaxed"
+                            value={mgtTemplateContent}
+                            onChange={(e) => setMgtTemplateContent(e.target.value)}
+                            disabled={!isEditingTemplate}
+                            placeholder="Write cooperation guidelines in Markdown..."
+                          />
+                        </div>
+
+                        {!isEditingTemplate && selectedMgtTemplateId && (
+                          <div className="border-t border-gray-800/60 pt-5 flex flex-col gap-4">
+                            <div className="flex flex-col gap-4">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                    <Sparkles size={14} className="text-indigo-400" /> AI Strategy Analysis
+                                  </span>
+                                  <span className="text-[10px] text-gray-500 mt-0.5 font-sans">Select an AI assistant harness installed on your system to inspect these guidelines.</span>
+                                </div>
+
+                                <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider font-sans">Harness:</span>
+                                    <select
+                                      className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none disabled:opacity-40"
+                                      value={selectedInspectAssistant}
+                                      onChange={(e) => setSelectedInspectAssistant(e.target.value)}
+                                      disabled={aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
+                                    >
+                                      {aiAssistants.filter(ai => ai.detected && ai.command).length > 0 ? (
+                                        aiAssistants
+                                          .filter(ai => ai.detected && ai.command)
+                                          .map(ai => (
+                                            <option key={ai.name} value={ai.name}>
+                                              {ai.displayName}
+                                            </option>
+                                          ))
+                                      ) : (
+                                        <option value="">No Harness Found</option>
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  <button
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10 disabled:opacity-40"
+                                    onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent, selectedInspectAssistant)}
+                                    disabled={analyzingTemplate || aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
+                                  >
+                                    {analyzingTemplate ? (
+                                      <>
+                                        <RefreshCw className="animate-spin" size={12} /> Inspecting...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Cpu size={12} /> Inspect Strategy
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider text-left">Evaluation Focus / Instructions (Optional)</label>
+                                <textarea
+                                  className="w-full bg-[#111827]/40 border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs min-h-[60px] resize-y leading-relaxed font-sans"
+                                  value={mgtAnalysisComment}
+                                  onChange={(e) => setMgtAnalysisComment(e.target.value)}
+                                  placeholder="e.g. Focus on checking if timeouts are handled well, check subagent roles coordination..."
+                                  disabled={analyzingTemplate}
+                                />
+                              </div>
+                            </div>
+
+                            {analysisResult && (
+                              <div className="flex flex-col gap-4">
+                                <div className="bg-[#1e1e38]/20 border border-indigo-500/10 rounded-xl p-5 text-xs text-gray-300 leading-relaxed font-sans max-h-[300px] overflow-y-auto text-left whitespace-pre-wrap select-text">
+                                  {analysisResult}
+                                </div>
+                                {suggestedImprovement && (
+                                  <div className="flex justify-end">
+                                    <button
+                                      className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-xs font-bold bg-green-600 hover:bg-green-700 text-white transition-all cursor-pointer shadow-md shadow-green-600/10"
+                                      onClick={() => {
+                                        setMgtTemplateContent(suggestedImprovement);
+                                        setIsEditingTemplate(true);
+                                        setSuggestedImprovement(null);
+                                        setAnalysisResult(null);
+                                        showToast('Suggested improvements applied! Click Save to persist changes.', 'success');
+                                      }}
+                                    >
+                                      <CheckCircle size={14} /> Apply Suggested Improvements
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-[400px] bg-[#111827]/10 border border-gray-800/60 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-6">
+                        <FolderOpen size={36} className="text-gray-600 mb-3" />
+                        <span className="text-sm font-semibold text-gray-400">No strategy template selected</span>
+                        <p className="text-xs text-gray-500 mt-1 max-w-sm font-sans">
+                          Select a template from the list to view, edit, or analyze it, or add a new custom teamwork workflow template.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* View 3: Settings View */}

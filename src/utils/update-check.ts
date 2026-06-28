@@ -14,6 +14,21 @@ export interface UpdateStatus {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
+  downloadUrl?: string | null;
+  releaseNotes?: string;
+}
+
+interface GitHubAsset {
+  name: string;
+  browser_download_url: string;
+  size: number;
+}
+
+interface GitHubRelease {
+  tag_name: string;
+  html_url: string;
+  body: string;
+  assets: GitHubAsset[];
 }
 
 /**
@@ -43,7 +58,7 @@ export function getCurrentVersion(): string {
 }
 
 /**
- * Checks for updates from the NPM registry.
+ * Checks for updates from the GitHub Releases API (antan87/NexusFlow).
  * Employs a 24-hour cache unless forced.
  *
  * @param force - If true, ignores the 24-hour cache and fetches immediately.
@@ -63,31 +78,48 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
       currentVersion,
       latestVersion: config.latestVersion,
       updateAvailable: isNewerVersion(currentVersion, config.latestVersion),
+      downloadUrl: config.latestDownloadUrl,
+      releaseNotes: config.latestReleaseNotes,
     };
   }
 
   try {
-    // Query NPM registry latest endpoint
-    const response = await fetch('https://registry.npmjs.org/@mrpatronz/nexusflow/latest', {
-      signal: AbortSignal.timeout(3000), // 3-second timeout to prevent blocking CLI/server
+    const response = await fetch('https://api.github.com/repos/antan87/NexusFlow/releases/latest', {
+      headers: { 'User-Agent': 'NexusFlow-Updater' },
+      signal: AbortSignal.timeout(4000),
     });
 
     if (!response.ok) {
-      throw new Error(`NPM registry returned status ${response.status}`);
+      throw new Error(`GitHub API returned status ${response.status}`);
     }
 
-    const data = await response.json() as { version: string };
-    const latestVersion = data.version;
+    const data = await response.json() as GitHubRelease;
+    const latestVersion = data.tag_name.replace(/^v/, '');
+    
+    // Resolve platform-matching asset (e.g. Setup.exe for Windows)
+    let downloadUrl: string | null = null;
+    const targetAsset = data.assets.find(asset => {
+      return asset.name.endsWith('.exe') && asset.name.toLowerCase().includes('setup');
+    });
+    if (targetAsset) {
+      downloadUrl = targetAsset.browser_download_url;
+    }
+
+    const releaseNotes = data.body || '';
 
     // Cache results
     config.lastUpdateCheck = new Date().toISOString();
     config.latestVersion = latestVersion;
+    config.latestDownloadUrl = downloadUrl;
+    config.latestReleaseNotes = releaseNotes;
     await saveConfig(config);
 
     return {
       currentVersion,
       latestVersion,
       updateAvailable: isNewerVersion(currentVersion, latestVersion),
+      downloadUrl,
+      releaseNotes,
     };
   } catch {
     // Fallback: If offline or check fails, return cached version status if available
@@ -96,6 +128,8 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
         currentVersion,
         latestVersion: config.latestVersion,
         updateAvailable: isNewerVersion(currentVersion, config.latestVersion),
+        downloadUrl: config.latestDownloadUrl,
+        releaseNotes: config.latestReleaseNotes,
       };
     }
     return null;

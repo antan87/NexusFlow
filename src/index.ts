@@ -20,6 +20,7 @@ import { stopCommand } from './commands/stop.js';
 import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
 import { uiCommand } from './commands/ui.js';
+import { tuiCommand } from './commands/tui.js';
 import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
@@ -30,6 +31,7 @@ import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
+import { desktopCommand } from './commands/desktop.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
 const program = new Command();
@@ -177,9 +179,39 @@ program
   .command('ui')
   .description('Open the web GUI dashboard for NexusFlow')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
-  .action(async (options: { port?: string }) => {
+  .option('-d, --daemon', 'Run the dashboard server in the background (daemon mode)')
+  .option('--server-only', 'Start the dashboard server without opening the browser')
+  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean }) => {
     try {
       await uiCommand(options);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('dashboard')
+  .alias('dash')
+  .description('Instantly open the web GUI dashboard in your default browser')
+  .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
+  .action(async (options: { port?: string }) => {
+    try {
+      await uiCommand({ ...options, daemon: true });
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+
+program
+  .command('tui')
+  .description('Open the interactive terminal GUI (TUI) dashboard')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(async (workspace?: string) => {
+    try {
+      await tuiCommand({ workspace });
     } catch (error) {
       console.error(error);
       process.exit(1);
@@ -329,6 +361,18 @@ program
   .action(async (workspace?: string) => {
     try {
       await doctorCommand(workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('desktop')
+  .description('Launch the NexusFlow desktop application')
+  .action(async () => {
+    try {
+      await desktopCommand();
     } catch (error) {
       console.error(error);
       process.exit(1);

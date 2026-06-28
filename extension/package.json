@@ -42,7 +42,45 @@
     "commands": [
       {
         "command": "nexusflow.openDashboard",
-        "title": "NexusFlow: Open Dashboard"
+        "title": "NexusFlow: Open Sidebar Dashboard"
+      },
+      {
+        "command": "nexusflow.openBrowserDashboard",
+        "title": "NexusFlow: Open Web Dashboard (Browser)"
+      },
+      {
+        "command": "nexusflow.openTui",
+        "title": "NexusFlow: Open Terminal GUI (TUI)"
+      },
+      {
+        "command": "nexusflow.createWorkspace",
+        "title": "NexusFlow: Create Workspace"
+      },
+      {
+        "command": "nexusflow.syncWorkspace",
+        "title": "NexusFlow: Sync Workspace"
+      },
+      {
+        "command": "nexusflow.runDoctor",
+        "title": "NexusFlow: Run Doctor Diagnostics"
+      },
+      {
+        "command": "nexusflow.commitWorkspace",
+        "title": "NexusFlow: Commit Workspace Changes"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "nexusflow.openTui",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "nexusflow.syncWorkspace",
+        "key": "ctrl+alt+s",
+        "mac": "cmd+alt+s",
+        "when": "editorTextFocus"
       }
     ]
   },

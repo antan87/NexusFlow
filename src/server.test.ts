@@ -10,6 +10,8 @@ import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as packer from './core/packer.js';
+import * as workflows from './utils/workflows.js';
+import * as detectAi from './utils/detect-ai.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -22,6 +24,10 @@ vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
 vi.mock('./core/packer.js');
+vi.mock('./utils/workflows.js');
+vi.mock('./utils/detect-ai.js', () => ({
+  detectAIAssistants: vi.fn().mockResolvedValue([])
+}));
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -459,6 +465,91 @@ describe('Server API Endpoints Unit Tests', () => {
       const text = await streamResponse.text();
       expect(text).toContain('"status":"completed"');
       expect(text).toContain('"progress":100');
+    });
+  });
+
+  describe('Workflows Templates API', () => {
+    it('GET /api/workflows/templates should return list of templates', async () => {
+      vi.spyOn(workflows, 'getWorkflowTemplates').mockResolvedValue([
+        { id: 'test-id', name: 'Test Name', description: 'Test Desc', content: 'Test Content', custom: false }
+      ]);
+
+      const response = await app.request('/api/workflows/templates');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data).toEqual({
+        templates: [
+          { id: 'test-id', name: 'Test Name', description: 'Test Desc', content: 'Test Content', custom: false }
+        ]
+      });
+    });
+
+    it('POST /api/workflows/templates should create or update template', async () => {
+      vi.spyOn(workflows, 'saveWorkflowTemplate').mockResolvedValue({
+        id: 'test-id',
+        name: 'Test Name',
+        description: 'Test Desc',
+        content: 'Test Content',
+        custom: true
+      });
+
+      const response = await app.request('/api/workflows/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'old-id', name: 'Test Name', content: 'Test Content' })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.template.id).toBe('test-id');
+      expect(workflows.saveWorkflowTemplate).toHaveBeenCalledWith('Test Name', 'Test Content', 'old-id');
+    });
+
+    it('DELETE /api/workflows/templates/:id should delete template', async () => {
+      vi.spyOn(workflows, 'getWorkflowTemplates').mockResolvedValue([
+        { id: 'test-id', name: 'Test Name', description: 'Test Desc', content: 'Test Content', custom: true }
+      ]);
+      vi.spyOn(workflows, 'deleteWorkflowTemplate').mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workflows/templates/test-id', {
+        method: 'DELETE'
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(workflows.deleteWorkflowTemplate).toHaveBeenCalledWith('test-id');
+    });
+
+    it('POST /api/workflows/templates/:id/analyze should run inspection with comment', async () => {
+      vi.mocked(detectAi.detectAIAssistants).mockResolvedValue([
+        { name: 'antigravity', displayName: 'Antigravity', detected: true, command: 'agy' }
+      ]);
+      
+      vi.mocked(execa).mockResolvedValue({
+        exitCode: 0,
+        stdout: 'Review result: Success\n=== SUGGESTED IMPROVEMENT START ===\n# Refined Strategy\n=== SUGGESTED IMPROVEMENT END ==='
+      } as any);
+
+      const response = await app.request('/api/workflows/templates/test-id/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: 'My Strategy guidelines',
+          assistant: 'antigravity',
+          comment: 'Check for timeouts'
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.analysis).toContain('Review result: Success');
+      expect(data.suggestedImprovement).toBe('# Refined Strategy');
+      expect(execa).toHaveBeenCalled();
+      
+      const calledArgs = vi.mocked(execa).mock.calls[0][1];
+      expect(JSON.stringify(calledArgs)).toContain('Check for timeouts');
     });
   });
 });

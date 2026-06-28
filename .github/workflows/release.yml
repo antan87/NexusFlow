@@ -45,7 +45,7 @@ jobs:
 
   publish:
     needs: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout Repository
@@ -66,11 +66,21 @@ jobs:
       - name: Install Extension Dependencies
         run: npm ci --prefix extension
 
+      - name: Install Desktop Dependencies
+        run: npm ci --prefix desktop
+
       - name: Build Project
         run: npm run build
 
+      - name: Build Desktop GUI & Binaries
+        run: npm run build --prefix desktop
+
+      - name: Build Standalone Installer
+        run: npm run build:installer --prefix desktop
+
       - name: Check version and NPM
         id: check-version
+        shell: bash
         run: |
           CURRENT_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('./package.json', 'utf8')).version)")
           echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
@@ -98,3 +108,5 @@ jobs:
           name: Release v${{ steps.check-version.outputs.version }}
           generate_release_notes: true
           target_commitish: ${{ github.sha }}
+          files: |
+            desktop/dist-installer-output/NexusFlowSetup.exe

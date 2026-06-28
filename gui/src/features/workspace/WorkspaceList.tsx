@@ -96,7 +96,7 @@ const parseInlineStyles = (text: string): React.ReactNode => {
       return <strong key={index} className="font-bold text-gray-200">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={index} className="px-1.5 py-0.5 bg-gray-900 border border-gray-800 text-indigo-300 rounded font-mono text-[10px]">{part.slice(1, -1)}</code>;
+      return <code key={index} className="px-1.5 py-0.5 bg-gray-900 border border-gray-800 text-cyan-400 rounded font-mono text-[10px]">{part.slice(1, -1)}</code>;
     }
     if (part.startsWith('*') && part.endsWith('*')) {
       return <em key={index} className="italic text-gray-300">{part.slice(1, -1)}</em>;
@@ -263,13 +263,13 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
           onClick={fetchWorkspaces}
           disabled={workspacesLoading}
         >
-          <RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-indigo-400' : ''} /> Refresh
+          <RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-cyan-400' : ''} /> Refresh
         </button>
       </header>
 
       {workspacesLoading ? (
         <div className="flex flex-col items-center py-40 gap-4 text-gray-400">
-          <RefreshCw className="animate-spin text-indigo-400" size={32} />
+          <RefreshCw className="animate-spin text-cyan-400" size={32} />
           <span className="text-sm">Fetching workspace details...</span>
         </div>
       ) : workspaces.length === 0 ? (
@@ -285,10 +285,10 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
           {workspaces.map((ws) => {
             const isExpanded = activeWsId === ws.branchName;
             return (
-              <div key={ws.id} className="glass-card p-8 rounded-2xl shadow-xl hover:shadow-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-indigo-500/10 via-purple-500/10 to-transparent">
+              <div key={ws.id} className="glass-card p-8 rounded-2xl shadow-xl hover:shadow-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-cyan-500/10 via-violet-500/10 to-transparent">
                 <div className="flex justify-between items-start gap-4 mb-4">
                   <div>
-                    <h3 className="text-lg font-bold text-white hover:text-indigo-400 transition-colors">{ws.branchName}</h3>
+                    <h3 className="text-lg font-bold text-white hover:text-cyan-400 transition-colors">{ws.branchName}</h3>
                     <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
                       <span>Created: {new Date(ws.createdAt).toLocaleDateString()}</span>
                       <span className="h-1 w-1 rounded-full bg-slate-850"></span>
@@ -317,7 +317,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <ExternalLink size={12} /> Open
                     </button>
                     <button
-                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-md shadow-indigo-500/10"
+                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-md shadow-cyan-650/10"
                       onClick={() => {
                         if (isExpanded) {
                           setActiveWsId(null);
@@ -339,7 +339,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                   </div>
                 </div>
 
-                <div className="text-xs text-slate-350 bg-slate-950/60 border-l-2 border-indigo-500/80 rounded-r-xl px-5 py-3.5 mb-5 font-normal leading-relaxed relative overflow-hidden before:absolute before:inset-y-0 before:right-0 before:w-12 before:bg-gradient-to-r before:from-transparent before:to-indigo-500/2">
+                <div className="text-xs text-slate-350 bg-slate-950/60 border-l-2 border-cyan-500/80 rounded-r-xl px-5 py-3.5 mb-5 font-normal leading-relaxed relative overflow-hidden before:absolute before:inset-y-0 before:right-0 before:w-12 before:bg-gradient-to-r before:from-transparent before:to-cyan-500/2">
                   {renderFormattedDescription(ws.description)}
                 </div>
 
@@ -356,7 +356,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                     <div className="flex items-center gap-1.5 ml-auto">
                       <select
                         id={`add-repo-select-feature-${ws.branchName}`}
-                        className="bg-slate-905 border border-slate-800 text-slate-300 rounded-lg text-[10px] px-3 py-1.5 font-semibold outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all hover:border-slate-700"
+                        className="bg-slate-905 border border-slate-800 text-slate-300 rounded-lg text-[10px] px-3 py-1.5 font-semibold outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-all hover:border-slate-700"
                         defaultValue=""
                         onChange={async (e) => {
                           const val = e.target.value;
@@ -389,8 +389,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'overview'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('overview')}
                       >
@@ -399,8 +399,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'sessions'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('sessions')}
                       >
@@ -409,8 +409,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'services'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('services')}
                       >
@@ -419,8 +419,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'changes'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('changes')}
                       >
@@ -429,8 +429,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'knowledge'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('knowledge')}
                       >
@@ -439,8 +439,8 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                       <button
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none ${
                           subTab === 'plan'
-                            ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                            : 'text-slate-500 hover:text-slate-350 hover:bg-slate-900/30 border border-transparent'
+                            ? 'bg-cyan-950/30 border border-cyan-900/60 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.1)]'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40 border border-transparent'
                         }`}
                         onClick={() => setSubTab('plan')}
                       >
@@ -453,7 +453,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                         {/* Section 1: AI Assistant Harnesses */}
                         <div className="bg-gray-950/20 border border-gray-800/80 rounded-xl p-5">
                           <div className="flex items-center gap-2 mb-4 border-b border-gray-800/80 pb-3">
-                            <Cpu size={18} className="text-indigo-400" />
+                            <Cpu size={18} className="text-cyan-400" />
                             <h4 className="font-bold text-white">AI Assistant Harnesses</h4>
                           </div>
                           <p className="text-xs text-gray-400 mb-4">
@@ -479,11 +479,11 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                                 <div key={name} className="flex flex-col p-3 bg-gray-900/40 border border-gray-800/60 rounded-lg">
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
-                                      <span className={`h-2 w-2 rounded-full ${isConfigured ? 'bg-indigo-500 shadow-sm' : 'bg-gray-700'}`}></span>
+                                      <span className={`h-2 w-2 rounded-full ${isConfigured ? 'bg-cyan-500 shadow-sm' : 'bg-gray-700'}`}></span>
                                       <span className="font-semibold text-xs text-gray-200">{displayName}</span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-[10px] font-medium">
-                                      {isConfigured && <span className="text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 text-[9px] font-bold uppercase tracking-wider">Active</span>}
+                                      {isConfigured && <span className="text-cyan-400 bg-cyan-950/20 px-2 py-0.5 rounded border border-cyan-900/40 text-[9px] font-bold uppercase tracking-wider">Active</span>}
                                       {isDetected ? (
                                         <span className="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[9px] font-bold uppercase tracking-wider">Installed</span>
                                       ) : (
@@ -493,7 +493,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                                   </div>
                                   {isConfigured && resumeCmd && (
                                     <div className="mt-2.5 flex items-center justify-between gap-2 bg-gray-950/80 px-2.5 py-1.5 rounded border border-gray-800/60 font-mono text-[10px]">
-                                      <span className="text-indigo-300 truncate">{resumeCmd}</span>
+                                      <span className="text-cyan-400 truncate">{resumeCmd}</span>
                                       <button
                                         onClick={() => handleCopy(resumeCmd)}
                                         className="text-gray-400 hover:text-white transition-colors cursor-pointer"
@@ -513,7 +513,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                         <div className="flex flex-col gap-6">
                           <div className="bg-gray-950/20 border border-gray-800/80 rounded-xl p-5">
                             <div className="flex items-center gap-2 mb-4 border-b border-gray-800/80 pb-3">
-                              <Layers size={18} className="text-indigo-400" />
+                              <Layers size={18} className="text-cyan-400" />
                               <h4 className="font-bold text-white">Local MCP Server (Tools)</h4>
                             </div>
                             <p className="text-xs text-gray-400 mb-4">
@@ -521,7 +521,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                             </p>
                             <div className="flex flex-col gap-3.5">
                               <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-cyan-455">
                                   <code>search_workspace</code>
                                 </div>
                                 <span className="text-[11px] text-gray-400">
@@ -529,7 +529,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                                 </span>
                               </div>
                               <div className="flex flex-col gap-1 border-t border-gray-800/40 pt-2.5">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-cyan-455">
                                   <code>get_service_logs</code>
                                 </div>
                                 <span className="text-[11px] text-gray-400">
@@ -537,7 +537,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                                 </span>
                               </div>
                               <div className="flex flex-col gap-1 border-t border-gray-800/40 pt-2.5">
-                                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300">
+                                <div className="flex items-center gap-2 text-xs font-semibold text-cyan-455">
                                   <code>delegate_to_local_agent</code>
                                 </div>
                                 <span className="text-[11px] text-gray-400">
@@ -550,7 +550,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                           {/* CLI shortcuts */}
                           <div className="bg-gray-950/20 border border-gray-800/80 rounded-xl p-5">
                             <div className="flex items-center gap-2 mb-4 border-b border-gray-800/80 pb-3">
-                              <Terminal size={18} className="text-indigo-400" />
+                              <Terminal size={18} className="text-cyan-400" />
                               <h4 className="font-bold text-white">Workspace CLI Shortcuts</h4>
                             </div>
                             <div className="flex flex-col gap-2.5">
@@ -563,7 +563,7 @@ export const WorkspaceList: React.FC<WorkspaceListProps> = ({
                               ].map(({ cmd, desc }) => (
                                 <div key={cmd} className="flex flex-col gap-1">
                                   <div className="flex items-center justify-between gap-2">
-                                    <code className="text-xs text-indigo-300">{cmd}</code>
+                                    <code className="text-xs text-cyan-400">{cmd}</code>
                                     <button
                                       onClick={() => handleCopy(cmd)}
                                       className="text-gray-400 hover:text-white transition-colors cursor-pointer"
