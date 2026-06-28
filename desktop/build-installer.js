@@ -156,7 +156,7 @@ async function build() {
 
     // 4. Install server dependencies and prune unused assets
     console.log('Installing production dependencies for staging server...');
-    execSync('npm install --omit=dev', { cwd: serverStagingDir, stdio: 'inherit' });
+    execSync('npm install --omit=dev', { cwd: serverStagingDir, stdio: 'inherit', shell: true });
     
     console.log('Pruning non-runtime files from node_modules (maps, tests, docs)...');
     pruneNodeModules(path.resolve(serverStagingDir, 'node_modules'));
@@ -180,7 +180,7 @@ async function build() {
     } else {
       // Try resolving from PATH
       try {
-        execSync('iscc /?', { stdio: 'ignore' });
+        execSync('iscc /?', { stdio: 'ignore', shell: true });
         isccPath = 'iscc';
       } catch {
         throw new Error('Inno Setup compiler (ISCC.exe) not found. Please verify it is installed.');
@@ -190,7 +190,7 @@ async function build() {
     console.log(`Using Inno Setup compiler: ${isccPath}`);
     const issScriptPath = path.resolve(__dirname, 'installer/nexusflow.iss');
     console.log(`Compiling installer script: ${issScriptPath}...`);
-    execSync(`"${isccPath}" "${issScriptPath}"`, { stdio: 'inherit' });
+    execSync(`"${isccPath}" "${issScriptPath}"`, { stdio: 'inherit', shell: true });
 
     // 7. Check if file got redirected to VirtualStore due to Windows virtualization and move it back
     const expectedOutputExe = path.resolve(outputDir, 'NexusFlowSetup.exe');

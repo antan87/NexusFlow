@@ -32,12 +32,12 @@ try {
   if (!fs.existsSync(binDir) || !fs.existsSync(neutralinoJsPath)) {
     console.log('Detected missing Neutralino binaries or client library. Running npx neu update...');
     try {
-      execSync('npx --no-install neu update', { cwd: __dirname, stdio: 'inherit' });
+      execSync('npx --no-install neu update', { cwd: __dirname, stdio: 'inherit', shell: true });
     } catch (err) {
       console.log('npx failed, trying direct node execution of local neu CLI binary for update...');
       const localNeuBin = path.join(__dirname, 'node_modules/@neutralinojs/neu/bin/neu');
       if (fs.existsSync(localNeuBin)) {
-        execSync(`node "${localNeuBin}" update`, { cwd: __dirname, stdio: 'inherit' });
+        execSync(`node "${localNeuBin}" update`, { cwd: __dirname, stdio: 'inherit', shell: true });
       } else {
         throw new Error('Local neutralino CLI binary not found. Please run npm install first in the desktop directory.');
       }
@@ -45,8 +45,12 @@ try {
   }
 
   // 1. Compile the parent project
-  console.log('Compiling parent project (NexusFlow)...');
-  execSync('npm run build', { cwd: parentDir, stdio: 'inherit' });
+  if (!process.env.CI) {
+    console.log('Compiling parent project (NexusFlow)...');
+    execSync('npm run build', { cwd: parentDir, stdio: 'inherit', shell: true });
+  } else {
+    console.log('Running in CI environment. Skipping parent project compilation.');
+  }
 
   // Read existing neutralino.js before purging resources folder
   let neutralinoJsContent = '';
@@ -90,12 +94,12 @@ try {
   // 4. Execute neu build using the locally installed CLI binary
   console.log('Executing neu build using locally installed CLI binary...');
   try {
-    execSync('npx --no-install neu build', { cwd: __dirname, stdio: 'inherit' });
+    execSync('npx --no-install neu build', { cwd: __dirname, stdio: 'inherit', shell: true });
   } catch (err) {
     console.log('npx failed, trying direct node execution of local neu CLI binary...');
     const localNeuBin = path.join(__dirname, 'node_modules/@neutralinojs/neu/bin/neu');
     if (fs.existsSync(localNeuBin)) {
-      execSync(`node "${localNeuBin}" build`, { cwd: __dirname, stdio: 'inherit' });
+      execSync(`node "${localNeuBin}" build`, { cwd: __dirname, stdio: 'inherit', shell: true });
     } else {
       throw new Error('Local neutralino CLI binary not found. Please run npm install first in the desktop directory.');
     }
