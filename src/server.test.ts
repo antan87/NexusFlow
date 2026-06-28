@@ -11,6 +11,7 @@ import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as packer from './core/packer.js';
 import * as workflows from './utils/workflows.js';
+import * as detectAi from './utils/detect-ai.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -24,6 +25,9 @@ vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
 vi.mock('./core/packer.js');
 vi.mock('./utils/workflows.js');
+vi.mock('./utils/detect-ai.js', () => ({
+  detectAIAssistants: vi.fn().mockResolvedValue([])
+}));
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -516,6 +520,36 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.success).toBe(true);
       expect(workflows.deleteWorkflowTemplate).toHaveBeenCalledWith('test-id');
+    });
+
+    it('POST /api/workflows/templates/:id/analyze should run inspection with comment', async () => {
+      vi.mocked(detectAi.detectAIAssistants).mockResolvedValue([
+        { name: 'antigravity', displayName: 'Antigravity', detected: true, command: 'agy' }
+      ]);
+      
+      vi.mocked(execa).mockResolvedValue({
+        exitCode: 0,
+        stdout: 'Review result: Success\n=== SUGGESTED IMPROVEMENT START ===\n# Refined Strategy\n=== SUGGESTED IMPROVEMENT END ==='
+      } as any);
+
+      const response = await app.request('/api/workflows/templates/test-id/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: 'My Strategy guidelines',
+          assistant: 'antigravity',
+          comment: 'Check for timeouts'
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.analysis).toContain('Review result: Success');
+      expect(data.suggestedImprovement).toBe('# Refined Strategy');
+      expect(execa).toHaveBeenCalled();
+      
+      const calledArgs = vi.mocked(execa).mock.calls[0][1];
+      expect(JSON.stringify(calledArgs)).toContain('Check for timeouts');
     });
   });
 });

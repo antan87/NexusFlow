@@ -185,6 +185,7 @@ export default function App() {
   const [deletingTemplate, setDeletingTemplate] = useState(false);
   const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
   const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
+  const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
 
   // Resumption Commands State
   const [testCommand, setTestCommand] = useState('npm run test');
@@ -606,7 +607,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/workflows/templates/${encodeURIComponent(id)}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, assistant }),
+        body: JSON.stringify({ content, assistant, comment: mgtAnalysisComment }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2834,52 +2835,65 @@ Core Instructions:
 
                         {!isEditingTemplate && selectedMgtTemplateId && (
                           <div className="border-t border-gray-800/60 pt-5 flex flex-col gap-4">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                              <div className="flex flex-col">
-                                <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                                  <Sparkles size={14} className="text-indigo-400" /> AI Strategy Analysis
-                                </span>
-                                <span className="text-[10px] text-gray-500 mt-0.5 font-sans">Select an AI assistant harness installed on your system to inspect these guidelines.</span>
-                              </div>
-
-                              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider font-sans">Harness:</span>
-                                  <select
-                                    className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none disabled:opacity-40"
-                                    value={selectedInspectAssistant}
-                                    onChange={(e) => setSelectedInspectAssistant(e.target.value)}
-                                    disabled={aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
-                                  >
-                                    {aiAssistants.filter(ai => ai.detected && ai.command).length > 0 ? (
-                                      aiAssistants
-                                        .filter(ai => ai.detected && ai.command)
-                                        .map(ai => (
-                                          <option key={ai.name} value={ai.name}>
-                                            {ai.displayName}
-                                          </option>
-                                        ))
-                                    ) : (
-                                      <option value="">No Harness Found</option>
-                                    )}
-                                  </select>
+                            <div className="flex flex-col gap-4">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                    <Sparkles size={14} className="text-indigo-400" /> AI Strategy Analysis
+                                  </span>
+                                  <span className="text-[10px] text-gray-500 mt-0.5 font-sans">Select an AI assistant harness installed on your system to inspect these guidelines.</span>
                                 </div>
 
-                                <button
-                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10 disabled:opacity-40"
-                                  onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent, selectedInspectAssistant)}
-                                  disabled={analyzingTemplate || aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
-                                >
-                                  {analyzingTemplate ? (
-                                    <>
-                                      <RefreshCw className="animate-spin" size={12} /> Inspecting...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Cpu size={12} /> Inspect Strategy
-                                    </>
-                                  )}
-                                </button>
+                                <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider font-sans">Harness:</span>
+                                    <select
+                                      className="bg-gray-900 border border-gray-800 text-xs text-white rounded-lg px-2.5 py-1.5 focus:border-indigo-500 transition-all outline-none disabled:opacity-40"
+                                      value={selectedInspectAssistant}
+                                      onChange={(e) => setSelectedInspectAssistant(e.target.value)}
+                                      disabled={aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
+                                    >
+                                      {aiAssistants.filter(ai => ai.detected && ai.command).length > 0 ? (
+                                        aiAssistants
+                                          .filter(ai => ai.detected && ai.command)
+                                          .map(ai => (
+                                            <option key={ai.name} value={ai.name}>
+                                              {ai.displayName}
+                                            </option>
+                                          ))
+                                      ) : (
+                                        <option value="">No Harness Found</option>
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  <button
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-500 hover:bg-indigo-600 text-white transition-all cursor-pointer shadow-md shadow-indigo-500/10 disabled:opacity-40"
+                                    onClick={() => handleAnalyzeTemplate(selectedMgtTemplateId, mgtTemplateContent, selectedInspectAssistant)}
+                                    disabled={analyzingTemplate || aiAssistants.filter(ai => ai.detected && ai.command).length === 0}
+                                  >
+                                    {analyzingTemplate ? (
+                                      <>
+                                        <RefreshCw className="animate-spin" size={12} /> Inspecting...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Cpu size={12} /> Inspect Strategy
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider text-left">Evaluation Focus / Instructions (Optional)</label>
+                                <textarea
+                                  className="w-full bg-[#111827]/40 border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs min-h-[60px] resize-y leading-relaxed font-sans"
+                                  value={mgtAnalysisComment}
+                                  onChange={(e) => setMgtAnalysisComment(e.target.value)}
+                                  placeholder="e.g. Focus on checking if timeouts are handled well, check subagent roles coordination..."
+                                  disabled={analyzingTemplate}
+                                />
                               </div>
                             </div>
 

@@ -1173,7 +1173,7 @@ app.delete('/api/workflows/templates/:id', async (c) => {
 // Analyze teamwork template rules via selected AI coding assistant harness
 app.post('/api/workflows/templates/:id/analyze', async (c) => {
   try {
-    const { content, assistant } = await c.req.json();
+    const { content, assistant, comment } = await c.req.json();
     if (!content) {
       return c.json({ error: 'Content is required.' }, 400);
     }
@@ -1182,18 +1182,20 @@ app.post('/api/workflows/templates/:id/analyze', async (c) => {
     let command = '';
     let args: string[] = [];
 
-    const prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
+    let prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
 Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
 
 After your analysis, provide a fully rewritten, optimized, and complete version of the strategy guidelines incorporating all your recommendations. This rewritten version must be suitable for production orchestration.
 You MUST prefix the rewritten version with the exact delimiter line:
 === SUGGESTED IMPROVEMENT START ===
 and suffix it with:
-=== SUGGESTED IMPROVEMENT END ===
+=== SUGGESTED IMPROVEMENT END ===`;
 
---- GUIDELINES START ---
-${content}
---- GUIDELINES END ---`;
+    if (comment && comment.trim()) {
+      prompt += `\n\nIMPORTANT: The user has provided the following specific instruction/comment that you MUST consider and prioritize during your evaluation and when rewriting the guidelines:\n"${comment.trim()}"`;
+    }
+
+    prompt += `\n\n--- GUIDELINES START ---\n${content}\n--- GUIDELINES END ---`;
 
     const assistants = await detectAIAssistants();
     const target = assistants.find(ai => ai.name === selectedAssistant);
