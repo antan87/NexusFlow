@@ -238,7 +238,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
       expect(response.status).toBe(400);
       const data = await response.json();
-      expect(data.error).toContain('Local AI endpoint must be localhost, 127.0.0.1, or a private LAN IP.');
+      expect(data.error).toContain('Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.');
     });
 
     it('should save safe endpoint and config', async () => {
@@ -521,6 +521,98 @@ describe('Server API Endpoints Unit Tests', () => {
       
       const calledArgs = vi.mocked(execa).mock.calls[0][1];
       expect(JSON.stringify(calledArgs)).toContain('Check for timeouts');
+    });
+
+    describe('POST /api/workspace/suggest-workflow', () => {
+      it('should suggest a workflow using heuristics when local LLM is disabled', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+        });
+
+        const response = await app.request('/api/workspace/suggest-workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: 'Fix a typo in README.md and update comments',
+            repos: [{ name: 'my-project', path: '/dev/my-project', defaultBranch: 'main' }]
+          })
+        });
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.success).toBe(true);
+        expect(data.difficulty).toBe('simple');
+        expect(data.suggestedWorkflowId).toBe('solo-developer');
+        expect(data.customInstructions).toContain('Solo Developer');
+      });
+
+      it('should suggest a complex workflow when description contains complex keywords', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+        });
+
+        const response = await app.request('/api/workspace/suggest-workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: 'Refactor database schema and migrate data to postgres',
+            repos: [{ name: 'my-project', path: '/dev/my-project', defaultBranch: 'main' }]
+          })
+        });
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.success).toBe(true);
+        expect(data.difficulty).toBe('complex');
+        expect(data.suggestedWorkflowId).toBe('plan-implement-review');
+        expect(data.customInstructions).toContain('Plan, Implement, Review');
+      });
+
+      it('should call local LLM and return suggested workflow when LLM is enabled', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+          localLlm: { enabled: true, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+        });
+
+        vi.spyOn(localAi, 'callLocalLlm').mockResolvedValue(JSON.stringify({
+          difficulty: 'moderate',
+          rationale: 'LLM selected moderate strategy.',
+          suggestedWorkflowId: 'research-verify',
+          customInstructions: '# LLM Custom Instructions'
+        }));
+
+        const response = await app.request('/api/workspace/suggest-workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: 'Implement new UI component',
+            repos: [{ name: 'my-project', path: '/dev/my-project', defaultBranch: 'main' }]
+          })
+        });
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.success).toBe(true);
+        expect(data.difficulty).toBe('moderate');
+        expect(data.rationale).toBe('LLM selected moderate strategy.');
+        expect(data.suggestedWorkflowId).toBe('research-verify');
+        expect(data.customInstructions).toBe('# LLM Custom Instructions');
+        expect(localAi.callLocalLlm).toHaveBeenCalled();
+      });
     });
   });
 });

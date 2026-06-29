@@ -53,11 +53,16 @@ export async function callLocalLlm(
       // OpenAI-compatible provider
       const url = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/chat/completions');
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (config.apiKey) {
+        headers['Authorization'] = `Bearer ${config.apiKey}`;
+      }
+
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           model,
           messages,

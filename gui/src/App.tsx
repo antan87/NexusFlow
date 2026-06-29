@@ -31,6 +31,7 @@ interface LocalLlmConfig {
   provider: 'ollama' | 'openai-compatible';
   endpoint: string;
   model: string;
+  apiKey?: string;
 }
 
 interface NexusFlowConfig {
@@ -177,7 +178,6 @@ export default function App() {
     { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
     { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
     { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
-    { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
   ]);
 
   const [toolsStatus, setToolsStatus] = useState<any[]>([]);
@@ -192,6 +192,9 @@ export default function App() {
   const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('plan-implement-review');
   const [customTeamworkInstructions, setCustomTeamworkInstructions] = useState<string>('');
+  const [suggestingWorkflow, setSuggestingWorkflow] = useState(false);
+  const [suggestedDifficulty, setSuggestedDifficulty] = useState<'simple' | 'moderate' | 'complex' | null>(null);
+  const [suggestedRationale, setSuggestedRationale] = useState('');
 
   // Workflow Strategy Management State
   const [selectedMgtTemplateId, setSelectedMgtTemplateId] = useState<string | null>(null);
@@ -838,6 +841,41 @@ export default function App() {
     }
   };
 
+  const handleSuggestWorkflow = async () => {
+    if (!description) {
+      showToast('Please enter a description for the workspace details first.', 'info');
+      return;
+    }
+    setSuggestingWorkflow(true);
+    setSuggestedDifficulty(null);
+    setSuggestedRationale('');
+    try {
+      const res = await fetch(`${API_BASE}/api/workspace/suggest-workflow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description,
+          repos: selectedRepos,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSuggestedDifficulty(data.difficulty);
+        setSuggestedRationale(data.rationale);
+        setSelectedWorkflowId(data.suggestedWorkflowId);
+        setCustomTeamworkInstructions(data.customInstructions);
+        showToast(`Suggested strategy populated successfully: ${data.difficulty.toUpperCase()} difficulty.`, 'success');
+      } else {
+        showToast(data.error || 'Failed to auto-suggest strategy.', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Network error while requesting strategy suggestion.', 'error');
+    } finally {
+      setSuggestingWorkflow(false);
+    }
+  };
+
   const handleCreateWorkspace = async () => {
     if (!branchName || selectedRepos.length === 0) return;
     setCreating(true);
@@ -848,7 +886,6 @@ export default function App() {
       { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
-      { id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' },
     ]);
 
     try {
@@ -1196,7 +1233,7 @@ Core Instructions:
           fetchGitChanges(wsName);
           fetchWorkspaceSessions(wsName);
         }
-        showToast('Repository successfully added. Configurations and Repomix packing updated.', 'success');
+        showToast('Repository successfully added and configurations updated.', 'success');
       } else {
         showToast(`Failed to add repository: ${data.error || 'Unknown error'}`, 'error');
       }
@@ -1902,17 +1939,7 @@ Core Instructions:
                       </div>
                     </div>
 
-                    <div className="flex gap-4">
-                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm shrink-0">
-                        4
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">Repomix Packing (Optional)</h3>
-                        <p className="text-xs text-gray-400 mt-1">
-                          If enabled, NexusFlow aggregates the entire multi-repo codebase using <code>Repomix</code> into a token-efficient XML file <code>nexusflow-context.xml</code>, giving AI immediate access to the full codebase state. You can toggle this setting in Settings.
-                        </p>
-                      </div>
-                    </div>
+
                   </div>
 
                   {/* Right: Quick actions and Telemetry info */}
@@ -2522,10 +2549,41 @@ Core Instructions:
                     ) : (
                       <>
                         <div className="mb-8">
-                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Team Collaboration Strategy</label>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">Team Collaboration Strategy</label>
+                            <button
+                              type="button"
+                              className="px-3 py-1.5 rounded-lg bg-indigo-650 hover:bg-indigo-700 text-white font-bold text-[11px] transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                              onClick={handleSuggestWorkflow}
+                              disabled={suggestingWorkflow}
+                            >
+                              <Sparkles size={12} className={suggestingWorkflow ? "animate-spin" : ""} />
+                              {suggestingWorkflow ? "Analyzing..." : "Auto-Suggest Strategy"}
+                            </button>
+                          </div>
                           <p className="text-xs text-gray-500 mb-4">
                             Select an agent cooperation pattern. This writes instructions to <code>AGENTS.md</code> directing how the team coordinates.
                           </p>
+                          
+                          {suggestedDifficulty && (
+                            <div className="mb-6 p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-xl text-xs flex flex-col gap-2 shadow-inner">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-300">Suggested Task Difficulty:</span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${
+                                  suggestedDifficulty === 'simple'
+                                    ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                                    : suggestedDifficulty === 'moderate'
+                                    ? 'bg-amber-500/20 border border-amber-500/30 text-amber-400'
+                                    : 'bg-rose-500/20 border border-rose-500/30 text-rose-450'
+                                }`}>
+                                  {suggestedDifficulty}
+                                </span>
+                              </div>
+                              <p className="text-gray-400 leading-relaxed font-sans">
+                                {suggestedRationale}
+                              </p>
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             {workflowTemplates.map((template) => {
                               const isSelected = selectedWorkflowId === template.id;
@@ -3284,6 +3342,23 @@ Core Instructions:
                           />
                           <span className="text-[10px] text-gray-500 mt-1">Exact name of the model registered on the server (e.g., <code>qwen2.5-coder:1.5b</code>).</span>
                         </div>
+
+                        {config.localLlm.provider === 'openai-compatible' && (
+                          <div className="flex flex-col md:col-span-2">
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">API Key (Optional)</label>
+                            <input
+                              type="password"
+                              className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-sm shadow-inner"
+                              value={config.localLlm.apiKey || ''}
+                              placeholder="sk-..."
+                              onChange={(e) => setConfig({
+                                ...config,
+                                localLlm: { ...config.localLlm!, apiKey: e.target.value }
+                              })}
+                            />
+                            <span className="text-[10px] text-gray-500 mt-1">Bearer token for authenticating with cloud LLM providers (e.g. OpenAI, DeepSeek, OpenRouter).</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between pt-4 border-t border-gray-800/40">

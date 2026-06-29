@@ -26,6 +26,7 @@ import {
   promptSelectEditor,
 } from '../utils/prompts.js';
 import type { Feature, WorkspaceContext } from '../types.js';
+import { suggestWorkflow } from '../utils/workflow-advisor.js';
 
 /**
  * Executes the full "create workspace" flow:
@@ -85,6 +86,17 @@ export async function createCommand(): Promise<void> {
     ? await confirm({ message: 'Enable Local AI Co-processor in this workspace context?', default: true })
     : false;
 
+  // ── 5.5. Suggest workflow strategy ───────────────────────────────
+  const workflowSpinner = ora('Suggesting teamwork collaboration strategy...').start();
+  let teamworkInstructions = '';
+  try {
+    const suggestion = await suggestWorkflow(description, selectedRepos, config.localLlm);
+    teamworkInstructions = suggestion.customInstructions;
+    workflowSpinner.succeed(`Auto-selected strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`);
+  } catch (err) {
+    workflowSpinner.fail('Failed to suggest teamwork strategy');
+  }
+
   // ── 6. Create workspace ─────────────────────────────────────────────
   const workspacePath = path.join(config.workspacesDir, branchName);
   const feature: Feature = {
@@ -97,6 +109,7 @@ export async function createCommand(): Promise<void> {
     workspacePath,
     createdAt: new Date().toISOString(),
     localLlmEnabled,
+    teamworkInstructions,
   };
 
   const wsSpinner = ora('Creating workspace with git worktrees...').start();
