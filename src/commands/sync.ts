@@ -93,11 +93,7 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
 
       await generateContextFiles(ctx, feature.assistants, workspacePath);
 
-      const config = await loadConfig();
-      if (config.packContextXml) {
-        const { packWorkspace } = await import('../core/packer.js');
-        await packWorkspace(workspacePath);
-      }
+
       console.log(chalk.green('✅ Workspace maps and contexts successfully updated.\n'));
     } catch (error) {
       console.error(chalk.red(`✖ Failed to regenerate maps: ${error instanceof Error ? error.message : String(error)}\n`));

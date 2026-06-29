@@ -10,6 +10,8 @@ import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
+import { writeWorkspaceFile, workspaceFileExists, writeBaseFile, readBaseFile, baseFileExists } from '../core/storage.js';
+import { generateDiffContext } from './diff-context.js';
 
 /** Maps each assistant to its generator function and the file it produces. */
 const GENERATORS: Record<
@@ -103,6 +105,34 @@ _(No gotchas recorded yet.)_
 }
 
 /**
+ * Builds the base codebase knowledge starter content.
+ */
+function buildBaseKnowledgeContent(repoName: string): string {
+  return `# Base Codebase Knowledge — ${repoName}
+
+> **This is a persistent cross-session memory file for ${repoName}.**
+> AI assistants should read this at the start of each session, and append new architectural learnings, conventions, decisions, and gotchas at the end.
+> This file persists across all features and tasks for this repository.
+
+## Architecture & Domain Concepts
+<!-- Document major design patterns, domain layers, and system concepts here. -->
+- None recorded yet.
+
+## Coding Conventions & Invariants
+<!-- Document coding styles, library rules, and invariants that must not be broken. -->
+- None recorded yet.
+
+## Discovered Gotchas & Watch-outs
+<!-- Document weird behaviors, workarounds, or bugs to avoid repeating them. -->
+- None recorded yet.
+
+## Architecture Decisions
+<!-- Document key architectural decisions made for this repository over time. -->
+- None recorded yet.
+`;
+}
+
+/**
  * Generates AI context files for each of the selected assistants.
  *
  * Also generates:
@@ -119,32 +149,70 @@ export async function generateContextFiles(
   assistants: AIAssistant[],
   workspacePath: string,
   onlyRepo?: string,
+  onlyBase?: boolean,
 ): Promise<void> {
   // Always generate a universal WORKSPACE.md at the workspace root
-  try {
-    const content = buildContextContent(ctx);
-    const filePath = path.join(workspacePath, 'WORKSPACE.md');
-    await fse.writeFile(filePath, content, 'utf-8');
-    console.log(
-      chalk.green('  ✔'),
-      `Generated universal ${chalk.bold('WORKSPACE.md')}`,
-    );
-
-    // Generate nexusflow-knowledge.md if it does not exist
-    const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md');
-    if (!(await fse.pathExists(knowledgePath))) {
-      const knowledgeContent = buildKnowledgeContent(ctx);
-      await fse.writeFile(knowledgePath, knowledgeContent, 'utf-8');
-      console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-knowledge.md')} (persistent AI memory)`);
-    } else {
-      console.log(chalk.gray('  ○'), `nexusflow-knowledge.md already exists — preserving existing content`);
+  if (!onlyBase) {
+    try {
+      const content = buildContextContent(ctx);
+      await writeWorkspaceFile(workspacePath, ctx.feature.id, 'WORKSPACE.md', content);
+      console.log(
+        chalk.green('  ✔'),
+        `Generated universal ${chalk.bold('WORKSPACE.md')}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        chalk.red('  ✖'),
+        `Failed to generate universal WORKSPACE.md: ${message}`,
+      );
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(
-      chalk.red('  ✖'),
-      `Failed to generate universal context files: ${message}`,
-    );
+  }
+
+  // Generate base knowledge for each repo if it does not exist (or force recreate if onlyBase is true)
+  for (const repo of ctx.repos) {
+    if (onlyRepo && repo.name !== onlyRepo) {
+      continue;
+    }
+    const baseExists = await baseFileExists(workspacePath, repo.name, 'nexusflow-knowledge.md');
+    if (!baseExists || onlyBase) {
+      const baseContent = buildBaseKnowledgeContent(repo.name);
+      await writeBaseFile(workspacePath, repo.name, 'nexusflow-knowledge.md', baseContent);
+      console.log(
+        chalk.green('  ✔'),
+        `Generated base knowledge for ${chalk.bold(repo.name)}`,
+      );
+    } else {
+      console.log(
+        chalk.gray('  ○'),
+        `Base knowledge for ${repo.name} already exists — preserving`,
+      );
+    }
+  }
+
+  if (!onlyBase) {
+    try {
+      // Generate nexusflow-knowledge.md if it does not exist
+      const knowledgeExists = await workspaceFileExists(workspacePath, ctx.feature.id, 'nexusflow-knowledge.md');
+      if (!knowledgeExists) {
+        const knowledgeContent = buildKnowledgeContent(ctx);
+        await writeWorkspaceFile(workspacePath, ctx.feature.id, 'nexusflow-knowledge.md', knowledgeContent);
+        console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-knowledge.md')} (persistent AI memory)`);
+      } else {
+        console.log(chalk.gray('  ○'), `nexusflow-knowledge.md already exists — preserving existing content`);
+      }
+
+      // Generate Git branch diff context file
+      await generateDiffContext(ctx, workspacePath);
+      console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-diff-context.md')} (incremental git diff)`);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        chalk.red('  ✖'),
+        `Failed to generate workspace context files: ${message}`,
+      );
+    }
   }
 
   // Generate per-repo architecture maps
@@ -176,6 +244,10 @@ export async function generateContextFiles(
         }
       }
     }
+  }
+
+  if (onlyBase) {
+    return;
   }
 
   // Generate configuration for each selected assistant

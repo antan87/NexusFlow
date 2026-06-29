@@ -148,7 +148,6 @@ export async function addRepoCommand(
     console.log(chalk.dim('  - Updated nexusflow.json and .gitignore'));
     console.log(chalk.dim('  - Re-analyzed workspace codebases'));
     console.log(chalk.dim('  - Regenerated LLM instruction context files'));
-    console.log(chalk.dim('  - Repacked codebase context using Repomix'));
     console.log();
   } catch (error) {
     spinner.fail(`Failed to add repository: ${error instanceof Error ? error.message : String(error)}`);

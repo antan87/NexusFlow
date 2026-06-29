@@ -204,30 +204,7 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
       updateCmd: 'npm install -g @mrpatronz/nexusflow',
       getCurrent: async () => currentVersion,
     },
-    {
-      id: 'repomix',
-      name: 'Repomix (Codebase Packer)',
-      command: 'repomix',
-      npmPackage: 'repomix',
-      updateCmd: 'npm install -g repomix',
-      getCurrent: async () => {
-        try {
-          const res = await execa('repomix', ['--version'], {
-            reject: false,
-            shell: process.platform === 'win32',
-          });
-          if (res.exitCode === 0) return res.stdout.trim();
-        } catch {}
-        try {
-          const res = await execa('npx', ['repomix', '--version'], {
-            reject: false,
-            shell: process.platform === 'win32',
-          });
-          if (res.exitCode === 0) return res.stdout.trim();
-        } catch {}
-        return '';
-      }
-    },
+
     {
       id: 'antigravity',
       name: 'Antigravity CLI',

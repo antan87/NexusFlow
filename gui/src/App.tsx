@@ -41,7 +41,25 @@ interface NexusFlowConfig {
   defaultEditor?: string | null;
   scanDepth: number;
   localLlm?: LocalLlmConfig;
-  packContextXml?: boolean;
+  storageProvider?: string;
+  adapterConfig?: Record<string, Record<string, any>>;
+  plugins?: string[];
+}
+
+interface AdapterConfigField {
+  key: string;
+  label: string;
+  type: 'string' | 'boolean' | 'number' | 'path';
+  required?: boolean;
+  default?: any;
+  description?: string;
+}
+
+interface StorageAdapterMeta {
+  name: string;
+  displayName: string;
+  description: string;
+  configFields: AdapterConfigField[];
 }
 
 interface DetectedAI {
@@ -124,6 +142,7 @@ export default function App() {
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [adapters, setAdapters] = useState<StorageAdapterMeta[]>([]);
 
   // Update Check State
   const [updateStatus, setUpdateStatus] = useState<{
@@ -407,7 +426,20 @@ export default function App() {
     }
   };
 
+  const fetchAdapters = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/adapters`);
+      const data = await res.json();
+      if (data.adapters) {
+        setAdapters(data.adapters);
+      }
+    } catch (e) {
+      console.error('Failed to fetch adapters:', e);
+    }
+  };
+
   const fetchConfig = async () => {
+    fetchAdapters();
     try {
       const res = await fetch(`${API_BASE}/api/config`);
       const data = await res.json();
@@ -1342,20 +1374,45 @@ Core Instructions:
                 </div>
 
                 <div className="pt-2">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      id="onboardingPackContextXml"
-                      className="w-4 h-4 rounded border-slate-800 bg-slate-950/60 text-indigo-650 focus:ring-indigo-500/50 cursor-pointer"
-                      checked={config.packContextXml || false}
-                      onChange={(e) => setConfig({ ...config, packContextXml: e.target.checked })}
-                    />
-                    <label htmlFor="onboardingPackContextXml" className="text-xs font-semibold text-slate-200 cursor-pointer select-none">
-                      Pack Codebase Context with Repomix (XML)
-                    </label>
-                  </div>
-                  <span className="text-[10px] text-slate-500 mt-1.5 block leading-normal">
-                    Aggregates all repository files into a single token-efficient XML file (<code>nexusflow-context.xml</code>) at the workspace root, giving AI assistants immediate access to the full codebase state.
+                  <label htmlFor="onboardingStorageProvider" className="text-xs font-semibold text-slate-200 block mb-1">
+                    Storage Provider
+                  </label>
+                  <select
+                    id="onboardingStorageProvider"
+                    className="w-full text-xs bg-slate-950/60 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+                    value={config.storageProvider || 'local'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const newConf = { ...config, storageProvider: val };
+                      const selectedAdapter = adapters.find(a => a.name === val);
+                      if (selectedAdapter?.configFields?.length) {
+                        if (!newConf.adapterConfig) newConf.adapterConfig = {};
+                        if (!newConf.adapterConfig[val]) newConf.adapterConfig[val] = {};
+                        selectedAdapter.configFields.forEach(f => {
+                          if (newConf.adapterConfig![val][f.key] === undefined && f.default !== undefined) {
+                            newConf.adapterConfig![val][f.key] = f.default;
+                          }
+                        });
+                      }
+                      setConfig(newConf);
+                    }}
+                  >
+                    {adapters.length > 0 ? (
+                      adapters.map((a) => (
+                        <option key={a.name} value={a.name}>
+                          {a.displayName}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="local">Local Workspace (Folders)</option>
+                        <option value="central-vault">Obsidian Central Vault</option>
+                      </>
+                    )}
+                  </select>
+                  <span className="text-[10px] text-slate-500 mt-1 block leading-normal">
+                    {adapters.find(a => a.name === (config.storageProvider || 'local'))?.description || 
+                      'Choose where to store maps, plans, and knowledge files. Centralized vault keeps repositories 100% clean and allows Obsidian integration.'}
                   </span>
                 </div>
 
@@ -3027,22 +3084,115 @@ Core Instructions:
                   </div>
 
                   <div className="flex flex-col md:col-span-2 border-t border-gray-800/60 pt-6 mt-2">
-                    <h3 className="text-sm font-bold text-white mb-2">Codebase Context Settings</h3>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        id="packContextXml"
-                        className="w-4 h-4 rounded border-gray-800 bg-[#111827] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                        checked={config.packContextXml || false}
-                        onChange={(e) => setConfig({ ...config, packContextXml: e.target.checked })}
-                      />
-                      <label htmlFor="packContextXml" className="text-xs font-semibold text-white cursor-pointer select-none">
-                        Pack Codebase Context with Repomix (XML)
+                    <h3 className="text-sm font-bold text-white mb-2">Workspace Storage Settings</h3>
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="storageProvider" className="text-xs font-semibold text-white select-none">
+                        Storage Provider
                       </label>
+                      <select
+                        id="storageProvider"
+                        className="w-full max-w-md text-xs bg-[#111827] border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500"
+                        value={config.storageProvider || 'local'}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const newConf = { ...config, storageProvider: val };
+                          const selectedAdapter = adapters.find(a => a.name === val);
+                          if (selectedAdapter?.configFields?.length) {
+                            if (!newConf.adapterConfig) newConf.adapterConfig = {};
+                            if (!newConf.adapterConfig[val]) newConf.adapterConfig[val] = {};
+                            selectedAdapter.configFields.forEach(f => {
+                              if (newConf.adapterConfig![val][f.key] === undefined && f.default !== undefined) {
+                                newConf.adapterConfig![val][f.key] = f.default;
+                              }
+                            });
+                          }
+                          setConfig(newConf);
+                        }}
+                      >
+                        {adapters.length > 0 ? (
+                          adapters.map((a) => (
+                            <option key={a.name} value={a.name}>
+                              {a.displayName}
+                            </option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="local">Local Workspace (Folders)</option>
+                            <option value="central-vault">Obsidian Central Vault</option>
+                          </>
+                        )}
+                      </select>
                     </div>
                     <span className="text-[10px] text-gray-500 mt-1">
-                      Aggregates files of all repositories in a workspace into a single token-efficient XML file (<code>nexusflow-context.xml</code>) at the workspace root, giving AI assistants immediate access to the full codebase state.
+                      {adapters.find(a => a.name === (config.storageProvider || 'local'))?.description || 
+                        'Choose where to store maps, plans, and knowledge files. Centralized vault keeps repositories 100% clean and allows Obsidian integration.'}
                     </span>
+
+                    {/* Dynamic config fields */}
+                    {(() => {
+                      const activeProv = config.storageProvider || 'local';
+                      const selectedAdapter = adapters.find((a) => a.name === activeProv);
+                      if (!selectedAdapter || !selectedAdapter.configFields || selectedAdapter.configFields.length === 0) {
+                        return null;
+                      }
+                      return (
+                        <div className="mt-4 p-4 rounded-lg bg-gray-950/40 border border-gray-800/80 max-w-md flex flex-col gap-4">
+                          <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                            {selectedAdapter.displayName} Settings
+                          </h4>
+                          {selectedAdapter.configFields.map((field) => {
+                            const value = config.adapterConfig?.[activeProv]?.[field.key] ?? field.default ?? '';
+                            const updateField = (val: any) => {
+                              const newAdapterConfig = {
+                                ...(config.adapterConfig || {}),
+                                [activeProv]: {
+                                  ...(config.adapterConfig?.[activeProv] || {}),
+                                  [field.key]: val,
+                                },
+                              };
+                              setConfig({ ...config, adapterConfig: newAdapterConfig });
+                            };
+
+                            if (field.type === 'boolean') {
+                              return (
+                                <label key={field.key} className="flex items-start gap-3 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 rounded border-gray-800 bg-gray-950 text-indigo-500 focus:ring-0 focus:ring-offset-0"
+                                    checked={!!value}
+                                    onChange={(e) => updateField(e.target.checked)}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-medium text-slate-200">{field.label}</span>
+                                    {field.description && (
+                                      <span className="text-[10px] text-gray-500 leading-normal mt-0.5">{field.description}</span>
+                                    )}
+                                  </div>
+                                </label>
+                              );
+                            }
+
+                            return (
+                              <div key={field.key} className="flex flex-col gap-1">
+                                <label className="text-[11px] font-semibold text-slate-300">{field.label}</label>
+                                <input
+                                  type={field.type === 'number' ? 'number' : 'text'}
+                                  className="w-full text-xs bg-slate-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus:border-indigo-500"
+                                  value={value}
+                                  onChange={(e) => {
+                                    const val = field.type === 'number' ? Number(e.target.value) : e.target.value;
+                                    updateField(val);
+                                  }}
+                                />
+                                {field.description && (
+                                  <span className="text-[10px] text-gray-500 leading-normal mt-0.5">{field.description}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

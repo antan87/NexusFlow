@@ -18,11 +18,11 @@ import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
-import { packWorkspace } from './core/packer.js';
 import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './utils/local-ai.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
@@ -70,6 +70,17 @@ app.get('/api/config', async (c) => {
 
     const config = await loadConfig();
     return c.json({ config, exists });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Get all registered storage adapters
+app.get('/api/adapters', async (c) => {
+  try {
+    const adapters = listStorageProviders();
+    return c.json({ adapters });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);
@@ -334,12 +345,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     await generateContextFiles(ctx, body.assistants, workspacePath);
     updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');
 
-    // Step 4: Pack codebase context
-    if (config.packContextXml) {
-      updateJobStep(jobId, 'pack', 'running', 'Packing codebase context with Repomix...');
-      const packResult = await packWorkspace(workspacePath);
-      updateJobStep(jobId, 'pack', 'completed', `Packed codebase context (${packResult.totalFiles} files, ${(packResult.fileSize / 1024).toFixed(2)} KB).`);
-    }
+    // XML context packing removed.
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -384,9 +390,7 @@ app.post('/api/workspace', async (c) => {
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
     ];
-    if (config.packContextXml) {
-      steps.push({ id: 'pack', name: 'Pack Codebase Context', status: 'pending', message: 'Waiting...' });
-    }
+    // XML context packing removed.
 
     const job: CreationJob = {
       id: jobId,
@@ -1032,7 +1036,6 @@ app.post('/api/updates/install', async (c) => {
     const { toolId } = await c.req.json() as { toolId: string };
     const tools = [
       { id: 'nexusflow', cmd: 'npm', args: ['install', '-g', '@mrpatronz/nexusflow'] },
-      { id: 'repomix', cmd: 'npm', args: ['install', '-g', 'repomix'] },
       { id: 'antigravity', cmd: 'agy', args: ['update'] },
       { id: 'claude', cmd: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
     ];
@@ -1254,29 +1257,7 @@ and suffix it with:
   }
 });
 
-// 18. Pack workspace codebase and download
-app.get('/api/workspace/:id/pack', async (c) => {
-  try {
-    const id = decodeURIComponent(c.req.param('id'));
-    const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
-
-    const feature = await loadFeatureConfig(workspacePath);
-    if (!feature) {
-      return c.json({ error: 'Workspace configuration not found.' }, 404);
-    }
-
-    const result = await packWorkspace(workspacePath);
-    const content = await fs.readFile(result.outputPath, 'utf-8');
-
-    c.header('Content-Disposition', `attachment; filename="nexusflow-context-${id.replace(/[\/\\ ]/g, '-')}.xml"`);
-    c.header('Content-Type', 'application/xml');
-    return c.text(content);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
-  }
-});
+// Legacy pack endpoint removed.
 
 // Serve index.html explicitly on root endpoint
 app.get('/', async (c) => {

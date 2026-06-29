@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
+import { resolveBaseFileUrl, resolveWorkspaceFileUrl } from '../core/storage.js';
 
 /**
  * Formats a ProjectAnalysis into a readable markdown section.
@@ -17,8 +18,11 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
 
   lines.push(`### ${analysis.name}`);
 
-  const mapPath = path.join(workspacePath, `nexusflow-map-${analysis.name}.md`).replace(/\\/g, '/');
+  const mapPath = resolveBaseFileUrl(workspacePath, analysis.name, `nexusflow-map-${analysis.name}.md`);
   lines.push(`- **Architecture Map**: [nexusflow-map-${analysis.name}.md](file:///${mapPath}) — **Instruction**: Before modifying this repository, read its architecture map. For exploration, consult the map's section index on demand.`);
+
+  const baseKnowledgePath = resolveBaseFileUrl(workspacePath, analysis.name, 'nexusflow-knowledge.md');
+  lines.push(`- **Base Knowledge & Decisions**: [nexusflow-knowledge.md](file:///${baseKnowledgePath}) — **Instruction**: Read this for persistent codebase learnings, decisions, and conventions.`);
 
   // Tech stack
   const { techStack } = analysis;
@@ -151,13 +155,12 @@ ${parts.join('\n')}
     }
   }
 
-  const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md').replace(/\\/g, '/');
+  const knowledgePath = resolveWorkspaceFileUrl(workspacePath, feature.id, 'nexusflow-knowledge.md').replace(/\\/g, '/');
 
   let setupDone = false;
   try {
-    const realKnowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md');
-    if (fs.existsSync(realKnowledgePath)) {
-      const content = fs.readFileSync(realKnowledgePath, 'utf-8');
+    if (fs.existsSync(knowledgePath)) {
+      const content = fs.readFileSync(knowledgePath, 'utf-8');
       if (!content.includes('No assumptions recorded yet') && !content.includes('AI assistant to populate')) {
         setupDone = true;
       }

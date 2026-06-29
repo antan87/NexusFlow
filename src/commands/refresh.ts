@@ -18,7 +18,7 @@ import type { WorkspaceContext } from '../types.js';
  * @param workspaceArg - Optional workspace path.
  */
 export async function refreshCommand(
-  options: { repo?: string },
+  options: { repo?: string; base?: boolean },
   workspaceArg?: string,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
@@ -66,19 +66,9 @@ export async function refreshCommand(
   };
 
   console.log(chalk.cyan('Regenerating context files and maps...'));
-  await generateContextFiles(ctx, feature.assistants, workspacePath, onlyRepo);
+  await generateContextFiles(ctx, feature.assistants, workspacePath, onlyRepo, options.base);
 
-  // If repopack context packing is enabled
-  const config = await loadConfig();
-  if (config.packContextXml) {
-    const { packWorkspace } = await import('../core/packer.js');
-    console.log(chalk.cyan('Re-packing workspace context...'));
-    try {
-      await packWorkspace(workspacePath);
-    } catch (error) {
-      console.warn(chalk.yellow(`  ⚠ Failed to repack context: ${error}`));
-    }
-  }
+
 
   // If handoff file exists, refresh it automatically too!
   const handoffPath = path.join(workspacePath, 'nexusflow-handoff.md');
@@ -88,7 +78,7 @@ export async function refreshCommand(
     hasHandoff = true;
   } catch {}
 
-  if (hasHandoff) {
+  if (!options.base && hasHandoff) {
     console.log(chalk.cyan('Refreshing handoff bundle...'));
     try {
       const { handoffCommand } = await import('./handoff.js');

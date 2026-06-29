@@ -24,14 +24,17 @@ import { tuiCommand } from './commands/tui.js';
 import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
-import { packCommand } from './commands/pack.js';
 import { removeCommand } from './commands/remove.js';
+import { loadConfig } from './core/config.js';
+import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { desktopCommand } from './commands/desktop.js';
+import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
+import { adapterListCommand, adapterUseCommand, adapterInfoCommand, adapterInitCommand } from './commands/adapter.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
 const program = new Command();
@@ -272,23 +275,7 @@ program
     }
   });
 
-program
-  .command('pack')
-  .description('Pack the workspace codebase into a single token-efficient XML file for AI consumption')
-  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .option('--no-compress', 'Do not compress files (strip comments, empty lines)')
-  .action(async (workspace: string | undefined, options: { compress?: boolean }) => {
-    try {
-      await packCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+// Pack command removed.
 
 program
   .command('remove')
@@ -345,7 +332,8 @@ program
   .description('Refresh workspace context, maps, plans and handoff files')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
-  .action(async (workspace: string | undefined, options: { repo?: string }) => {
+  .option('-b, --base', 'Only refresh base-layer maps and codebase knowledge from main')
+  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean }) => {
     try {
       await refreshCommand(options, workspace);
     } catch (error) {
@@ -378,6 +366,121 @@ program
       process.exit(1);
     }
   });
+// Config command group
+const configCmd = program.command('config').description('View and update NexusFlow configuration');
+
+configCmd
+  .command('show')
+  .description('Display the current configuration')
+  .action(async () => {
+    try {
+      await configShowCommand();
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('get')
+  .description('Get a specific configuration key')
+  .argument('<key>', 'Configuration key to read')
+  .action(async (key: string) => {
+    try {
+      await configGetCommand(key);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('set')
+  .description('Set a configuration key to a value')
+  .argument('<key>', 'Configuration key to set')
+  .argument('<value>', 'Value to assign')
+  .action(async (key: string, value: string) => {
+    try {
+      await configSetCommand(key, value);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Default action when 'nexusflow config' is run without a subcommand
+configCmd.action(async () => {
+  try {
+    await configShowCommand();
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+});
+
+// Adapter command group
+const adapterCmd = program.command('adapter').description('Manage storage adapters — list, switch, configure, or create new ones');
+
+adapterCmd
+  .command('list')
+  .description('List all available storage adapters')
+  .action(async () => {
+    try {
+      await adapterListCommand();
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+adapterCmd
+  .command('use')
+  .description('Switch to a different storage adapter (prompts for config if needed)')
+  .argument('<name>', 'Adapter name to activate')
+  .action(async (name: string) => {
+    try {
+      await adapterUseCommand(name);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+adapterCmd
+  .command('info')
+  .description('Show detailed information about an adapter')
+  .argument('<name>', 'Adapter name to inspect')
+  .action(async (name: string) => {
+    try {
+      await adapterInfoCommand(name);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+adapterCmd
+  .command('init')
+  .description('Scaffold a new adapter plugin project')
+  .argument('<name>', 'Name for the new adapter')
+  .action(async (name: string) => {
+    try {
+      await adapterInitCommand(name);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Default action when 'nexusflow adapter' is run without a subcommand
+adapterCmd.action(async () => {
+  try {
+    await adapterListCommand();
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+});
 
 const mcp = program.command('mcp').description('Manage the NexusFlow MCP Server for AI assistants');
 
@@ -422,5 +525,15 @@ program.hook('postAction', async (thisCommand, actionCommand) => {
   }
 });
 
-program.parse();
+async function bootstrap() {
+  try {
+    const config = await loadConfig();
+    if (config.plugins && config.plugins.length > 0) {
+      await loadPlugins(program, config.plugins);
+    }
+  } catch {}
+  await program.parseAsync(process.argv);
+}
+
+bootstrap();
 
