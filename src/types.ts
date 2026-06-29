@@ -11,6 +11,7 @@ export interface LocalLlmConfig {
   provider: 'ollama' | 'openai-compatible';
   endpoint: string;
   model: string;
+  apiKey?: string;
 }
 
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */

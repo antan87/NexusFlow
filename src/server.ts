@@ -39,6 +39,7 @@ import {
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
 import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
+import { suggestWorkflow } from './utils/workflow-advisor.js';
 
 // Resolve static files directory
 const __filename = fileURLToPath(import.meta.url);
@@ -91,6 +92,9 @@ function isSafeLocalEndpoint(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
     const hostname = url.hostname.toLowerCase();
+    if (url.protocol === 'https:') {
+      return true;
+    }
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
       return true;
     }
@@ -110,7 +114,7 @@ app.post('/api/config', async (c) => {
     const newConfig = await c.req.json();
     if (newConfig?.localLlm?.enabled && newConfig.localLlm.endpoint) {
       if (!isSafeLocalEndpoint(newConfig.localLlm.endpoint)) {
-        return c.json({ error: 'Local AI endpoint must be localhost, 127.0.0.1, or a private LAN IP.' }, 400);
+        return c.json({ error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
       }
     }
     await saveConfig(newConfig);
@@ -170,15 +174,15 @@ app.get('/api/editor-detect', async (c) => {
 // 6.5. Local LLM test & recommendation
 app.post('/api/local-llm/test', async (c) => {
   try {
-    const { provider, endpoint, model, shoot } = await c.req.json();
+    const { provider, endpoint, model, apiKey, shoot } = await c.req.json();
     if (!endpoint || !isSafeLocalEndpoint(endpoint)) {
-      return c.json({ success: false, error: 'Local AI endpoint must be localhost, 127.0.0.1, or a private LAN IP.' }, 400);
+      return c.json({ success: false, error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
     }
     const cleanEndpoint = endpoint.replace(/\/$/, '');
     
     if (shoot) {
       const responseText = await callLocalLlm(
-        { enabled: true, provider, endpoint, model },
+        { enabled: true, provider, endpoint, model, apiKey },
         [{ role: 'user', content: 'Respond with the exact word "OK" and nothing else.' }]
       );
       const cleanResponse = responseText.trim();
@@ -489,6 +493,27 @@ app.post('/api/workspace/:id/repo', async (c) => {
 
     await addRepoToWorkspace(workspacePath, repoPath);
     return c.json({ success: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// 7.8. Suggest workflow strategy based on feature description & selected repos
+app.post('/api/workspace/suggest-workflow', async (c) => {
+  try {
+    const { description, repos } = await c.req.json() as {
+      description: string;
+      repos: RepoInfo[];
+    };
+
+    const config = await loadConfig();
+    const suggestion = await suggestWorkflow(description, repos, config.localLlm);
+
+    return c.json({
+      success: true,
+      ...suggestion
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

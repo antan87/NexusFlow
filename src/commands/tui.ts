@@ -256,7 +256,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
   process.stdout.on('resize', resizeHandler);
 
   // Status Polling Loop
-  const pollInterval = setInterval(async () => {
+  let pollInterval = setInterval(async () => {
     await updateGitStatus();
     if (!state.inputMode && !state.activeCommandRunning) {
       draw();
@@ -275,7 +275,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
   };
 
   // Keyboard Event Handlers
-  process.stdin.on('keypress', async (str, key) => {
+  const keypressHandler = async (str: any, key: any) => {
     if (key.ctrl && key.name === 'c') {
       cleanup();
       process.exit(0);
@@ -300,18 +300,77 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
           draw();
 
           try {
-            // Run command via execa
             const script = fileURLToPath(new URL('../index.js', import.meta.url));
             const args = cmd.split(' ');
-            const { stdout, stderr } = await execa('node', [script, ...args], { cwd: workspacePath });
+            
+            // Check if it's an interactive command
+            const INTERACTIVE_COMMANDS = ['create', 'remove', 'rm', 'open', 'add-repo', 'add', 'init'];
+            const isInteractive = INTERACTIVE_COMMANDS.some(
+              (ic) => cmd.toLowerCase() === ic || cmd.toLowerCase().startsWith(ic + ' ')
+            );
 
-            if (stdout) {
-              stdout.split('\n').filter(Boolean).forEach((l) => log(`  ${l}`));
+            if (isInteractive) {
+              // Pause TUI and run command interactively
+              process.stdin.off('keypress', keypressHandler);
+              cleanup();
+
+              // Clear alternate screen and show standard terminal
+              console.log(chalk.bold.cyan(`\nEntering interactive mode for "nexusflow ${cmd}"...\n`));
+
+              try {
+                await execa('node', [script, ...args], {
+                  cwd: workspacePath,
+                  stdio: 'inherit',
+                  shell: process.platform === 'win32',
+                });
+              } catch (err: any) {
+                console.error(chalk.red(`\n✖ Command failed: ${err.message}`));
+              }
+
+              // Check if workspace still exists (in case it was deleted by 'remove')
+              let workspaceExists = true;
+              try {
+                await fs.access(workspacePath);
+              } catch {
+                workspaceExists = false;
+              }
+
+              if (!workspaceExists) {
+                console.log(chalk.bold.cyan('\n👋 Workspace deleted. Exiting NexusFlow TUI Dashboard.\n'));
+                process.exit(0);
+              }
+
+              // Re-initialize TUI state
+              process.stdout.write('\x1B[?1049h'); // Switch to alternate screen buffer
+              process.stdout.write('\x1B[?25l');   // Hide cursor
+              if (process.stdin.isTTY) {
+                process.stdin.setRawMode(true);
+              }
+              process.stdout.on('resize', resizeHandler);
+              process.stdin.on('keypress', keypressHandler);
+              
+              pollInterval = setInterval(async () => {
+                await updateGitStatus();
+                if (!state.inputMode && !state.activeCommandRunning) {
+                  draw();
+                }
+              }, 5000);
+
+              state.activeCommandRunning = false;
+              await updateGitStatus();
+              draw();
+            } else {
+              // Run background command via execa
+              const { stdout, stderr } = await execa('node', [script, ...args], { cwd: workspacePath });
+
+              if (stdout) {
+                stdout.split('\n').filter(Boolean).forEach((l) => log(`  ${l}`));
+              }
+              if (stderr) {
+                stderr.split('\n').filter(Boolean).forEach((l) => log(`  ${chalk.red(l)}`));
+              }
+              log(chalk.green('✔ Command completed successfully.'));
             }
-            if (stderr) {
-              stderr.split('\n').filter(Boolean).forEach((l) => log(`  ${chalk.red(l)}`));
-            }
-            log(chalk.green('✔ Command completed successfully.'));
           } catch (err: any) {
             log(chalk.red(`✖ Command failed: ${err.message}`));
           } finally {
@@ -420,5 +479,6 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         }
       }
     }
-  });
+  };
+  process.stdin.on('keypress', keypressHandler);
 }
