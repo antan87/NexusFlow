@@ -90,3 +90,5 @@ export async function mcpSetupCommand() {
     console.log(JSON.stringify({ mcpServers: { nexusflow: mcpConfig } }, null, 2));
   }
 }
+
+

@@ -9,7 +9,6 @@ import * as localAi from './utils/local-ai.js';
 import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
-import * as packer from './core/packer.js';
 import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 
@@ -23,7 +22,6 @@ vi.mock('./utils/local-ai.js');
 vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
-vi.mock('./core/packer.js');
 vi.mock('./utils/workflows.js');
 vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
@@ -206,6 +204,25 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('GET /api/adapters', () => {
+    it('should return all registered storage adapters with meta', async () => {
+      const response = await app.request('/api/adapters');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.adapters).toBeDefined();
+      expect(Array.isArray(data.adapters)).toBe(true);
+      // It should include at least 'local', 'central-vault', and 'obsidian'
+      const names = data.adapters.map((a: any) => a.name);
+      expect(names).toContain('local');
+      expect(names).toContain('central-vault');
+      expect(names).toContain('obsidian');
+
+      const obsidian = data.adapters.find((a: any) => a.name === 'obsidian');
+      expect(obsidian.displayName).toBe('Obsidian Vault');
+      expect(obsidian.configFields.length).toBeGreaterThan(0);
+    });
+  });
+
   describe('POST /api/config', () => {
     it('should validate endpoint domain safety', async () => {
       const response = await app.request('/api/config', {
@@ -366,22 +383,22 @@ describe('Server API Endpoints Unit Tests', () => {
       const response = await app.request('/api/updates/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toolId: 'repomix' })
+        body: JSON.stringify({ toolId: 'nexusflow' })
       });
 
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.success).toBe(true);
       expect(data.output).toBe('Successfully updated');
-      expect(execa).toHaveBeenCalledWith('npm', ['install', '-g', 'repomix'], expect.any(Object));
+      expect(execa).toHaveBeenCalledWith('npm', ['install', '-g', '@mrpatronz/nexusflow'], expect.any(Object));
     });
   });
 
   describe('POST /api/workspace', () => {
-    it('should complete workspace creation successfully when packContextXml is false', async () => {
+    it('should complete workspace creation successfully', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
         workspacesDir: '/mock/workspaces',
-        packContextXml: false
+        storageProvider: 'local'
       } as any);
 
       vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/test-ws-creation-no-pack');
@@ -419,53 +436,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(text).toContain('"progress":100');
     });
 
-    it('should complete workspace creation successfully when packContextXml is true', async () => {
-      vi.spyOn(config, 'loadConfig').mockResolvedValue({
-        workspacesDir: '/mock/workspaces',
-        packContextXml: true
-      } as any);
-
-      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/test-ws-creation-with-pack');
-      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
-      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
-      vi.spyOn(packer, 'packWorkspace').mockResolvedValue({
-        outputPath: '/mock/workspace/nexusflow-context.xml',
-        totalFiles: 5,
-        totalCharacters: 1000,
-        fileSize: 5120
-      });
-
-      const response = await app.request('/api/workspace', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          branchName: 'test-ws-creation-with-pack',
-          description: 'A test workspace',
-          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
-          assistants: ['antigravity']
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-      expect(data.jobId).toBe('test-ws-creation-with-pack');
-
-      // Wait a brief tick for the background job to execute
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(workspace.createWorkspace).toHaveBeenCalled();
-      expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
-      expect(generators.generateContextFiles).toHaveBeenCalled();
-      expect(packer.packWorkspace).toHaveBeenCalled();
-
-      // Read status via SSE stream route
-      const streamResponse = await app.request('/api/workspace/create-stream/test-ws-creation-with-pack');
-      expect(streamResponse.status).toBe(200);
-      const text = await streamResponse.text();
-      expect(text).toContain('"status":"completed"');
-      expect(text).toContain('"progress":100');
-    });
+    // XML context packing tests removed.
   });
 
   describe('Workflows Templates API', () => {

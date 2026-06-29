@@ -7,6 +7,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { globby } from 'globby';
+import { writeWorkspaceFile, readWorkspaceFile, workspaceFileExists, writeBaseFile, readBaseFile, baseFileExists } from '../core/storage.js';
 import type { ProjectAnalysis, RepoInfo } from '../types.js';
 
 interface PatternRule {
@@ -493,14 +494,11 @@ export async function generateRepoMap(
   md.push('## 📝 Discovered Conventions');
   md.push('');
   
-  const conventionsFile = path.join(workspacePath, `nexusflow-conventions-${repoName}.md`);
+  const featureId = path.basename(workspacePath);
+  const conventionsFilename = `nexusflow-conventions-${repoName}.md`;
   let customConventions = '';
   
-  let conventionsExist = false;
-  try {
-    await fs.access(conventionsFile);
-    conventionsExist = true;
-  } catch {}
+  const conventionsExist = await workspaceFileExists(workspacePath, featureId, conventionsFilename);
 
   if (!conventionsExist) {
     const starterContent = `# Repository Conventions — ${repoName}
@@ -519,12 +517,12 @@ Future AI assistant sessions will read these conventions from the repository map
 - None recorded yet.
 `;
     try {
-      await fs.writeFile(conventionsFile, starterContent, 'utf-8');
+      await writeBaseFile(workspacePath, repoName, conventionsFilename, starterContent);
       customConventions = starterContent.replace(/^#\s+.+\n?/, '').trim();
     } catch {}
   } else {
     try {
-      customConventions = await fs.readFile(conventionsFile, 'utf-8');
+      customConventions = await readBaseFile(workspacePath, repoName, conventionsFilename);
       customConventions = customConventions.replace(/^#\s+.+\n?/, '').trim();
     } catch {}
   }
@@ -537,6 +535,5 @@ Future AI assistant sessions will read these conventions from the repository map
     md.push('');
   }
 
-  const outPath = path.join(workspacePath, `nexusflow-map-${repoName}.md`);
-  await fs.writeFile(outPath, md.join('\n'), 'utf-8');
+  await writeBaseFile(workspacePath, repoName, `nexusflow-map-${repoName}.md`, md.join('\n'));
 }

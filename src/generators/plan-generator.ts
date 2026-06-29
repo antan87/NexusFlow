@@ -7,6 +7,7 @@
 import path from 'node:path';
 import fse from 'fs-extra';
 import chalk from 'chalk';
+import { writeWorkspaceFile } from '../core/storage.js';
 import type {
   WorkspaceContext,
   ProjectAnalysis,
@@ -187,8 +188,10 @@ export async function generateImplementationPlan(
           .map((n) => `- ${n}`),
         '',
       ];
-      await fse.outputFile(
-        path.join(workspacePath, 'nexusflow-plan.md'),
+      await writeWorkspaceFile(
+        workspacePath,
+        feature.id,
+        'nexusflow-plan.md',
         lines.join('\n'),
       );
       console.log(chalk.green('  ✔'), 'Generated nexusflow-plan.md');
@@ -420,8 +423,7 @@ export async function generateImplementationPlan(
     md.push('');
 
     // ── Write file ──────────────────────────────────────────────────────
-    const outPath = path.join(workspacePath, 'nexusflow-plan.md');
-    await fse.outputFile(outPath, md.join('\n'));
+    await writeWorkspaceFile(workspacePath, feature.id, 'nexusflow-plan.md', md.join('\n'));
     console.log(chalk.green('  ✔'), 'Generated nexusflow-plan.md');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

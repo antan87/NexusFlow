@@ -110,6 +110,7 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow list` | List all existing workspaces (alias: `ls`) |
 | `nexusflow open` | Re-open a workspace in your editor |
 | `nexusflow init` | Configure NexusFlow settings |
+| `nexusflow adapter` | Manage storage adapters — list, switch, configure, or initialize custom plugins |
 | `nexusflow pack` | Pack the workspace codebase into a single token-efficient XML file |
 | `nexusflow start` | Start all services in a workspace (auto-detected) |
 | `nexusflow stop` | Stop all running services |
@@ -155,6 +156,33 @@ Access sessions via the Web Dashboard's **Sessions** tab or through the API:
 ```
 GET /api/workspace/:id/sessions
 GET /api/session/:assistant/:sessionId/transcript
+```
+
+## 🗄️ Pluggable Storage & Vault Adapters
+
+NexusFlow supports multiple storage backends to control where workspace context maps, plans, and persistent AI knowledge files are stored. This allows keeping your Git repository workspaces completely clean from AI file clutter.
+
+Available storage providers:
+- **Local (`local`)** — Stores files directly in the workspace directory (default).
+- **Central Vault (`central-vault`)** — Stores files in a centralized folder on your machine at `~/.nexusflow/vault/`.
+- **Obsidian Vault (`obsidian`)** — Stores files in a designated folder inside your Obsidian Vault, wrapped in a `nexusflow/` subdirectory (e.g. `vault/nexusflow/workspaces/<featureId>`). Auto-wraps files with YAML frontmatter metadata and tags for easy Obsidian indexing.
+
+### CLI Adapter Management
+
+Configure storage adapters from the command line:
+
+```bash
+# List all registered storage adapters and the active provider
+nexusflow adapter list
+
+# View configurations and fields for a specific adapter
+nexusflow adapter info obsidian
+
+# Switch to a different adapter (e.g. obsidian) and configure its settings
+nexusflow adapter use obsidian
+
+# Scaffolds a template for creating a new custom storage adapter plugin
+nexusflow adapter init my-custom-plugin
 ```
 
 ## 👥 Teamwork Strategy Workflows

@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { execa } from 'execa';
 
 import type { Feature, RepoInfo, WorkspaceContext } from '../types.js';
@@ -14,8 +15,9 @@ import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
-import { packWorkspace } from './packer.js';
 import { loadConfig } from './config.js';
+import { getActiveStorageProvider } from './adapters/registry.js';
+import { deleteWorkspaceFiles } from './storage.js';
 
 /** Name of the per-workspace manifest file. */
 const MANIFEST_FILE = 'nexusflow.json';
@@ -90,7 +92,7 @@ export async function createWorkspace(
       "mcpServers": {
         "nexusflow": {
           "command": "npx",
-          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run", workspacePath]
+          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "start"]
         }
       }
     };
@@ -116,6 +118,9 @@ export async function createWorkspace(
 
   // Persist the feature manifest.
   await saveFeatureConfig(workspacePath, feature);
+
+  // Exclude NexusFlow files from git
+  await excludeNexusFlowFiles(workspacePath, feature);
 
   return workspacePath;
 }
@@ -178,9 +183,9 @@ export async function saveFeatureConfig(
   workspacePath: string,
   feature: Feature,
 ): Promise<void> {
-  const manifestPath = path.join(workspacePath, MANIFEST_FILE);
   const data = JSON.stringify(feature, null, 2) + '\n';
-  await fs.writeFile(manifestPath, data, 'utf-8');
+  const adapter = getActiveStorageProvider();
+  await adapter.writeWorkspaceFile(workspacePath, feature.id, MANIFEST_FILE, data);
 }
 
 /**
@@ -194,16 +199,36 @@ export async function saveFeatureConfig(
 export async function loadFeatureConfig(
   workspacePath: string,
 ): Promise<Feature | null> {
-  const rootDir = await findWorkspaceRoot(workspacePath);
-  if (!rootDir) return null;
+  const featureId = path.basename(workspacePath);
+  const adapter = getActiveStorageProvider();
 
-  const manifestPath = path.join(rootDir, MANIFEST_FILE);
+  // 1. Try reading via the storage adapter first
+  try {
+    const raw = await adapter.readWorkspaceFile(workspacePath, featureId, MANIFEST_FILE);
+    return JSON.parse(raw) as Feature;
+  } catch {}
+
+  // 2. Try direct local check
+  const manifestPath = path.join(workspacePath, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(manifestPath, 'utf-8');
     return JSON.parse(raw) as Feature;
-  } catch {
-    return null;
+  } catch {}
+
+  // 3. Try direct vault check
+  const vaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, MANIFEST_FILE);
+  try {
+    const raw = await fs.readFile(vaultManifest, 'utf-8');
+    return JSON.parse(raw) as Feature;
+  } catch {}
+
+  // 4. Traverse parent directories
+  const rootDir = await findWorkspaceRoot(workspacePath);
+  if (rootDir && rootDir !== workspacePath) {
+    return loadFeatureConfig(rootDir);
   }
+
+  return null;
 }
 
 /**
@@ -255,6 +280,12 @@ export async function deleteWorkspace(
 ): Promise<void> {
   const feature = await loadFeatureConfig(workspacePath);
   if (feature) {
+    try {
+      await deleteWorkspaceFiles(workspacePath, feature.id);
+    } catch (error) {
+      console.warn(`Warning: failed to delete workspace context files from storage:`, error);
+    }
+
     const origRepos = feature.originalRepos || [];
     for (let i = 0; i < feature.repos.length; i++) {
       const worktreePath = feature.repos[i]!;
@@ -373,8 +404,61 @@ export async function addRepoToWorkspace(
   };
 
   await generateContextFiles(ctx, feature.assistants, workspacePath);
-  const config = await loadConfig();
-  if (config.packContextXml) {
-    await packWorkspace(workspacePath);
+  await excludeNexusFlowFiles(workspacePath, feature);
+}
+
+/**
+ * Automatically adds NexusFlow workspace context and config files to git's local
+ * exclude list for each repository so they never show up in `git status` or get committed.
+ */
+async function excludeNexusFlowFiles(workspacePath: string, feature: Feature): Promise<void> {
+  const excludeEntries = [
+    'CLAUDE.md',
+    'AGENTS.md',
+    'WORKSPACE.md',
+    'nexusflow-knowledge.md',
+    'nexusflow-plan.md',
+    'nexusflow-conventions-*.md',
+    'nexusflow-map-*.md',
+    'nexusflow-diff-context.md',
+    '.cursor/rules/',
+    '.vscode/settings.json'
+  ];
+
+  for (const repoPath of feature.repos) {
+    try {
+      const gitDir = path.join(repoPath, '.git');
+      let worktreeGitDir = gitDir;
+      const stat = await fs.stat(gitDir);
+      if (stat.isFile()) {
+        const fileContent = await fs.readFile(gitDir, 'utf8');
+        const match = fileContent.match(/gitdir:\s*(.+)/);
+        if (match) {
+          worktreeGitDir = match[1].trim();
+        }
+      }
+      
+      const excludeFilePath = path.join(worktreeGitDir, 'info', 'exclude');
+      await fs.mkdir(path.dirname(excludeFilePath), { recursive: true });
+      
+      let excludeContent = '';
+      try {
+        excludeContent = await fs.readFile(excludeFilePath, 'utf8');
+      } catch {}
+
+      let updated = false;
+      for (const entry of excludeEntries) {
+        if (!excludeContent.includes(entry)) {
+          excludeContent = excludeContent.trim() + '\n' + entry + '\n';
+          updated = true;
+        }
+      }
+      
+      if (updated) {
+        await fs.writeFile(excludeFilePath, excludeContent.trim() + '\n', 'utf8');
+      }
+    } catch {
+      // Ignore if not a git repo or directory missing
+    }
   }
 }

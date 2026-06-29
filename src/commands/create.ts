@@ -14,7 +14,6 @@ import { confirm } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { createWorkspace } from '../core/workspace.js';
-import { packWorkspace } from '../core/packer.js';
 import { generateContextFiles } from '../generators/index.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { detectAIAssistants } from '../utils/detect-ai.js';
@@ -124,22 +123,7 @@ export async function createCommand(): Promise<void> {
   console.log(chalk.cyan('\nGenerating AI context files...'));
   await generateContextFiles(ctx, selectedAI, workspacePath);
 
-  // ── 8.5. Pack codebase context ──────────────────────────────────────
-  if (config.packContextXml) {
-    const packSpinner = ora('Packing codebase context with Repomix...').start();
-    try {
-      const packResult = await packWorkspace(workspacePath);
-      const filesCount = packResult.outputPaths?.length || 1;
-      packSpinner.succeed(
-        `Packed codebase context into ${filesCount} file(s) (${packResult.totalFiles} files total, ${(packResult.fileSize / 1024).toFixed(2)} KB)`
-      );
-    } catch (error) {
-      packSpinner.fail('Failed to pack codebase context');
-      console.error(chalk.red(`  ${error}`));
-    }
-  } else {
-    console.log(chalk.gray('\n  ○ Skipping codebase context packing (packContextXml is disabled)'));
-  }
+  // Monolithic XML context packing removed.
 
   // ── 8. Open in editor ───────────────────────────────────────────────
   const detectedEditors = await detectEditors();

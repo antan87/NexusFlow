@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 import type { NexusFlowConfig } from '../types.js';
+import { getStorageProvider, setActiveStorageProvider } from './adapters/registry.js';
 
 /** Name of the config directory under the user's home folder. */
 const CONFIG_DIR_NAME = '.nexusflow';
@@ -33,7 +34,6 @@ export function getDefaultConfig(): NexusFlowConfig {
     defaultAssistant: null,
     defaultEditor: null,
     scanDepth: 2,
-    packContextXml: false,
     excludePatterns: [
       '**/node_modules/**',
       '**/bin/**',
@@ -84,20 +84,34 @@ export async function ensureConfigDir(): Promise<void> {
 export async function loadConfig(): Promise<NexusFlowConfig> {
   const configPath = path.join(getConfigDir(), CONFIG_FILE_NAME);
 
+  let merged: NexusFlowConfig;
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<NexusFlowConfig>;
 
     // Merge with defaults so newly-added keys are always present.
-    const merged = { ...getDefaultConfig(), ...parsed };
+    merged = { ...getDefaultConfig(), ...parsed };
     if (parsed.localLlm) {
       merged.localLlm = { ...getDefaultConfig().localLlm, ...parsed.localLlm };
     }
-    return merged;
   } catch {
     // File doesn't exist or is unreadable — return defaults.
-    return getDefaultConfig();
+    merged = getDefaultConfig();
   }
+
+  // Set the active storage provider based on configuration
+  try {
+    const providerName = merged.storageProvider || 'local';
+    const provider = getStorageProvider(providerName);
+    // Pass per-adapter settings if available
+    const adapterSettings = merged.adapterConfig?.[providerName] ?? {};
+    if (provider.configure) {
+      provider.configure(adapterSettings);
+    }
+    setActiveStorageProvider(provider);
+  } catch {}
+
+  return merged;
 }
 
 /**
@@ -112,4 +126,15 @@ export async function saveConfig(config: NexusFlowConfig): Promise<void> {
   const configPath = path.join(getConfigDir(), CONFIG_FILE_NAME);
   const data = JSON.stringify(config, null, 2) + '\n';
   await fs.writeFile(configPath, data, 'utf-8');
+
+  // Set the active storage provider based on configuration
+  try {
+    const providerName = config.storageProvider || 'local';
+    const provider = getStorageProvider(providerName);
+    const adapterSettings = config.adapterConfig?.[providerName] ?? {};
+    if (provider.configure) {
+      provider.configure(adapterSettings);
+    }
+    setActiveStorageProvider(provider);
+  } catch {}
 }

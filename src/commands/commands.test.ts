@@ -103,7 +103,8 @@ describe('NexusFlow CLI New Commands unit tests', () => {
         expect.any(Object),
         expect.any(Array),
         mockWorkspacePath,
-        'repo-1'
+        'repo-1',
+        undefined
       );
     });
   });

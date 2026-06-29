@@ -36,8 +36,14 @@ export interface NexusFlowConfig {
   /** Global patterns to exclude when packing/analyzing repositories. */
   excludePatterns?: string[];
 
-  /** Whether to pack codebase context into XML format. Default: true */
-  packContextXml?: boolean;
+  /** Active storage provider name. Default: 'local' */
+  storageProvider?: string;
+
+  /** Per-adapter settings keyed by adapter name. */
+  adapterConfig?: Record<string, Record<string, unknown>>;
+
+  /** List of plugin paths or npm packages to load. */
+  plugins?: string[];
 
   /** ISO timestamp of the last update check. */
   lastUpdateCheck?: string;
