@@ -257,7 +257,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                 }
                 case 'openFile': {
                     const uri = vscode.Uri.file(data.filePath);
-                    vscode.workspace.openTextDocument(uri).then((doc) => {
+                    vscode.workspace.openTextDocument(uri).then((doc: vscode.TextDocument) => {
                         vscode.window.showTextDocument(doc);
                     });
                     break;
