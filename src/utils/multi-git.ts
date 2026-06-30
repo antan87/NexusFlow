@@ -10,8 +10,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execa } from 'execa';
 
-import type { Feature } from '../types.js';
+import type { Feature, SyncStatus } from '../types.js';
 import { detectDefaultBranch } from './git.js';
+
+export type { SyncStatus };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,14 +39,32 @@ export interface RepoStatus {
   summary: string;
 }
 
-/** Result of a rebase operation. */
+/**
+ * Result of a rebase operation.
+ *
+ * The classified {@link SyncStatus} values mean:
+ * - `up-to-date`     — branch already contained the latest base commits.
+ * - `rebased`        — new base commits were applied cleanly.
+ * - `conflict`       — a genuine merge conflict; the rebase was aborted.
+ * - `stash-conflict` — the rebase succeeded but re-applying auto-stashed local
+ *                      changes conflicted; the stash is preserved for manual merge.
+ * - `error`          — an infrastructure failure (network/auth on fetch, etc.) that
+ *                      is *not* a merge conflict.
+ */
 export interface RebaseResult {
-  /** Whether the rebase completed without conflicts. */
+  /**
+   * Whether the rebase itself completed. True for `up-to-date`, `rebased`, and
+   * `stash-conflict` (the rebase landed; only the stash pop needs attention).
+   */
   success: boolean;
+  /** Classified outcome. */
+  status: SyncStatus;
   /** Human-readable outcome message. */
   message: string;
-  /** Stderr output when a conflict is detected. */
+  /** Stderr output — populated only for `status === 'conflict'`. */
   conflict?: string;
+  /** Whether dirty working-tree changes were auto-stashed during the operation. */
+  stashed?: boolean;
 }
 
 /** Result of a commit-and-push operation. */
@@ -163,58 +183,130 @@ export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
 }
 
 /**
- * Rebases the current branch on top of the latest upstream base branch.
+ * Extracts the stderr (falling back to the message) from a thrown execa error.
+ */
+function errText(error: unknown): string {
+  if (error instanceof Error && 'stderr' in error) {
+    const stderr = String((error as { stderr: unknown }).stderr).trim();
+    if (stderr) return stderr;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Rebases the current branch on top of the latest upstream base branch, while
+ * safely preserving any uncommitted local changes.
  *
- * Fetches from origin first, then attempts `git rebase origin/{baseBranch}`.
- * If a conflict occurs the rebase is aborted and the conflict details are
- * returned.
+ * Unlike a bare `git rebase`, this is safe to call from non-interactive agents
+ * against a *dirty* working tree: dirty changes are stashed first and restored
+ * afterwards. The outcome is classified (see {@link SyncStatus}) so that a dirty
+ * tree or a network failure is never mis-reported as a merge conflict.
+ *
+ * Sequence: `git fetch` → (stash if dirty) → `git rebase origin/{base}` →
+ * (pop the stash if one was made).
  *
  * @param repoPath   - Absolute path to the repo root.
  * @param baseBranch - The upstream branch to rebase onto (e.g. 'main').
- * @returns Result indicating success or conflict information.
+ * @returns Classified result; `conflict` text is set only for real merge conflicts.
  */
 export async function rebaseRepo(
   repoPath: string,
   baseBranch: string,
 ): Promise<RebaseResult> {
+  // 1. Fetch latest from origin. A failure here is infrastructure (network/auth),
+  //    not a conflict.
   try {
-    // Fetch latest from origin.
     await execa('git', ['fetch', 'origin'], { cwd: repoPath });
+  } catch (error) {
+    return {
+      success: false,
+      status: 'error',
+      message: `Fetch failed: ${errText(error).split('\n')[0]}`,
+    };
+  }
 
-    // Attempt rebase.
+  // 2. Stash dirty changes (including untracked) so the rebase has a clean tree.
+  let stashed = false;
+  const status = await getRepoStatus(repoPath);
+  if (status.hasChanges) {
+    try {
+      await execa(
+        'git',
+        ['stash', 'push', '-u', '-m', 'nexusflow-autostash'],
+        { cwd: repoPath },
+      );
+      stashed = true;
+    } catch (error) {
+      return {
+        success: false,
+        status: 'error',
+        message: `Failed to stash local changes: ${errText(error).split('\n')[0]}`,
+      };
+    }
+  }
+
+  // 3. Attempt the rebase.
+  let rebaseStatus: SyncStatus;
+  let rebaseMessage: string;
+  try {
     const { stdout } = await execa(
       'git',
       ['rebase', `origin/${baseBranch}`],
       { cwd: repoPath },
     );
 
-    // Determine how far ahead the branch is.
-    const message = stdout.includes('up to date')
-      ? 'Up to date'
-      : stdout.includes('Applied')
-        ? stdout.trim()
-        : 'Rebased successfully';
-
-    return { success: true, message };
+    if (stdout.includes('up to date') || stdout.includes('up-to-date')) {
+      rebaseStatus = 'up-to-date';
+      rebaseMessage = 'Up to date';
+    } else {
+      rebaseStatus = 'rebased';
+      rebaseMessage = 'Rebased onto latest base';
+    }
   } catch (error) {
-    // Abort the in-progress rebase so the repo isn't left in a broken state.
+    // Genuine merge conflict (or other rebase failure). Abort so the repo is
+    // never left mid-rebase, then restore the user's stashed work.
     try {
       await execa('git', ['rebase', '--abort'], { cwd: repoPath });
     } catch {
       // Best-effort abort; ignore if it fails.
     }
 
-    const stderr =
-      error instanceof Error && 'stderr' in error
-        ? String((error as { stderr: unknown }).stderr)
-        : String(error);
+    if (stashed) {
+      try {
+        await execa('git', ['stash', 'pop'], { cwd: repoPath });
+      } catch {
+        // Stash pop after an abort should normally succeed (tree is unchanged);
+        // if it doesn't, the stash is preserved for manual recovery.
+      }
+    }
 
     return {
       success: false,
+      status: 'conflict',
       message: 'Conflict during rebase',
-      conflict: stderr,
+      conflict: errText(error),
+      stashed,
     };
   }
+
+  // 4. Restore stashed local changes, if any.
+  if (stashed) {
+    try {
+      await execa('git', ['stash', 'pop'], { cwd: repoPath });
+    } catch (error) {
+      // The rebase landed, but re-applying local changes conflicts. `git stash
+      // pop` leaves the stash in place on conflict, so the work is not lost.
+      return {
+        success: true,
+        status: 'stash-conflict',
+        message: 'Rebased; local changes need manual merge — stash preserved',
+        conflict: errText(error),
+        stashed,
+      };
+    }
+  }
+
+  return { success: true, status: rebaseStatus, message: rebaseMessage, stashed };
 }
 
 /**
