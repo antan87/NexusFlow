@@ -8,7 +8,7 @@
     "nexusflow": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && npm run build --prefix gui && npm run extension:compile",
+    "build": "tsc && npm run build --prefix gui",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "ui": "node dist/index.js ui",
