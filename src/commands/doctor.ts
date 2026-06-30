@@ -211,6 +211,19 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
     }
   }
 
+  // Check .code-workspace file exists (required for VS Code SCM to discover worktrees)
+  const workspaceName = path.basename(workspacePath);
+  const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+  try {
+    await fs.access(codeWorkspacePath);
+    console.log(`  ${chalk.green('✔')} ${workspaceName}.code-workspace exists`);
+  } catch {
+    warnings.push(
+      `Missing ${workspaceName}.code-workspace. VS Code SCM will not show changes inside repo sub-folders. Run \`nexusflow refresh\` to regenerate it.`
+    );
+    console.log(`  ${chalk.yellow('⚠')} ${workspaceName}.code-workspace is missing`);
+  }
+
   // Check VS Code Settings for search.useIgnoreFiles: false
   const vscodeSettingsPath = path.join(workspacePath, '.vscode', 'settings.json');
   try {

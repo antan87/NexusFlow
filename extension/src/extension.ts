@@ -58,6 +58,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Start Hono server in background if not running
     startHonoServer(context);
 
+    // Scope keybindings to workspaces where nexusflow.json exists
+    vscode.commands.executeCommand('setContext', 'nexusflow.workspaceActive', true);
+
     // Initialize Status Bar Item
     myStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     myStatusBarItem.command = 'nexusflow.openTui';
@@ -292,11 +295,21 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
+        const nonce = getNonce();
+        const codiconsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._context.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css')
+        );
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 style-src ${webview.cspSource} 'unsafe-inline';
+                 script-src 'nonce-${nonce}';
+                 font-src ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="${codiconsUri}" rel="stylesheet" />
     <title>NexusFlow Sidebar Console</title>
     <style>
         :root {
@@ -491,10 +504,10 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 <body>
 
     <div class="header">
-        <h3>⚡ NexusFlow</h3>
+        <h3><i class="codicon codicon-extensions"></i> NexusFlow</h3>
         <div class="status-indicator">
             <div class="status-dot"></div>
-            <span>ONLINE</span>
+            <span>ACTIVE</span>
         </div>
     </div>
 
@@ -507,10 +520,10 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div class="btn-grid">
-            <button class="btn" onclick="runCommand('tui')">💻 Open TUI</button>
-            <button class="btn" onclick="runCommand('sync')">🔄 Rebase Sync</button>
-            <button class="btn" onclick="runCommand('doctor')">🩺 Run Doctor</button>
-            <button class="btn" onclick="triggerCommand('nexusflow.commitWorkspace')">📝 Commit</button>
+            <button class="btn" onclick="runCommand('tui')"><i class="codicon codicon-terminal"></i> Open TUI</button>
+            <button class="btn" onclick="runCommand('sync')"><i class="codicon codicon-sync"></i> Rebase Sync</button>
+            <button class="btn" onclick="runCommand('doctor')"><i class="codicon codicon-pulse"></i> Run Doctor</button>
+            <button class="btn" onclick="triggerCommand('nexusflow.commitWorkspace')"><i class="codicon codicon-git-commit"></i> Commit</button>
         </div>
 
         <div class="card">
@@ -530,7 +543,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 
     <!-- Empty Wizard Setup View -->
     <div id="wizard-view" style="display: none;" class="wizard-view">
-        <div class="wizard-icon">🚀</div>
+        <div class="wizard-icon"><i class="codicon codicon-rocket"></i></div>
         <h4 style="margin-bottom: 8px; font-size: 14px; color: var(--text-primary);">No Workspace Detected</h4>
         <p class="wizard-text">NexusFlow coordinates multi-repo workspaces with Git worktrees and auto-generated AI contexts.</p>
         
@@ -547,7 +560,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
         <p style="color: var(--text-secondary);">Querying workspace configuration...</p>
     </div>
 
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         // Listen for messages from extension backend
@@ -587,7 +600,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                 const repoList = document.getElementById('repo-list');
                 repoList.innerHTML = details.repos.map(r => \`
                     <li class="file-row" onclick="openFile('\${r.path.replace(/\\\\/g, '/')}')">
-                        <span class="file-icon">📁</span>
+                        <i class="codicon codicon-folder file-icon"></i>
                         <span>\${r.name}</span>
                     </li>
                 \`).join('');
@@ -598,7 +611,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                 const files = ['WORKSPACE.md', 'nexusflow-knowledge.md', 'nexusflow-plan.md'];
                 contextFiles.innerHTML = files.map(file => \`
                     <li class="file-row" onclick="openFile('\${root}/\${file}')">
-                        <span class="file-icon">📄</span>
+                        <i class="codicon codicon-file-text file-icon"></i>
                         <span>\${file}</span>
                     </li>
                 \`).join('');
@@ -612,6 +625,15 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
     }
+}
+
+function getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }
 
 function updateStatusBarItem() {

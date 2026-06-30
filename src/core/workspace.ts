@@ -68,17 +68,40 @@ export async function createWorkspace(
     console.warn('Warning: Failed to initialize git repository at workspace root:', error);
   }
 
-  // Create .vscode/settings.json to allow VS Code search to query inside ignored sub-repos
+  // Generate a .code-workspace file so VS Code opens each repo as a top-level workspace
+  // folder with its own SCM provider. Without this, VS Code's git scanner respects the
+  // root .gitignore (which lists every repo dir) and never discovers the worktrees.
+  try {
+    const workspaceName = path.basename(workspacePath);
+    const codeWorkspace = {
+      folders: [
+        { path: '.', name: `${workspaceName} (workspace)` },
+        ...repos.map((repo) => ({ path: repo.name, name: repo.name })),
+      ],
+      settings: {
+        'search.useIgnoreFiles': false,
+      },
+    };
+    await fs.writeFile(
+      path.join(workspacePath, `${workspaceName}.code-workspace`),
+      JSON.stringify(codeWorkspace, null, 2) + '\n',
+      'utf-8',
+    );
+  } catch (error) {
+    console.warn('Warning: Failed to create .code-workspace file:', error);
+  }
+
+  // Create .vscode/settings.json for editors that don't use the .code-workspace file
   try {
     const vscodeDir = path.join(workspacePath, '.vscode');
     await fs.mkdir(vscodeDir, { recursive: true });
     const settings = {
-      "search.useIgnoreFiles": false
+      'search.useIgnoreFiles': false,
     };
     await fs.writeFile(
       path.join(vscodeDir, 'settings.json'),
       JSON.stringify(settings, null, 2) + '\n',
-      'utf-8'
+      'utf-8',
     );
   } catch (error) {
     console.warn('Warning: Failed to create .vscode/settings.json:', error);

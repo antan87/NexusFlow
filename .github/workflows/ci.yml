@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install GUI Dependencies
+        run: npm ci --prefix gui
+
+      - name: Install Extension Dependencies
+        run: npm ci --prefix extension
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Run Tests
+        run: npm test
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+        working-directory: gui
+
+      - name: Run GUI E2E Tests
+        run: npm run test:gui
