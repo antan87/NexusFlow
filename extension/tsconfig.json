@@ -10,9 +10,8 @@
     "strict": true,
     "rootDir": "src",
     "moduleResolution": "node16",
-    "types": ["node"],
-    "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "esModuleInterop": true
   },
   "exclude": [
     "node_modules",

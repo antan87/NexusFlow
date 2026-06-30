@@ -18,7 +18,7 @@
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build",
     "extension:install": "npm install --prefix extension",
-    "extension:compile": "node extension/node_modules/typescript/bin/tsc -p extension/tsconfig.json"
+    "extension:compile": "npm run compile --prefix extension"
   },
   "keywords": [
     "ai",
