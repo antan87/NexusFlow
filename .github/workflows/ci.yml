@@ -30,6 +30,9 @@ jobs:
       - name: Build Project
         run: npm run build
 
+      - name: Compile VS Code Extension
+        run: npm run extension:compile
+
       - name: Run Tests
         run: npm test
 
