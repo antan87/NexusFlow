@@ -10,6 +10,7 @@
     "strict": true,
     "rootDir": "src",
     "moduleResolution": "node",
+    "ignoreDeprecations": "5.0",
     "types": ["node"],
     "esModuleInterop": true
   },
