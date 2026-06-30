@@ -28,7 +28,8 @@ import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
-import { getWorkspaceRepos, rebaseRepo, commitAndPush, getRepoStatus } from './utils/multi-git.js';
+import { getWorkspaceRepos, commitAndPush, getRepoStatus } from './utils/multi-git.js';
+import { syncWorkspace } from './core/sync.js';
 import {
   detectAllServices,
   detectOrchestrationTools,
@@ -861,20 +862,21 @@ app.post('/api/workspace/:id/sync', async (c) => {
     const config = await loadConfig();
     const workspacePath = path.join(config.workspacesDir, id);
 
-    const repos = await getWorkspaceRepos(workspacePath);
-    const results = [];
+    const report = await syncWorkspace(workspacePath);
+    const results = report.repos.map((repo) => ({
+      repoName: repo.name,
+      success: repo.status !== 'conflict' && repo.status !== 'error',
+      status: repo.status,
+      message: repo.message,
+      conflict: repo.conflict,
+    }));
 
-    for (const repo of repos) {
-      const result = await rebaseRepo(repo.path, repo.defaultBranch || 'main');
-      results.push({
-        repoName: repo.name,
-        success: result.success,
-        message: result.message,
-        conflict: result.conflict,
-      });
-    }
-
-    return c.json({ results });
+    return c.json({
+      results,
+      syncedCount: report.syncedCount,
+      conflictCount: report.conflictCount,
+      errorCount: report.errorCount,
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

@@ -9,6 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig } from '../core/workspace.js';
+import { syncWorkspace } from '../core/sync.js';
 import { callLocalLlm } from '../utils/local-ai.js';
 
 export async function startMcpServer(workspacePath?: string) {
@@ -43,6 +44,19 @@ export async function startMcpServer(workspacePath?: string) {
             },
           },
           required: ['query'],
+        },
+      },
+      {
+        name: 'sync_workspace',
+        description: 'Rebase every repository in the NexusFlow workspace onto its base branch. Safe to call non-interactively: dirty working trees are auto-stashed and restored, so a dirty tree is never mis-reported as a conflict. Returns structured per-repo results (status: up-to-date | rebased | conflict | stash-conflict | error) and records them to the workspace state file.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            workspaceId: {
+              type: 'string',
+              description: 'Optional ID/branchName of the workspace to sync. If omitted, uses the currently active workspace.',
+            },
+          },
         },
       },
       {
@@ -232,6 +246,36 @@ export async function startMcpServer(workspacePath?: string) {
             {
               type: 'text',
               text: `Error searching workspace: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    if (name === 'sync_workspace') {
+      try {
+        const feature = await loadFeatureConfig(resolvedWorkspacePath);
+        if (!feature) {
+          throw new Error(`Workspace not found at ${resolvedWorkspacePath}. Make sure you are in a NexusFlow workspace or provide a valid workspaceId.`);
+        }
+
+        const report = await syncWorkspace(resolvedWorkspacePath);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(report, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error syncing workspace: ${error.message}`,
             },
           ],
           isError: true,

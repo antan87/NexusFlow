@@ -4,16 +4,13 @@
  */
 
 import chalk from 'chalk';
-import { select, search } from '@inquirer/prompts';
+import { search } from '@inquirer/prompts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
-import { analyzeAllRepos } from '../analyzers/index.js';
-import { generateContextFiles } from '../generators/index.js';
-import type { WorkspaceContext } from '../types.js';
+import { syncWorkspace, type RepoSyncReport } from '../core/sync.js';
 
 /**
  * Executes the sync command.
@@ -35,69 +32,50 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
   console.log(chalk.bold(`Syncing workspace: ${chalk.cyan(feature.branchName)}`));
   console.log(chalk.dim(`Path: ${workspacePath}\n`));
 
-  let repos;
+  let report;
   try {
-    repos = await getWorkspaceRepos(workspacePath);
+    report = await syncWorkspace(workspacePath);
   } catch (error) {
-    console.error(chalk.red(`✖ Failed to retrieve repos: ${error instanceof Error ? error.message : String(error)}`));
+    console.error(chalk.red(`✖ Failed to sync: ${error instanceof Error ? error.message : String(error)}`));
     return;
   }
 
-  let syncedCount = 0;
-  let conflictCount = 0;
-
-  for (const repo of repos) {
+  for (const repo of report.repos) {
     console.log(`Repository: ${chalk.bold(repo.name)}`);
-    const defaultBranch = repo.defaultBranch || 'main';
-
-    const spinner = chalk.dim('  Rebasing...');
-    process.stdout.write(spinner);
-
-    const result = await rebaseRepo(repo.path, defaultBranch);
-
-    // Clear rebase message line
-    process.stdout.write('\r' + ' '.repeat(spinner.length) + '\r');
-
-    if (result.success) {
-      console.log(`  ${chalk.green('✅')} Synced (${result.message})`);
-      syncedCount++;
-    } else {
-      console.log(`  ${chalk.red('⚠️')} Conflict: ${result.message}`);
-      if (result.conflict) {
-        console.log(chalk.dim(result.conflict.split('\n').map(l => `    ${l}`).slice(0, 5).join('\n')));
-      }
-      conflictCount++;
-    }
+    renderRepoResult(repo);
   }
 
-  console.log(`\n📊 ${chalk.bold('Summary:')} ${syncedCount} synced, ${conflictCount} conflict(s)\n`);
+  const parts = [`${report.syncedCount} synced`];
+  if (report.conflictCount > 0) parts.push(`${report.conflictCount} conflict(s)`);
+  if (report.errorCount > 0) parts.push(`${report.errorCount} error(s)`);
+  console.log(`\n📊 ${chalk.bold('Summary:')} ${parts.join(', ')}\n`);
 
-  if (syncedCount > 0) {
-    console.log(chalk.cyan('Regenerating architecture maps and context...'));
-    try {
-      const allRepos = await Promise.all(feature.repos.map(r => {
-        const repoName = path.basename(r);
-        return {
-          name: repoName,
-          path: r,
-          defaultBranch: 'main',
-        };
-      }));
+  if (report.syncedCount > 0) {
+    console.log(chalk.green('✅ Workspace maps and contexts updated.\n'));
+  }
+}
 
-      const analysis = await analyzeAllRepos(allRepos);
-      const ctx: WorkspaceContext = {
-        feature,
-        repos: allRepos,
-        analysis,
-      };
-
-      await generateContextFiles(ctx, feature.assistants, workspacePath);
-
-
-      console.log(chalk.green('✅ Workspace maps and contexts successfully updated.\n'));
-    } catch (error) {
-      console.error(chalk.red(`✖ Failed to regenerate maps: ${error instanceof Error ? error.message : String(error)}\n`));
-    }
+/**
+ * Prints a single repo's sync outcome with status-appropriate styling.
+ */
+function renderRepoResult(repo: RepoSyncReport): void {
+  switch (repo.status) {
+    case 'up-to-date':
+    case 'rebased':
+      console.log(`  ${chalk.green('✅')} Synced (${repo.message})`);
+      break;
+    case 'stash-conflict':
+      console.log(`  ${chalk.yellow('⚠️')} ${repo.message}`);
+      break;
+    case 'conflict':
+      console.log(`  ${chalk.red('❌')} Conflict: ${repo.message}`);
+      if (repo.conflict) {
+        console.log(chalk.dim(repo.conflict.split('\n').map(l => `    ${l}`).slice(0, 5).join('\n')));
+      }
+      break;
+    case 'error':
+      console.log(`  ${chalk.red('🔌')} ${repo.message}`);
+      break;
   }
 }
 

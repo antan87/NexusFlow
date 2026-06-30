@@ -397,6 +397,42 @@ export interface RunningState {
   updatedAt: string;
 }
 
+// ─── Per-Repo Sync State ──────────────────────────────────────────────────
+
+/**
+ * Classified outcome of a sync/rebase attempt for a single repo.
+ * See `utils/multi-git.ts` for the meaning of each value.
+ */
+export type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';
+
+/** Persisted sync/validation state for a single repo in a workspace. */
+export interface RepoSyncState {
+  /** Directory name of the repo. */
+  repoName: string;
+  /** ISO timestamp of the last sync attempt. */
+  lastSyncedAt?: string;
+  /** Classified result of the last sync. */
+  lastSyncStatus?: SyncStatus;
+  /** Human-readable message from the last sync. */
+  lastSyncMessage?: string;
+  /** True when the repo pulled in new commits and has not yet been re-validated. */
+  pendingValidation?: boolean;
+  /** Result of the last validation run (e.g. test/e2e), if any. */
+  lastValidationResult?: 'pass' | 'fail' | null;
+  /** ISO timestamp of the last validation run. */
+  lastValidatedAt?: string;
+}
+
+/** State file saved to track per-repo sync/validation status (`.nexusflow-state.json`). */
+export interface WorkspaceState {
+  /** Workspace path this state belongs to. */
+  workspacePath: string;
+  /** Per-repo state, keyed by repo name. */
+  repos: Record<string, RepoSyncState>;
+  /** Timestamp when the state was last updated. */
+  updatedAt: string;
+}
+
 // ─── Phase 3: Dependency Graph Types ──────────────────────────────────────
 
 /** A node in the workspace dependency graph. */
