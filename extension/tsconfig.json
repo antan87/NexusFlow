@@ -10,6 +10,7 @@
     "strict": true,
     "rootDir": "src",
     "moduleResolution": "node16",
+    "types": ["node", "vscode"],
     "skipLibCheck": true,
     "esModuleInterop": true
   },
