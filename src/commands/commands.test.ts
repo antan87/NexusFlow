@@ -142,7 +142,7 @@ describe('NexusFlow CLI New Commands unit tests', () => {
         existingAIConfigs: [],
       });
       vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(mockAnalysis);
-      vi.spyOn(fs, 'access').mockResolvedValue(undefined);
+      vi.spyOn(fs, 'access').mockResolvedValue(undefined); // covers .code-workspace + artifact checks
       vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ "search.useIgnoreFiles": false }));
 
       // Run doctor command

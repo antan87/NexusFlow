@@ -2,7 +2,7 @@
   "name": "nexusflow-vscode",
   "displayName": "NexusFlow Multi-Repo Workspace Orchestrator",
   "description": "Manage multiple repositories as a single feature workspace, orchestrate background services, and align AI coding contexts natively inside VS Code.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "nexusflow",
   "engines": {
     "vscode": "^1.80.0"
@@ -42,31 +42,38 @@
     "commands": [
       {
         "command": "nexusflow.openDashboard",
-        "title": "NexusFlow: Open Sidebar Dashboard"
+        "title": "Open Sidebar Dashboard",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.openBrowserDashboard",
-        "title": "NexusFlow: Open Web Dashboard (Browser)"
+        "title": "Open Web Dashboard (Browser)",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.openTui",
-        "title": "NexusFlow: Open Terminal GUI (TUI)"
+        "title": "Open Terminal GUI (TUI)",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.createWorkspace",
-        "title": "NexusFlow: Create Workspace"
+        "title": "Create Workspace",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.syncWorkspace",
-        "title": "NexusFlow: Sync Workspace"
+        "title": "Sync Workspace",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.runDoctor",
-        "title": "NexusFlow: Run Doctor Diagnostics"
+        "title": "Run Doctor Diagnostics",
+        "category": "NexusFlow"
       },
       {
         "command": "nexusflow.commitWorkspace",
-        "title": "NexusFlow: Commit Workspace Changes"
+        "title": "Commit Workspace Changes",
+        "category": "NexusFlow"
       }
     ],
     "keybindings": [
@@ -74,13 +81,13 @@
         "command": "nexusflow.openTui",
         "key": "ctrl+alt+t",
         "mac": "cmd+alt+t",
-        "when": "editorTextFocus"
+        "when": "editorTextFocus && nexusflow.workspaceActive"
       },
       {
         "command": "nexusflow.syncWorkspace",
         "key": "ctrl+alt+s",
         "mac": "cmd+alt+s",
-        "when": "editorTextFocus"
+        "when": "editorTextFocus && nexusflow.workspaceActive"
       }
     ]
   },
@@ -93,6 +100,8 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@vscode/vsce": "^3.0.0",
+    "@vscode/codicons": "^0.0.36",
     "@types/vscode": "^1.125.0",
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.1",
