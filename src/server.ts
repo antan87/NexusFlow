@@ -21,6 +21,7 @@ import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
+import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './utils/local-ai.js';
@@ -39,7 +40,7 @@ import {
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
-import type { Feature, RepoInfo, WorkspaceContext } from './types.js';
+import type { Feature, RepoInfo, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 
 // Resolve static files directory
@@ -144,6 +145,91 @@ app.get('/api/workspaces', async (c) => {
     const config = await loadConfig();
     const workspaces = await listWorkspaces(config.workspacesDir);
     return c.json(workspaces);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+// Severity ranking for picking the worst per-repo sync outcome in a workspace.
+const SYNC_SEVERITY: Record<SyncStatus, number> = {
+  conflict: 4,
+  'stash-conflict': 3,
+  error: 2,
+  rebased: 1,
+  'up-to-date': 0,
+};
+
+/** Returns the most severe recorded sync status across a workspace's repos. */
+function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
+  let worst: SyncStatus | 'unknown' = 'unknown';
+  let worstSeverity = -1;
+  for (const s of states) {
+    if (!s.lastSyncStatus) continue;
+    const severity = SYNC_SEVERITY[s.lastSyncStatus];
+    if (severity > worstSeverity) {
+      worstSeverity = severity;
+      worst = s.lastSyncStatus;
+    }
+  }
+  return worst;
+}
+
+// 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
+// Cheap on purpose: git status + cached running/sync state only — never fetch/rebase.
+app.get('/api/workspaces/status', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspaces = await listWorkspaces(config.workspacesDir);
+
+    const entries = await Promise.all(
+      workspaces.map(async (ws) => {
+        const workspacePath =
+          ws.workspacePath || path.join(config.workspacesDir, ws.branchName);
+        const status = {
+          id: ws.id,
+          branchName: ws.branchName,
+          changedFiles: 0,
+          dirtyRepos: 0,
+          runningServices: 0,
+          syncStatus: 'unknown' as SyncStatus | 'unknown',
+          pendingValidation: false,
+        };
+
+        try {
+          // Uncommitted changes across the workspace's repo worktrees.
+          for (const repoPath of ws.repos) {
+            const worktreePath = path.join(workspacePath, path.basename(repoPath));
+            const repoStatus = await getRepoStatus(worktreePath);
+            if (repoStatus.hasChanges) {
+              status.dirtyRepos += 1;
+              status.changedFiles += repoStatus.changedFiles.length;
+            }
+          }
+
+          // Running services (cached running-state, PM2-verified — same source as
+          // the Services tab; only workspaces that ever started services touch PM2).
+          const runningState = await loadRunningState(workspacePath);
+          status.runningServices = runningState?.services?.length ?? 0;
+
+          // Sync state: worst-case classification + any repo pending validation.
+          const wsState = await loadWorkspaceState(workspacePath);
+          const repoStates = Object.values(wsState.repos);
+          status.syncStatus = worstSyncStatus(repoStates);
+          status.pendingValidation = repoStates.some((r) => r.pendingValidation);
+        } catch {
+          // Leave defaults on any per-workspace failure so one bad repo doesn't
+          // fail the whole response.
+        }
+
+        return status;
+      })
+    );
+
+    // Keyed by branchName to match how the GUI looks up a workspace.
+    const byWorkspace: Record<string, (typeof entries)[number]> = {};
+    for (const entry of entries) byWorkspace[entry.branchName] = entry;
+    return c.json(byWorkspace);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: msg }, 500);

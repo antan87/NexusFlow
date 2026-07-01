@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   PlusCircle,
-  FolderGit2,
   Settings as SettingsIcon,
   Terminal,
   Play,
@@ -17,12 +16,14 @@ import {
   Copy,
   X,
   Cpu,
-  Workflow,
   Trash2,
   CheckCircle,
 } from 'lucide-react';
 import './App.css';
-import { WorkspaceList } from './features/workspace/WorkspaceList.js';
+import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
+import { AppSidebar } from './app/AppSidebar.js';
+import { DashboardPage } from './pages/DashboardPage.js';
+import { WorkspacesPage } from './pages/WorkspacesPage.js';
 
 
 // Types matched with src/types.ts
@@ -115,12 +116,26 @@ interface RunningService {
   startedAt: string;
 }
 
+type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';
+
+interface WorkspaceStatus {
+  id: string;
+  branchName: string;
+  changedFiles: number;
+  dirtyRepos: number;
+  runningServices: number;
+  syncStatus: SyncStatus | 'unknown';
+  pendingValidation: boolean;
+}
+
 const API_BASE = (import.meta.env.DEV || (typeof window !== 'undefined' && (window as any).Neutralino)) ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
 
-export default function App() {
-  const [view, setView] = useState<'guide' | 'create' | 'workspaces' | 'settings' | 'workflows'>('guide');
+function AppInner() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [view, setView] = useState<'dashboard' | 'guide' | 'create' | 'workspaces' | 'settings' | 'workflows'>('dashboard');
 
   // Toast State
   interface Toast {
@@ -233,6 +248,9 @@ export default function App() {
   // Workspaces List
   const [workspaces, setWorkspaces] = useState<Feature[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  // At-a-glance status per workspace (keyed by branchName), for the listing overview.
+  const [workspaceStatuses, setWorkspaceStatuses] = useState<Record<string, WorkspaceStatus>>({});
+  const [statusesLoading, setStatusesLoading] = useState(false);
 
   // Active Workspace Services / Orchestration Details
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
@@ -550,10 +568,25 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/workspaces`);
       const data = await res.json();
       setWorkspaces(Array.isArray(data) ? data : []);
+      // Refresh at-a-glance status alongside the list (independent endpoint).
+      void fetchWorkspaceStatuses();
     } catch (e) {
       console.error(e);
     } finally {
       setWorkspacesLoading(false);
+    }
+  };
+
+  const fetchWorkspaceStatuses = async () => {
+    setStatusesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/status`);
+      const data = await res.json();
+      setWorkspaceStatuses(data && typeof data === 'object' && !Array.isArray(data) ? data : {});
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setStatusesLoading(false);
     }
   };
 
@@ -1093,10 +1126,26 @@ export default function App() {
     const queryParams = new URLSearchParams(window.location.search);
     const queryWsId = queryParams.get('workspaceId');
     if (queryWsId) {
-      setActiveWsId(queryWsId);
-      setView('workspaces');
+      navigate(`/workspaces/${encodeURIComponent(queryWsId)}`);
     }
   }, []);
+
+  // Keep the legacy `view` + workspace selection (and their data-loading effects) in sync with the route.
+  useEffect(() => {
+    const p = location.pathname;
+    if (p.startsWith('/workspaces')) {
+      setView('workspaces');
+      const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
+      setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
+      const tab = parts[2];
+      const valid = ['overview', 'sessions', 'services', 'changes', 'knowledge', 'plan'];
+      setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
+    } else if (p.startsWith('/new')) setView('create');
+    else if (p.startsWith('/strategies')) setView('workflows');
+    else if (p.startsWith('/settings')) setView('settings');
+    else if (p.startsWith('/guide')) setView('guide');
+    else setView('dashboard');
+  }, [location.pathname]);
 
   // Load tool updates status and LLM recommendations when settings view is open
   useEffect(() => {
@@ -1120,9 +1169,9 @@ export default function App() {
     };
   }, [activeWsId]);
 
-  // Load git changes when tab switches to 'changes' or active workspace changes
+  // Load git changes for the Changes tab and the Overview (per-repo topology panel)
   useEffect(() => {
-    if (activeWsId && subTab === 'changes') {
+    if (activeWsId && (subTab === 'changes' || subTab === 'overview')) {
       fetchGitChanges(activeWsId);
     }
   }, [activeWsId, subTab]);
@@ -1180,12 +1229,12 @@ Workspace Metadata:
 - Mapped Repositories: ${repoNames}
 
 Core Instructions:
-1. Always inspect and update "session.md" (session state handover memo) and "plan.md" (tasks checklist) at the workspace root as you progress.
+1. Always read and append to "nexusflow-knowledge.md" (persistent workspace memory & decisions) as you progress, and follow the phased order in "nexusflow-plan.md".
 2. Read "WORKSPACE.md" at the root for a detailed index of repository relationships, tech stacks, and listening ports.
 3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" in sub-repositories.
 `;
     navigator.clipboard.writeText(prompt);
-    showToast('Universal AI briefing prompt copied to clipboard!', 'success');
+    showToast('AI context prompt copied to clipboard!', 'success');
   };
 
   const handleDeleteWorkspace = async (wsName: string) => {
@@ -1508,7 +1557,7 @@ Core Instructions:
     return (
       <div className="flex flex-col h-screen w-full bg-[#060813] text-[#d1d5db] font-mono text-[11px] overflow-hidden select-none border-t border-gray-800">
         {/* Terminal Header */}
-        <div className="flex items-center justify-between px-3 py-2 bg-[#0b0f19] border-b border-gray-800 shrink-0 text-[10px]">
+        <div className="flex items-center justify-between px-3 py-2 bg-surface border-b border-gray-800 shrink-0 text-[10px]">
           <div className="flex items-center gap-2">
             <span className="font-bold text-indigo-400">NEXUSFLOW_SHELL</span>
             <span className="text-gray-700">|</span>
@@ -1707,122 +1756,24 @@ Core Instructions:
   }
 
   return (
-    <div className="flex min-h-screen bg-[#05070c] text-slate-300 font-mono crt-screen">
-      {/* Sidebar Navigation */}
-      <aside className="w-64 bg-[#05070c] border-r border-slate-900 flex flex-col p-6 shrink-0 relative z-10 neon-border">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-9 h-9 bg-gradient-to-tr from-cyan-500 to-violet-600 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/10 text-lg select-none">
-            NF
-          </div>
-          <div>
-            <span className="text-sm font-bold tracking-wider text-white">
-              NexusFlow
-            </span>
-            <span className="block text-[8px] text-cyan-400 font-semibold tracking-widest uppercase mt-0.5">COMMAND_CENTER</span>
-          </div>
-        </div>
-        <nav className="flex-1">
-          <ul className="flex flex-col gap-2">
-            <li>
-              <button
-                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
-                  view === 'guide'
-                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
-                }`}
-                onClick={() => {
-                  setView('guide');
-                }}
-              >
-                <Sparkles size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-                Getting Started
-              </button>
-            </li>
-            <li>
-              <button
-                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
-                  view === 'create'
-                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
-                }`}
-                onClick={() => {
-                  setView('create');
-                  setActiveStep(0);
-                  setCreatedWorkspace(null);
-                  setBranchName('');
-                  setDescription('');
-                  setSelectedRepos([]);
-                  setLocalLlmEnabled(config?.localLlm?.enabled || false);
-                }}
-              >
-                <PlusCircle size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-                New Workspace
-              </button>
-            </li>
-            <li>
-              <button
-                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
-                  view === 'workspaces'
-                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
-                }`}
-                onClick={() => {
-                  setView('workspaces');
-                  fetchWorkspaces();
-                }}
-              >
-                <FolderGit2 size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-                Active Workspaces
-              </button>
-            </li>
-            <li>
-              <button
-                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
-                  view === 'workflows'
-                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
-                }`}
-                onClick={() => {
-                  setView('workflows');
-                  fetchWorkflowTemplates();
-                  if (workflowTemplates.length > 0) {
-                    const first = workflowTemplates[0];
-                    setSelectedMgtTemplateId(first.id);
-                    setMgtTemplateName(first.name);
-                    setMgtTemplateContent(first.content);
-                  }
-                  setAnalysisResult(null);
-                }}
-              >
-                <Workflow size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-                Team Strategies
-              </button>
-            </li>
-            <li>
-              <button
-                className={`w-full flex items-center gap-3 p-3 rounded-lg text-xs font-bold transition-all cursor-pointer border relative overflow-hidden group ${
-                  view === 'settings'
-                    ? 'text-cyan-400 bg-cyan-950/30 border-cyan-900/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
-                    : 'text-slate-400 border-transparent hover:text-white hover:bg-slate-900/40'
-                }`}
-                onClick={() => {
-                  setView('settings');
-                  fetchConfig();
-                }}
-              >
-                <SettingsIcon size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-                Settings
-              </button>
-            </li>
-          </ul>
-        </nav>
-        <div className="pt-6 border-t border-slate-900 text-[10px] text-slate-500 text-center tracking-wider font-semibold uppercase">
-          SYSTEM_UI: ONLINE v{appVersion}
-        </div>
-      </aside>
+    <div className="flex min-h-screen bg-base text-content">
+      <AppSidebar
+        pathname={location.pathname}
+        appVersion={appVersion}
+        onNavigate={navigate}
+        onNewWorkspace={() => {
+          setActiveStep(0);
+          setCreatedWorkspace(null);
+          setBranchName('');
+          setDescription('');
+          setSelectedRepos([]);
+          setLocalLlmEnabled(config?.localLlm?.enabled || false);
+          navigate('/new');
+        }}
+      />
 
       {/* Main Content Area */}
-      <main className="flex-1 p-8 overflow-y-auto max-w-7xl w-full mx-auto">
+      <main className="flex-1 overflow-y-auto p-6 sm:p-8">
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-gray-400">
             <RefreshCw className="animate-spin text-indigo-400" size={32} />
@@ -1882,6 +1833,26 @@ Core Instructions:
               </div>
             )}
 
+            {/* View: Dashboard (Overview) */}
+            {view === 'dashboard' && config && (
+              <DashboardPage
+                workspaces={workspaces}
+                workspaceStatuses={workspaceStatuses}
+                workspacesLoading={workspacesLoading}
+                statusesLoading={statusesLoading}
+                onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+                onNewWorkspace={() => {
+                  setActiveStep(0);
+                  setCreatedWorkspace(null);
+                  setBranchName('');
+                  setDescription('');
+                  setSelectedRepos([]);
+                  setLocalLlmEnabled(config?.localLlm?.enabled || false);
+                  navigate('/new');
+                }}
+              />
+            )}
+
             {/* View 0: Getting Started Guide */}
             {view === 'guide' && config && (
               <div className="max-w-4xl mx-auto">
@@ -1899,7 +1870,7 @@ Core Instructions:
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
                   {/* Left: Interactive Stepper */}
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-6 shadow-xl backdrop-blur-sm space-y-6">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-6 shadow-xl backdrop-blur-sm space-y-6">
                     <h2 className="text-lg font-bold text-white mb-4">NexusFlow Workflows</h2>
                     
                     <div className="flex gap-4">
@@ -1943,7 +1914,7 @@ Core Instructions:
                   </div>
 
                   {/* Right: Quick actions and Telemetry info */}
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-6 shadow-xl backdrop-blur-sm flex flex-col justify-between">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-6 shadow-xl backdrop-blur-sm flex flex-col justify-between">
                     <div>
                       <h2 className="text-lg font-bold text-white mb-4">Current Configuration</h2>
                       <div className="space-y-3 text-xs">
@@ -1969,13 +1940,13 @@ Core Instructions:
                     <div className="pt-6 border-t border-gray-800/60 flex flex-col gap-2">
                       <button
                         className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white shadow-md shadow-indigo-500/10 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer"
-                        onClick={() => setView('create')}
+                        onClick={() => navigate('/new')}
                       >
                         <PlusCircle size={14} /> Create a Workspace
                       </button>
                       <button
                         className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
-                        onClick={() => setView('settings')}
+                        onClick={() => navigate('/settings')}
                       >
                         <SettingsIcon size={14} className="text-gray-500" /> Modify Settings
                       </button>
@@ -1984,7 +1955,7 @@ Core Instructions:
                 </div>
 
                 {/* Compare dashboard at the bottom */}
-                <div className="bg-[#111827]/20 border border-gray-800/80 rounded-xl p-6 shadow-md">
+                <div className="bg-surface/20 border border-gray-800/80 rounded-xl p-6 shadow-md">
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Industry Comparison</h4>
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px] text-gray-400 text-left border-collapse">
@@ -2047,7 +2018,7 @@ Core Instructions:
                   ></div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep > 0 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 0 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 0 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 0 ? 'border-indigo-500 bg-surface text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
                       {activeStep > 0 ? <Check size={14} /> : '1'}
                     </div>
@@ -2055,7 +2026,7 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep > 1 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 1 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 1 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 1 ? 'border-indigo-500 bg-surface text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
                       {activeStep > 1 ? <Check size={14} /> : '2'}
                     </div>
@@ -2063,7 +2034,7 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep > 2 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 2 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 2 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 2 ? 'border-indigo-500 bg-surface text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
                       {activeStep > 2 ? <Check size={14} /> : '3'}
                     </div>
@@ -2071,7 +2042,7 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep > 3 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 3 ? 'border-indigo-500 bg-[#0b0f19] text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep > 3 ? 'bg-emerald-500 border-emerald-500 text-white' : activeStep === 3 ? 'border-indigo-500 bg-surface text-white shadow-lg shadow-indigo-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
                       {activeStep > 3 ? <Check size={14} /> : '4'}
                     </div>
@@ -2079,7 +2050,7 @@ Core Instructions:
                   </div>
                   <div className="flex flex-col items-center gap-2">
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all ${
-                      activeStep === 4 ? 'border-emerald-500 bg-[#0b0f19] text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
+                      activeStep === 4 ? 'border-emerald-500 bg-surface text-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-gray-800 bg-gray-900 text-gray-500'
                     }`}>
                       5
                     </div>
@@ -2089,12 +2060,12 @@ Core Instructions:
 
                 {/* Step 0: Name & Description */}
                 {activeStep === 0 && (
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
                     <div className="mb-6">
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Feature Branch Name</label>
                       <input
                         type="text"
-                        className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                        className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
                         placeholder="e.g., feature/oauth-authentication-flow"
                         value={branchName}
                         onChange={(e) => setBranchName(e.target.value)}
@@ -2103,7 +2074,7 @@ Core Instructions:
                     <div className="mb-8">
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Feature Purpose & Context</label>
                       <textarea
-                        className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm min-h-[140px] resize-y shadow-inner"
+                        className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm min-h-[140px] resize-y shadow-inner"
                         placeholder="Describe what you want to build. This helps AI assistants analyze context and produce matching plans."
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
@@ -2123,14 +2094,14 @@ Core Instructions:
 
                 {/* Step 1: Repo Selector */}
                 {activeStep === 1 && (
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
                     <div className="flex justify-between items-center mb-6">
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Repositories</label>
                       <div className="relative w-64">
                         <Search size={14} className="absolute left-3 top-3 text-gray-500" />
                         <input
                           type="text"
-                          className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-9 pr-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs"
+                          className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-9 pr-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs"
                           placeholder="Search repo name..."
                           value={repoSearch}
                           onChange={(e) => setRepoSearch(e.target.value)}
@@ -2150,7 +2121,7 @@ Core Instructions:
                           return (
                             <div
                               key={repo.path}
-                              className={`bg-[#111827]/60 border rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-gray-800/20 hover:border-gray-700 transition-all ${
+                              className={`bg-surface/60 border rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-gray-800/20 hover:border-gray-700 transition-all ${
                                 isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                               }`}
                               onClick={() => handleToggleRepo(repo)}
@@ -2192,7 +2163,7 @@ Core Instructions:
 
                 {/* Step 2: AI & Editor Settings */}
                 {activeStep === 2 && (
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
                     {creating ? (
                       <div className="flex flex-col items-center py-6">
                         <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2.5">
@@ -2292,7 +2263,7 @@ Core Instructions:
                               return (
                                 <div
                                   key={ai.name}
-                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-700 transition-all ${
+                                  className={`bg-surface/60 border rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-700 transition-all ${
                                     isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                                   }`}
                                   onClick={() => handleToggleAI(ai.name)}
@@ -2326,7 +2297,7 @@ Core Instructions:
                               return (
                                 <div
                                   key={ed.command}
-                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
+                                  className={`bg-surface/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
                                     isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                                   }`}
                                   onClick={() => {
@@ -2348,7 +2319,7 @@ Core Instructions:
                               );
                             })}
                             <div
-                              className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
+                              className={`bg-surface/60 border rounded-xl p-4 flex flex-col cursor-pointer hover:border-gray-700 transition-all ${
                                 selectedEditor === null ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                               }`}
                               onClick={() => {
@@ -2459,7 +2430,7 @@ Core Instructions:
 
                 {/* Step 3: Team Strategy */}
                 {activeStep === 3 && (
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm">
                     {creating ? (
                       <div className="flex flex-col items-center py-6">
                         <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2.5">
@@ -2590,7 +2561,7 @@ Core Instructions:
                               return (
                                 <div
                                   key={template.id}
-                                  className={`bg-[#111827]/60 border rounded-xl p-4 flex flex-col gap-2 cursor-pointer hover:border-gray-700 transition-all ${
+                                  className={`bg-surface/60 border rounded-xl p-4 flex flex-col gap-2 cursor-pointer hover:border-gray-700 transition-all ${
                                     isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                                   }`}
                                   onClick={() => {
@@ -2614,7 +2585,7 @@ Core Instructions:
                             You can customize these instructions directly. They will be saved in the workspace context.
                           </p>
                           <textarea
-                            className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-xs font-mono min-h-[220px] resize-y shadow-inner leading-relaxed"
+                            className="w-full bg-surface border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-xs font-mono min-h-[220px] resize-y shadow-inner leading-relaxed"
                             value={customTeamworkInstructions}
                             onChange={(e) => setCustomTeamworkInstructions(e.target.value)}
                             placeholder="Enter custom instructions for how the AI agents should coordinate..."
@@ -2651,7 +2622,7 @@ Core Instructions:
 
                 {/* Step 4: Success Screen */}
                 {activeStep === 4 && createdWorkspace && (
-                  <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-10 text-center shadow-xl backdrop-blur-sm">
+                  <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-10 text-center shadow-xl backdrop-blur-sm">
                     <div className="inline-flex items-center justify-center p-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mb-6">
                       <Check size={36} />
                     </div>
@@ -2675,9 +2646,8 @@ Core Instructions:
                       <button
                         className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white transition-all cursor-pointer"
                         onClick={() => {
-                          setView('workspaces');
                           fetchWorkspaces();
-                          setActiveWsId(branchName);
+                          navigate(`/workspaces/${encodeURIComponent(branchName)}`);
                         }}
                       >
                         <Terminal size={14} className="text-cyan-400" /> Manage Services
@@ -2694,69 +2664,32 @@ Core Instructions:
               </div>
             )}
 
-            {/* View 2: Active Workspaces Panel */}
+            {/* View 2: Active Workspaces (master-detail) */}
             {view === 'workspaces' && (
-              <WorkspaceList
-                workspacesLoading={workspacesLoading}
+              <WorkspacesPage
                 workspaces={workspaces}
-                activeWsId={activeWsId}
-                setActiveWsId={setActiveWsId}
+                workspaceStatuses={workspaceStatuses}
+                statusesLoading={statusesLoading}
+                workspacesLoading={workspacesLoading}
+                fetchWorkspaces={fetchWorkspaces}
+                selectedId={activeWsId}
+                subTab={subTab}
+                onSelect={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+                onSelectTab={(id, tab) => navigate(`/workspaces/${encodeURIComponent(id)}/${tab}`)}
                 resumingWs={resumingWs}
                 handleResumeSession={handleResumeSession}
                 handleCopyPrompt={handleCopyPrompt}
                 handleOpenInEditor={handleOpenInEditor}
-                fetchWorkspaces={fetchWorkspaces}
-                aiAssistants={aiAssistants}
-                repos={repos}
-                deleteWsLoading={deleteWsLoading}
-                addRepoLoading={addRepoLoading}
                 handleDeleteWorkspace={handleDeleteWorkspace}
+                deleteWsLoading={deleteWsLoading}
+                repos={repos}
+                addRepoLoading={addRepoLoading}
                 handleAddRepo={handleAddRepo}
-                services={services}
-                runningServices={runningServices}
-                selectedLogService={selectedLogService}
-                serviceLogs={serviceLogs}
-                logsEndRef={logsEndRef}
-                setSelectedLogService={setSelectedLogService}
-                handleStartServices={handleStartServices}
-                handleStopServices={handleStopServices}
-                orchTools={orchTools}
-                servicesLoading={servicesLoading}
-                gitChanges={gitChanges}
-                gitChangesLoading={gitChangesLoading}
-                syncLoading={syncLoading}
-                syncResults={syncResults}
-                commitMessage={commitMessage}
-                showCommitModal={showCommitModal}
-                commitLoading={commitLoading}
-                commitResults={commitResults}
-                setSyncResults={setSyncResults}
-                setCommitResults={setCommitResults}
-                setCommitMessage={setCommitMessage}
-                setShowCommitModal={setShowCommitModal}
-                fetchGitChanges={fetchGitChanges}
-                handleSyncAll={handleSyncAll}
-                handleCommitAll={handleCommitAll}
-                knowledgeContent={knowledgeContent}
-                knowledgeLoading={knowledgeLoading}
-                isEditingKnowledge={isEditingKnowledge}
-                editedKnowledge={editedKnowledge}
-                saveKnowledgeLoading={saveKnowledgeLoading}
-                setEditedKnowledge={setEditedKnowledge}
-                setIsEditingKnowledge={setIsEditingKnowledge}
-                handleSaveKnowledge={handleSaveKnowledge}
-                planContent={planContent}
-                planLoading={planLoading}
-                sessions={sessions}
-                sessionsLoading={sessionsLoading}
-                activeSession={activeSession}
-                transcript={transcript}
-                transcriptLoading={transcriptLoading}
-                setActiveSession={setActiveSession}
-                setTranscript={setTranscript}
-                fetchSessionTranscript={fetchSessionTranscript}
-                subTab={subTab}
-                setSubTab={setSubTab}
+                sessionProps={{ sessions, sessionsLoading, activeSession, transcript, transcriptLoading, workspaces, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession }}
+                serviceProps={{ services, runningServices, selectedLogService, serviceLogs, logsEndRef, setSelectedLogService, handleStartServices, handleStopServices, orchTools, servicesLoading }}
+                changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
+                knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
+                planProps={{ planContent, planLoading }}
               />
             )}
 
@@ -2771,7 +2704,7 @@ Core Instructions:
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 text-left">
                   {/* Left sidebar: Strategy List */}
                   <div className="lg:col-span-4 flex flex-col gap-4">
-                    <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-5 shadow-md flex flex-col gap-4">
+                    <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-5 shadow-md flex flex-col gap-4">
                       <div className="flex justify-between items-center">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Strategies</h3>
                         <button
@@ -2834,7 +2767,7 @@ Core Instructions:
                   {/* Right side: Strategy Detail / Edit Panel */}
                   <div className="lg:col-span-8 flex flex-col gap-6">
                     {(selectedMgtTemplateId || isEditingTemplate) ? (
-                      <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-6 shadow-md flex flex-col gap-5">
+                      <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-6 shadow-md flex flex-col gap-5">
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1">
                             {isEditingTemplate ? (
@@ -2842,7 +2775,7 @@ Core Instructions:
                                 <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Strategy Name</label>
                                 <input
                                   type="text"
-                                  className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white text-sm outline-none transition-all"
+                                  className="w-full bg-surface border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white text-sm outline-none transition-all"
                                   value={mgtTemplateName}
                                   onChange={(e) => setMgtTemplateName(e.target.value)}
                                   placeholder="e.g. Test-Driven Development"
@@ -2940,7 +2873,7 @@ Core Instructions:
                         <div className="flex flex-col gap-2">
                           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Guidelines Markdown</label>
                           <textarea
-                            className="w-full bg-[#111827] border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-xs font-mono min-h-[250px] resize-y shadow-inner leading-relaxed"
+                            className="w-full bg-surface border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-xs font-mono min-h-[250px] resize-y shadow-inner leading-relaxed"
                             value={mgtTemplateContent}
                             onChange={(e) => setMgtTemplateContent(e.target.value)}
                             disabled={!isEditingTemplate}
@@ -3003,7 +2936,7 @@ Core Instructions:
                               <div className="flex flex-col gap-2">
                                 <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider text-left">Evaluation Focus / Instructions (Optional)</label>
                                 <textarea
-                                  className="w-full bg-[#111827]/40 border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs min-h-[60px] resize-y leading-relaxed font-sans"
+                                  className="w-full bg-surface/40 border border-gray-850 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-2 text-white placeholder-gray-600 transition-all outline-none text-xs min-h-[60px] resize-y leading-relaxed font-sans"
                                   value={mgtAnalysisComment}
                                   onChange={(e) => setMgtAnalysisComment(e.target.value)}
                                   placeholder="e.g. Focus on checking if timeouts are handled well, check subagent roles coordination..."
@@ -3039,7 +2972,7 @@ Core Instructions:
                         )}
                       </div>
                     ) : (
-                      <div className="h-[400px] bg-[#111827]/10 border border-gray-800/60 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-6">
+                      <div className="h-[400px] bg-surface/10 border border-gray-800/60 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-6">
                         <FolderOpen size={36} className="text-gray-600 mb-3" />
                         <span className="text-sm font-semibold text-gray-400">No strategy template selected</span>
                         <p className="text-xs text-gray-500 mt-1 max-w-sm font-sans">
@@ -3071,12 +3004,12 @@ Core Instructions:
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mb-6">
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Development Directory</label>
                     <input
                       type="text"
-                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                      className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
                       value={config.devDir}
                       onChange={(e) => setConfig({ ...config, devDir: e.target.value })}
                     />
@@ -3087,7 +3020,7 @@ Core Instructions:
                     <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Workspaces Directory</label>
                     <input
                       type="text"
-                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                      className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
                       value={config.workspacesDir}
                       onChange={(e) => setConfig({ ...config, workspacesDir: e.target.value })}
                     />
@@ -3098,7 +3031,7 @@ Core Instructions:
                     <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Repo Search Depth</label>
                     <input
                       type="number"
-                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                      className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
                       min={1}
                       max={5}
                       value={config.scanDepth}
@@ -3110,7 +3043,7 @@ Core Instructions:
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Default Assistant</label>
                     <select
-                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
+                      className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
                       value={config.defaultAssistant || ''}
                       onChange={(e) => setConfig({ ...config, defaultAssistant: e.target.value || null })}
                     >
@@ -3127,7 +3060,7 @@ Core Instructions:
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Default Editor</label>
                     <select
-                      className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
+                      className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
                       value={config.defaultEditor || ''}
                       onChange={(e) => setConfig({ ...config, defaultEditor: e.target.value || null })}
                     >
@@ -3149,7 +3082,7 @@ Core Instructions:
                       </label>
                       <select
                         id="storageProvider"
-                        className="w-full max-w-md text-xs bg-[#111827] border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500"
+                        className="w-full max-w-md text-xs bg-surface border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500"
                         value={config.storageProvider || 'local'}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -3255,7 +3188,7 @@ Core Instructions:
                 </div>
 
                 {/* Local AI Co-Processor Settings */}
-                <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mb-6 mt-6">
+                <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mb-6 mt-6">
                   <h3 className="text-lg font-bold text-white mb-2">Local AI Co-Processor Settings</h3>
                   <p className="text-xs text-gray-450 mb-6 font-semibold">Enable a local LLM to handle simple tasks like log analysis, git diff summaries, and boilerplate code generation without using remote tokens.</p>
 
@@ -3274,7 +3207,7 @@ Core Instructions:
                     <input
                       type="checkbox"
                       id="localLlmEnabled"
-                      className="w-4 h-4 rounded border-gray-800 bg-[#111827] text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      className="w-4 h-4 rounded border-gray-800 bg-surface text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       checked={config.localLlm?.enabled || false}
                       onChange={(e) => {
                         const defaultLlm = { enabled: e.target.checked, provider: 'ollama' as const, endpoint: 'http://localhost:11434', model: recommendation?.recommendedModel || 'qwen2.5-coder:1.5b' };
@@ -3295,7 +3228,7 @@ Core Instructions:
                         <div className="flex flex-col">
                           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Local Provider</label>
                           <select
-                            className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
+                            className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white transition-all outline-none text-sm shadow-inner cursor-pointer"
                             value={config.localLlm.provider}
                             onChange={(e) => setConfig({
                               ...config,
@@ -3312,7 +3245,7 @@ Core Instructions:
                           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Endpoint URL</label>
                           <input
                             type="text"
-                            className={`w-full bg-[#111827] border focus:ring-1 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner ${
+                            className={`w-full bg-surface border focus:ring-1 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner ${
                               config.localLlm.endpoint && !config.localLlm.endpoint.trim().startsWith('http://') && !config.localLlm.endpoint.trim().startsWith('https://')
                                 ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500'
                                 : 'border-gray-800 focus:border-indigo-500 focus:ring-indigo-500'
@@ -3333,7 +3266,7 @@ Core Instructions:
                           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Model Name</label>
                           <input
                             type="text"
-                            className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
+                            className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-600 transition-all outline-none text-sm shadow-inner"
                             value={config.localLlm.model}
                             onChange={(e) => setConfig({
                               ...config,
@@ -3348,7 +3281,7 @@ Core Instructions:
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">API Key (Optional)</label>
                             <input
                               type="password"
-                              className="w-full bg-[#111827] border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-sm shadow-inner"
+                              className="w-full bg-surface border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-4 py-3 text-white placeholder-gray-605 transition-all outline-none text-sm shadow-inner"
                               value={config.localLlm.apiKey || ''}
                               placeholder="sk-..."
                               onChange={(e) => setConfig({
@@ -3396,7 +3329,7 @@ Core Instructions:
                 </div>
 
                 {/* Toolchain Updates Section */}
-                <div className="bg-[#111827]/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mt-6">
+                <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mt-6">
                   <div className="flex justify-between items-center mb-6">
                     <div>
                       <h3 className="text-lg font-bold text-white mb-1">AI Toolchain Updates</h3>
@@ -3505,7 +3438,7 @@ Core Instructions:
       {/* Transcript Modal Overlay */}
       {activeSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-[#0b0f19] border border-gray-800 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-fadeIn">
+          <div className="bg-surface border border-gray-800 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl overflow-hidden animate-fadeIn">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-950/40">
               <div>
@@ -3628,5 +3561,13 @@ Core Instructions:
         ))}
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <HashRouter>
+      <AppInner />
+    </HashRouter>
   );
 }

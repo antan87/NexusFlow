@@ -224,8 +224,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     // 3. Open dashboard
     await page.goto('/');
 
-    // 4. Click New Workspace in Sidebar
-    await page.locator('button:has-text("New Workspace")').click();
+    // 4. Click New Workspace in the sidebar (scoped to avoid matching page-level buttons)
+    await page.getByRole('complementary').getByRole('button', { name: 'New workspace' }).click();
 
     // 5. Fill Details
     await page.getByPlaceholder('e.g., feature/oauth-authentication-flow').fill('feat-test-branch');
