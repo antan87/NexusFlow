@@ -1,152 +1,167 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import "tailwindcss";
 
-/* Global Font Overrides to Monospace */
+/* ─── Design tokens ───────────────────────────────────────────────────────────
+   "Mission control for parallel feature branches": neutral dark surfaces, a single
+   restrained blue accent, and a strict semantic status palette. Sans-serif UI,
+   monospace only for code/paths/data. */
+@theme {
+  /* Surfaces */
+  --color-base: #0b0c0e;
+  --color-surface: #141619;
+  --color-raised: #1b1e22;
+  --color-hairline: #24272c;
+  --color-hairline-strong: #333840;
+
+  /* Foreground / text */
+  --color-content: #e7e9ec;
+  --color-content-muted: #9aa0a8;
+  --color-content-faint: #6a7078;
+
+  /* Interactive accent (nav active, primary actions, focus rings) */
+  --color-accent: #4f7cff;
+  --color-accent-hover: #6b8fff;
+  --color-accent-soft: #1b2540;
+
+  /* Semantic status language */
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+  --color-danger: #f85149;
+  --color-running: #2db6c9;
+  --color-idle: #6a7078;
+
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Radii */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  /* ── Legacy palette remap ──────────────────────────────────────────────────
+     Maps the color names still used by not-yet-rewritten views (Create wizard,
+     Settings, Strategies) and the reused feature components onto the new tokens,
+     so every legacy element harmonizes with the modern theme without JSX edits.
+     Also defines the custom shades those views reference (which were previously
+     undefined and rendered with no color). */
+  --color-indigo-300: #8aa5ff;
+  --color-indigo-400: #6b8fff;
+  --color-indigo-500: #4f7cff;
+  --color-indigo-600: #3f68e0;
+  --color-indigo-650: #3f68e0;
+  --color-indigo-700: #3459c9;
+  --color-indigo-950: #182038;
+  --color-violet-500: #6b8fff;
+  --color-violet-600: #4f7cff;
+
+  --color-gray-300: #e7e9ec;
+  --color-gray-400: #9aa0a8;
+  --color-gray-500: #6a7078;
+  --color-gray-550: #6a7078;
+  --color-gray-555: #6a7078;
+  --color-gray-600: #565c64;
+  --color-gray-700: #333840;
+  --color-gray-800: #24272c;
+  --color-gray-850: #1b1e22;
+  --color-gray-900: #141619;
+  --color-gray-950: #0f1113;
+
+  --color-slate-300: #cfd3d8;
+  --color-slate-350: #b6bcc4;
+  --color-slate-400: #9aa0a8;
+  --color-slate-455: #8b929b;
+  --color-slate-500: #6a7078;
+  --color-slate-550: #6a7078;
+  --color-slate-700: #333840;
+  --color-slate-800: #24272c;
+  --color-slate-850: #1b1e22;
+  --color-slate-900: #141619;
+  --color-slate-905: #121417;
+  --color-slate-950: #0f1113;
+
+  --color-cyan-400: #2db6c9;
+  --color-cyan-455: #2db6c9;
+  --color-cyan-500: #2db6c9;
+  --color-cyan-650: #2596a6;
+  --color-emerald-650: #2f9e46;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+html {
+  color-scheme: dark;
+}
 body {
-  font-family: 'JetBrains Mono', monospace !important;
-  background-color: #030408 !important;
-  background-image: 
-    radial-gradient(at 50% 0%, rgba(139, 92, 246, 0.06) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, rgba(6, 182, 212, 0.04) 0px, transparent 50%) !important;
+  font-family: var(--font-sans);
+  background-color: var(--color-base);
+  color: var(--color-content);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+code, pre, kbd, samp {
+  font-family: var(--font-mono);
 }
 
-h1, h2, h3, h4, h5, h6, button, input, select, textarea, code, pre {
-  font-family: 'JetBrains Mono', monospace !important;
+/* Consistent focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
-/* Custom Sleek Scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #05070c;
-}
+/* Sleek neutral scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #1f2937;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  background: #2a2e34;
+  border-radius: 4px;
+  border: 2px solid var(--color-base);
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #374151;
-}
+::-webkit-scrollbar-thumb:hover { background: #3a3f47; }
 
-/* Glassmorphism and Terminal UI Helpers */
-@utility glass-card {
-  background: rgba(5, 7, 12, 0.6) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.04) !important;
-  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.5) !important;
-}
-
-@utility glass-card-glow {
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.05), inset 0 0 1px 1px rgba(255, 255, 255, 0.03);
-}
-
-@utility text-glow-cyan {
-  text-shadow: 0 0 8px rgba(6, 182, 212, 0.4);
-}
-
-@utility text-glow-green {
-  text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
-}
-
-@utility neon-border {
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.1);
-}
-
-@utility neon-border-green {
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
-}
-
-/* CRT Scanline effect */
-.crt-screen {
-  position: relative;
-}
-
-.crt-screen::after {
-  content: " ";
-  display: block;
-  position: absolute;
-  top: 0; left: 0; bottom: 0; right: 0;
-  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.01), rgba(0, 255, 0, 0.04));
-  z-index: 10;
-  background-size: 100% 4px, 6px 100%;
-  pointer-events: none;
-  opacity: 0.35;
-}
-
-@utility animate-slide-in {
-  animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
+/* ─── Motion (respecting reduced-motion) ─────────────────────────────────────── */
 @utility animate-fade-in {
-  animation: fade-in 0.2s ease-out forwards;
+  animation: fade-in 0.16s ease-out both;
+}
+@utility animate-rise {
+  animation: rise 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
+/* ─── Compatibility utilities (used by not-yet-restyled feature components) ─────
+   Remapped to the new neutral tokens so reused components inherit the modern look.
+   CRT/neon/text-glow effects were intentionally dropped. */
+@utility glass-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+}
+@utility animate-slide-in {
+  animation: rise 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 @utility animate-spin-slow {
   animation: spin 8s linear infinite;
 }
-
 @utility animate-pulse-glow-green {
-  animation: pulse-glow-green 2s infinite ease-in-out;
+  animation: soft-pulse 2s infinite ease-in-out;
 }
-
 @utility animate-pulse-glow-cyan {
-  animation: pulse-glow-cyan 2.5s infinite ease-in-out;
+  animation: soft-pulse 2.5s infinite ease-in-out;
+}
+@keyframes soft-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
 }
 
-@keyframes slide-in {
-  from {
-    transform: translateY(0.5rem);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes pulse-glow-green {
-  0%, 100% {
-    box-shadow: 0 0 4px rgba(52, 211, 153, 0.15);
-    opacity: 0.8;
-  }
-  50% {
-    box-shadow: 0 0 10px rgba(52, 211, 153, 0.4);
-    opacity: 1;
-  }
-}
-
-@keyframes pulse-glow-cyan {
-  0%, 100% {
-    box-shadow: 0 0 4px rgba(6, 182, 212, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
-  }
-}
-
-/* Custom terminal colors */
-.term-matrix {
-  color: #10b981;
-  background-color: #030712;
-}
-.term-dracula {
-  color: #f8f8f2;
-  background-color: #282a36;
-}
-.term-classic {
-  color: #e5e7eb;
-  background-color: #0b0f19;
-}
+/* Terminal log themes for the service logs console */
+.term-matrix { color: #3fb950; background-color: #0b0c0e; }
+.term-dracula { color: #f8f8f2; background-color: #1b1e22; }
+.term-classic { color: var(--color-content); background-color: #0b0f14; }

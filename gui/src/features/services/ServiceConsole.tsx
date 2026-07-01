@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Square, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2, Cpu, Activity, RefreshCw } from 'lucide-react';
+import { Play, Square, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2, RefreshCw } from 'lucide-react';
 import type { Feature, ServiceConfig, RunningService, OrchestrationDetection } from '../../types.js';
 
 interface ServiceConsoleProps {
@@ -74,43 +74,8 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
         </div>
       )}
 
-      {/* Telemetry Dashboard Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        {/* Telemetry 1: CPU */}
-        <div className="glass-card p-5 rounded-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-indigo-500/10 via-purple-500/10 to-transparent">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 mb-3">
-            <span className="flex items-center gap-1.5"><Cpu size={14} className="text-indigo-400" /> Simulated CPU Load</span>
-            <span className={isAnyRunning ? "text-emerald-400 font-mono font-bold" : "text-slate-550 font-mono"}>
-              {isAnyRunning ? '4.8%' : '0%'}
-            </span>
-          </div>
-          <div className="w-full bg-slate-900 rounded-full h-1.5 mb-2 overflow-hidden border border-white/5">
-            <div
-              className={`h-1.5 rounded-full transition-all duration-500 ${isAnyRunning ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-slate-800"}`}
-              style={{ width: isAnyRunning ? '48%' : '0%' }}
-            ></div>
-          </div>
-          <span className="text-[10px] text-slate-550">Fluctuating active worker processes</span>
-        </div>
-
-        {/* Telemetry 2: Memory */}
-        <div className="glass-card p-5 rounded-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-indigo-500/10 via-purple-500/10 to-transparent">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 mb-3">
-            <span className="flex items-center gap-1.5"><Activity size={14} className="text-indigo-400" /> Simulated Memory</span>
-            <span className={isAnyRunning ? "text-cyan-400 font-mono font-bold" : "text-slate-550 font-mono"}>
-              {isAnyRunning ? '192 MB' : '0 MB'}
-            </span>
-          </div>
-          <div className="w-full bg-slate-900 rounded-full h-1.5 mb-2 overflow-hidden border border-white/5">
-            <div
-              className={`h-1.5 rounded-full transition-all duration-500 ${isAnyRunning ? "bg-gradient-to-r from-cyan-500 to-indigo-400" : "bg-slate-800"}`}
-              style={{ width: isAnyRunning ? '65%' : '0%' }}
-            ></div>
-          </div>
-          <span className="text-[10px] text-slate-550">Working set size for spawned servers</span>
-        </div>
-
-        {/* Telemetry 3: Environment Health */}
+      {/* Workspace service status (real running-process state) */}
+      <div className="mb-6">
         <div className="glass-card p-5 rounded-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-indigo-500/10 via-purple-500/10 to-transparent">
           <div className="flex justify-between items-center text-xs font-semibold text-slate-400 mb-3">
             <span>Workspace Status</span>
@@ -122,7 +87,7 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
           <div className="text-xs text-white font-semibold mb-2">
             {isAnyRunning ? `${runningServices.filter(rs => rs.pid > 0).length} processes active` : "All processes offline"}
           </div>
-          <span className="text-[10px] text-slate-550">Service state mapping</span>
+          <span className="text-[10px] text-slate-550">Live service state for this workspace</span>
         </div>
       </div>
 
