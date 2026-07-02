@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mrpatronz/nexusflow.git"
+    "url": "git+https://github.com/antan87/NexusFlow.git"
   },
   "main": "dist/index.js",
   "bin": {
