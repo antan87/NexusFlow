@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
@@ -19,7 +20,11 @@ const nodeStagingDir = path.resolve(distInstallerDir, 'node');
 const serverStagingDir = path.resolve(distInstallerDir, 'server');
 const outputDir = path.resolve(__dirname, 'dist-installer-output');
 
-const nodeExeUrl = 'https://nodejs.org/dist/v20.15.0/win-x64/node.exe';
+// Embedded Node.js runtime shipped inside the installer. Pinned + checksum-verified.
+const nodeVersion = 'v20.15.0';
+const nodeFile = 'win-x64/node.exe';
+const nodeExeUrl = `https://nodejs.org/dist/${nodeVersion}/${nodeFile}`;
+const nodeShasumsUrl = `https://nodejs.org/dist/${nodeVersion}/SHASUMS256.txt`;
 const nodeExePath = path.resolve(nodeStagingDir, 'node.exe');
 
 function copyDir(src, dest) {
@@ -56,6 +61,36 @@ function downloadFile(url, destPath) {
       reject(err);
     });
   });
+}
+
+function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (response) => {
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to fetch ${url}: status ${response.statusCode}`));
+        return;
+      }
+      let data = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
+}
+
+async function verifyNodeChecksum(filePath) {
+  console.log('Verifying embedded Node.js against official SHASUMS256...');
+  const shasums = await fetchText(nodeShasumsUrl);
+  const line = shasums.split('\n').find((l) => l.trim().endsWith(nodeFile));
+  if (!line) {
+    throw new Error(`Could not find ${nodeFile} in ${nodeShasumsUrl}`);
+  }
+  const expected = line.trim().split(/\s+/)[0].toLowerCase();
+  const actual = crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').toLowerCase();
+  if (expected !== actual) {
+    throw new Error(`Node.js checksum mismatch!\n  expected: ${expected}\n  actual:   ${actual}`);
+  }
+  console.log(`Node.js checksum verified (${actual}).`);
 }
 
 function sleepSync(ms) {
@@ -168,8 +203,9 @@ async function build() {
     console.log('Pruning non-runtime files from node_modules (maps, tests, docs)...');
     pruneNodeModules(path.resolve(serverStagingDir, 'node_modules'));
 
-    // 5. Download embedded Node.js executable
+    // 5. Download embedded Node.js executable and verify its integrity
     await downloadFile(nodeExeUrl, nodeExePath);
+    await verifyNodeChecksum(nodeExePath);
 
     // 6. Locate and run Inno Setup compiler (ISCC.exe)
     console.log('Locating Inno Setup compiler...');
@@ -180,24 +216,28 @@ async function build() {
     const globalIsccPath = 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe';
 
     let isccPath = '';
-    if (fs.existsSync(userIsccPath)) {
-      isccPath = userIsccPath;
-    } else if (fs.existsSync(globalIsccPath)) {
-      isccPath = globalIsccPath;
-    } else {
-      // Try resolving from PATH
-      try {
-        execSync('iscc /?', { stdio: 'ignore', shell: true });
-        isccPath = 'iscc';
-      } catch {
-        throw new Error('Inno Setup compiler (ISCC.exe) not found. Please verify it is installed.');
+    // Prefer ISCC on PATH (how CI installs it via choco); fall back to the
+    // standard install locations for local developer machines.
+    try {
+      execSync('iscc /?', { stdio: 'ignore', shell: true });
+      isccPath = 'iscc';
+    } catch {
+      if (fs.existsSync(userIsccPath)) {
+        isccPath = userIsccPath;
+      } else if (fs.existsSync(globalIsccPath)) {
+        isccPath = globalIsccPath;
+      } else {
+        throw new Error('Inno Setup compiler (ISCC.exe) not found on PATH or in the standard install locations.');
       }
     }
 
     console.log(`Using Inno Setup compiler: ${isccPath}`);
+    // Inject the version from the root package.json so the installer's AppVersion
+    // always matches the release (no more hardcoded, drifting version in the .iss).
+    const appVersion = JSON.parse(fs.readFileSync(path.resolve(parentDir, 'package.json'), 'utf8')).version;
     const issScriptPath = path.resolve(__dirname, 'installer/nexusflow.iss');
-    console.log(`Compiling installer script: ${issScriptPath}...`);
-    execSync(`"${isccPath}" "${issScriptPath}"`, { stdio: 'inherit', shell: true });
+    console.log(`Compiling installer script: ${issScriptPath} (AppVersion=${appVersion})...`);
+    execSync(`"${isccPath}" "/DAppVersion=${appVersion}" "${issScriptPath}"`, { stdio: 'inherit', shell: true });
 
     // 7. Check if file got redirected to VirtualStore due to Windows virtualization and move it back
     const expectedOutputExe = path.resolve(outputDir, 'NexusFlowSetup.exe');

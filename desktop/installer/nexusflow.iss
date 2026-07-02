@@ -1,9 +1,17 @@
 ; NexusFlow Desktop Installer Script for Inno Setup
 ; Creates a user-level (no-admin-needed) installer.
+;
+; AppVersion is injected at build time via ISCC /DAppVersion=<version>
+; (see desktop/build-installer.js, which reads it from the root package.json).
+; The fallback below only applies when the script is compiled directly.
+
+#ifndef AppVersion
+  #define AppVersion "0.0.0-dev"
+#endif
 
 [Setup]
 AppName=NexusFlow
-AppVersion=0.2.17
+AppVersion={#AppVersion}
 AppPublisher=Antigravity team
 AppPublisherURL=https://github.com/mrpatronz/nexusflow
 DefaultDirName={localappdata}\Programs\NexusFlow

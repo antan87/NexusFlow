@@ -1,14 +1,26 @@
 {
   "name": "@mrpatronz/nexusflow",
-  "version": "0.2.19",
+  "version": "1.2.0",
   "description": "Combine multiple repos into a workspace with rich AI assistant context",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrpatronz/nexusflow.git"
+  },
   "main": "dist/index.js",
   "bin": {
     "nexusflow": "dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc && npm run build --prefix gui",
+    "version": "node scripts/sync-version.mjs && git add -A",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "ui": "node dist/index.js ui",
