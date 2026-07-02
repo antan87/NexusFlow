@@ -50,3 +50,33 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # 4. Desktop npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/desktop"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "antan87"
+    groups:
+      desktop-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # 5. GitHub Actions workflow dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "antan87"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

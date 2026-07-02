@@ -1,0 +1,186 @@
+name: Release
+
+# One deliberate, coordinated release for every channel (npm + VS Code extension
+# + desktop installer), triggered by pushing a version tag:
+#
+#   npm version minor        # bumps + syncs every package, creates the vX.Y.Z tag
+#   git push --follow-tags   # pushing the tag runs this workflow
+#
+# Prerelease tags (e.g. v1.2.0-rc.1) publish npm under the "next" dist-tag, mark
+# the GitHub Release as a prerelease, and skip the Marketplace (which does not
+# support semver prerelease suffixes).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ── Gate: the tag, the root version, and every synced file must agree ────────
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve and validate version
+        id: resolve
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "Tag version: $TAG / package.json version: $PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag ($TAG) does not match package.json version ($PKG). Bump with 'npm version'."
+            exit 1
+          fi
+          node scripts/sync-version.mjs --check
+          echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          if [[ "$PKG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── npm ──────────────────────────────────────────────────────────────────────
+  npm:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # provenance attestation
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org/'
+
+      - run: npm ci
+      - run: npm ci --prefix gui
+      - run: npm run build
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.guard.outputs.version }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          if npm info "@mrpatronz/nexusflow@$VERSION" version >/dev/null 2>&1; then
+            echo "npm already has $VERSION — skipping (idempotent re-run)."
+            exit 0
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi
+
+  # ── VS Code Marketplace ───────────────────────────────────────────────────────
+  vscode:
+    needs: guard
+    if: needs.guard.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Azure OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci --prefix extension
+
+      - name: Azure Login (OIDC — no stored PAT)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Publish to VS Code Marketplace
+        working-directory: extension
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          PUBLISHED=$(npx vsce show nexusflow.nexusflow-vscode --json 2>/dev/null \
+            | node -e "
+                const d=require('fs').readFileSync(0,'utf8');
+                try { process.exit(JSON.parse(d).versions?.['$VERSION'] ? 0 : 1); }
+                catch { process.exit(1); }
+              " && echo "true" || echo "false")
+          if [ "$PUBLISHED" = "true" ]; then
+            echo "Marketplace already has $VERSION — skipping (idempotent re-run)."
+            exit 0
+          fi
+          npx vsce publish --no-dependencies --azure-credential
+
+  # ── Desktop installer (Windows) ───────────────────────────────────────────────
+  desktop:
+    needs: guard
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - run: npm ci
+      - run: npm ci --prefix gui
+      - run: npm ci --prefix desktop
+
+      # Build the root project FIRST (tsc + gui) so the compiled server exists for
+      # the installer to bundle — the old desktop workflow skipped this.
+      - name: Build server + GUI
+        run: npm run build
+
+      - name: Build desktop binary (Neutralino)
+        run: npm run build --prefix desktop
+
+      - name: Build standalone installer (Inno Setup)
+        run: npm run build:installer --prefix desktop
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexusflow-setup
+          path: desktop/dist-installer-output/NexusFlowSetup.exe
+          if-no-files-found: error
+
+  # ── One GitHub Release for the tag, with every artifact attached ───────────────
+  github-release:
+    needs: [guard, npm, vscode, desktop]
+    # Run even if the Marketplace job was skipped (prereleases) but not if it failed.
+    if: always() && needs.npm.result == 'success' && needs.desktop.result == 'success' && (needs.vscode.result == 'success' || needs.vscode.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nexusflow-setup
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release v${{ needs.guard.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
+          files: dist/NexusFlowSetup.exe
