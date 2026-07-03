@@ -100,13 +100,21 @@ jobs:
       - run: npm ci --prefix extension
 
       - name: Azure Login (OIDC — no stored PAT)
+        id: azure-login
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
+      - name: Skip VS Code Marketplace publish when Azure OIDC is unavailable
+        if: steps.azure-login.outcome != 'success'
+        run: |
+          echo "::warning::Azure OIDC login failed or is not configured; skipping VS Code Marketplace publish for this release."
+
       - name: Publish to VS Code Marketplace
+        if: steps.azure-login.outcome == 'success'
         working-directory: extension
         env:
           VERSION: ${{ needs.guard.outputs.version }}
