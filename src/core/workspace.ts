@@ -115,7 +115,7 @@ export async function createWorkspace(
       "mcpServers": {
         "nexusflow": {
           "command": "npx",
-          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "start"]
+          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run"]
         }
       }
     };

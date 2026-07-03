@@ -14,7 +14,7 @@ import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig, listWorkspaces } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, type WorkspaceRepo, type RepoStatus } from '../utils/multi-git.js';
 
-const COMMANDS = ['sync', 'doctor', 'refresh', 'status', 'start', 'stop', 'logs', 'list', 'create', 'open', 'pack', 'remove', 'add-repo', 'help'];
+const COMMANDS = ['sync', 'doctor', 'refresh', 'status', 'start', 'stop', 'logs', 'list', 'create', 'open', 'remove', 'add-repo', 'help'];
 
 interface TuiState {
   workspacePath: string;
