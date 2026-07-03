@@ -67,7 +67,8 @@ describe('generateRepoMap', () => {
     await generateRepoMap(mockRepo, mockAnalysis, workspacePath);
 
     // 3. Assertions
-    const expectedOutPath = path.join(workspacePath, 'nexusflow-map-test-repo.md');
+    // Per-repo maps are base-namespace files (local adapter → per-repo subdir).
+    const expectedOutPath = path.join(workspacePath, '.nexusflow', 'base', 'test-repo', 'nexusflow-map-test-repo.md');
     expect(fs.writeFile).toHaveBeenCalledTimes(1);
     expect(writtenFiles[expectedOutPath]).toBeDefined();
 
@@ -142,7 +143,8 @@ describe('generateRepoMap', () => {
 
     await generateRepoMap(mockRepo, mockAnalysis, workspacePath, new Set(['my-internal-package']));
 
-    const expectedOutPath = path.join(workspacePath, 'nexusflow-map-test-repo.md');
+    // Per-repo maps are base-namespace files (local adapter → per-repo subdir).
+    const expectedOutPath = path.join(workspacePath, '.nexusflow', 'base', 'test-repo', 'nexusflow-map-test-repo.md');
     const content = writtenFiles[expectedOutPath]!;
 
     expect(content).toContain('## 📨 Messaging Topology');

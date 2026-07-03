@@ -19,6 +19,12 @@ import { refreshWorkspace } from './refresh.js';
 
 /** Name of the schedules file inside ~/.nexusflow. */
 const SCHEDULES_FILE = 'schedules.json';
+const SCHEDULES_LOCK_FILE = `${SCHEDULES_FILE}.lock`;
+const RUN_LOCK_DIR = 'schedule-runs';
+const STORE_LOCK_TIMEOUT_MS = 10_000;
+const STORE_LOCK_STALE_MS = 2 * 60_000;
+const RUN_LOCK_STALE_MS = 24 * 60 * 60_000;
+const LOCK_RETRY_MS = 50;
 
 /** Kinds of work a schedule can run. */
 export type ScheduleTask = 'sync' | 'refresh';
@@ -57,11 +63,114 @@ export interface JobRunResult {
   message: string;
 }
 
+let scheduleStoreMutationQueue: Promise<void> = Promise.resolve();
+
 /**
  * Returns the path to the schedules file (~/.nexusflow/schedules.json).
  */
 export function getSchedulesPath(): string {
   return path.join(getConfigDir(), SCHEDULES_FILE);
+}
+
+function getSchedulesLockPath(): string {
+  return path.join(getConfigDir(), SCHEDULES_LOCK_FILE);
+}
+
+function getRunLockPath(jobId: string): string {
+  const safeId = jobId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return path.join(getConfigDir(), RUN_LOCK_DIR, `${safeId}.lock`);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function clearStaleLock(lockPath: string, staleMs: number): Promise<boolean> {
+  try {
+    const stat = await fs.stat(lockPath);
+    if (Date.now() - stat.mtimeMs <= staleMs) return false;
+    await fs.unlink(lockPath);
+    return true;
+  } catch (error) {
+    return getErrorCode(error) === 'ENOENT';
+  }
+}
+
+async function acquireLock(
+  lockPath: string,
+  options: {
+    staleMs: number;
+    timeoutMs: number;
+    timeoutMessage: string;
+  },
+): Promise<() => Promise<void>> {
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const startedAt = Date.now();
+
+  for (;;) {
+    try {
+      const handle = await fs.open(lockPath, 'wx');
+      try {
+        await handle.writeFile(JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+        }) + '\n', 'utf-8');
+      } catch (error) {
+        await handle.close().catch(() => {});
+        await fs.unlink(lockPath).catch(() => {});
+        throw error;
+      }
+
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {});
+        await fs.unlink(lockPath).catch(() => {});
+      };
+    } catch (error) {
+      if (getErrorCode(error) !== 'EEXIST') throw error;
+      if (await clearStaleLock(lockPath, options.staleMs)) continue;
+      if (Date.now() - startedAt >= options.timeoutMs) {
+        throw new Error(options.timeoutMessage);
+      }
+      await delay(LOCK_RETRY_MS);
+    }
+  }
+}
+
+function enqueueScheduleStoreMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const run = scheduleStoreMutationQueue.then(operation, operation);
+  scheduleStoreMutationQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function mutateSchedules<T>(
+  mutator: (store: ScheduleStore) => Promise<{ value: T; save: boolean }> | { value: T; save: boolean },
+): Promise<T> {
+  return enqueueScheduleStoreMutation(async () => {
+    const release = await acquireLock(getSchedulesLockPath(), {
+      staleMs: STORE_LOCK_STALE_MS,
+      timeoutMs: STORE_LOCK_TIMEOUT_MS,
+      timeoutMessage: 'Timed out waiting for schedules.json to become writable.',
+    });
+    try {
+      const store = await loadSchedules();
+      const result = await mutator(store);
+      if (result.save) {
+        await saveSchedules(store);
+      }
+      return result.value;
+    } finally {
+      await release();
+    }
+  });
 }
 
 /**
@@ -157,33 +266,32 @@ export async function addSchedule(input: {
   task: ScheduleTask;
   intervalMinutes: number;
 }): Promise<ScheduledJob> {
-  const store = await loadSchedules();
+  return mutateSchedules((store) => {
+    const workspaceName = path.basename(input.workspacePath);
+    const job: ScheduledJob = {
+      id: `${input.task}-${workspaceName}-${Date.now().toString(36)}`,
+      workspacePath: input.workspacePath,
+      task: input.task,
+      intervalMinutes: input.intervalMinutes,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+    };
 
-  const workspaceName = path.basename(input.workspacePath);
-  const job: ScheduledJob = {
-    id: `${input.task}-${workspaceName}-${Date.now().toString(36)}`,
-    workspacePath: input.workspacePath,
-    task: input.task,
-    intervalMinutes: input.intervalMinutes,
-    enabled: true,
-    createdAt: new Date().toISOString(),
-  };
-
-  store.jobs.push(job);
-  await saveSchedules(store);
-  return job;
+    store.jobs.push(job);
+    return { value: job, save: true };
+  });
 }
 
 /**
  * Removes a schedule by id. Returns false when no job matched.
  */
 export async function removeSchedule(id: string): Promise<boolean> {
-  const store = await loadSchedules();
-  const before = store.jobs.length;
-  store.jobs = store.jobs.filter((j) => j.id !== id);
-  if (store.jobs.length === before) return false;
-  await saveSchedules(store);
-  return true;
+  return mutateSchedules((store) => {
+    const before = store.jobs.length;
+    store.jobs = store.jobs.filter((j) => j.id !== id);
+    const removed = store.jobs.length !== before;
+    return { value: removed, save: removed };
+  });
 }
 
 /**
@@ -194,12 +302,12 @@ export async function setScheduleEnabled(
   id: string,
   enabled: boolean,
 ): Promise<ScheduledJob | null> {
-  const store = await loadSchedules();
-  const job = store.jobs.find((j) => j.id === id);
-  if (!job) return null;
-  job.enabled = enabled;
-  await saveSchedules(store);
-  return job;
+  return mutateSchedules((store) => {
+    const job = store.jobs.find((j) => j.id === id);
+    if (!job) return { value: null, save: false };
+    job.enabled = enabled;
+    return { value: job, save: true };
+  });
 }
 
 /**
@@ -210,6 +318,20 @@ export async function setScheduleEnabled(
  * @returns The classified outcome with a summary message.
  */
 export async function runJob(job: ScheduledJob): Promise<JobRunResult> {
+  let releaseRunLock: (() => Promise<void>) | null = null;
+  try {
+    releaseRunLock = await acquireLock(getRunLockPath(job.id), {
+      staleMs: RUN_LOCK_STALE_MS,
+      timeoutMs: 0,
+      timeoutMessage: `Schedule ${job.id} is already running.`,
+    });
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
   let result: JobRunResult;
 
   try {
@@ -239,16 +361,18 @@ export async function runJob(job: ScheduledJob): Promise<JobRunResult> {
 
   // Record the run. Re-load the store so concurrent CLI edits are not lost.
   try {
-    const store = await loadSchedules();
-    const stored = store.jobs.find((j) => j.id === job.id);
-    if (stored) {
+    await mutateSchedules((store) => {
+      const stored = store.jobs.find((j) => j.id === job.id);
+      if (!stored) return { value: undefined, save: false };
       stored.lastRunAt = new Date().toISOString();
       stored.lastStatus = result.status;
       stored.lastMessage = result.message;
-      await saveSchedules(store);
-    }
+      return { value: undefined, save: true };
+    });
   } catch {
     // Best-effort bookkeeping; the job itself already ran.
+  } finally {
+    await releaseRunLock();
   }
 
   return result;

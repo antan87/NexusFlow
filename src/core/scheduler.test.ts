@@ -8,18 +8,32 @@ import {
   nextDueAt,
   parseInterval,
   removeSchedule,
+  runJob,
   setScheduleEnabled,
   type ScheduledJob,
   type ScheduleStore,
 } from './scheduler.js';
+import { refreshWorkspace } from './refresh.js';
+import { syncWorkspace } from './sync.js';
 
 vi.mock('node:fs/promises');
+vi.mock('./refresh.js');
+vi.mock('./sync.js');
 
 /** Parses the JSON written by the most recent writeFile call. */
 function lastWritten(): ScheduleStore {
   const calls = vi.mocked(fs.writeFile).mock.calls;
   const data = calls[calls.length - 1][1] as string;
   return JSON.parse(data) as ScheduleStore;
+}
+
+function mockScheduleStore(initial: ScheduleStore): { current: () => ScheduleStore } {
+  let current = JSON.parse(JSON.stringify(initial)) as ScheduleStore;
+  vi.mocked(fs.readFile).mockImplementation(async () => JSON.stringify(current) as any);
+  vi.mocked(fs.writeFile).mockImplementation(async (_path, data) => {
+    current = JSON.parse(String(data)) as ScheduleStore;
+  });
+  return { current: () => current };
 }
 
 function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
@@ -39,6 +53,22 @@ describe('scheduler', () => {
     vi.clearAllMocks();
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
     vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+    vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
+    vi.mocked(fs.stat).mockResolvedValue({ mtimeMs: Date.now() } as any);
+    vi.mocked(fs.open).mockResolvedValue({
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(syncWorkspace).mockResolvedValue({
+      syncedCount: 1,
+      conflictCount: 0,
+      errorCount: 0,
+      contextRefreshed: false,
+    } as any);
+    vi.mocked(refreshWorkspace).mockResolvedValue({
+      analyzedRepos: ['/repo'],
+      reusedRepos: [],
+    } as any);
   });
 
   describe('parseInterval', () => {
@@ -124,23 +154,55 @@ describe('scheduler', () => {
     });
 
     it('removeSchedule deletes by id and reports misses', async () => {
-      const existing: ScheduleStore = { version: 1, jobs: [makeJob()] };
-      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existing) as any);
+      mockScheduleStore({ version: 1, jobs: [makeJob()] });
 
       expect(await removeSchedule('sync-ws-abc')).toBe(true);
       expect(lastWritten().jobs).toHaveLength(0);
       expect(await removeSchedule('nope')).toBe(false);
     });
-
     it('setScheduleEnabled toggles and persists', async () => {
-      const existing: ScheduleStore = { version: 1, jobs: [makeJob()] };
-      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existing) as any);
+      mockScheduleStore({ version: 1, jobs: [makeJob()] });
 
       const job = await setScheduleEnabled('sync-ws-abc', false);
 
       expect(job!.enabled).toBe(false);
       expect(lastWritten().jobs[0]!.enabled).toBe(false);
       expect(await setScheduleEnabled('nope', true)).toBeNull();
+    });
+
+    it('serializes concurrent schedule mutations so updates are not lost', async () => {
+      const store = mockScheduleStore({ version: 1, jobs: [] });
+
+      const [first, second] = await Promise.all([
+        addSchedule({ workspacePath: '/ws/feature-a', task: 'sync', intervalMinutes: 30 }),
+        addSchedule({ workspacePath: '/ws/feature-b', task: 'refresh', intervalMinutes: 60 }),
+      ]);
+
+      expect(store.current().jobs.map((job) => job.id)).toEqual([first.id, second.id]);
+    });
+  });
+
+  describe('runJob', () => {
+    it('does not run a job that already has an active run lock', async () => {
+      vi.mocked(fs.open).mockRejectedValueOnce(Object.assign(new Error('exists'), { code: 'EEXIST' }));
+
+      const result = await runJob(makeJob());
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('already running');
+      expect(syncWorkspace).not.toHaveBeenCalled();
+      expect(refreshWorkspace).not.toHaveBeenCalled();
+    });
+
+    it('records the run result through the serialized schedule mutation path', async () => {
+      const store = mockScheduleStore({ version: 1, jobs: [makeJob()] });
+
+      const result = await runJob(makeJob());
+
+      expect(result.status).toBe('success');
+      expect(syncWorkspace).toHaveBeenCalledWith('/ws');
+      expect(store.current().jobs[0]!.lastStatus).toBe('success');
+      expect(store.current().jobs[0]!.lastMessage).toBe('1 synced, context unchanged');
     });
   });
 });

@@ -18,7 +18,6 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 
 - **Multi-repo workspaces** — group any set of local Git repos under one feature branch using worktrees
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
-- **Codebase context packing** — compress an entire multi-repo workspace into a single token-efficient XML file for web-based LLMs using Repomix
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
@@ -112,19 +111,26 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow list` | List all existing workspaces (alias: `ls`) |
 | `nexusflow open` | Re-open a workspace in your editor |
 | `nexusflow init` | Configure NexusFlow settings |
-| `nexusflow adapter` | Manage storage adapters — list, switch, configure, or initialize custom plugins |
-| `nexusflow pack` | Pack the workspace codebase into a single token-efficient XML file |
+| `nexusflow add-repo` | Add a repository to an existing workspace (alias: `add`) |
+| `nexusflow remove` | Delete a workspace and prune its git worktrees (alias: `rm`) |
 | `nexusflow start` | Start all services in a workspace (auto-detected) |
 | `nexusflow stop` | Stop all running services |
 | `nexusflow status` | Show running/stopped status and PIDs |
 | `nexusflow logs` | Tail aggregated logs from all services |
-| `nexusflow ui` | Launch the interactive Web Dashboard (port 3000) |
+| `nexusflow ui` | Launch the interactive Web Dashboard (`--port`, `--server-only`, `--strict-port`) |
+| `nexusflow dashboard` | Instantly open the Web Dashboard in your browser (alias: `dash`) |
+| `nexusflow tui` | Open the interactive terminal (TUI) dashboard |
 | `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
-| `nexusflow commit` | Commit and push changes across all modified repositories (`--repo` to filter) |
+| `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
 | `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
+| `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
 | `nexusflow schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
 | `nexusflow doctor` | Run health checks and diagnostics to verify workspace integrity |
+| `nexusflow config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
+| `nexusflow adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
+| `nexusflow mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
+| `nexusflow desktop` | Launch the NexusFlow desktop application |
 
 ## 🤖 Supported AI Assistants
 

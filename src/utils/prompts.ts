@@ -7,6 +7,7 @@ import { input, checkbox, confirm, select, search } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
+import { isValidBranchName } from './git.js';
 
 /**
  * Prompts the user for a feature branch name.
@@ -15,8 +16,12 @@ export async function promptBranchName(): Promise<string> {
   const branchName = await input({
     message: 'Feature branch name:',
     validate: (value: string) => {
-      if (!value.trim()) return 'Branch name cannot be empty';
-      if (/\s/.test(value)) return 'Branch name cannot contain spaces';
+      const trimmed = value.trim();
+      if (!trimmed) return 'Branch name cannot be empty';
+      if (/\s/.test(trimmed)) return 'Branch name cannot contain spaces';
+      // Reject git-illegal names up front so worktree creation doesn't fail
+      // deep inside createWorkspace after the workspace dir already exists.
+      if (!isValidBranchName(trimmed)) return 'Not a valid git branch name';
       return true;
     },
   });

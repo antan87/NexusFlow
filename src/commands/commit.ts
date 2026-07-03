@@ -13,7 +13,11 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
 
 interface CommitOptions {
-  noPush?: boolean;
+  /**
+   * Commander stores the `--no-push` flag under `push` (default `true`);
+   * pushing is therefore suppressed when this is explicitly `false`.
+   */
+  push?: boolean;
   dryRun?: boolean;
   /** Restrict the commit to these repos (by directory name). */
   repo?: string[];
@@ -43,6 +47,8 @@ export async function commitCommand(
   options?: CommitOptions,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n💾 NexusFlow — Committing Workspace Changes\n'));
+
+  const noPush = options?.push === false;
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
@@ -94,7 +100,7 @@ export async function commitCommand(
     }
 
     if (options?.dryRun) {
-      console.log(chalk.dim('  [Dry Run] Would commit and ' + (options?.noPush ? 'not push' : 'push')));
+      console.log(chalk.dim('  [Dry Run] Would commit and ' + (noPush ? 'not push' : 'push')));
       continue;
     }
 
@@ -102,13 +108,13 @@ export async function commitCommand(
     process.stdout.write(spinner);
 
     const result = await commitAndPush(repo.path, message, repo.branchName, {
-      noPush: options?.noPush,
+      noPush,
     });
 
     process.stdout.write('\r' + ' '.repeat(spinner.length) + '\r');
 
     if (result.success) {
-      const action = options?.noPush ? 'Committed' : 'Committed & pushed';
+      const action = noPush ? 'Committed' : 'Committed & pushed';
       console.log(`  ${chalk.green('✅')} ${action} (${chalk.cyan(result.commitHash || 'no hash')})`);
     } else {
       console.log(`  ${chalk.red('✖')} Failed: ${result.message}`);

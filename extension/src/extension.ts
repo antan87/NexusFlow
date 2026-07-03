@@ -7,9 +7,28 @@ import * as fs from 'fs';
 let serverProcess: child_process.ChildProcess | null = null;
 let myStatusBarItem: vscode.StatusBarItem | null = null;
 
+// The extension owns its backend, so it pins the port and starts the server
+// with --strict-port (below) rather than chasing an auto-incremented one.
+const SERVER_PORT = 3000;
+const SERVER_URL = `http://localhost:${SERVER_PORT}`;
+
+/**
+ * Resolves how to invoke the NexusFlow CLI. Prefers the bundled build (present
+ * when running from the source tree), and falls back to a globally installed
+ * `nexusflow` binary on PATH — so the packaged, installed extension still works
+ * instead of pointing at a non-existent sibling `dist/`.
+ */
+function resolveCli(context: vscode.ExtensionContext): { command: string; prefixArgs: string[] } {
+    const bundled = path.join(context.extensionPath, '..', 'dist', 'index.js');
+    if (fs.existsSync(bundled)) {
+        return { command: 'node', prefixArgs: [bundled] };
+    }
+    return { command: process.platform === 'win32' ? 'nexusflow.cmd' : 'nexusflow', prefixArgs: [] };
+}
+
 function checkServerRunning(): Promise<boolean> {
     return new Promise((resolve) => {
-        const req = http.get('http://localhost:3000/api/config', (res) => {
+        const req = http.get(`${SERVER_URL}/api/config`, (res) => {
             resolve(res.statusCode === 200);
         });
         req.on('error', () => {
@@ -30,13 +49,18 @@ async function startHonoServer(context: vscode.ExtensionContext) {
     }
 
     console.log('Starting Hono server...');
-    const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
-    
-    serverProcess = child_process.spawn('node', [serverScript, 'ui'], {
-        cwd: path.join(context.extensionPath, '..'),
-        env: { ...process.env, PORT: '3000' },
-        detached: false
-    });
+    const { command, prefixArgs } = resolveCli(context);
+
+    serverProcess = child_process.spawn(
+        command,
+        [...prefixArgs, 'ui', '--server-only', '--strict-port', '--port', String(SERVER_PORT)],
+        {
+            cwd: path.join(context.extensionPath, '..'),
+            env: { ...process.env },
+            detached: false,
+            shell: process.platform === 'win32',
+        }
+    );
 
     serverProcess.stdout?.on('data', (data) => {
         console.log(`[Hono Server]: ${data}`);
@@ -81,17 +105,17 @@ export function activate(context: vscode.ExtensionContext) {
     if (typeof (vscode as any).lm?.registerMcpServerDefinitionProvider === 'function') {
         const mcpProvider = {
             provideMcpServerDefinitions: async () => {
-                const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
+                const { command, prefixArgs } = resolveCli(context);
                 const workspaceFolders = vscode.workspace.workspaceFolders;
-                const args = [serverScript, 'mcp', 'run'];
+                const args = [...prefixArgs, 'mcp', 'run'];
                 if (workspaceFolders && workspaceFolders.length > 0) {
                     args.push(workspaceFolders[0].uri.fsPath);
                 }
-                
+
                 return [
                     new (vscode as any).McpStdioServerDefinition({
                         label: 'NexusFlow MCP Server',
-                        command: 'node',
+                        command,
                         args: args
                     })
                 ];
@@ -115,7 +139,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Register Open Browser Dashboard Command
     context.subscriptions.push(
         vscode.commands.registerCommand('nexusflow.openBrowserDashboard', () => {
-            vscode.env.openExternal(vscode.Uri.parse('http://localhost:3000'));
+            vscode.env.openExternal(vscode.Uri.parse(SERVER_URL));
         })
     );
 
@@ -171,8 +195,8 @@ function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) 
     }
     
     const cwd = (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
-    const serverScript = path.join(context.extensionPath, '..', 'dist', 'index.js');
-    
+    const { command: cliCommand, prefixArgs } = resolveCli(context);
+
     let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
     if (!terminal) {
         terminal = vscode.window.createTerminal({
@@ -184,8 +208,10 @@ function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) 
         terminal.sendText('\u0003', true);
     }
     terminal.show(true);
-    const escapedScriptPath = `"${serverScript}"`;
-    terminal.sendText(`node ${escapedScriptPath} ${command}`);
+    const invocation = prefixArgs.length > 0
+        ? `${cliCommand} "${prefixArgs[0]}"`
+        : cliCommand;
+    terminal.sendText(`${invocation} ${command}`);
 }
 
 export function deactivate() {

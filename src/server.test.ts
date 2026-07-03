@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
-import { app } from './server.js';
+import { app, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -620,6 +620,13 @@ describe('Server API Endpoints Unit Tests', () => {
     beforeEach(() => {
       vi.spyOn(config, 'getConfigDir').mockReturnValue('/mock/home/.nexusflow');
       vi.spyOn(config, 'ensureConfigDir').mockResolvedValue(undefined);
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+      vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
+      vi.mocked(fs.stat).mockResolvedValue({ mtimeMs: Date.now() } as any);
+      vi.mocked(fs.open).mockResolvedValue({
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as any);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
     });
 
@@ -691,6 +698,131 @@ describe('Server API Endpoints Unit Tests', () => {
       const response = await app.request('/api/schedules/nope', { method: 'DELETE' });
 
       expect(response.status).toBe(404);
+    });
+  });
+
+  describe('Security hardening', () => {
+    describe('workspace path traversal (A2.2)', () => {
+      it('DELETE /api/workspace/:id rejects a traversal id without touching the filesystem', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+        const deleteSpy = vi
+          .spyOn(workspace, 'deleteWorkspace')
+          .mockResolvedValue(undefined as any);
+
+        const response = await app.request(
+          `/api/workspace/${encodeURIComponent('../../evil')}`,
+          { method: 'DELETE' },
+        );
+
+        expect(response.status).toBe(400);
+        expect(deleteSpy).not.toHaveBeenCalled();
+      });
+
+      it('GET /api/workspace/:id/knowledge rejects a traversal id without reading the file', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+        const readSpy = vi.spyOn(fs, 'readFile');
+
+        const response = await app.request(
+          `/api/workspace/${encodeURIComponent('../../../etc/passwd')}/knowledge`,
+        );
+
+        expect(response.status).toBe(400);
+        expect(readSpy).not.toHaveBeenCalled();
+      });
+
+      it('accepts a normal workspace id', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+        vi.mocked(fs.readFile).mockResolvedValue('# Knowledge' as any);
+
+        const response = await app.request('/api/workspace/my-feature/knowledge');
+
+        expect(response.status).toBe(200);
+      });
+    });
+
+    describe('diff repo containment (A2.3)', () => {
+      it('rejects a sibling-prefix repo escape', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+        const execSpy = vi.mocked(execa);
+
+        // Workspace "feat"; sibling "feat-secret" shares the name prefix.
+        const response = await app.request(
+          `/api/workspace/feat/changes/diff?repo=${encodeURIComponent(
+            '../feat-secret/repo',
+          )}&file=x.ts`,
+        );
+
+        expect(response.status).toBe(400);
+        expect(execSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('CORS is restricted to localhost (A2.1)', () => {
+      it('does not echo a non-localhost Origin', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+
+        const response = await app.request('/api/config', {
+          headers: { Origin: 'http://evil.example.com' },
+        });
+
+        expect(response.headers.get('access-control-allow-origin')).not.toBe(
+          'http://evil.example.com',
+        );
+      });
+
+      it('allows a localhost Origin', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          workspacesDir: '/mock/workspaces',
+        } as any);
+
+        const response = await app.request('/api/config', {
+          headers: { Origin: 'http://localhost:5173' },
+        });
+
+        expect(response.headers.get('access-control-allow-origin')).toBe(
+          'http://localhost:5173',
+        );
+      });
+    });
+
+    describe('update download URL allow-list (A2.1)', () => {
+      it('accepts GitHub release hosts over HTTPS', () => {
+        expect(
+          isAllowedUpdateUrl(
+            'https://github.com/mrpatronz/nexusflow/releases/download/v1.3.0/Setup.exe',
+          ),
+        ).toBe(true);
+        expect(
+          isAllowedUpdateUrl('https://objects.githubusercontent.com/foo/Setup.exe'),
+        ).toBe(true);
+      });
+
+      it('rejects non-GitHub hosts and non-HTTPS schemes', () => {
+        expect(isAllowedUpdateUrl('https://evil.example.com/Setup.exe')).toBe(false);
+        expect(isAllowedUpdateUrl('http://github.com/Setup.exe')).toBe(false);
+        expect(isAllowedUpdateUrl('file:///C:/Setup.exe')).toBe(false);
+        expect(isAllowedUpdateUrl('not a url')).toBe(false);
+      });
+
+      it('POST /api/updates/download rejects a disallowed host', async () => {
+        const response = await app.request('/api/updates/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ downloadUrl: 'https://evil.example.com/Setup.exe' }),
+        });
+
+        expect(response.status).toBe(400);
+      });
     });
   });
 });

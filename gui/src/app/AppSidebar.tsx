@@ -62,7 +62,7 @@ export function AppSidebar({
       </button>
 
       <div className="mt-3 border-t border-hairline pt-3 text-center text-[10px] font-medium uppercase tracking-wider text-content-faint">
-        NexusFlow v{appVersion}
+        NexusFlow{appVersion ? ` v${appVersion}` : ''}
       </div>
     </aside>
   );

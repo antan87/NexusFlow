@@ -53,6 +53,33 @@ describe('Storage Adapters', () => {
       await adapter.deleteWorkspace('/ws/path', 'feature-1');
       expect(fs.rm).not.toHaveBeenCalled();
     });
+
+    it('should write base files into a per-repo base directory', async () => {
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await adapter.writeBaseFile('/ws/path', 'RepoName', 'nexusflow-knowledge.md', 'base');
+
+      expect(fs.writeFile).toHaveBeenCalledWith(
+        path.normalize('/ws/path/.nexusflow/base/RepoName/nexusflow-knowledge.md'),
+        'base',
+        'utf8'
+      );
+    });
+
+    it('should not collide base and workspace files that share a filename (A1.2)', () => {
+      const wsUrl = adapter.resolveWorkspaceFileUrl('/ws/path', 'feature-1', 'nexusflow-knowledge.md');
+      const baseUrl = adapter.resolveBaseFileUrl('/ws/path', 'RepoName', 'nexusflow-knowledge.md');
+      expect(wsUrl).not.toBe(baseUrl);
+      expect(wsUrl).toContain('/ws/path/nexusflow-knowledge.md');
+      expect(baseUrl).toContain('/ws/path/.nexusflow/base/RepoName/nexusflow-knowledge.md');
+    });
+
+    it('should isolate per-repo base files from each other', () => {
+      const a = adapter.resolveBaseFileUrl('/ws/path', 'RepoA', 'nexusflow-knowledge.md');
+      const b = adapter.resolveBaseFileUrl('/ws/path', 'RepoB', 'nexusflow-knowledge.md');
+      expect(a).not.toBe(b);
+    });
   });
 
   describe('CentralVaultAdapter', () => {

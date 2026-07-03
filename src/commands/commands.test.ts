@@ -38,6 +38,9 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       };
 
       vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(mockFeature);
+      vi.spyOn(workspace, 'resolveRepoInfos').mockResolvedValue([
+        { name: 'repo-1', path: repo1Path, defaultBranch: 'main' },
+      ]);
       vi.spyOn(multiGit, 'getRepoStatus').mockResolvedValue({
         hasChanges: true,
         changedFiles: ['src/file1.ts'],
@@ -133,6 +136,9 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       };
 
       vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(mockFeature);
+      vi.spyOn(workspace, 'resolveRepoInfos').mockResolvedValue([
+        { name: 'repo-1', path: repo1Path, defaultBranch: 'main' },
+      ]);
       vi.spyOn(fs, 'stat').mockResolvedValue({ isDirectory: () => true } as any);
       vi.spyOn(multiGit, 'getRepoStatus').mockResolvedValue({
         hasChanges: false,

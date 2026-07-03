@@ -24,6 +24,7 @@ import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { WorkspacesPage } from './pages/WorkspacesPage.js';
+import { API_BASE } from './lib/apiBase.js';
 
 
 // Types matched with src/types.ts
@@ -128,7 +129,6 @@ interface WorkspaceStatus {
   pendingValidation: boolean;
 }
 
-const API_BASE = (import.meta.env.DEV || (typeof window !== 'undefined' && (window as any).Neutralino)) ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
 
@@ -168,7 +168,7 @@ function AppInner() {
     downloadUrl?: string | null;
     releaseNotes?: string;
   } | null>(null);
-  const [appVersion, setAppVersion] = useState('0.1.5');
+  const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
 
   // Repos & Tools
@@ -258,6 +258,7 @@ function AppInner() {
   const [orchTools, setOrchTools] = useState<OrchestrationDetection[]>([]);
   const [runningServices, setRunningServices] = useState<RunningService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
+  const [serviceWorkspaceId, setServiceWorkspaceId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan'>('overview');
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -396,13 +397,22 @@ function AppInner() {
         throw new Error(applyData.error || 'Failed to trigger application update');
       }
 
-      showToast('Update downloaded! App is restarting...', 'success');
+      const isNeutralino = typeof window !== 'undefined' && (window as any).Neutralino;
+      showToast(
+        isNeutralino
+          ? 'Update downloaded! App is restarting...'
+          : 'Update downloaded and installer launched. Restart NexusFlow to complete the update.',
+        'success'
+      );
 
       // 3. Exit Neutralino client window to unlock files on disk
-      if (typeof window !== 'undefined' && (window as any).Neutralino) {
+      if (isNeutralino) {
         setTimeout(() => {
           (window as any).Neutralino.app.exit();
         }, 800);
+      } else {
+        setUpdateStep('idle');
+        setUpdatingApp(false);
       }
     } catch (err: any) {
       console.error('Update failed:', err);
@@ -699,13 +709,23 @@ function AppInner() {
       const encodedId = encodeURIComponent(wsId);
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/services`);
       const data = await res.json();
-      setServices(data.services || []);
+      const nextServices = data.services || [];
+      setServiceWorkspaceId(wsId);
+      setServices(nextServices);
       setOrchTools(data.orchestrationTools || []);
       setRunningServices(data.runningState || []);
+      const hasSelectedService = selectedLogService
+        ? nextServices.some((service: ServiceConfig) => service.name === selectedLogService)
+        : false;
+      if (!silent || !hasSelectedService) setServiceLogs('');
       
-      if (data.services.length > 0 && !selectedLogService) {
-        setSelectedLogService(data.services[0].name);
-      }
+      setSelectedLogService((current) => {
+        if (nextServices.length === 0) return null;
+        if (current && nextServices.some((service: ServiceConfig) => service.name === current)) {
+          return current;
+        }
+        return nextServices[0].name;
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -1200,7 +1220,7 @@ function AppInner() {
   // Poll logs for active service logs
   useEffect(() => {
     let interval: any = null;
-    if (activeWsId && selectedLogService) {
+    if (activeWsId && serviceWorkspaceId === activeWsId && selectedLogService) {
       fetchLogs(activeWsId, selectedLogService);
       interval = setInterval(() => {
         fetchLogs(activeWsId, selectedLogService);
@@ -1209,7 +1229,7 @@ function AppInner() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [activeWsId, selectedLogService]);
+  }, [activeWsId, serviceWorkspaceId, selectedLogService]);
 
   // Scroll to bottom of logs when log content changes
   useEffect(() => {
@@ -1576,7 +1596,7 @@ Core Instructions:
                 [Change WS]
               </button>
             )}
-            <span className="text-[10px] text-gray-500">v{appVersion}</span>
+            {appVersion && <span className="text-[10px] text-gray-500">v{appVersion}</span>}
           </div>
         </div>
 

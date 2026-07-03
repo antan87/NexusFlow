@@ -16,7 +16,6 @@ import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import { loadConfig } from './config.js';
-import { getActiveStorageProvider } from './adapters/registry.js';
 import { deleteWorkspaceFiles } from './storage.js';
 
 /** Name of the per-workspace manifest file. */
@@ -115,7 +114,7 @@ export async function createWorkspace(
       "mcpServers": {
         "nexusflow": {
           "command": "npx",
-          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "start"]
+          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run"]
         }
       }
     };
@@ -207,8 +206,13 @@ export async function saveFeatureConfig(
   feature: Feature,
 ): Promise<void> {
   const data = JSON.stringify(feature, null, 2) + '\n';
-  const adapter = getActiveStorageProvider();
-  await adapter.writeWorkspaceFile(workspacePath, feature.id, MANIFEST_FILE, data);
+  // The manifest is workspace-structural: it must live at the workspace root
+  // (where listWorkspaces scans and the git-worktree container lives),
+  // independent of the storage adapter. Routing it through an adapter would
+  // send it to a vault (invisible to the scan) and, for Obsidian, prepend YAML
+  // frontmatter that makes the JSON unparseable.
+  await fs.mkdir(workspacePath, { recursive: true });
+  await fs.writeFile(path.join(workspacePath, MANIFEST_FILE), data, 'utf-8');
 }
 
 /**
@@ -223,29 +227,23 @@ export async function loadFeatureConfig(
   workspacePath: string,
 ): Promise<Feature | null> {
   const featureId = path.basename(workspacePath);
-  const adapter = getActiveStorageProvider();
 
-  // 1. Try reading via the storage adapter first
-  try {
-    const raw = await adapter.readWorkspaceFile(workspacePath, featureId, MANIFEST_FILE);
-    return JSON.parse(raw) as Feature;
-  } catch {}
-
-  // 2. Try direct local check
+  // 1. The manifest lives at the workspace root (see saveFeatureConfig).
   const manifestPath = path.join(workspacePath, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(manifestPath, 'utf-8');
     return JSON.parse(raw) as Feature;
   } catch {}
 
-  // 3. Try direct vault check
+  // 2. Legacy fallback: manifests written into the central vault before the
+  //    manifest was pinned to the workspace root.
   const vaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(vaultManifest, 'utf-8');
     return JSON.parse(raw) as Feature;
   } catch {}
 
-  // 4. Traverse parent directories
+  // 3. Traverse parent directories
   const rootDir = await findWorkspaceRoot(workspacePath);
   if (rootDir && rootDir !== workspacePath) {
     return loadFeatureConfig(rootDir);
@@ -290,6 +288,15 @@ export async function resolveRepoInfo(repoPath: string): Promise<RepoInfo> {
     path: repoPath,
     defaultBranch,
   };
+}
+
+/**
+ * Resolves a list of repo paths to RepoInfo objects, detecting each repo's
+ * real default branch. Prefer this over hardcoding `main`, which breaks diff
+ * context generation for `master`-based repos.
+ */
+export async function resolveRepoInfos(repoPaths: string[]): Promise<RepoInfo[]> {
+  return Promise.all(repoPaths.map((r) => resolveRepoInfo(r)));
 }
 
 /**
@@ -460,8 +467,19 @@ async function excludeNexusFlowFiles(workspacePath: string, feature: Feature): P
           worktreeGitDir = match[1].trim();
         }
       }
-      
-      const excludeFilePath = path.join(worktreeGitDir, 'info', 'exclude');
+
+      // git reads info/exclude from the *common* git dir, not the per-worktree
+      // gitdir. For a worktree the per-worktree gitdir has a `commondir` pointer
+      // to it; resolve that so the excludes actually take effect.
+      let commonGitDir = worktreeGitDir;
+      try {
+        const commonRel = (await fs.readFile(path.join(worktreeGitDir, 'commondir'), 'utf8')).trim();
+        if (commonRel) {
+          commonGitDir = path.resolve(worktreeGitDir, commonRel);
+        }
+      } catch {}
+
+      const excludeFilePath = path.join(commonGitDir, 'info', 'exclude');
       await fs.mkdir(path.dirname(excludeFilePath), { recursive: true });
       
       let excludeContent = '';

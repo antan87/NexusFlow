@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 
 import { loadConfig } from '../core/config.js';
-import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
+import { listWorkspaces, loadFeatureConfig, resolveRepoInfos } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus } from '../utils/multi-git.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
@@ -28,16 +28,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
     return;
   }
 
-  const allRepos = await Promise.all(
-    feature.repos.map(async (r) => {
-      const repoName = path.basename(r);
-      return {
-        name: repoName,
-        path: r,
-        defaultBranch: 'main',
-      };
-    })
-  );
+  const allRepos = await resolveRepoInfos(feature.repos);
 
   console.log(chalk.cyan('Retrieving repository statuses and running analysis...'));
   const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
@@ -72,9 +63,9 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
 
   try {
     const knowledgeContent = await fs.readFile(knowledgePath, 'utf-8');
-    extractedGotchas = extractSection(knowledgeContent, 'Known Gotchas');
+    extractedGotchas = extractSection(knowledgeContent, ['Known Gotchas', 'Discovered Gotchas & Watch-outs', 'Discovered Gotchas']);
     extractedDecisions = extractSection(knowledgeContent, 'Architecture Decisions');
-    extractedQuestions = extractSection(knowledgeContent, 'Clarifying Questions for the User');
+    extractedQuestions = extractSection(knowledgeContent, ['Clarifying Questions for the User', 'Clarifying Questions']);
   } catch {}
 
   // Build dependency description
@@ -201,13 +192,18 @@ function getTestCommand(repoPath: string, analysis?: any): string {
 }
 
 /**
- * Extracts a specific section from the knowledge file.
+ * Extracts a specific section from the knowledge file. Accepts one or more
+ * header aliases so it tolerates both the workspace doc's headers and the
+ * base-knowledge template's differently-worded equivalents.
  */
-function extractSection(content: string, header: string): string {
+function extractSection(content: string, header: string | string[]): string {
+  const headers = Array.isArray(header) ? header : [header];
   const lines = content.split('\n');
-  const index = lines.findIndex(l => l.trim().startsWith(`## ${header}`));
+  const index = lines.findIndex(l =>
+    headers.some(h => l.trim().startsWith(`## ${h}`)),
+  );
   if (index === -1) return '_None recorded yet._';
-  
+
   const resultLines: string[] = [];
   for (let i = index + 1; i < lines.length; i++) {
     if (lines[i]!.trim().startsWith('##')) break;
