@@ -83,9 +83,12 @@ jobs:
           fi
 
   # ── VS Code Marketplace ───────────────────────────────────────────────────────
+  # Gated behind a repo variable until Azure OIDC (AZURE_CLIENT_ID / AZURE_TENANT_ID)
+  # is configured — until then this job is skipped rather than failing the release.
+  # To re-enable: set the repo/environment variable VSCODE_PUBLISHING_ENABLED=true.
   vscode:
     needs: guard
-    if: needs.guard.outputs.prerelease == 'false'
+    if: needs.guard.outputs.prerelease == 'false' && vars.VSCODE_PUBLISHING_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # Azure OIDC
