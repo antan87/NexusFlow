@@ -42,7 +42,7 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
 
   for (const repo of report.repos) {
     console.log(`Repository: ${chalk.bold(repo.name)}`);
-    renderRepoResult(repo);
+    renderRepoResult(repo, workspacePath);
   }
 
   const parts = [`${report.syncedCount} synced`];
@@ -50,15 +50,19 @@ export async function syncCommand(workspaceArg?: string): Promise<void> {
   if (report.errorCount > 0) parts.push(`${report.errorCount} error(s)`);
   console.log(`\n📊 ${chalk.bold('Summary:')} ${parts.join(', ')}\n`);
 
-  if (report.syncedCount > 0) {
-    console.log(chalk.green('✅ Workspace maps and contexts updated.\n'));
+  if (report.contextRefreshed) {
+    console.log(chalk.green('✅ Workspace maps and contexts updated (changed repos only).\n'));
+  } else if (report.syncedCount > 0 && report.conflictCount === 0 && report.errorCount === 0) {
+    console.log(chalk.green('✅ Everything already up to date — context files left untouched.\n'));
   }
 }
 
 /**
- * Prints a single repo's sync outcome with status-appropriate styling.
+ * Prints a single repo's sync outcome with status-appropriate styling and,
+ * for conflicts, the conflicted files plus how to resolve them.
  */
-function renderRepoResult(repo: RepoSyncReport): void {
+function renderRepoResult(repo: RepoSyncReport, workspacePath: string): void {
+  const repoDir = path.join(workspacePath, repo.name);
   switch (repo.status) {
     case 'up-to-date':
     case 'rebased':
@@ -66,15 +70,30 @@ function renderRepoResult(repo: RepoSyncReport): void {
       break;
     case 'stash-conflict':
       console.log(`  ${chalk.yellow('⚠️')} ${repo.message}`);
+      console.log(chalk.dim(`    Your local changes are safe in the stash. To merge them manually:`));
+      console.log(chalk.dim(`      cd ${repoDir}`));
+      console.log(chalk.dim('      git stash pop   # resolve any conflicts, then git add the files'));
       break;
     case 'conflict':
-      console.log(`  ${chalk.red('❌')} Conflict: ${repo.message}`);
-      if (repo.conflict) {
+      console.log(`  ${chalk.red('❌')} Conflict: ${repo.message} ${chalk.dim('(rebase was aborted — your branch is unchanged)')}`);
+      if (repo.conflictFiles && repo.conflictFiles.length > 0) {
+        console.log(chalk.dim('    Conflicted files:'));
+        for (const file of repo.conflictFiles.slice(0, 10)) {
+          console.log(`      ${chalk.red('✖')} ${file}`);
+        }
+        if (repo.conflictFiles.length > 10) {
+          console.log(chalk.dim(`      … and ${repo.conflictFiles.length - 10} more`));
+        }
+      } else if (repo.conflict) {
         console.log(chalk.dim(repo.conflict.split('\n').map(l => `    ${l}`).slice(0, 5).join('\n')));
       }
+      console.log(chalk.dim('    To resolve manually:'));
+      console.log(chalk.dim(`      cd ${repoDir}`));
+      console.log(chalk.dim(`      git rebase origin/${repo.baseBranch}   # fix conflicts, git add, then git rebase --continue`));
       break;
     case 'error':
       console.log(`  ${chalk.red('🔌')} ${repo.message}`);
+      console.log(chalk.dim('    This is an infrastructure failure (network/auth), not a merge conflict — check your connection or credentials and re-run nexusflow sync.'));
       break;
   }
 }

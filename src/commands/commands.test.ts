@@ -41,9 +41,10 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       vi.spyOn(multiGit, 'getRepoStatus').mockResolvedValue({
         hasChanges: true,
         changedFiles: ['src/file1.ts'],
+        files: [{ code: ' M', path: 'src/file1.ts' }],
         summary: '1 file changed',
       });
-      
+
       const mockAnalysis = new Map();
       mockAnalysis.set(repo1Path, {
         name: 'repo-1',
@@ -55,7 +56,11 @@ describe('NexusFlow CLI New Commands unit tests', () => {
         readmeSummary: 'README summary',
         existingAIConfigs: [],
       });
-      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(mockAnalysis);
+      vi.spyOn(analyzers, 'analyzeAllReposCached').mockResolvedValue({
+        analysis: mockAnalysis,
+        analyzed: ['repo-1'],
+        reused: [],
+      });
 
       const writtenFiles: Record<string, string> = {};
       vi.spyOn(fs, 'writeFile').mockImplementation(async (filePath: any, content: any) => {
@@ -92,19 +97,24 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       };
 
       vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(mockFeature);
-      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(analyzers, 'analyzeAllReposCached').mockResolvedValue({
+        analysis: new Map(),
+        analyzed: ['repo-1'],
+        reused: [],
+      });
       vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
 
       // Run refresh command with repo filter
       await refreshCommand({ repo: 'repo-1' }, mockWorkspacePath);
 
-      expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
+      expect(analyzers.analyzeAllReposCached).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalledWith(
         expect.any(Object),
         expect.any(Array),
         mockWorkspacePath,
         'repo-1',
-        undefined
+        undefined,
+        ['repo-1']
       );
     });
   });
@@ -127,6 +137,7 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       vi.spyOn(multiGit, 'getRepoStatus').mockResolvedValue({
         hasChanges: false,
         changedFiles: [],
+        files: [],
         summary: 'Clean',
       });
 
@@ -141,7 +152,11 @@ describe('NexusFlow CLI New Commands unit tests', () => {
         readmeSummary: 'README summary',
         existingAIConfigs: [],
       });
-      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(mockAnalysis);
+      vi.spyOn(analyzers, 'analyzeAllReposCached').mockResolvedValue({
+        analysis: mockAnalysis,
+        analyzed: ['repo-1'],
+        reused: [],
+      });
       vi.spyOn(fs, 'access').mockResolvedValue(undefined); // covers .code-workspace + artifact checks
       vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ "search.useIgnoreFiles": false }));
 
@@ -150,7 +165,7 @@ describe('NexusFlow CLI New Commands unit tests', () => {
 
       expect(workspace.loadFeatureConfig).toHaveBeenCalledWith(mockWorkspacePath);
       expect(fs.stat).toHaveBeenCalledWith(repo1Path);
-      expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
+      expect(analyzers.analyzeAllReposCached).toHaveBeenCalled();
     });
   });
 });

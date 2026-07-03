@@ -143,6 +143,12 @@ function buildBaseKnowledgeContent(repoName: string): string {
  * @param ctx           - The workspace context (feature + repos).
  * @param assistants    - Which AI assistants to generate context files for.
  * @param workspacePath - Absolute path to the workspace root directory.
+ * @param onlyRepo      - Restrict per-repo output to a single repo by name.
+ * @param onlyBase      - Only generate base-layer maps/knowledge.
+ * @param changedRepos  - When provided, per-repo architecture maps are only
+ *                        rewritten for these repos (unchanged repos keep their
+ *                        existing map byte-identical, preserving AI prompt
+ *                        caches). A missing map file is generated regardless.
  */
 export async function generateContextFiles(
   ctx: WorkspaceContext,
@@ -150,6 +156,7 @@ export async function generateContextFiles(
   workspacePath: string,
   onlyRepo?: string,
   onlyBase?: boolean,
+  changedRepos?: string[],
 ): Promise<void> {
   // Always generate a universal WORKSPACE.md at the workspace root
   if (!onlyBase) {
@@ -234,6 +241,13 @@ export async function generateContextFiles(
       }
       const a = ctx.analysis.get(repo.path);
       if (a) {
+        if (changedRepos && !changedRepos.includes(repo.name)) {
+          const mapExists = await baseFileExists(workspacePath, repo.name, `nexusflow-map-${repo.name}.md`);
+          if (mapExists) {
+            console.log(chalk.gray('  ○'), `Architecture Map for ${repo.name} unchanged — skipped (cache hit)`);
+            continue;
+          }
+        }
         try {
           const { generateRepoMap } = await import('./map-generator.js');
           await generateRepoMap(repo, a, workspacePath, allProduced);

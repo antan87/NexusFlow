@@ -34,6 +34,13 @@ import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { desktopCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
+import {
+  scheduleAddCommand,
+  scheduleListCommand,
+  scheduleRemoveCommand,
+  scheduleRunCommand,
+  scheduleToggleCommand,
+} from './commands/schedule.js';
 import { adapterListCommand, adapterUseCommand, adapterInfoCommand, adapterInitCommand } from './commands/adapter.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
@@ -245,7 +252,8 @@ program
   .requiredOption('-m, --message <msg>', 'Commit message')
   .option('--no-push', 'Stage and commit changes without pushing to remote')
   .option('--dry-run', 'Preview changes without committing')
-  .action(async (workspace: string | undefined, options: { message: string; noPush?: boolean; dryRun?: boolean }) => {
+  .option('-r, --repo <repos...>', 'Only commit the given repositories (by name)')
+  .action(async (workspace: string | undefined, options: { message: string; noPush?: boolean; dryRun?: boolean; repo?: string[] }) => {
     try {
       await commitCommand(options.message, workspace, options);
     } catch (error) {
@@ -260,11 +268,12 @@ program
 
 program
   .command('diff')
-  .description('Display a unified summary of changes across all repositories')
+  .description('Display a unified summary of changes across all repositories (including unpushed commits)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
+  .option('-r, --repo <repos...>', 'Only show the given repositories (by name)')
+  .action(async (workspace: string | undefined, options: { repo?: string[] }) => {
     try {
-      await diffCommand(workspace);
+      await diffCommand(workspace, options);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');
@@ -329,11 +338,12 @@ program
 
 program
   .command('refresh')
-  .description('Refresh workspace context, maps, plans and handoff files')
+  .description('Refresh workspace context, maps, plans and handoff files (re-analyzes only changed repos)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
   .option('-b, --base', 'Only refresh base-layer maps and codebase knowledge from main')
-  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean }) => {
+  .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
+  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean; force?: boolean }) => {
     try {
       await refreshCommand(options, workspace);
     } catch (error) {
@@ -476,6 +486,106 @@ adapterCmd
 adapterCmd.action(async () => {
   try {
     await adapterListCommand();
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+});
+
+// Schedule command group
+const scheduleCmd = program
+  .command('schedule')
+  .description('Manage recurring workspace jobs (sync/refresh) — jobs run while a NexusFlow server is active');
+
+scheduleCmd
+  .command('add')
+  .description('Schedule a recurring job for a workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-t, --task <task>', 'Job to run: "sync" or "refresh"', 'sync')
+  .requiredOption('-e, --every <interval>', 'How often to run, e.g. 30m, 2h, 1d')
+  .action(async (workspace: string | undefined, options: { task?: string; every?: string }) => {
+    try {
+      await scheduleAddCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+scheduleCmd
+  .command('list')
+  .alias('ls')
+  .description('List all scheduled jobs')
+  .action(async () => {
+    try {
+      await scheduleListCommand();
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+scheduleCmd
+  .command('remove')
+  .alias('rm')
+  .description('Remove a scheduled job')
+  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .action(async (id: string) => {
+    try {
+      await scheduleRemoveCommand(id);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+scheduleCmd
+  .command('enable')
+  .description('Enable a scheduled job')
+  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .action(async (id: string) => {
+    try {
+      await scheduleToggleCommand(id, true);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+scheduleCmd
+  .command('disable')
+  .description('Disable a scheduled job without removing it')
+  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .action(async (id: string) => {
+    try {
+      await scheduleToggleCommand(id, false);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+scheduleCmd
+  .command('run')
+  .description('Run a scheduled job immediately')
+  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .action(async (id: string) => {
+    try {
+      await scheduleRunCommand(id);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Default action when 'nexusflow schedule' is run without a subcommand
+scheduleCmd.action(async () => {
+  try {
+    await scheduleListCommand();
   } catch (error) {
     console.error(error);
     process.exit(1);

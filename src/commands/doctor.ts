@@ -7,7 +7,7 @@ import { execa } from 'execa';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getRepoStatus } from '../utils/multi-git.js';
-import { analyzeAllRepos } from '../analyzers/index.js';
+import { analyzeAllReposCached } from '../analyzers/index.js';
 import { globby } from 'globby';
 import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
 
@@ -71,7 +71,7 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
   }
 
   // ── 2. Run Analysis for detailed checks ────────────────────────────────
-  const analysis = await analyzeAllRepos(allRepos);
+  const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
   console.log();
 
   // ── 3. Branch & Git Status Checks ──────────────────────────────────────
