@@ -22,23 +22,58 @@ function getStatePath(workspacePath: string): string {
 }
 
 /**
- * Loads the running state from disk, syncing active status with PM2.
+ * Parses `pm2 jlist` output defensively. npx/pm2 can emit preamble lines before
+ * the JSON array, which would make a bare JSON.parse throw and silently drop us
+ * to stale cached state.
  */
-export async function loadRunningState(workspacePath: string): Promise<RunningState | null> {
+export function parsePm2Json(stdout: string): any[] {
+  try {
+    return JSON.parse(stdout);
+  } catch {}
+  const start = stdout.indexOf('[');
+  const end = stdout.lastIndexOf(']');
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(stdout.slice(start, end + 1));
+    } catch {}
+  }
+  return [];
+}
+
+/**
+ * Runs `pm2 jlist` once and returns the parsed process list (empty on failure).
+ * Callers iterating many workspaces should fetch this once and pass it into
+ * {@link loadRunningState} to avoid spawning npx per workspace.
+ */
+export async function getPm2List(): Promise<any[]> {
+  try {
+    const { stdout } = await execa('npx', ['pm2', 'jlist']);
+    return parsePm2Json(stdout);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Loads the running state from disk, syncing active status with PM2.
+ *
+ * @param workspacePath - Workspace root path.
+ * @param pm2List - Optional pre-fetched `pm2 jlist` output (see {@link getPm2List}).
+ */
+export async function loadRunningState(workspacePath: string, pm2List?: any[]): Promise<RunningState | null> {
   try {
     const raw = await fs.readFile(getStatePath(workspacePath), 'utf-8');
     const state = JSON.parse(raw) as RunningState;
 
     try {
       // Query current PM2 process list to verify actual running status
-      const { stdout } = await execa('npx', ['pm2', 'jlist']);
-      const pm2List = JSON.parse(stdout);
+      const list = pm2List ?? await getPm2List();
       const workspaceId = path.basename(workspacePath);
       const prefix = `nexusflow-${workspaceId}-`;
 
       const activeServices = state.services.map((service) => {
         const uniqueName = `${prefix}${service.name}`;
-        const pm2App = pm2List.find((app: any) => app.name === uniqueName);
+        const pm2App = list.find((app: any) => app.name === uniqueName);
         const running = pm2App && pm2App.pm2_env?.status === 'online';
         return {
           ...service,
@@ -137,7 +172,7 @@ export async function startServices(
 
       // Retrieve the real PID from PM2
       const { stdout } = await execa('npx', ['pm2', 'jlist']);
-      const pm2List = JSON.parse(stdout);
+      const pm2List = parsePm2Json(stdout);
       const pm2App = pm2List.find((app: any) => app.name === uniqueName);
       const pid = pm2App?.pid || 0;
 

@@ -620,6 +620,13 @@ describe('Server API Endpoints Unit Tests', () => {
     beforeEach(() => {
       vi.spyOn(config, 'getConfigDir').mockReturnValue('/mock/home/.nexusflow');
       vi.spyOn(config, 'ensureConfigDir').mockResolvedValue(undefined);
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+      vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
+      vi.mocked(fs.stat).mockResolvedValue({ mtimeMs: Date.now() } as any);
+      vi.mocked(fs.open).mockResolvedValue({
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as any);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
     });
 

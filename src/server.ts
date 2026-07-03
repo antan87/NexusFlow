@@ -48,6 +48,7 @@ import {
   startServices,
   stopServices,
   loadRunningState,
+  getPm2List,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
@@ -275,6 +276,10 @@ app.get('/api/workspaces/status', async (c) => {
     const config = await loadConfig();
     const workspaces = await listWorkspaces(config.workspacesDir);
 
+    // Fetch the PM2 process list once for the whole overview instead of
+    // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
+    const pm2List = await getPm2List();
+
     const entries = await Promise.all(
       workspaces.map(async (ws) => {
         const workspacePath =
@@ -302,7 +307,7 @@ app.get('/api/workspaces/status', async (c) => {
 
           // Running services (cached running-state, PM2-verified — same source as
           // the Services tab; only workspaces that ever started services touch PM2).
-          const runningState = await loadRunningState(workspacePath);
+          const runningState = await loadRunningState(workspacePath, pm2List);
           status.runningServices = runningState?.services?.length ?? 0;
 
           // Sync state: worst-case classification + any repo pending validation.
@@ -424,9 +429,21 @@ interface CreationJob {
   workspacePath?: string;
   feature?: Feature;
   listeners: Set<(event: { type: string; data: any }) => void>;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
 }
 
 const creationJobs = new Map<string, CreationJob>();
+
+// Keep a finished job around briefly so a late SSE reconnect can still read its
+// final state, then drop it so the map doesn't grow unbounded.
+const FINISHED_JOB_TTL_MS = 5 * 60 * 1000;
+
+function scheduleJobCleanup(jobId: string) {
+  const job = creationJobs.get(jobId);
+  if (!job || job.cleanupTimer) return;
+  job.cleanupTimer = setTimeout(() => creationJobs.delete(jobId), FINISHED_JOB_TTL_MS);
+  job.cleanupTimer.unref?.();
+}
 
 function updateJobStep(
   jobId: string,
@@ -473,6 +490,10 @@ function updateJobStep(
 
   for (const listener of job.listeners) {
     listener(eventPayload);
+  }
+
+  if (job.status === 'completed' || job.status === 'failed') {
+    scheduleJobCleanup(jobId);
   }
 }
 
@@ -622,25 +643,34 @@ app.get('/api/workspace/create-stream/:jobId', async (c) => {
       return;
     }
 
-    const listener = async (event: { type: string; data: any }) => {
-      try {
-        await stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event.data),
-        });
-      } catch (err) {
+    // Keep the connection open until the job finishes, driven by job events
+    // rather than polling.
+    await new Promise<void>((resolve) => {
+      const listener = async (event: { type: string; data: any }) => {
+        try {
+          await stream.writeSSE({
+            event: event.type,
+            data: JSON.stringify(event.data),
+          });
+        } catch {
+          job.listeners.delete(listener);
+          resolve();
+          return;
+        }
+        if (event.data?.status === 'completed' || event.data?.status === 'failed') {
+          job.listeners.delete(listener);
+          resolve();
+        }
+      };
+
+      job.listeners.add(listener);
+
+      // Guard against the job finishing between the initial state write and now.
+      if (job.status === 'completed' || job.status === 'failed') {
         job.listeners.delete(listener);
+        resolve();
       }
-    };
-
-    job.listeners.add(listener);
-
-    // Keep connection alive until job finishes
-    while (job.status === 'running') {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    job.listeners.delete(listener);
+    });
   });
 });
 
@@ -1446,7 +1476,7 @@ app.get('/api/schedules', async (c) => {
 
 // Create a scheduled job
 app.post('/api/schedules', async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => ({} as any));
   const task = body.task === 'refresh' ? 'refresh' : body.task === 'sync' ? 'sync' : null;
   if (!task) {
     return c.json({ error: 'task must be "sync" or "refresh"' }, 400);
@@ -1481,7 +1511,7 @@ app.post('/api/schedules', async (c) => {
 
 // Enable/disable a scheduled job
 app.post('/api/schedules/:id/enabled', async (c) => {
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => ({} as any));
   const job = await setScheduleEnabled(c.req.param('id'), Boolean(body.enabled));
   if (!job) return c.json({ error: 'Schedule not found' }, 404);
   return c.json({ job });
@@ -1528,8 +1558,11 @@ app.get('/', async (c) => {
   }
 });
 
-// Serve static assets from GUI build folder
-app.use('/*', serveStatic({ root: path.relative(process.cwd(), guiPath) }));
+// Serve static assets from GUI build folder. Use the absolute build path
+// (serveStatic joins root + request path) so asset serving does not depend on
+// the server's cwd — a cwd on another drive made the old cwd-relative path
+// resolve wrong and serve a blank GUI, e.g. under `ui --daemon`.
+app.use('/*', serveStatic({ root: guiPath }));
 
 export function startServer(
   port = 3000,
