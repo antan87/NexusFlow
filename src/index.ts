@@ -191,7 +191,8 @@ program
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
   .option('-d, --daemon', 'Run the dashboard server in the background (daemon mode)')
   .option('--server-only', 'Start the dashboard server without opening the browser')
-  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean }) => {
+  .option('--strict-port', 'Fail instead of auto-incrementing when the port is in use')
+  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean }) => {
     try {
       await uiCommand(options);
     } catch (error) {

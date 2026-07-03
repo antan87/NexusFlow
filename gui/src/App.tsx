@@ -24,6 +24,7 @@ import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { WorkspacesPage } from './pages/WorkspacesPage.js';
+import { API_BASE } from './lib/apiBase.js';
 
 
 // Types matched with src/types.ts
@@ -128,7 +129,6 @@ interface WorkspaceStatus {
   pendingValidation: boolean;
 }
 
-const API_BASE = (import.meta.env.DEV || (typeof window !== 'undefined' && (window as any).Neutralino)) ? 'http://localhost:3000' : '';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
 

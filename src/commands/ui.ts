@@ -45,7 +45,7 @@ function openBrowser(url: string): void {
  *
  * @param options - CLI options, including optional port, daemon, and server-only.
  */
-export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean }): Promise<void> {
+export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean }): Promise<void> {
   const port = options.port ? parseInt(options.port, 10) : 3000;
   const url = `http://localhost:${port}`;
 
@@ -67,7 +67,9 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
     console.log(chalk.dim('  Starting server in the background...'));
     try {
       const serverScript = fileURLToPath(new URL('../index.js', import.meta.url));
-      const child = spawn(process.execPath, [serverScript, 'ui', '--port', String(port), '--server-only'], {
+      const daemonArgs = [serverScript, 'ui', '--port', String(port), '--server-only'];
+      if (options.strictPort) daemonArgs.push('--strict-port');
+      const child = spawn(process.execPath, daemonArgs, {
         detached: true,
         stdio: 'ignore'
       });
@@ -91,7 +93,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
   // Standard foreground blocking mode
   console.log(chalk.dim('  Starting local server...'));
   try {
-    const { port: actualPort } = await startServer(port);
+    const { port: actualPort } = await startServer(port, { strictPort: options.strictPort });
     const actualUrl = `http://localhost:${actualPort}`;
 
     console.log(chalk.green(`  ✔ Dashboard running at: ${chalk.bold(actualUrl)}`));

@@ -1531,7 +1531,10 @@ app.get('/', async (c) => {
 // Serve static assets from GUI build folder
 app.use('/*', serveStatic({ root: path.relative(process.cwd(), guiPath) }));
 
-export function startServer(port = 3000): Promise<{ port: number; server: any }> {
+export function startServer(
+  port = 3000,
+  opts: { strictPort?: boolean } = {},
+): Promise<{ port: number; server: any }> {
   return new Promise((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
       // The dashboard server doubles as the host for recurring workspace
@@ -1542,7 +1545,14 @@ export function startServer(port = 3000): Promise<{ port: number; server: any }>
 
     server.on('error', (e: any) => {
       if (e.code === 'EADDRINUSE') {
-        resolve(startServer(port + 1));
+        // Callers that own their backend (desktop/extension) pass strictPort so
+        // they can rely on the port they requested instead of chasing a silent
+        // increment they'd never find.
+        if (opts.strictPort) {
+          reject(new Error(`Port ${port} is already in use.`));
+        } else {
+          resolve(startServer(port + 1, opts));
+        }
       } else {
         reject(e);
       }

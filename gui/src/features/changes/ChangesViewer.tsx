@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FolderGit2, RefreshCw, Check, Save, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import type { Feature } from '../../types.js';
+import { API_BASE } from '../../lib/apiBase.js';
 
 interface ChangesViewerProps {
   ws: Feature;
@@ -20,8 +21,6 @@ interface ChangesViewerProps {
   handleSyncAll: (wsId: string) => Promise<void>;
   handleCommitAll: (wsId: string) => Promise<void>;
 }
-
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : '';
 
 export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   ws,
