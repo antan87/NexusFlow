@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 
 import { loadConfig } from '../core/config.js';
-import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
+import { listWorkspaces, loadFeatureConfig, resolveRepoInfos } from '../core/workspace.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from '../core/storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -29,16 +29,7 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
     return;
   }
 
-  const allRepos = await Promise.all(
-    feature.repos.map(async (r) => {
-      const repoName = path.basename(r);
-      return {
-        name: repoName,
-        path: r,
-        defaultBranch: 'main',
-      };
-    })
-  );
+  const allRepos = await resolveRepoInfos(feature.repos);
 
   console.log(chalk.cyan('Running diagnostics...\n'));
 

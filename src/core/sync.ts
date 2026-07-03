@@ -8,7 +8,7 @@
 
 import * as path from 'node:path';
 
-import { loadFeatureConfig } from './workspace.js';
+import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { recordRepoSync } from './workspace-state.js';
 import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -112,11 +112,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
   let contextRefreshed = false;
   if (contentChanged) {
     try {
-      const allRepos = feature.repos.map((r) => ({
-        name: path.basename(r),
-        path: r,
-        defaultBranch: 'main',
-      }));
+      const allRepos = await resolveRepoInfos(feature.repos);
 
       const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };

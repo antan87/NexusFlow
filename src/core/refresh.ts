@@ -9,7 +9,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import { loadFeatureConfig } from './workspace.js';
+import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import type { WorkspaceContext } from '../types.js';
@@ -59,11 +59,7 @@ export async function refreshWorkspace(
     );
   }
 
-  const allRepos = feature.repos.map((r) => ({
-    name: path.basename(r),
-    path: r,
-    defaultBranch: 'main',
-  }));
+  const allRepos = await resolveRepoInfos(feature.repos);
 
   const { analysis, analyzed, reused } = await analyzeAllReposCached(
     allRepos,
