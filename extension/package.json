@@ -2,7 +2,7 @@
   "name": "nexusflow-vscode",
   "displayName": "NexusFlow Multi-Repo Workspace Orchestrator",
   "description": "Manage multiple repositories as a single feature workspace, orchestrate background services, and align AI coding contexts natively inside VS Code.",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "publisher": "nexusflow",
   "engines": {
     "vscode": "^1.80.0"
