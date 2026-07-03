@@ -67,8 +67,95 @@ export const app = new Hono();
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
 
-// Enable CORS for frontend dev server
-app.use('/api/*', cors());
+// ─── Path containment guards ──────────────────────────────────────────────
+// The server exposes state-changing routes keyed by a workspace `:id` taken
+// straight from the URL. Without containment checks, `..%2f..` sequences let a
+// caller read/write/delete files outside the workspaces root. Every handler
+// that turns an id (or repo name) into a filesystem path must go through these.
+
+/** Thrown when a requested path escapes its permitted base directory. */
+export class PathAccessError extends Error {
+  constructor(message = 'Invalid workspace path') {
+    super(message);
+    this.name = 'PathAccessError';
+  }
+}
+
+/** Resolve `target` and assert it stays within `baseDir` (or equals it). */
+function assertWithin(baseDir: string, target: string): string {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(target);
+  // Trailing separator prevents a sibling like `feat-secret` from passing the
+  // prefix test for base `feat`.
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new PathAccessError();
+  }
+  return resolved;
+}
+
+/** Safe workspace directory for a route `:id`, contained within workspacesDir. */
+export function resolveWorkspacePath(workspacesDir: string, id: string): string {
+  return assertWithin(workspacesDir, path.join(workspacesDir, id));
+}
+
+/** Safe sub-repo path for a repo name, contained within the workspace. */
+export function resolveRepoPath(workspacePath: string, repoName: string): string {
+  return assertWithin(workspacePath, path.join(workspacePath, repoName));
+}
+
+/** Consistent error response; path-containment violations map to 400. */
+function errorResponse(c: any, error: unknown) {
+  if (error instanceof PathAccessError) {
+    return c.json({ error: error.message }, 400);
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return c.json({ error: msg }, 500);
+}
+
+/**
+ * Restrict the self-update download to GitHub release hosts over HTTPS so a
+ * cross-origin caller cannot make the server fetch and later execute an
+ * arbitrary binary.
+ */
+export function isAllowedUpdateUrl(candidate: string): boolean {
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host.endsWith('.github.com') ||
+      host === 'githubusercontent.com' ||
+      host.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Enable CORS for the local GUI only. This server can spawn processes, run
+// package installs and delete worktrees, so a wildcard origin would let any
+// web page the developer has open drive it cross-origin.
+app.use(
+  '/api/*',
+  cors({
+    origin: (origin) => {
+      // No Origin header → same-origin or a non-browser client (CLI/desktop).
+      if (!origin) return origin;
+      try {
+        const { hostname } = new URL(origin);
+        const isLocal =
+          hostname === 'localhost' ||
+          hostname === '127.0.0.1' ||
+          hostname === '::1' ||
+          hostname === '[::1]';
+        return isLocal ? origin : null;
+      } catch {
+        return null;
+      }
+    },
+  }),
+);
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
 
@@ -85,8 +172,7 @@ app.get('/api/config', async (c) => {
     const config = await loadConfig();
     return c.json({ config, exists });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -96,8 +182,7 @@ app.get('/api/adapters', async (c) => {
     const adapters = listStorageProviders();
     return c.json({ adapters });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -133,8 +218,7 @@ app.post('/api/config', async (c) => {
     await saveConfig(newConfig);
     return c.json({ success: true, config: newConfig });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -145,8 +229,7 @@ app.get('/api/repos', async (c) => {
     const repos = await scanForRepos(config.devDir, config.scanDepth);
     return c.json(repos);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -157,8 +240,7 @@ app.get('/api/workspaces', async (c) => {
     const workspaces = await listWorkspaces(config.workspacesDir);
     return c.json(workspaces);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -242,8 +324,7 @@ app.get('/api/workspaces/status', async (c) => {
     for (const entry of entries) byWorkspace[entry.branchName] = entry;
     return c.json(byWorkspace);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -253,8 +334,7 @@ app.get('/api/ai-detect', async (c) => {
     const assistants = await detectAIAssistants();
     return c.json(assistants);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -264,8 +344,7 @@ app.get('/api/editor-detect', async (c) => {
     const editors = await detectEditors();
     return c.json(editors);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -399,7 +478,7 @@ function updateJobStep(
 
 async function runCreationJob(jobId: string, body: any, config: any) {
   try {
-    const workspacePath = path.join(config.workspacesDir, body.branchName);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, body.branchName);
     const job = creationJobs.get(jobId);
     if (job) {
       job.workspacePath = workspacePath;
@@ -508,8 +587,7 @@ app.post('/api/workspace', async (c) => {
 
     return c.json({ success: true, jobId });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -571,13 +649,12 @@ app.delete('/api/workspace/:id', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await deleteWorkspace(workspacePath);
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -587,13 +664,12 @@ app.post('/api/workspace/:id/repo', async (c) => {
     const id = decodeURIComponent(c.req.param('id'));
     const { repoPath } = await c.req.json() as { repoPath: string };
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await addRepoToWorkspace(workspacePath, repoPath);
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -613,8 +689,7 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
       ...suggestion
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -655,8 +730,7 @@ app.post('/api/open-editor', async (c) => {
 
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -665,7 +739,7 @@ app.get('/api/workspace/:id/services', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     // Detect all services
     const services = await detectAllServices(workspacePath);
@@ -680,8 +754,7 @@ app.get('/api/workspace/:id/services', async (c) => {
       runningState: runningState?.services || [],
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -691,14 +764,13 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const id = c.req.param('id');
     const { services } = await c.req.json() as { services: any[] };
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = path.join(workspacePath, '.nexusflow-logs');
 
     await startServices(services, workspacePath, logDir);
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -707,13 +779,12 @@ app.post('/api/workspace/:id/services/stop', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await stopServices(workspacePath);
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -723,7 +794,7 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
     const id = c.req.param('id');
     const serviceName = c.req.param('serviceName');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logFile = path.join(workspacePath, '.nexusflow-logs', `${serviceName}.log`);
 
     let content = '';
@@ -743,8 +814,7 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
 
     return c.json({ logs: content });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -753,7 +823,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     // Load feature config to get repo paths
     const feature = await loadFeatureConfig(workspacePath);
@@ -829,8 +899,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
 
     return c.json({ changes: results });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -846,14 +915,9 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
-    const worktreePath = path.join(workspacePath, repoName);
-
-    // Security check: ensure path is within workspace directory
-    const resolvedPath = path.resolve(worktreePath);
-    if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-      return c.json({ error: 'Invalid repository path.' }, 400);
-    }
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    // Contained within the workspace; rejects `..` and sibling-prefix escapes.
+    const worktreePath = resolveRepoPath(workspacePath, repoName);
 
     let diff = '';
     
@@ -886,8 +950,7 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
     return c.json({ diff });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -896,7 +959,7 @@ app.get('/api/workspace/:id/knowledge', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
 
     let content = '';
@@ -908,8 +971,7 @@ app.get('/api/workspace/:id/knowledge', async (c) => {
 
     return c.json({ content });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -919,14 +981,13 @@ app.put('/api/workspace/:id/knowledge', async (c) => {
     const id = c.req.param('id');
     const { content } = await c.req.json() as { content: string };
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
 
     await fs.writeFile(knowledgeFile, content, 'utf-8');
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -935,7 +996,7 @@ app.get('/api/workspace/:id/plan', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const planFile = path.join(workspacePath, 'nexusflow-plan.md');
 
     let content = '';
@@ -947,8 +1008,7 @@ app.get('/api/workspace/:id/plan', async (c) => {
 
     return c.json({ content });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -957,7 +1017,7 @@ app.post('/api/workspace/:id/sync', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     const report = await syncWorkspace(workspacePath);
     const results = report.repos.map((repo) => ({
@@ -975,8 +1035,7 @@ app.post('/api/workspace/:id/sync', async (c) => {
       errorCount: report.errorCount,
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -986,7 +1045,7 @@ app.post('/api/workspace/:id/commit', async (c) => {
     const id = c.req.param('id');
     const { message } = await c.req.json() as { message: string };
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     const repos = await getWorkspaceRepos(workspacePath);
     const results = [];
@@ -1007,8 +1066,7 @@ app.post('/api/workspace/:id/commit', async (c) => {
 
     return c.json({ results });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1018,7 +1076,7 @@ app.post('/api/workspace/:id/resume', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     // Load feature config to get repo paths
     const feature = await loadFeatureConfig(workspacePath);
@@ -1089,8 +1147,7 @@ app.post('/api/workspace/:id/resume', async (c) => {
 
     return c.json({ success: true, resumeCommand, workspacePath });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1099,7 +1156,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
-    const workspacePath = path.join(config.workspacesDir, id);
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     const feature = await loadFeatureConfig(workspacePath);
     if (!feature) {
@@ -1109,8 +1166,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
     const sessions = await findSessions(workspacePath, feature.repos);
     return c.json({ sessions });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1122,8 +1178,7 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1137,8 +1192,7 @@ app.get('/api/update-status', async (c) => {
     }
     return c.json(status);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1149,8 +1203,7 @@ app.get('/api/updates/tools', async (c) => {
     const status = await getToolsStatus(force);
     return c.json(status);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1179,8 +1232,7 @@ app.post('/api/updates/install', async (c) => {
       return c.json({ error: `Update failed: ${result.stderr || result.stdout}` }, 500);
     }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1192,6 +1244,9 @@ app.post('/api/updates/download', async (c) => {
     const { downloadUrl } = await c.req.json() as { downloadUrl: string };
     if (!downloadUrl) {
       return c.json({ error: 'Download URL is required' }, 400);
+    }
+    if (!isAllowedUpdateUrl(downloadUrl)) {
+      return c.json({ error: 'Download URL is not an allowed update host' }, 400);
     }
 
     const tempDir = os.tmpdir();
@@ -1257,8 +1312,7 @@ app.get('/api/workflows/templates', async (c) => {
     const templates = await getWorkflowTemplates();
     return c.json({ templates });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1272,8 +1326,7 @@ app.post('/api/workflows/templates', async (c) => {
     const template = await saveWorkflowTemplate(name, content, id);
     return c.json({ success: true, template });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1292,8 +1345,7 @@ app.delete('/api/workflows/templates/:id', async (c) => {
     await deleteWorkflowTemplate(id);
     return c.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1376,8 +1428,7 @@ and suffix it with:
 
     return c.json({ analysis, suggestedImprovement });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: msg }, 500);
+    return errorResponse(c, error);
   }
 });
 
@@ -1454,17 +1505,14 @@ app.delete('/api/schedules/:id', async (c) => {
 
 // Refresh a workspace's context files on demand (cache-aware)
 app.post('/api/workspace/:id/refresh', async (c) => {
-  const config = await loadConfig();
-  const workspacePath = path.join(config.workspacesDir, c.req.param('id'));
   try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
     const body = await c.req.json().catch(() => ({}));
     const report = await refreshWorkspace(workspacePath, { force: Boolean(body.force) });
     return c.json({ report });
   } catch (error) {
-    return c.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      500,
-    );
+    return errorResponse(c, error);
   }
 });
 
@@ -1485,7 +1533,7 @@ app.use('/*', serveStatic({ root: path.relative(process.cwd(), guiPath) }));
 
 export function startServer(port = 3000): Promise<{ port: number; server: any }> {
   return new Promise((resolve, reject) => {
-    const server = serve({ fetch: app.fetch, port }, (info) => {
+    const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
       // The dashboard server doubles as the host for recurring workspace
       // jobs (nexusflow schedule ...); jobs are re-read from disk each tick.
       startScheduler({ log: (message) => console.log(`[scheduler] ${message}`) });
