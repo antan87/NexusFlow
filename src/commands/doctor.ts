@@ -7,6 +7,7 @@ import { execa } from 'execa';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getRepoStatus } from '../utils/multi-git.js';
+import { workspaceFileExists, baseFileExists } from '../core/storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { globby } from 'globby';
 import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
@@ -188,24 +189,26 @@ export async function doctorCommand(workspaceArg?: string): Promise<void> {
   console.log();
 
   // ── 6. Missing Core Files ──────────────────────────────────────────────
+  // Checks go through the storage adapter so they hold for non-local providers
+  // (vault/obsidian) where these artifacts don't live at the workspace root.
   console.log(chalk.bold('📄 Core Artifacts:'));
-  const coreFiles = [
-    { name: 'WORKSPACE.md', required: true },
-    { name: 'nexusflow-knowledge.md', required: true },
-    { name: 'nexusflow-plan.md', required: true },
+  const featureId = path.basename(workspacePath);
+  const coreFiles: Array<{ name: string; exists: () => Promise<boolean> }> = [
+    { name: 'WORKSPACE.md', exists: () => workspaceFileExists(workspacePath, featureId, 'WORKSPACE.md') },
+    { name: 'nexusflow-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-knowledge.md') },
+    { name: 'nexusflow-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-plan.md') },
   ];
 
-  // Add expected maps
+  // Per-repo maps are base-namespace files.
   for (const repo of allRepos) {
-    coreFiles.push({ name: `nexusflow-map-${repo.name}.md`, required: true });
+    const name = `nexusflow-map-${repo.name}.md`;
+    coreFiles.push({ name, exists: () => baseFileExists(workspacePath, repo.name, name) });
   }
 
   for (const file of coreFiles) {
-    const filePath = path.join(workspacePath, file.name);
-    try {
-      await fs.access(filePath);
+    if (await file.exists()) {
       console.log(`  ${chalk.green('✔')} ${file.name} exists`);
-    } catch {
+    } else {
       warnings.push(`Missing core workspace artifact: "${file.name}".`);
       console.log(`  ${chalk.yellow('⚠')} ${file.name} is missing`);
     }

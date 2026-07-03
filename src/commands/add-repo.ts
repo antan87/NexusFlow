@@ -11,6 +11,24 @@ import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { listWorkspaces, loadFeatureConfig, addRepoToWorkspace } from '../core/workspace.js';
+import type { Feature, RepoInfo } from '../types.js';
+
+/**
+ * Returns the scanned repos that are not already part of the workspace.
+ *
+ * `feature.repos` holds worktree paths inside the workspace, whereas scanned
+ * repos carry their original source path — so dedup must compare against
+ * `feature.originalRepos`, normalizing for path separators.
+ */
+export function filterAvailableRepos<T extends Pick<RepoInfo, 'path'>>(
+  scanned: T[],
+  feature: Pick<Feature, 'originalRepos'>,
+): T[] {
+  const originalRepoPaths = new Set(
+    (feature.originalRepos ?? []).map((p) => path.resolve(p)),
+  );
+  return scanned.filter((r) => !originalRepoPaths.has(path.resolve(r.path)));
+}
 
 /**
  * Executes the add-repo command.
@@ -112,9 +130,7 @@ export async function addRepoCommand(
       return;
     }
 
-    const availableRepos = repos.filter(
-      (r) => !feature.repos.includes(r.path)
-    );
+    const availableRepos = filterAvailableRepos(repos, feature);
 
     if (availableRepos.length === 0) {
       console.log(chalk.yellow('All scanned repositories are already in the workspace.\n'));

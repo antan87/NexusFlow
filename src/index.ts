@@ -253,7 +253,7 @@ program
   .option('--no-push', 'Stage and commit changes without pushing to remote')
   .option('--dry-run', 'Preview changes without committing')
   .option('-r, --repo <repos...>', 'Only commit the given repositories (by name)')
-  .action(async (workspace: string | undefined, options: { message: string; noPush?: boolean; dryRun?: boolean; repo?: string[] }) => {
+  .action(async (workspace: string | undefined, options: { message: string; push?: boolean; dryRun?: boolean; repo?: string[] }) => {
     try {
       await commitCommand(options.message, workspace, options);
     } catch (error) {

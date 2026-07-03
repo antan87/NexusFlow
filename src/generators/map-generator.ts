@@ -7,7 +7,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { globby } from 'globby';
-import { writeWorkspaceFile, readWorkspaceFile, workspaceFileExists, writeBaseFile, readBaseFile, baseFileExists } from '../core/storage.js';
+import { writeBaseFile, readBaseFile, baseFileExists } from '../core/storage.js';
 import type { ProjectAnalysis, RepoInfo } from '../types.js';
 
 interface PatternRule {
@@ -494,11 +494,12 @@ export async function generateRepoMap(
   md.push('## 📝 Discovered Conventions');
   md.push('');
   
-  const featureId = path.basename(workspacePath);
   const conventionsFilename = `nexusflow-conventions-${repoName}.md`;
   let customConventions = '';
   
-  const conventionsExist = await workspaceFileExists(workspacePath, featureId, conventionsFilename);
+  // Conventions are a per-repo base file; check the base namespace so an
+  // existing file is preserved instead of being clobbered with the starter.
+  const conventionsExist = await baseFileExists(workspacePath, repoName, conventionsFilename);
 
   if (!conventionsExist) {
     const starterContent = `# Repository Conventions — ${repoName}
