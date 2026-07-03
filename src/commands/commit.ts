@@ -10,11 +10,24 @@ import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { getWorkspaceRepos, getRepoStatus, commitAndPush } from '../utils/multi-git.js';
+import { getWorkspaceRepos, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
 
 interface CommitOptions {
   noPush?: boolean;
   dryRun?: boolean;
+  /** Restrict the commit to these repos (by directory name). */
+  repo?: string[];
+}
+
+/**
+ * Renders a porcelain status code with a color matching its state:
+ * green for staged, yellow for unstaged, cyan for untracked.
+ */
+function renderStatusCode(file: RepoStatusFile): string {
+  const code = file.code.trim() || '??';
+  if (file.code === '??') return chalk.cyan(code);
+  if (file.code[0] !== ' ' && file.code[0] !== '?') return chalk.green(code);
+  return chalk.yellow(code);
 }
 
 /**
@@ -40,7 +53,18 @@ export async function commitCommand(
     return;
   }
 
-  const repos = await getWorkspaceRepos(workspacePath);
+  let repos = await getWorkspaceRepos(workspacePath);
+
+  if (options?.repo && options.repo.length > 0) {
+    const unknown = options.repo.filter((name) => !repos.some((r) => r.name === name));
+    if (unknown.length > 0) {
+      console.error(chalk.red(`✖ Repositor${unknown.length === 1 ? 'y' : 'ies'} not in this workspace: ${unknown.join(', ')}`));
+      console.log(chalk.dim(`  Available repos: ${repos.map((r) => r.name).join(', ')}`));
+      return;
+    }
+    repos = repos.filter((r) => options.repo!.includes(r.name));
+  }
+
   const changedRepos = [];
 
   for (const repo of repos) {
@@ -62,10 +86,11 @@ export async function commitCommand(
   console.log();
 
   for (const { repo, status } of changedRepos) {
+    const diff = await getDiffSummary(repo.path);
     console.log(`Repository: ${chalk.bold(repo.name)}`);
-    console.log(chalk.dim(`  Changes: ${status.summary}`));
-    for (const file of status.changedFiles) {
-      console.log(`    ${chalk.yellow('M')} ${file}`);
+    console.log(chalk.dim(`  Changes: ${status.summary} (${chalk.green(`+${diff.additions}`)} ${chalk.red(`−${diff.deletions}`)})`));
+    for (const file of status.files) {
+      console.log(`    ${renderStatusCode(file)} ${file.path}`);
     }
 
     if (options?.dryRun) {

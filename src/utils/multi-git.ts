@@ -29,12 +29,22 @@ export interface WorkspaceRepo {
   defaultBranch: string;
 }
 
+/** A single changed file with its porcelain status code. */
+export interface RepoStatusFile {
+  /** Two-character porcelain code, e.g. ' M', 'A ', '??'. */
+  code: string;
+  /** Path relative to the repo root. */
+  path: string;
+}
+
 /** Result of inspecting the working-tree status of a repo. */
 export interface RepoStatus {
   /** Whether any tracked or untracked files have been modified. */
   hasChanges: boolean;
   /** List of changed file paths (relative to repo root). */
   changedFiles: string[];
+  /** Changed files with their porcelain status codes. */
+  files: RepoStatusFile[];
   /** Human-readable summary, e.g. '3 files changed'. */
   summary: string;
 }
@@ -63,6 +73,8 @@ export interface RebaseResult {
   message: string;
   /** Stderr output — populated only for `status === 'conflict'`. */
   conflict?: string;
+  /** Paths that had merge conflicts — populated only for `status === 'conflict'`. */
+  conflictFiles?: string[];
   /** Whether dirty working-tree changes were auto-stashed during the operation. */
   stashed?: boolean;
 }
@@ -163,11 +175,16 @@ export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
     });
 
     const lines = stdout.trim().split('\n').filter(Boolean);
-    const changedFiles = lines.map((line) => line.slice(3).trim());
+    const files = lines.map((line) => ({
+      code: line.slice(0, 2),
+      path: line.slice(3).trim(),
+    }));
+    const changedFiles = files.map((f) => f.path);
 
     return {
       hasChanges: changedFiles.length > 0,
       changedFiles,
+      files,
       summary:
         changedFiles.length === 0
           ? 'Clean'
@@ -177,8 +194,34 @@ export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
     return {
       hasChanges: false,
       changedFiles: [],
+      files: [],
       summary: `Error: ${error instanceof Error ? error.message : String(error)}`,
     };
+  }
+}
+
+/**
+ * Counts commits on the current branch that have not been pushed to
+ * `origin/<branchName>` yet.
+ *
+ * @param repoPath   - Absolute path to the repo root.
+ * @param branchName - Branch to compare against on origin.
+ * @returns Number of unpushed commits, or null when the remote branch does
+ *          not exist (never pushed) or git fails.
+ */
+export async function getUnpushedCount(
+  repoPath: string,
+  branchName: string,
+): Promise<number | null> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-list', '--count', `origin/${branchName}..HEAD`],
+      { cwd: repoPath },
+    );
+    return parseInt(stdout.trim(), 10);
+  } catch {
+    return null;
   }
 }
 
@@ -263,8 +306,21 @@ export async function rebaseRepo(
       rebaseMessage = 'Rebased onto latest base';
     }
   } catch (error) {
-    // Genuine merge conflict (or other rebase failure). Abort so the repo is
-    // never left mid-rebase, then restore the user's stashed work.
+    // Genuine merge conflict (or other rebase failure). Capture the conflicted
+    // paths while the rebase is still in progress, then abort so the repo is
+    // never left mid-rebase, and restore the user's stashed work.
+    let conflictFiles: string[] = [];
+    try {
+      const { stdout } = await execa(
+        'git',
+        ['diff', '--name-only', '--diff-filter=U'],
+        { cwd: repoPath },
+      );
+      conflictFiles = stdout.split('\n').filter(Boolean);
+    } catch {
+      // Best-effort capture; the conflict text still carries the details.
+    }
+
     try {
       await execa('git', ['rebase', '--abort'], { cwd: repoPath });
     } catch {
@@ -283,8 +339,11 @@ export async function rebaseRepo(
     return {
       success: false,
       status: 'conflict',
-      message: 'Conflict during rebase',
+      message: conflictFiles.length > 0
+        ? `Conflict during rebase (${conflictFiles.length} file${conflictFiles.length === 1 ? '' : 's'})`
+        : 'Conflict during rebase',
       conflict: errText(error),
+      conflictFiles,
       stashed,
     };
   }

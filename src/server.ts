@@ -31,6 +31,17 @@ import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getWorkspaceRepos, commitAndPush, getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
+import { refreshWorkspace } from './core/refresh.js';
+import {
+  addSchedule,
+  loadSchedules,
+  nextDueAt,
+  parseInterval,
+  removeSchedule,
+  runJob,
+  setScheduleEnabled,
+  startScheduler,
+} from './core/scheduler.js';
 import {
   detectAllServices,
   detectOrchestrationTools,
@@ -1370,6 +1381,93 @@ and suffix it with:
   }
 });
 
+// ─── Schedules: recurring workspace jobs (sync/refresh) ─────────────────
+
+// List all scheduled jobs (with computed next-due time)
+app.get('/api/schedules', async (c) => {
+  const store = await loadSchedules();
+  const jobs = store.jobs.map((job) => ({
+    ...job,
+    nextDueAt: nextDueAt(job)?.toISOString() ?? null,
+  }));
+  return c.json({ jobs });
+});
+
+// Create a scheduled job
+app.post('/api/schedules', async (c) => {
+  const body = await c.req.json();
+  const task = body.task === 'refresh' ? 'refresh' : body.task === 'sync' ? 'sync' : null;
+  if (!task) {
+    return c.json({ error: 'task must be "sync" or "refresh"' }, 400);
+  }
+
+  const intervalMinutes =
+    typeof body.intervalMinutes === 'number' && body.intervalMinutes > 0
+      ? Math.floor(body.intervalMinutes)
+      : parseInterval(String(body.every ?? ''));
+  if (!intervalMinutes) {
+    return c.json({ error: 'Provide intervalMinutes (> 0) or every (e.g. "30m", "2h", "1d")' }, 400);
+  }
+
+  const config = await loadConfig();
+  const workspacePath = body.workspacePath
+    ? String(body.workspacePath)
+    : body.workspaceId
+      ? path.join(config.workspacesDir, String(body.workspaceId))
+      : null;
+  if (!workspacePath) {
+    return c.json({ error: 'Provide workspacePath or workspaceId' }, 400);
+  }
+
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    return c.json({ error: `No NexusFlow workspace found at ${workspacePath}` }, 404);
+  }
+
+  const job = await addSchedule({ workspacePath, task, intervalMinutes });
+  return c.json({ job }, 201);
+});
+
+// Enable/disable a scheduled job
+app.post('/api/schedules/:id/enabled', async (c) => {
+  const body = await c.req.json();
+  const job = await setScheduleEnabled(c.req.param('id'), Boolean(body.enabled));
+  if (!job) return c.json({ error: 'Schedule not found' }, 404);
+  return c.json({ job });
+});
+
+// Run a scheduled job immediately
+app.post('/api/schedules/:id/run', async (c) => {
+  const store = await loadSchedules();
+  const job = store.jobs.find((j) => j.id === c.req.param('id'));
+  if (!job) return c.json({ error: 'Schedule not found' }, 404);
+  const result = await runJob(job);
+  return c.json({ result });
+});
+
+// Delete a scheduled job
+app.delete('/api/schedules/:id', async (c) => {
+  const removed = await removeSchedule(c.req.param('id'));
+  if (!removed) return c.json({ error: 'Schedule not found' }, 404);
+  return c.json({ ok: true });
+});
+
+// Refresh a workspace's context files on demand (cache-aware)
+app.post('/api/workspace/:id/refresh', async (c) => {
+  const config = await loadConfig();
+  const workspacePath = path.join(config.workspacesDir, c.req.param('id'));
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const report = await refreshWorkspace(workspacePath, { force: Boolean(body.force) });
+    return c.json({ report });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      500,
+    );
+  }
+});
+
 // Legacy pack endpoint removed.
 
 // Serve index.html explicitly on root endpoint
@@ -1388,9 +1486,12 @@ app.use('/*', serveStatic({ root: path.relative(process.cwd(), guiPath) }));
 export function startServer(port = 3000): Promise<{ port: number; server: any }> {
   return new Promise((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port }, (info) => {
+      // The dashboard server doubles as the host for recurring workspace
+      // jobs (nexusflow schedule ...); jobs are re-read from disk each tick.
+      startScheduler({ log: (message) => console.log(`[scheduler] ${message}`) });
       resolve({ port: info.port, server });
     }) as import('node:http').Server;
-    
+
     server.on('error', (e: any) => {
       if (e.code === 'EADDRINUSE') {
         resolve(startServer(port + 1));

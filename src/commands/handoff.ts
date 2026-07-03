@@ -7,7 +7,7 @@ import { execa } from 'execa';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus } from '../utils/multi-git.js';
-import { analyzeAllRepos } from '../analyzers/index.js';
+import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
 
 /**
@@ -40,7 +40,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   );
 
   console.log(chalk.cyan('Retrieving repository statuses and running analysis...'));
-  const analysis = await analyzeAllRepos(allRepos);
+  const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
 
   const reposStatusInfo = await Promise.all(
     allRepos.map(async (repo) => {

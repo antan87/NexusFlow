@@ -1,24 +1,22 @@
 import chalk from 'chalk';
-import { select, search } from '@inquirer/prompts';
+import { search } from '@inquirer/prompts';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { getWorkspaceRepos } from '../utils/multi-git.js';
-import { analyzeAllRepos } from '../analyzers/index.js';
-import { generateContextFiles } from '../generators/index.js';
-import type { WorkspaceContext } from '../types.js';
+import { refreshWorkspace } from '../core/refresh.js';
 
 /**
  * Runs the refresh command.
- * Updates context files, maps, and plans.
+ * Updates context files, maps, and plans — re-analyzing only repos whose
+ * content changed since the last run (use --force to re-analyze everything).
  *
- * @param options - CLI options, e.g. { repo: 'API_CoworkerFacade' }.
+ * @param options - CLI options, e.g. { repo: 'API_CoworkerFacade', force: true }.
  * @param workspaceArg - Optional workspace path.
  */
 export async function refreshCommand(
-  options: { repo?: string; base?: boolean },
+  options: { repo?: string; base?: boolean; force?: boolean },
   workspaceArg?: string,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
@@ -44,50 +42,30 @@ export async function refreshCommand(
   } else {
     console.log('Refreshing context for all repositories...');
   }
-
-  const allRepos = await Promise.all(
-    feature.repos.map(async (r) => {
-      const repoName = path.basename(r);
-      return {
-        name: repoName,
-        path: r,
-        defaultBranch: 'main',
-      };
-    })
-  );
-
-  console.log(chalk.cyan('Running project analysis...'));
-  const analysis = await analyzeAllRepos(allRepos);
-
-  const ctx: WorkspaceContext = {
-    feature,
-    repos: allRepos,
-    analysis,
-  };
-
-  console.log(chalk.cyan('Regenerating context files and maps...'));
-  await generateContextFiles(ctx, feature.assistants, workspacePath, onlyRepo, options.base);
-
-
-
-  // If handoff file exists, refresh it automatically too!
-  const handoffPath = path.join(workspacePath, 'nexusflow-handoff.md');
-  let hasHandoff = false;
-  try {
-    await fs.access(handoffPath);
-    hasHandoff = true;
-  } catch {}
-
-  if (!options.base && hasHandoff) {
-    console.log(chalk.cyan('Refreshing handoff bundle...'));
-    try {
-      const { handoffCommand } = await import('./handoff.js');
-      await handoffCommand(workspacePath);
-    } catch (error) {
-      console.warn(chalk.yellow(`  ⚠ Failed to refresh handoff bundle: ${error}`));
-    }
+  if (options.force) {
+    console.log(chalk.dim('Force mode: ignoring analysis cache.'));
   }
 
+  let report;
+  try {
+    report = await refreshWorkspace(workspacePath, {
+      onlyRepo,
+      baseOnly: options.base,
+      force: options.force,
+    });
+  } catch (error) {
+    console.error(chalk.red(`✖ Failed to refresh: ${error instanceof Error ? error.message : String(error)}`));
+    return;
+  }
+
+  if (report.reusedRepos.length > 0) {
+    console.log(
+      chalk.dim(
+        `\n♻️  Token-efficient refresh: ${report.reusedRepos.length} unchanged repo(s) reused cached analysis` +
+        (report.analyzedRepos.length > 0 ? `, ${report.analyzedRepos.length} re-analyzed.` : '.'),
+      ),
+    );
+  }
   console.log(chalk.bold.green('\n✅ Workspace context successfully refreshed!\n'));
 }
 

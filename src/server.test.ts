@@ -615,4 +615,82 @@ describe('Server API Endpoints Unit Tests', () => {
       });
     });
   });
+
+  describe('Schedules API', () => {
+    beforeEach(() => {
+      vi.spyOn(config, 'getConfigDir').mockReturnValue('/mock/home/.nexusflow');
+      vi.spyOn(config, 'ensureConfigDir').mockResolvedValue(undefined);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    });
+
+    it('GET /api/schedules should return jobs with a computed nextDueAt', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({
+        version: 1,
+        jobs: [{
+          id: 'sync-ws-abc',
+          workspacePath: '/mock/ws',
+          task: 'sync',
+          intervalMinutes: 60,
+          enabled: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastRunAt: '2026-01-02T10:00:00.000Z',
+        }],
+      }) as any);
+
+      const response = await app.request('/api/schedules');
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.jobs).toHaveLength(1);
+      expect(data.jobs[0].id).toBe('sync-ws-abc');
+      expect(data.jobs[0].nextDueAt).toBe('2026-01-02T11:00:00.000Z');
+    });
+
+    it('POST /api/schedules should reject an unknown task', async () => {
+      const response = await app.request('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: 'deploy', every: '2h', workspacePath: '/mock/ws' }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain('task must be');
+    });
+
+    it('POST /api/schedules should create a job for a valid workspace', async () => {
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT')); // empty store
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+        id: 'ws-1',
+        branchName: 'ws-1',
+        description: '',
+        repos: [],
+        assistants: [],
+        workspacePath: '/mock/workspaces/ws-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const response = await app.request('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: 'refresh', every: '2h', workspaceId: 'ws-1' }),
+      });
+
+      expect(response.status).toBe(201);
+      const data = await response.json();
+      expect(data.job.task).toBe('refresh');
+      expect(data.job.intervalMinutes).toBe(120);
+      expect(data.job.enabled).toBe(true);
+      expect(fs.writeFile).toHaveBeenCalled();
+    });
+
+    it('DELETE /api/schedules/:id should 404 for an unknown job', async () => {
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+
+      const response = await app.request('/api/schedules/nope', { method: 'DELETE' });
+
+      expect(response.status).toBe(404);
+    });
+  });
 });

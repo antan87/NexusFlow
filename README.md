@@ -22,6 +22,8 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
+- **Incremental, token-efficient refresh** — an analysis cache fingerprints each repo (HEAD + dirty files), so `refresh`/`sync` only re-analyze repos that changed and unchanged maps stay byte-identical (keeping your AI assistant's prompt cache warm)
+- **Scheduled workspace jobs** — recurring `sync`/`refresh` per workspace (e.g. every 2h) that run while the dashboard server is up, so context files stay fresh without manual runs
 - **Service orchestration** — start, stop, and tail logs for all services in a workspace with a single command
 - **Interactive Web Dashboard** — rich dark-themed GUI for managing workspaces, viewing sessions, and streaming logs
 - **CLI-first** — every action available from the terminal via the `nexusflow` command
@@ -117,10 +119,11 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow status` | Show running/stopped status and PIDs |
 | `nexusflow logs` | Tail aggregated logs from all services |
 | `nexusflow ui` | Launch the interactive Web Dashboard (port 3000) |
-| `nexusflow diff` | View changes across all sub-repositories in the active workspace |
-| `nexusflow commit` | Commit and push changes across all modified repositories |
+| `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
+| `nexusflow commit` | Commit and push changes across all modified repositories (`--repo` to filter) |
 | `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
-| `nexusflow refresh`| Regenerate codebase maps, plan, and AI context files without rebasing |
+| `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
+| `nexusflow schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
 | `nexusflow doctor` | Run health checks and diagnostics to verify workspace integrity |
 
 ## 🤖 Supported AI Assistants
@@ -184,6 +187,27 @@ nexusflow adapter use obsidian
 # Scaffolds a template for creating a new custom storage adapter plugin
 nexusflow adapter init my-custom-plugin
 ```
+
+## 🕐 Scheduled Workspace Jobs
+
+Keep workspaces fresh without manual runs — schedule recurring `sync` or `refresh` jobs per workspace:
+
+```bash
+# Rebase + regenerate context every 2 hours
+nexusflow schedule add --task sync --every 2h
+
+# Nightly context refresh for a specific workspace
+nexusflow schedule add ~/dev/workspaces/my-feature --task refresh --every 1d
+
+# Inspect, pause, or run jobs
+nexusflow schedule list
+nexusflow schedule disable <id>
+nexusflow schedule run <id>
+```
+
+Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow server is running — start one with `nexusflow ui` (use `--daemon --server-only` for a background host). A job whose interval elapsed while no server was running simply runs on the next scheduler tick.
+
+Scheduled runs are **token-efficient by design**: they use the same analysis cache as `nexusflow refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
 ## 👥 Teamwork Strategy Workflows
 

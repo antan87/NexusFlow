@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { loadFeatureConfig } from './workspace.js';
 import { recordRepoSync } from './workspace-state.js';
 import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
-import { analyzeAllRepos } from '../analyzers/index.js';
+import { analyzeAllReposCached } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import type { SyncStatus, WorkspaceContext } from '../types.js';
 
@@ -19,12 +19,16 @@ import type { SyncStatus, WorkspaceContext } from '../types.js';
 export interface RepoSyncReport {
   /** Directory name of the repo. */
   name: string;
+  /** Base branch the repo rebases onto (e.g. 'main'). */
+  baseBranch: string;
   /** Classified outcome. */
   status: SyncStatus;
   /** Human-readable message. */
   message: string;
   /** Conflict stderr — populated only for `status === 'conflict'`. */
   conflict?: string;
+  /** Paths that had merge conflicts — populated only for `status === 'conflict'`. */
+  conflictFiles?: string[];
 }
 
 /** Aggregated result of syncing an entire workspace. */
@@ -41,6 +45,8 @@ export interface SyncReport {
   conflictCount: number;
   /** Count of repos that failed for infrastructure reasons (fetch/auth, etc.). */
   errorCount: number;
+  /** Whether context files/maps were regenerated (only when content changed). */
+  contextRefreshed: boolean;
 }
 
 /** A sync status counts as "synced" when the rebase itself landed. */
@@ -82,9 +88,11 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
 
     repoReports.push({
       name: repo.name,
+      baseBranch: defaultBranch,
       status: result.status,
       message: result.message,
       conflict: result.conflict,
+      conflictFiles: result.conflictFiles,
     });
 
     if (isSynced(result.status)) syncedCount++;
@@ -92,9 +100,17 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
     else errorCount++;
   }
 
-  // Regenerate maps/context when anything synced. A regen failure must never
+  // Regenerate maps/context only when a rebase actually changed repo content
+  // ('rebased' or 'stash-conflict'). When every repo was already up to date,
+  // skipping regeneration keeps context files byte-identical — no wasted
+  // analysis and no invalidated AI prompt caches. The cached analyzer then
+  // limits the work to the repos that changed. A regen failure must never
   // fail the sync itself — the rebases already happened.
-  if (syncedCount > 0) {
+  const contentChanged = repoReports.some(
+    (r) => r.status === 'rebased' || r.status === 'stash-conflict',
+  );
+  let contextRefreshed = false;
+  if (contentChanged) {
     try {
       const allRepos = feature.repos.map((r) => ({
         name: path.basename(r),
@@ -102,9 +118,10 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
         defaultBranch: 'main',
       }));
 
-      const analysis = await analyzeAllRepos(allRepos);
+      const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };
-      await generateContextFiles(ctx, feature.assistants, workspacePath);
+      await generateContextFiles(ctx, feature.assistants, workspacePath, undefined, undefined, analyzed);
+      contextRefreshed = true;
     } catch {
       // Best-effort regeneration; ignore failures.
     }
@@ -117,5 +134,6 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
     syncedCount,
     conflictCount,
     errorCount,
+    contextRefreshed,
   };
 }
