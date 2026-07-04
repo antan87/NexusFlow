@@ -106,8 +106,11 @@ _(No gotchas recorded yet.)_
 
 /**
  * Builds the base codebase knowledge starter content.
+ *
+ * Exported so the knowledge engine (`core/knowledge.ts`) can bootstrap a
+ * missing base-knowledge file with the same section layout the generators use.
  */
-function buildBaseKnowledgeContent(repoName: string): string {
+export function buildBaseKnowledgeContent(repoName: string): string {
   return `# Base Codebase Knowledge — ${repoName}
 
 > **This is a persistent cross-session memory file for ${repoName}.**

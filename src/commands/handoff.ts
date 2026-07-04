@@ -6,7 +6,8 @@ import { execa } from 'execa';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig, resolveRepoInfos } from '../core/workspace.js';
-import { getWorkspaceRepos, getRepoStatus } from '../utils/multi-git.js';
+import { getRepoStatus } from '../utils/multi-git.js';
+import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
 
@@ -55,17 +56,21 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
     })
   );
 
-  // Parse knowledge from nexusflow-knowledge.md if it exists
-  const knowledgePath = path.join(workspacePath, 'nexusflow-knowledge.md');
+  // Parse knowledge from the workspace knowledge file via the active storage
+  // adapter (it may live outside the workspace directory, e.g. an Obsidian vault).
   let extractedGotchas = '_None recorded yet._';
   let extractedDecisions = '_None recorded yet._';
   let extractedQuestions = '_None recorded yet._';
 
   try {
-    const knowledgeContent = await fs.readFile(knowledgePath, 'utf-8');
-    extractedGotchas = extractSection(knowledgeContent, ['Known Gotchas', 'Discovered Gotchas & Watch-outs', 'Discovered Gotchas']);
-    extractedDecisions = extractSection(knowledgeContent, 'Architecture Decisions');
-    extractedQuestions = extractSection(knowledgeContent, ['Clarifying Questions for the User', 'Clarifying Questions']);
+    const raw = await readWorkspaceKnowledge(workspacePath);
+    if (raw) {
+      // Drop a leading YAML frontmatter block (added by the Obsidian adapter).
+      const knowledgeContent = raw.replace(/^---\n[\s\S]*?\n---\n*/, '');
+      extractedGotchas = extractSection(knowledgeContent, ['Known Gotchas', 'Discovered Gotchas & Watch-outs', 'Discovered Gotchas']);
+      extractedDecisions = extractSection(knowledgeContent, 'Architecture Decisions');
+      extractedQuestions = extractSection(knowledgeContent, ['Clarifying Questions for the User', 'Clarifying Questions']);
+    }
   } catch {}
 
   // Build dependency description

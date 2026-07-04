@@ -226,6 +226,99 @@ export async function getUnpushedCount(
 }
 
 /**
+ * Returns the name of the currently checked-out branch.
+ *
+ * @param repoPath - Absolute path to the repo root.
+ * @returns The branch name, or `null` when the repo is in a detached-HEAD
+ *          state or git fails.
+ */
+export async function getRepoBranch(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoPath,
+    });
+    const branch = stdout.trim();
+    // A detached HEAD reports the literal 'HEAD'.
+    return branch && branch !== 'HEAD' ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Counts how many commits the current branch is ahead of / behind
+ * `origin/<branchName>`.
+ *
+ * @param repoPath   - Absolute path to the repo root.
+ * @param branchName - Branch to compare against on origin.
+ * @returns `{ ahead, behind }`. Both are `null` when the remote branch does
+ *          not exist (never pushed) or git fails.
+ */
+export async function getAheadBehind(
+  repoPath: string,
+  branchName: string,
+): Promise<{ ahead: number | null; behind: number | null }> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-list', '--left-right', '--count', `origin/${branchName}...HEAD`],
+      { cwd: repoPath },
+    );
+    // Output is "<behind>\t<ahead>": left = commits only on origin, right = only on HEAD.
+    const [behindStr, aheadStr] = stdout.trim().split(/\s+/);
+    const behind = Number.parseInt(behindStr, 10);
+    const ahead = Number.parseInt(aheadStr, 10);
+    return {
+      ahead: Number.isNaN(ahead) ? null : ahead,
+      behind: Number.isNaN(behind) ? null : behind,
+    };
+  } catch {
+    return { ahead: null, behind: null };
+  }
+}
+
+/**
+ * Returns the URL of a git remote.
+ *
+ * @param repoPath - Absolute path to the repo root.
+ * @param remote   - Remote name (default `'origin'`).
+ * @returns The remote URL, or `null` when the remote does not exist.
+ */
+export async function getRemoteUrl(
+  repoPath: string,
+  remote = 'origin',
+): Promise<string | null> {
+  try {
+    const { stdout } = await execa('git', ['remote', 'get-url', remote], {
+      cwd: repoPath,
+    });
+    const url = stdout.trim();
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pushes the current branch to origin, setting the upstream on first push.
+ *
+ * @param repoPath   - Absolute path to the repo root.
+ * @param branchName - Branch to push.
+ * @returns `{ success, message }`.
+ */
+export async function pushRepo(
+  repoPath: string,
+  branchName: string,
+): Promise<{ success: boolean; message: string }> {
+  try {
+    await execa('git', ['push', '-u', 'origin', branchName], { cwd: repoPath });
+    return { success: true, message: `Pushed ${branchName} to origin` };
+  } catch (error) {
+    return { success: false, message: errText(error).split('\n')[0] };
+  }
+}
+
+/**
  * Extracts the stderr (falling back to the message) from a thrown execa error.
  */
 function errText(error: unknown): string {

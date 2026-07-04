@@ -10,6 +10,7 @@
  */
 
 import { Command } from 'commander';
+import chalk from 'chalk';
 
 import { createCommand } from './commands/create.js';
 import { listCommand } from './commands/list.js';
@@ -26,12 +27,15 @@ import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
 import { removeCommand } from './commands/remove.js';
 import { loadConfig } from './core/config.js';
+import { debugLog } from './utils/debug.js';
 import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
+import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
+import { finishCommand } from './commands/finish.js';
 import { desktopCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
 import {
@@ -51,7 +55,16 @@ program
   .description(
     'Combine multiple repos into a workspace with rich AI assistant context',
   )
-  .version(getCurrentVersion());
+  .version(getCurrentVersion())
+  .option('--debug', 'Enable verbose debug logging to stderr (or set NEXUSFLOW_DEBUG=1)');
+
+// Turn the global --debug flag into the env var the debug logger reads, before
+// any action runs.
+program.hook('preAction', (thisCommand) => {
+  if (thisCommand.opts().debug) {
+    process.env.NEXUSFLOW_DEBUG = '1';
+  }
+});
 
 program
   .command('create')
@@ -367,6 +380,97 @@ program
   });
 
 program
+  .command('finish')
+  .description('Finish a feature — commit & push everything, open PRs, promote learnings, optionally remove the workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-m, --message <msg>', 'Commit message for any remaining changes')
+  .option('--no-pr', 'Skip PR creation and compare links')
+  .option('--no-knowledge', 'Skip the knowledge promotion step')
+  .option('--cleanup', 'Remove the workspace after everything is confirmed pushed (still asks for confirmation)')
+  .option('-y, --yes', 'Accept defaults for non-destructive prompts')
+  .option('--dry-run', 'Show what finish would do without changing anything')
+  .action(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean }) => {
+    try {
+      await finishCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Knowledge command group
+const knowledgeCmd = program
+  .command('knowledge')
+  .alias('know')
+  .description('Capture and manage workspace learnings (decisions, gotchas, progress)');
+
+knowledgeCmd
+  .command('add')
+  .description('Append a timestamped learning to the workspace knowledge file')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | progress | assumption | question')
+  .requiredOption('-m, --message <msg>', 'The learning to record')
+  .option('--title <title>', 'Short title (used for decision headings)')
+  .option('-r, --repo <repo>', "Write to this repo's persistent base knowledge instead")
+  .action(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {
+    try {
+      await knowledgeAddCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+knowledgeCmd
+  .command('show')
+  .description("Print the workspace knowledge file (or a repo's base knowledge)")
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-s, --section <name>', 'Only show one section')
+  .option('-r, --repo <repo>', "Show the repo's base knowledge file instead")
+  .action(async (workspace: string | undefined, options: { section?: string; repo?: string }) => {
+    try {
+      await knowledgeShowCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+knowledgeCmd
+  .command('promote')
+  .description('Copy workspace learnings into per-repo base knowledge so they persist across features')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-r, --repo <repo>', 'Target repository (skips the repo prompt)')
+  .option('-t, --type <type>', 'Entry type when promoting a message non-interactively')
+  .option('-m, --message <msg>', 'Promote this text directly (non-interactive)')
+  .option('--move', 'Remove the entry from the workspace file after promoting (default: copy)')
+  .option('--all', 'Promote all decisions, gotchas and assumptions without prompting')
+  .action(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
+    try {
+      await knowledgePromoteCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
   .command('desktop')
   .description('Launch the NexusFlow desktop application')
   .action(async () => {
@@ -638,11 +742,16 @@ program.hook('postAction', async (thisCommand, actionCommand) => {
 
 async function bootstrap() {
   try {
-    const config = await loadConfig();
+    // Quiet: plugins (which may register storage adapters) are not loaded yet,
+    // so a storage-adapter warning here would be a false alarm.
+    const config = await loadConfig({ quiet: true });
     if (config.plugins && config.plugins.length > 0) {
       await loadPlugins(program, config.plugins);
     }
-  } catch {}
+  } catch (error) {
+    console.warn(chalk.yellow('⚠ Plugin loading failed — continuing without plugins.'));
+    debugLog('plugins', 'bootstrap', error);
+  }
   await program.parseAsync(process.argv);
 }
 

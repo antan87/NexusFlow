@@ -17,7 +17,10 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 ## ✨ Features
 
 - **Multi-repo workspaces** — group any set of local Git repos under one feature branch using worktrees
+- **The full feature loop** — `create` opens a workspace, `finish` closes it: commit + push every repo, open PRs (or print compare links), promote learnings, and optionally clean up
+- **Knowledge that accumulates** — capture decisions and gotchas as you work with `nexusflow knowledge add`, then `promote` the reusable ones into per-repo memory that survives across features
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
+- **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
@@ -123,6 +126,8 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
 | `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
+| `nexusflow finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
+| `nexusflow knowledge` | Capture & manage workspace learnings: `add` (decision/gotcha/progress/…), `show`, `promote` into per-repo base knowledge |
 | `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
 | `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
 | `nexusflow schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
@@ -142,6 +147,51 @@ NexusFlow auto-detects which assistants are available on your machine and genera
 | **OpenAI Codex** | `AGENTS.md` | `codex` in PATH |
 | **GitHub Copilot** | `.github/copilot-instructions.md` | Always available |
 | **Cursor** | `.cursor/rules/nexusflow.mdc` | `cursor` in PATH |
+
+## 🔁 The Feature Loop: create → work → learn → finish
+
+NexusFlow is built around a single loop:
+
+1. **`nexusflow create`** — open a workspace of git worktrees on a feature branch with AI context files generated.
+2. **Work** — your AI assistant edits code across repos. As it goes, it records learnings:
+   ```bash
+   nexusflow knowledge add -t decision -m "Chose worktrees over submodules for isolation"
+   nexusflow knowledge add -t gotcha   -m "fs.rm needs maxRetries on Windows (EBUSY)"
+   nexusflow knowledge add -t progress -m "Rollback-on-failure implemented"
+   ```
+   Entries land under the right heading in `nexusflow-knowledge.md` (routed through your storage adapter — local, central vault, or Obsidian — so the GUI and the generators all see the same file). No hand-editing, no accidental overwrites.
+3. **`nexusflow finish`** — close it out:
+   - Shows a preflight status table (branch, dirty files, unpushed commits) per repo.
+   - Commits any remaining changes (repos on the wrong branch or in a detached HEAD are skipped, never committed) and pushes every branch.
+   - Opens a PR per repo with the GitHub CLI when it's installed and authenticated; otherwise prints a ready-to-click **compare URL** for GitHub, GitLab, Azure DevOps, or Bitbucket.
+   - Offers to **promote** reusable learnings into each repo's persistent base knowledge (so they survive into the next feature).
+   - With `--cleanup`, removes the workspace once everything is confirmed pushed (never while you're `cd`'d inside it).
+
+   ```bash
+   nexusflow finish --dry-run        # preview what would happen
+   nexusflow finish -m "Ship feature" --cleanup
+   ```
+
+## 🔌 MCP Server & Tools
+
+`nexusflow mcp setup` registers NexusFlow's MCP server with Claude Desktop, Cursor, and VS Code so your assistant can drive the whole loop without leaving the session. The server exposes:
+
+| Tool | What it does |
+|:---|:---|
+| `search_workspace` | `git grep` across every repo in the workspace |
+| `workspace_status` | Per-repo branch / dirty / ahead-behind / remote status |
+| `get_workspace_diff` | Changed files, insertions/deletions, and unpushed commits |
+| `commit_workspace` | Commit (and push) all changed repos with one message |
+| `sync_workspace` | Rebase every repo onto its base branch (auto-stashes dirty trees) |
+| `refresh_context` | Regenerate maps/plan/context (only re-analyzes changed repos) |
+| `run_doctor` | Structured workspace health diagnostics |
+| `add_knowledge` | Record a decision / gotcha / progress note — the preferred way to persist learnings |
+| `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
+| `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
+| `get_service_logs` | Tail a running service's logs |
+| `delegate_to_local_agent` | Offload cheap/high-volume subtasks to a local SLM (when enabled) |
+
+Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `NEXUSFLOW_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 
 ## 🕐 Session History & Resumption
 

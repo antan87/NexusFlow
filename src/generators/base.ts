@@ -220,7 +220,7 @@ ${teamworkSection}
     - \`nexusflow sync\` — rebase all repositories with their default base branches.
     - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
     - \`nexusflow doctor\` — run diagnostics to verify workspace health.
-- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Before ending your session, append significant architecture decisions, discovered gotchas, and checklist progress to \`nexusflow-knowledge.md\`. Never delete or overwrite existing knowledge/decisions — only append.
+- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
 ${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
   ctx.localLlm ? `\n  - **Model Capacity**: The local agent is running \`${ctx.localLlm.model}\`. ${

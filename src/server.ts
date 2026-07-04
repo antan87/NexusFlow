@@ -29,9 +29,17 @@ import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
-import { getWorkspaceRepos, commitAndPush, getRepoStatus } from './utils/multi-git.js';
+import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
+import { commitWorkspace } from './core/commit.js';
 import { refreshWorkspace } from './core/refresh.js';
+import { writeWorkspaceFile } from './core/storage.js';
+import {
+  readWorkspaceKnowledge,
+  addWorkspaceKnowledge,
+  addBaseKnowledge,
+  type KnowledgeEntryType,
+} from './core/knowledge.js';
 import {
   addSchedule,
   loadSchedules,
@@ -985,20 +993,16 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 });
 
 // 13a. Get workspace knowledge (nexusflow-knowledge.md)
+// Routed through the active storage adapter so the GUI edits the same file the
+// generators write (under the Obsidian/vault adapters this lives outside the
+// workspace directory).
 app.get('/api/workspace/:id/knowledge', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
 
-    let content = '';
-    try {
-      content = await fs.readFile(knowledgeFile, 'utf-8');
-    } catch {
-      content = '# Workspace Knowledge\n\nNo knowledge file yet.';
-    }
-
+    const content = (await readWorkspaceKnowledge(workspacePath)) ?? '# Workspace Knowledge\n\nNo knowledge file yet.';
     return c.json({ content });
   } catch (error) {
     return errorResponse(c, error);
@@ -1012,10 +1016,42 @@ app.put('/api/workspace/:id/knowledge', async (c) => {
     const { content } = await c.req.json() as { content: string };
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const knowledgeFile = path.join(workspacePath, 'nexusflow-knowledge.md');
 
-    await fs.writeFile(knowledgeFile, content, 'utf-8');
+    const feature = await loadFeatureConfig(workspacePath);
+    const featureId = feature?.id ?? path.basename(workspacePath);
+    await writeWorkspaceFile(workspacePath, featureId, 'nexusflow-knowledge.md', content);
     return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13b-2. Append a single structured learning (used for a GUI quick-add).
+app.post('/api/workspace/:id/knowledge/entry', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as {
+      type: KnowledgeEntryType;
+      message: string;
+      title?: string;
+      repo?: string;
+    };
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+
+    const result = body.repo
+      ? await addBaseKnowledge(workspacePath, body.repo, {
+          type: body.type,
+          message: body.message,
+          title: body.title,
+        })
+      : await addWorkspaceKnowledge(workspacePath, {
+          type: body.type,
+          message: body.message,
+          title: body.title,
+        });
+
+    return c.json({ success: true, ...result });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1077,22 +1113,14 @@ app.post('/api/workspace/:id/commit', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
-    const repos = await getWorkspaceRepos(workspacePath);
-    const results = [];
-
-    for (const repo of repos) {
-      const status = await getRepoStatus(repo.path);
-      if (status.hasChanges) {
-        const result = await commitAndPush(repo.path, message, repo.branchName);
-        results.push({
-          repoName: repo.name,
-          success: result.success,
-          commitHash: result.commitHash,
-          filesChanged: result.filesChanged,
-          message: result.message,
-        });
-      }
-    }
+    const report = await commitWorkspace(workspacePath, message);
+    const results = report.repos.map((repo) => ({
+      repoName: repo.name,
+      success: repo.success,
+      commitHash: repo.commitHash,
+      filesChanged: repo.filesChanged,
+      message: repo.message,
+    }));
 
     return c.json({ results });
   } catch (error) {

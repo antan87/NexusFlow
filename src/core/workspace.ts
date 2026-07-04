@@ -35,21 +35,94 @@ export function getWorkspacePath(
   return path.join(workspacesDir, branchName);
 }
 
+/** A worktree created during {@link createWorkspace}, tracked for rollback. */
+interface WorktreeRollbackAction {
+  repoPath: string;
+  worktreePath: string;
+  createdBranch: boolean;
+}
+
+/**
+ * Best-effort rollback of a partially-created workspace: removes each worktree
+ * this run added (pruning on failure), deletes only branches this run created,
+ * and removes the workspace directory. Rollback failures are warned, never
+ * thrown, so the caller can rethrow the original error.
+ */
+async function rollbackWorkspace(
+  workspacePath: string,
+  branchName: string,
+  actions: WorktreeRollbackAction[],
+): Promise<void> {
+  for (const action of [...actions].reverse()) {
+    try {
+      await removeWorktree(action.repoPath, action.worktreePath, true);
+    } catch (error) {
+      console.warn(`Warning: rollback failed to remove worktree ${action.worktreePath}:`, error);
+      try {
+        await execa('git', ['worktree', 'prune'], { cwd: action.repoPath });
+      } catch {
+        // Best-effort prune.
+      }
+    }
+    // Only delete a branch this run created — never a pre-existing one.
+    if (action.createdBranch) {
+      try {
+        await execa('git', ['branch', '-D', branchName], { cwd: action.repoPath });
+      } catch {
+        // The branch may already be gone with its worktree; ignore.
+      }
+    }
+  }
+
+  try {
+    await fs.rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error) {
+    console.warn(
+      `Warning: rollback could not fully remove ${workspacePath} — remove it manually:`,
+      error,
+    );
+  }
+}
+
 /**
  * Creates a full workspace for a feature:
  * 1. Creates the workspace directory.
  * 2. Creates a git worktree for every repo in the feature.
  * 3. Saves the feature manifest (`nexusflow.json`).
  *
- * @param feature - The feature definition.
- * @param repos   - Resolved repo metadata for every repo in the feature.
+ * If any worktree fails, the partially-created workspace is rolled back
+ * automatically (worktrees removed, run-created branches deleted, directory
+ * removed) and the original error is rethrown, so a failed `create` never
+ * leaves debris behind.
+ *
+ * @param feature    - The feature definition.
+ * @param repos      - Resolved repo metadata for every repo in the feature.
+ * @param onProgress - Optional per-repo progress callback (repo name, index, total).
  * @returns The absolute path to the newly created workspace.
  */
 export async function createWorkspace(
   feature: Feature,
   repos: RepoInfo[],
+  onProgress?: (repoName: string, index: number, total: number) => void,
 ): Promise<string> {
   const workspacePath = feature.workspacePath;
+
+  // Fail fast if the target already exists and is non-empty, rather than
+  // silently merging into (and later half-rolling-back) an existing directory.
+  try {
+    const existing = await fs.readdir(workspacePath);
+    if (existing.length > 0) {
+      throw new Error(
+        `Workspace directory already exists and is not empty: ${workspacePath}. ` +
+          `Remove it first (e.g. 'nexusflow remove ${feature.id}') or choose another branch name.`,
+      );
+    }
+  } catch (error) {
+    // A non-existent directory (ENOENT) is the normal, happy path.
+    if (error instanceof Error && error.message.includes('already exists and is not empty')) {
+      throw error;
+    }
+  }
 
   // Ensure the workspace directory exists.
   await fs.mkdir(workspacePath, { recursive: true });
@@ -127,22 +200,32 @@ export async function createWorkspace(
     console.warn('Warning: Failed to create .cursor/mcp.json:', error);
   }
 
-  // Create a worktree for each repo inside the workspace.
-  for (const repo of repos) {
-    const worktreeTarget = path.join(workspacePath, repo.name);
-    await createWorktree(
-      repo.path,
-      worktreeTarget,
-      feature.branchName,
-      repo.defaultBranch,
-    );
+  // Create a worktree for each repo inside the workspace. On any failure, roll
+  // back everything created so far and rethrow the original error.
+  const rollbackActions: WorktreeRollbackAction[] = [];
+  try {
+    for (let i = 0; i < repos.length; i++) {
+      const repo = repos[i]!;
+      onProgress?.(repo.name, i, repos.length);
+      const worktreeTarget = path.join(workspacePath, repo.name);
+      const { createdBranch } = await createWorktree(
+        repo.path,
+        worktreeTarget,
+        feature.branchName,
+        repo.defaultBranch,
+      );
+      rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, createdBranch });
+    }
+
+    // Persist the feature manifest.
+    await saveFeatureConfig(workspacePath, feature);
+
+    // Exclude NexusFlow files from git
+    await excludeNexusFlowFiles(workspacePath, feature);
+  } catch (error) {
+    await rollbackWorkspace(workspacePath, feature.branchName, rollbackActions);
+    throw error;
   }
-
-  // Persist the feature manifest.
-  await saveFeatureConfig(workspacePath, feature);
-
-  // Exclude NexusFlow files from git
-  await excludeNexusFlowFiles(workspacePath, feature);
 
   return workspacePath;
 }
@@ -308,6 +391,17 @@ export async function resolveRepoInfos(repoPaths: string[]): Promise<RepoInfo[]>
 export async function deleteWorkspace(
   workspacePath: string,
 ): Promise<void> {
+  // Refuse to delete the workspace the caller is currently inside — on Windows
+  // the directory removal would fail with EBUSY and leave it half-removed.
+  const rel = path.relative(workspacePath, process.cwd());
+  const cwdInside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  if (cwdInside) {
+    throw new Error(
+      `Refusing to delete the workspace you are currently inside (${process.cwd()}). ` +
+        `cd out of it first, then retry.`,
+    );
+  }
+
   const feature = await loadFeatureConfig(workspacePath);
   if (feature) {
     try {
@@ -356,9 +450,10 @@ export async function deleteWorkspace(
     } catch {}
   }
 
-  // Delete the directory itself
+  // Delete the directory itself. Retries help on Windows, where a lingering
+  // file handle (editor, terminal, just-exited git) yields a transient EBUSY.
   try {
-    await fs.rm(workspacePath, { recursive: true, force: true });
+    await fs.rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   } catch (error) {
     console.error(`Failed to delete workspace directory ${workspacePath}:`, error);
     throw error;

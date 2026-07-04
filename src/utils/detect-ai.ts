@@ -27,25 +27,36 @@ async function commandExists(command: string): Promise<boolean> {
 /**
  * Probes the system for known AI coding assistants and returns their status.
  *
+ * `detected` reports whether the assistant should be offered as an option;
+ * `command` is set only when a CLI that can host an *interactive terminal
+ * session* is available (it is the single source of truth for launching one).
+ * Some assistants can be detected without being launchable this way — Copilot
+ * is convention-based, and Cursor's `cursor` binary opens the GUI editor rather
+ * than a terminal agent (its launchable CLI is `cursor-agent`).
+ *
  * Detection rules:
- * - **Claude**: detected if `claude` *or* `antigravity` is on PATH.
- *   When Antigravity is found it is labelled as `'claude'` because it
- *   generates `CLAUDE.md` context files.
+ * - **Claude**: detected if `claude` *or* `agy` (Antigravity) is on PATH.
+ * - **Antigravity**: detected if `agy` is on PATH.
  * - **Codex**: detected if `codex` is on PATH.
- * - **Copilot**: always shown as an option (convention-based via
- *   `.github/copilot-instructions.md`).
- * - **Cursor**: detected if `cursor` is on PATH.
+ * - **Copilot**: always offered (convention-based via
+ *   `.github/copilot-instructions.md`); launchable only when the `copilot`
+ *   CLI is on PATH.
+ * - **Cursor**: detected if `cursor` is on PATH; launchable only when the
+ *   `cursor-agent` CLI is on PATH.
  *
  * @returns An array of {@link DetectedAI} results, one per assistant.
  */
 export async function detectAIAssistants(): Promise<DetectedAI[]> {
   // Run all probes concurrently.
-  const [hasClaude, hasAntigravity, hasCodex, hasCursor] = await Promise.all([
-    commandExists('claude'),
-    commandExists('agy'),
-    commandExists('codex'),
-    commandExists('cursor'),
-  ]);
+  const [hasClaude, hasAntigravity, hasCodex, hasCopilot, hasCursor, hasCursorAgent] =
+    await Promise.all([
+      commandExists('claude'),
+      commandExists('agy'),
+      commandExists('codex'),
+      commandExists('copilot'),
+      commandExists('cursor'),
+      commandExists('cursor-agent'),
+    ]);
 
   const results: DetectedAI[] = [
     {
@@ -69,14 +80,17 @@ export async function detectAIAssistants(): Promise<DetectedAI[]> {
     {
       name: 'copilot' as AIAssistant,
       displayName: 'GitHub Copilot',
-      // Copilot is convention-based; always available as an option.
+      // Copilot is convention-based; always available as an option, but only
+      // launchable as a session when its CLI is installed.
       detected: true,
+      ...(hasCopilot ? { command: 'copilot' } : {}),
     },
     {
       name: 'cursor' as AIAssistant,
       displayName: 'Cursor',
       detected: hasCursor,
-      ...(hasCursor ? { command: 'cursor' } : {}),
+      // `cursor` opens the GUI editor; `cursor-agent` is the terminal session CLI.
+      ...(hasCursorAgent ? { command: 'cursor-agent' } : {}),
     },
   ];
 

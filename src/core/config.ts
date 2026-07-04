@@ -6,9 +6,43 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import chalk from 'chalk';
 
 import type { NexusFlowConfig } from '../types.js';
 import { getStorageProvider, setActiveStorageProvider } from './adapters/registry.js';
+import { debugLog } from '../utils/debug.js';
+
+/**
+ * Activates the configured storage provider, falling back to local storage on
+ * failure. Unless `quiet`, a failure prints a visible warning (a silent
+ * fallback from e.g. the Obsidian adapter to local is a nasty surprise). The
+ * quiet path exists for bootstrap, where plugin-provided adapters are not yet
+ * registered and a warning would be a false alarm.
+ */
+function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void {
+  const providerName = config.storageProvider || 'local';
+  try {
+    const provider = getStorageProvider(providerName);
+    const adapterSettings = config.adapterConfig?.[providerName] ?? {};
+    if (provider.configure) {
+      provider.configure(adapterSettings);
+    }
+    setActiveStorageProvider(provider);
+  } catch (error) {
+    if (!quiet) {
+      console.warn(
+        chalk.yellow(`⚠ Storage adapter "${providerName}" failed to activate — falling back to local storage.`),
+      );
+    }
+    debugLog('storage', `activate "${providerName}"`, error);
+    // Deterministic fallback rather than relying on the registry's implicit default.
+    try {
+      setActiveStorageProvider(getStorageProvider('local'));
+    } catch (fallbackError) {
+      debugLog('storage', 'local fallback failed', fallbackError);
+    }
+  }
+}
 
 /** Name of the config directory under the user's home folder. */
 const CONFIG_DIR_NAME = '.nexusflow';
@@ -81,36 +115,40 @@ export async function ensureConfigDir(): Promise<void> {
  *
  * @returns The loaded or default configuration.
  */
-export async function loadConfig(): Promise<NexusFlowConfig> {
+export async function loadConfig(options: { quiet?: boolean } = {}): Promise<NexusFlowConfig> {
   const configPath = path.join(getConfigDir(), CONFIG_FILE_NAME);
+  const quiet = options.quiet ?? false;
 
-  let merged: NexusFlowConfig;
+  let merged: NexusFlowConfig = getDefaultConfig();
+
+  let raw: string | null = null;
   try {
-    const raw = await fs.readFile(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<NexusFlowConfig>;
-
-    // Merge with defaults so newly-added keys are always present.
-    merged = { ...getDefaultConfig(), ...parsed };
-    if (parsed.localLlm) {
-      merged.localLlm = { ...getDefaultConfig().localLlm, ...parsed.localLlm };
-    }
+    raw = await fs.readFile(configPath, 'utf-8');
   } catch {
-    // File doesn't exist or is unreadable — return defaults.
-    merged = getDefaultConfig();
+    // File doesn't exist (first run) or is unreadable — defaults are correct.
+    raw = null;
   }
 
-  // Set the active storage provider based on configuration
-  try {
-    const providerName = merged.storageProvider || 'local';
-    const provider = getStorageProvider(providerName);
-    // Pass per-adapter settings if available
-    const adapterSettings = merged.adapterConfig?.[providerName] ?? {};
-    if (provider.configure) {
-      provider.configure(adapterSettings);
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<NexusFlowConfig>;
+      // Merge with defaults so newly-added keys are always present.
+      merged = { ...getDefaultConfig(), ...parsed };
+      if (parsed.localLlm) {
+        merged.localLlm = { ...getDefaultConfig().localLlm, ...parsed.localLlm };
+      }
+    } catch (error) {
+      // A corrupted config is worth surfacing — silently reverting devDir /
+      // workspacesDir / storageProvider to defaults is a nasty failure mode.
+      if (!quiet) {
+        console.warn(chalk.yellow('⚠ ~/.nexusflow/config.json is invalid JSON — using defaults for this run.'));
+      }
+      debugLog('config', 'parse config.json', error);
+      merged = getDefaultConfig();
     }
-    setActiveStorageProvider(provider);
-  } catch {}
+  }
 
+  activateStorageProvider(merged, quiet);
   return merged;
 }
 
@@ -127,14 +165,6 @@ export async function saveConfig(config: NexusFlowConfig): Promise<void> {
   const data = JSON.stringify(config, null, 2) + '\n';
   await fs.writeFile(configPath, data, 'utf-8');
 
-  // Set the active storage provider based on configuration
-  try {
-    const providerName = config.storageProvider || 'local';
-    const provider = getStorageProvider(providerName);
-    const adapterSettings = config.adapterConfig?.[providerName] ?? {};
-    if (provider.configure) {
-      provider.configure(adapterSettings);
-    }
-    setActiveStorageProvider(provider);
-  } catch {}
+  // Re-activate the storage provider based on the saved configuration.
+  activateStorageProvider(config, false);
 }
