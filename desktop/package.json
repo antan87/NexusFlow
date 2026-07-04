@@ -9,6 +9,6 @@
     "update": "npx neu update"
   },
   "devDependencies": {
-    "@neutralinojs/neu": "^11.1.0"
+    "@neutralinojs/neu": "^11.7.2"
   }
 }
