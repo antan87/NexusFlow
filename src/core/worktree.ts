@@ -5,6 +5,16 @@
 
 import { execa } from 'execa';
 
+/** Result of creating a worktree. */
+export interface CreateWorktreeResult {
+  /**
+   * True when this call created a new local branch (`-b`). False when it
+   * checked out a branch that already existed. Used by rollback to decide
+   * whether deleting the branch is safe.
+   */
+  createdBranch: boolean;
+}
+
 /**
  * Creates a new git worktree for a feature branch.
  *
@@ -16,13 +26,14 @@ import { execa } from 'execa';
  * @param targetPath - Absolute path where the worktree should be created.
  * @param branchName - Name of the new local branch to create.
  * @param baseBranch - Remote branch to base the new branch on (e.g. 'main').
+ * @returns Whether a new branch was created (vs. checking out an existing one).
  */
 export async function createWorktree(
   repoPath: string,
   targetPath: string,
   branchName: string,
   baseBranch: string,
-): Promise<void> {
+): Promise<CreateWorktreeResult> {
   let fetched = false;
   // Fetch latest remote state.
   try {
@@ -94,6 +105,8 @@ export async function createWorktree(
       { cwd: repoPath },
     );
   }
+
+  return { createdBranch: !branchExists };
 }
 
 /**

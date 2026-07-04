@@ -90,6 +90,22 @@ You don't need to open five terminal windows to start your backend, frontend, da
   nexusflow stop
   ```
 
+### 6. Capture Learnings as You Go
+As you (or your AI assistant) make decisions and hit gotchas, record them so they aren't lost between sessions:
+```bash
+nexusflow knowledge add -t decision -m "Switched auth to short-lived tokens"
+nexusflow knowledge add -t gotcha   -m "The worker needs REDIS_URL set locally"
+```
+Entries are filed under the right section of `nexusflow-knowledge.md` automatically. Your AI assistant can do the same through the `add_knowledge` MCP tool.
+
+### 7. Finish the Feature
+When the work is done, close the loop in one command:
+```bash
+nexusflow finish --dry-run          # preview: what will be committed / pushed
+nexusflow finish -m "Ship feature"  # commit + push every repo, print PR links
+```
+`finish` shows a per-repo status table, commits and pushes each repo (skipping any on the wrong branch), and prints a ready-to-open PR/compare link for each remote. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
+
 ---
 
 ## 🛠️ CLI Reference
@@ -110,5 +126,7 @@ Here is a summary of the command-line interface:
 | **`nexusflow diff`** | `nexusflow diff` | Displays pending code changes across all active workspace repositories. |
 | **`nexusflow commit`** | `nexusflow commit` | Automates cross-repository git commit and branch pushes in the workspace. |
 | **`nexusflow sync`** | `nexusflow sync` | Syncs and rebases all workspace worktrees with default base branches. |
+| **`nexusflow finish`** | `nexusflow finish [-m <msg>] [--cleanup] [--dry-run]` | Closes out a feature: commits & pushes all repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
+| **`nexusflow knowledge`** | `nexusflow knowledge add -t <type> -m <msg>` / `show` / `promote` | Captures workspace learnings and promotes reusable ones into per-repo base knowledge. |
 | **`nexusflow refresh`**| `nexusflow refresh` | Regenerates architecture maps, task plans, and AI context files. |
 | **`nexusflow doctor`** | `nexusflow doctor` | Assesses and reports diagnostics of the current workspace setup. |

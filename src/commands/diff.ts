@@ -5,13 +5,10 @@
  */
 
 import chalk from 'chalk';
-import { select } from '@inquirer/prompts';
-import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
 
-import { loadConfig } from '../core/config.js';
-import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { getWorkspaceRepos, getRepoStatus, getDiffSummary, getUnpushedCount } from '../utils/multi-git.js';
+import { loadFeatureConfig } from '../core/workspace.js';
+import { getWorkspaceDiffReport } from '../core/diff.js';
+import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 
 interface DiffOptions {
   /** Restrict the diff to these repos (by directory name). */
@@ -27,7 +24,7 @@ interface DiffOptions {
 export async function diffCommand(workspaceArg?: string, options?: DiffOptions): Promise<void> {
   console.log(chalk.bold.cyan('\n🔍 NexusFlow — Workspace Diff Summary\n'));
 
-  const workspacePath = await resolveWorkspace(workspaceArg);
+  const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace to view diff:');
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
@@ -36,49 +33,12 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
     return;
   }
 
-  let repos = await getWorkspaceRepos(workspacePath);
-
-  if (options?.repo && options.repo.length > 0) {
-    const unknown = options.repo.filter((name) => !repos.some((r) => r.name === name));
-    if (unknown.length > 0) {
-      console.error(chalk.red(`✖ Repositor${unknown.length === 1 ? 'y' : 'ies'} not in this workspace: ${unknown.join(', ')}`));
-      console.log(chalk.dim(`  Available repos: ${repos.map((r) => r.name).join(', ')}`));
-      return;
-    }
-    repos = repos.filter((r) => options.repo!.includes(r.name));
-  }
-
-  const results: Array<{
-    name: string;
-    filesChanged: number;
-    additions: number;
-    deletions: number;
-    unpushed: number | null;
-    summary: string;
-  }> = [];
-
-  for (const repo of repos) {
-    const status = await getRepoStatus(repo.path);
-    const unpushed = await getUnpushedCount(repo.path, repo.branchName);
-
-    // A repo with no working-tree changes still matters when it has local
-    // commits that were never pushed — otherwise "all clean" hides them.
-    if (!status.hasChanges && !(unpushed && unpushed > 0)) {
-      continue;
-    }
-
-    const diff = status.hasChanges
-      ? await getDiffSummary(repo.path)
-      : { summary: 'No working-tree changes', additions: 0, deletions: 0 };
-
-    results.push({
-      name: repo.name,
-      filesChanged: status.changedFiles.length,
-      additions: diff.additions,
-      deletions: diff.deletions,
-      unpushed,
-      summary: diff.summary,
-    });
+  let results;
+  try {
+    results = await getWorkspaceDiffReport(workspacePath, options?.repo);
+  } catch (error) {
+    console.error(chalk.red(`✖ ${error instanceof Error ? error.message : String(error)}`));
+    return;
   }
 
   if (results.length === 0) {
@@ -86,15 +46,17 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
     return;
   }
 
-  // Print unified table
+  // Print unified table. Size the name column to the actual repo names so
+  // long names (common in real workspaces) don't overrun the other columns.
+  const nameW = Math.max(10, ...results.map((r) => r.name.length)) + 1;
   console.log(chalk.bold(
-    'Repository'.padEnd(25) + ' | ' +
+    'Repository'.padEnd(nameW) + ' | ' +
     'Files'.padEnd(6) + ' | ' +
     'Additions'.padEnd(10) + ' | ' +
     'Deletions'.padEnd(10) + ' | ' +
     'Unpushed'.padEnd(8)
   ));
-  console.log(chalk.dim('─'.repeat(72)));
+  console.log(chalk.dim('─'.repeat(nameW + 45)));
 
   for (const res of results) {
     const fileStr = res.filesChanged.toString().padEnd(6);
@@ -102,7 +64,7 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
     const delStr = `-${res.deletions}`.padEnd(10);
     const unpushedStr = res.unpushed === null ? '?'.padEnd(8) : String(res.unpushed).padEnd(8);
     console.log(
-      chalk.bold(res.name.padEnd(25)) + ' | ' +
+      chalk.bold(res.name.padEnd(nameW)) + ' | ' +
       fileStr + ' | ' +
       chalk.green(addStr) + ' | ' +
       chalk.red(delStr) + ' | ' +
@@ -120,41 +82,4 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
   }
 
   console.log();
-}
-
-/**
- * Resolves workspace path.
- */
-async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
-  if (workspaceArg) {
-    const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
-      return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
-    }
-  }
-
-  const cwdFeature = await loadFeatureConfig(process.cwd());
-  if (cwdFeature) return cwdFeature.workspacePath;
-
-  const config = await loadConfig();
-  const workspaces = await listWorkspaces(config.workspacesDir);
-
-  if (workspaces.length === 0) {
-    console.log(chalk.yellow('No workspaces found.\n'));
-    return null;
-  }
-
-  const selected = await select({
-    message: 'Select a workspace to view diff:',
-    choices: workspaces.map((ws) => ({
-      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
-      value: ws.workspacePath,
-    })),
-  });
-
-  return selected;
 }

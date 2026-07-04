@@ -1,0 +1,296 @@
+/**
+ * @module core/doctor
+ * Headless workspace diagnostics. Produces a structured {@link DoctorReport}
+ * shared by the CLI `doctor` renderer and the MCP `run_doctor` tool. The local
+ * AI connectivity probe uses fetch + AbortController, so this is safe to run
+ * outside a TTY.
+ */
+
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import { execa } from 'execa';
+import { globby } from 'globby';
+
+import { loadConfig } from './config.js';
+import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
+import { getRepoStatus } from '../utils/multi-git.js';
+import { workspaceFileExists, baseFileExists } from './storage.js';
+import { analyzeAllReposCached } from '../analyzers/index.js';
+import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
+import type { ProjectAnalysis } from '../types.js';
+
+export type DoctorCheckStatus = 'pass' | 'warn' | 'fail' | 'info';
+
+/** A single diagnostic result. */
+export interface DoctorCheck {
+  category: string;
+  name: string;
+  status: DoctorCheckStatus;
+  message: string;
+}
+
+/** Full diagnostic report for a workspace. */
+export interface DoctorReport {
+  workspacePath: string;
+  branchName: string;
+  checks: DoctorCheck[];
+  errors: string[];
+  warnings: string[];
+  healthy: boolean;
+  /** True when worktree-path errors aborted the deeper checks. */
+  aborted: boolean;
+}
+
+/** Resolves the conventional test command for a repo's tech stack. */
+function getTestCommand(analysis: ProjectAnalysis): string {
+  if (analysis.techStack.languages.includes('csharp')) return 'dotnet test';
+  if (analysis.techStack.languages.includes('typescript') || analysis.techStack.languages.includes('javascript')) return 'npm test';
+  if (analysis.techStack.languages.includes('python')) return 'pytest';
+  if (analysis.techStack.languages.includes('go')) return 'go test ./...';
+  return 'npm test';
+}
+
+/**
+ * Runs all workspace diagnostics and returns a structured report.
+ *
+ * @param workspacePath - Absolute path to the workspace directory.
+ * @throws If the workspace manifest cannot be loaded.
+ */
+export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    throw new Error('Failed to load workspace configuration. Ensure nexusflow.json exists.');
+  }
+
+  const allRepos = await resolveRepoInfos(feature.repos);
+  const checks: DoctorCheck[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  const report = (): DoctorReport => ({
+    workspacePath,
+    branchName: feature.branchName,
+    checks,
+    errors,
+    warnings,
+    healthy: errors.length === 0 && warnings.length === 0,
+    aborted: false,
+  });
+
+  // ── 1. Worktree Paths ──────────────────────────────────────────────────
+  let worktreeErrors = false;
+  for (const repo of allRepos) {
+    try {
+      const stat = await fs.stat(repo.path);
+      if (!stat.isDirectory()) {
+        errors.push(`Worktree path for "${repo.name}" is not a directory.`);
+        checks.push({ category: 'Worktree Paths', name: repo.name, status: 'fail', message: 'Path is not a directory' });
+        worktreeErrors = true;
+      } else {
+        checks.push({ category: 'Worktree Paths', name: repo.name, status: 'pass', message: 'Directory exists' });
+      }
+    } catch {
+      errors.push(`Worktree path for "${repo.name}" does not exist: ${repo.path}`);
+      checks.push({ category: 'Worktree Paths', name: repo.name, status: 'fail', message: 'Path does not exist' });
+      worktreeErrors = true;
+    }
+  }
+
+  if (worktreeErrors) {
+    return { ...report(), aborted: true };
+  }
+
+  // ── 2. Analysis (feeds later checks) ───────────────────────────────────
+  const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
+
+  // ── 3. Branch Alignment & Git Status ───────────────────────────────────
+  for (const repo of allRepos) {
+    let branch = 'unknown';
+    try {
+      const { stdout } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo.path });
+      branch = stdout.trim();
+    } catch {
+      // Detached HEAD or git failure — leave as 'unknown'.
+    }
+
+    if (branch !== feature.branchName) {
+      warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${feature.branchName}".`);
+      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${feature.branchName})` });
+    } else {
+      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}"` });
+    }
+
+    const status = await getRepoStatus(repo.path);
+    if (status.hasChanges) {
+      warnings.push(`Repository "${repo.name}" has uncommitted changes.`);
+      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Has uncommitted changes (${status.summary})` });
+    }
+  }
+
+  // ── 4. Local Package Setup & Reference Versioning ──────────────────────
+  let hasCsharp = false;
+  let hasNode = false;
+
+  for (const repo of allRepos) {
+    const a = analysis.get(repo.path);
+    if (!a) continue;
+
+    if (a.techStack.languages.includes('csharp')) hasCsharp = true;
+    if (a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript')) hasNode = true;
+
+    if (a.techStack.languages.includes('csharp')) {
+      try {
+        const csprojs = await globby('**/*.csproj', {
+          cwd: repo.path,
+          absolute: true,
+          ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+        });
+        for (const csproj of csprojs) {
+          const content = await fs.readFile(csproj, 'utf-8');
+          if (content.toLowerCase().includes('-local') || content.toLowerCase().includes('-dev')) {
+            warnings.push(`Temporary package version (e.g. ending in "-local" or "-dev") found in "${path.basename(csproj)}".`);
+            checks.push({ category: 'Local Package Setup', name: repo.name, status: 'warn', message: `Temporary local package version in "${path.basename(csproj)}"` });
+          }
+        }
+      } catch {}
+
+      if (a.nugetFeeds && a.nugetFeeds.length === 0) {
+        try {
+          const nugetConfigs = await globby('**/NuGet.config', {
+            cwd: repo.path,
+            ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+          });
+          if (nugetConfigs.length === 0) {
+            warnings.push(`Repository "${repo.name}" does not have a NuGet.config. It might not resolve local package dependencies.`);
+            checks.push({ category: 'Local Package Setup', name: repo.name, status: 'warn', message: 'No NuGet.config found (needed for local package feeds)' });
+          }
+        } catch {}
+      }
+    }
+
+    if (a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript')) {
+      try {
+        const pjs = await globby('**/package.json', {
+          cwd: repo.path,
+          absolute: true,
+          ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/dist/**', '**/out/**', '**/.git/**'],
+        });
+        for (const pj of pjs) {
+          const content = await fs.readFile(pj, 'utf-8');
+          if (content.includes('"file:') || content.includes('"link:')) {
+            warnings.push(`Temporary package link/file reference (e.g., "file:../") found in "${path.basename(pj)}".`);
+            checks.push({ category: 'Local Package Setup', name: repo.name, status: 'warn', message: `Temporary local dependency reference ("file:" or "link:") in "${path.basename(pj)}"` });
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (hasCsharp || hasNode) {
+    checks.push({ category: 'Local Package Setup', name: 'validation', status: 'pass', message: 'Local registry feeds/link validation completed.' });
+  } else {
+    checks.push({ category: 'Local Package Setup', name: 'validation', status: 'info', message: 'No C# or Node.js repositories to validate.' });
+  }
+
+  // ── 5. Test Commands ───────────────────────────────────────────────────
+  for (const repo of allRepos) {
+    const a = analysis.get(repo.path);
+    if (!a) continue;
+
+    const testCommand = getTestCommand(a);
+    if (testCommand === 'npm test' && !a.techStack.languages.includes('typescript') && !a.techStack.languages.includes('javascript')) {
+      warnings.push(`Repository "${repo.name}" fell back to default test command "npm test".`);
+      checks.push({ category: 'Test Commands', name: repo.name, status: 'warn', message: 'Using default fallback test command "npm test"' });
+    } else {
+      checks.push({ category: 'Test Commands', name: repo.name, status: 'pass', message: `Test command is "${testCommand}"` });
+    }
+  }
+
+  // ── 6. Core Artifacts ──────────────────────────────────────────────────
+  const featureId = path.basename(workspacePath);
+  const coreFiles: Array<{ name: string; exists: () => Promise<boolean> }> = [
+    { name: 'WORKSPACE.md', exists: () => workspaceFileExists(workspacePath, featureId, 'WORKSPACE.md') },
+    { name: 'nexusflow-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-knowledge.md') },
+    { name: 'nexusflow-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-plan.md') },
+  ];
+  for (const repo of allRepos) {
+    const name = `nexusflow-map-${repo.name}.md`;
+    coreFiles.push({ name, exists: () => baseFileExists(workspacePath, repo.name, name) });
+  }
+
+  for (const file of coreFiles) {
+    if (await file.exists()) {
+      checks.push({ category: 'Core Artifacts', name: file.name, status: 'pass', message: 'exists' });
+    } else {
+      warnings.push(`Missing core workspace artifact: "${file.name}".`);
+      checks.push({ category: 'Core Artifacts', name: file.name, status: 'warn', message: 'is missing' });
+    }
+  }
+
+  const workspaceName = path.basename(workspacePath);
+  const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+  try {
+    await fs.access(codeWorkspacePath);
+    checks.push({ category: 'Core Artifacts', name: `${workspaceName}.code-workspace`, status: 'pass', message: 'exists' });
+  } catch {
+    warnings.push(`Missing ${workspaceName}.code-workspace. VS Code SCM will not show changes inside repo sub-folders. Run \`nexusflow refresh\` to regenerate it.`);
+    checks.push({ category: 'Core Artifacts', name: `${workspaceName}.code-workspace`, status: 'warn', message: 'is missing' });
+  }
+
+  const vscodeSettingsPath = path.join(workspacePath, '.vscode', 'settings.json');
+  try {
+    const content = await fs.readFile(vscodeSettingsPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    if (parsed['search.useIgnoreFiles'] === false) {
+      checks.push({ category: 'Core Artifacts', name: '.vscode/settings.json', status: 'pass', message: 'configured correctly (search.useIgnoreFiles: false)' });
+    } else {
+      warnings.push('.vscode/settings.json search.useIgnoreFiles is not set to false. VS Code global search may ignore repository files.');
+      checks.push({ category: 'Core Artifacts', name: '.vscode/settings.json', status: 'warn', message: 'search.useIgnoreFiles is not set to false' });
+    }
+  } catch {
+    warnings.push('Missing .vscode/settings.json. VS Code search might not work properly inside sub-repos.');
+    checks.push({ category: 'Core Artifacts', name: '.vscode/settings.json', status: 'warn', message: 'is missing or invalid' });
+  }
+
+  // ── 7. Local AI Agent Connection ───────────────────────────────────────
+  const config = await loadConfig();
+  if (config.localLlm?.enabled) {
+    const { provider, endpoint, model } = config.localLlm;
+    try {
+      const cleanEndpoint = endpoint.replace(/\/$/, '');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        if (provider === 'ollama') {
+          const res = await fetch(`${cleanEndpoint}/api/tags`, { signal: controller.signal });
+          if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
+          const data: any = await res.json();
+          const models = data?.models || [];
+          if (isOllamaModelAvailable(models, model)) {
+            checks.push({ category: 'Local AI Agent', name: provider, status: 'pass', message: `Ollama active and model "${model}" is ready` });
+          } else {
+            const availableList = models.map((m: any) => m.name).join(', ') || 'none';
+            warnings.push(`Local model "${model}" is not pulled in Ollama. Available: [${availableList}]. Run "ollama pull ${model}" to install it.`);
+            checks.push({ category: 'Local AI Agent', name: provider, status: 'warn', message: `Ollama active, but model "${model}" is not pulled` });
+          }
+        } else {
+          const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
+          const res = await fetch(testUrl, { signal: controller.signal });
+          if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
+          checks.push({ category: 'Local AI Agent', name: provider, status: 'pass', message: `OpenAI-compatible server at "${endpoint}" is active` });
+        }
+      } catch (e: any) {
+        throw new Error(e.name === 'AbortError' ? 'Request timed out after 5 seconds' : e.message);
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (e: any) {
+      warnings.push(`Local LLM server at "${endpoint}" is offline or unreachable: ${e.message}`);
+      checks.push({ category: 'Local AI Agent', name: 'connection', status: 'warn', message: `Local LLM server is offline or unreachable (${e.message})` });
+    }
+  } else {
+    checks.push({ category: 'Local AI Agent', name: 'status', status: 'info', message: 'Local AI agent is disabled in config.' });
+  }
+
+  return report();
+}

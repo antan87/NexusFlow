@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { execa } from 'execa';
-import { rebaseRepo } from './multi-git.js';
+import {
+  rebaseRepo,
+  getRepoBranch,
+  getAheadBehind,
+  getRemoteUrl,
+  pushRepo,
+} from './multi-git.js';
 
 vi.mock('execa');
 
@@ -154,5 +160,73 @@ describe('rebaseRepo', () => {
     expect(result.status).toBe('stash-conflict');
     expect(result.stashed).toBe(true);
     expect(result.message).toMatch(/stash preserved/i);
+  });
+});
+
+describe('getRepoBranch', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the current branch name', async () => {
+    vi.mocked(execa).mockResolvedValue({ stdout: 'feature/foo\n' } as any);
+    expect(await getRepoBranch('/repo')).toBe('feature/foo');
+  });
+
+  it('returns null for a detached HEAD', async () => {
+    vi.mocked(execa).mockResolvedValue({ stdout: 'HEAD\n' } as any);
+    expect(await getRepoBranch('/repo')).toBeNull();
+  });
+
+  it('returns null when git fails', async () => {
+    vi.mocked(execa).mockRejectedValue(new Error('not a repo'));
+    expect(await getRepoBranch('/repo')).toBeNull();
+  });
+});
+
+describe('getAheadBehind', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('parses behind/ahead counts from rev-list --left-right', async () => {
+    // Output is "<behind>\t<ahead>".
+    vi.mocked(execa).mockResolvedValue({ stdout: '2\t3\n' } as any);
+    expect(await getAheadBehind('/repo', 'main')).toEqual({ ahead: 3, behind: 2 });
+  });
+
+  it('returns nulls when the remote branch does not exist', async () => {
+    vi.mocked(execa).mockRejectedValue(new Error("unknown revision 'origin/main'"));
+    expect(await getAheadBehind('/repo', 'main')).toEqual({ ahead: null, behind: null });
+  });
+});
+
+describe('getRemoteUrl', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the remote URL', async () => {
+    vi.mocked(execa).mockResolvedValue({ stdout: 'git@github.com:owner/repo.git\n' } as any);
+    expect(await getRemoteUrl('/repo')).toBe('git@github.com:owner/repo.git');
+  });
+
+  it('returns null when the remote does not exist', async () => {
+    vi.mocked(execa).mockRejectedValue(new Error('No such remote'));
+    expect(await getRemoteUrl('/repo')).toBeNull();
+  });
+});
+
+describe('pushRepo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('pushes with -u and reports success', async () => {
+    vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
+    const result = await pushRepo('/repo', 'feature/foo');
+    expect(result.success).toBe(true);
+    expect(execa).toHaveBeenCalledWith('git', ['push', '-u', 'origin', 'feature/foo'], { cwd: '/repo' });
+  });
+
+  it('reports failure with the first line of the error', async () => {
+    vi.mocked(execa).mockRejectedValue(
+      Object.assign(new Error('git failed'), { stderr: 'fatal: no upstream\nmore detail' }),
+    );
+    const result = await pushRepo('/repo', 'feature/foo');
+    expect(result.success).toBe(false);
+    expect(result.message).toBe('fatal: no upstream');
   });
 });

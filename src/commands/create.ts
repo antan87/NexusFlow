@@ -18,6 +18,8 @@ import { generateContextFiles } from '../generators/index.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { detectAIAssistants } from '../utils/detect-ai.js';
 import { detectEditors } from '../utils/detect-editors.js';
+import { openInEditor } from '../utils/open-editor.js';
+import { debugLog } from '../utils/debug.js';
 import {
   promptBranchName,
   promptDescription,
@@ -94,7 +96,9 @@ export async function createCommand(): Promise<void> {
     teamworkInstructions = suggestion.customInstructions;
     workflowSpinner.succeed(`Auto-selected strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`);
   } catch (err) {
-    workflowSpinner.fail('Failed to suggest teamwork strategy');
+    const reason = err instanceof Error ? err.message : String(err);
+    workflowSpinner.fail(`Failed to suggest teamwork strategy (${reason}) — continuing without one`);
+    debugLog('workflow-advisor', 'suggestWorkflow', err);
   }
 
   // ── 6. Create workspace ─────────────────────────────────────────────
@@ -114,29 +118,43 @@ export async function createCommand(): Promise<void> {
 
   const wsSpinner = ora('Creating workspace with git worktrees...').start();
   try {
-    await createWorkspace(feature, selectedRepos);
+    await createWorkspace(feature, selectedRepos, (repoName, index, total) => {
+      wsSpinner.text = `Creating worktrees… ${repoName} (${index + 1}/${total})`;
+    });
     wsSpinner.succeed(`Workspace created at ${chalk.bold(workspacePath)}`);
   } catch (error) {
     wsSpinner.fail('Failed to create workspace');
     const message = error instanceof Error ? error.message : String(error);
     console.error(chalk.red(`  ${message}`));
+    console.log(chalk.dim('  Rolled back the partial workspace.'));
+    process.exitCode = 1;
     return;
   }
 
-  // ── 7. Analyze projects ─────────────────────────────────────────────
-  console.log(chalk.cyan('\nAnalyzing projects...'));
+  // ── 7-8. Analyze projects & generate context ────────────────────────
+  // The worktrees are the product; if analysis/generation fails the workspace
+  // is still usable, so keep it and tell the user how to retry rather than
+  // exiting with an error.
   const workspaceRepos = selectedRepos.map((repo) => ({
     ...repo,
     path: path.join(workspacePath, repo.name),
   }));
-  const analysis = await analyzeAllRepos(workspaceRepos);
+  try {
+    console.log(chalk.cyan('\nAnalyzing projects...'));
+    const analysis = await analyzeAllRepos(workspaceRepos);
 
-  // ── 8. Generate AI context files ────────────────────────────────────
-  const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis, localLlm: config.localLlm };
-  console.log(chalk.cyan('\nGenerating AI context files...'));
-  await generateContextFiles(ctx, selectedAI, workspacePath);
-
-  // Monolithic XML context packing removed.
+    const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis, localLlm: config.localLlm };
+    console.log(chalk.cyan('\nGenerating AI context files...'));
+    await generateContextFiles(ctx, selectedAI, workspacePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(
+      chalk.yellow(
+        `\n⚠️  Workspace was created and is usable, but context generation failed (${message}).\n` +
+          `   Run "nexusflow refresh" inside the workspace to retry.`,
+      ),
+    );
+  }
 
   // ── 8. Open in editor ───────────────────────────────────────────────
   const detectedEditors = await detectEditors();
@@ -145,10 +163,7 @@ export async function createCommand(): Promise<void> {
   if (editor) {
     const editorSpinner = ora(`Opening in ${editor.name}...`).start();
     try {
-      await execa(editor.command, [workspacePath], {
-        stdio: 'ignore',
-        shell: process.platform === 'win32',
-      });
+      await openInEditor(editor.command, workspacePath);
       editorSpinner.succeed(`Opened in ${editor.name}`);
     } catch {
       editorSpinner.warn(
@@ -174,30 +189,40 @@ export async function createCommand(): Promise<void> {
   // ── 9. Start AI Assistant Session ───────────────────────────────────
   if (selectedAI.length > 0) {
     const assistant = selectedAI[0];
-    const confirmStart = await confirm({
-      message: `Do you want to start a session with ${assistant} inside the workspace now?`,
-      default: true,
-    });
+    const detected = detectedAI.find((a) => a.name === assistant);
+    const label = detected?.displayName ?? assistant;
+    // `command` is the single source of truth for a launchable terminal session
+    // (see detect-ai.ts). Some assistants are selectable but not launchable this
+    // way (e.g. Copilot without its CLI, or Cursor's GUI-only binary).
+    const launchCmd = detected?.command;
 
-    if (confirmStart) {
-      console.log(chalk.cyan(`\n🚀 Starting ${assistant} session inside workspace...\n`));
+    if (!launchCmd) {
+      console.log(
+        chalk.dim(
+          `\n  ${label} has no launchable terminal CLI — open the workspace in it manually.`,
+        ),
+      );
+    } else {
+      const confirmStart = await confirm({
+        message: `Do you want to start a session with ${label} inside the workspace now?`,
+        default: true,
+      });
 
-      let cmd = 'agy';
-      if (assistant === 'claude') cmd = 'claude';
-      else if (assistant === 'codex') cmd = 'codex';
-      else if (assistant === 'copilot') cmd = 'copilot';
+      if (confirmStart) {
+        console.log(chalk.cyan(`\n🚀 Starting ${label} session inside workspace...\n`));
 
-      try {
-        await execa(cmd, [], {
-          cwd: workspacePath,
-          stdio: 'inherit',
-          shell: process.platform === 'win32',
-        });
-        console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
-      } catch {
-        console.log(
-          chalk.yellow(`\n⚠️  Could not start ${assistant}. Please start it manually:\n  ${chalk.dim(`cd "${workspacePath}" && ${cmd}`)}`)
-        );
+        try {
+          await execa(launchCmd, [], {
+            cwd: workspacePath,
+            stdio: 'inherit',
+            shell: process.platform === 'win32',
+          });
+          console.log(chalk.green(`\n👋 Exited ${label} session.`));
+        } catch {
+          console.log(
+            chalk.yellow(`\n⚠️  Could not start ${label}. Please start it manually:\n  ${chalk.dim(`cd "${workspacePath}" && ${launchCmd}`)}`)
+          );
+        }
       }
     }
   }

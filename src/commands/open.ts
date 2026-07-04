@@ -10,6 +10,7 @@ import { select, confirm, search } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces } from '../core/workspace.js';
 import { detectEditors } from '../utils/detect-editors.js';
+import { openInEditor } from '../utils/open-editor.js';
 import { promptSelectEditor } from '../utils/prompts.js';
 import { findSessions } from '../utils/session-finder.js';
 
@@ -51,10 +52,7 @@ export async function openCommand(): Promise<void> {
 
   if (editor) {
     try {
-      await execa(editor.command, [selected], {
-        stdio: 'ignore',
-        shell: process.platform === 'win32',
-      });
+      await openInEditor(editor.command, selected);
       console.log(chalk.green(`\n✅ Opened ${selected} in ${editor.name}\n`));
     } catch {
       console.log(chalk.yellow(`\n⚠️  Could not open editor. Navigate manually:`));

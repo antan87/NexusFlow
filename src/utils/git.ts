@@ -34,13 +34,44 @@ export async function gitFetch(repoPath: string): Promise<void> {
 }
 
 /**
- * Detects the default branch of a repository by inspecting remote branches.
- * Prefers `main` over `master`. Falls back to `'main'` when neither is found.
+ * Detects the default branch of a repository.
+ *
+ * Tries several strategies in order of authority so that repos without an
+ * `origin/main`/`origin/master` remote branch — including remote-less local
+ * repos — resolve to a real, checkout-able branch instead of a blind `'main'`
+ * (which would make {@link import('../core/worktree.js')} fail with
+ * `fatal: invalid reference: main`):
+ *
+ * 1. `origin/HEAD` symbolic-ref — authoritative, set at clone time.
+ * 2. Remote-tracking branches — prefer `origin/main`, then `origin/master`.
+ * 3. Local branches named `main`/`master` (repo has no remote yet).
+ * 4. The currently checked-out branch — the best base for a remote-less repo.
+ * 5. Last resort — `'main'`.
  *
  * @param repoPath - Absolute path to the repo root.
  * @returns The name of the default branch.
  */
 export async function detectDefaultBranch(repoPath: string): Promise<string> {
+  // 1. origin/HEAD is what `git clone` records as the remote's default branch.
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+      { cwd: repoPath },
+    );
+    const prefix = 'refs/remotes/origin/';
+    const ref = stdout.trim();
+    if (ref.startsWith(prefix)) {
+      const branch = ref.slice(prefix.length);
+      if (branch) {
+        return branch;
+      }
+    }
+  } catch {
+    // origin/HEAD is often unset on manually-added remotes; try the next strategy.
+  }
+
+  // 2. Scan remote-tracking branches, preferring main over master.
   try {
     const { stdout } = await execa('git', ['branch', '-r'], { cwd: repoPath });
     const branches = stdout.split('\n').map((b) => b.trim());
@@ -52,12 +83,44 @@ export async function detectDefaultBranch(repoPath: string): Promise<string> {
     if (branches.some((b) => b === 'origin/master' || b.endsWith('/origin/master'))) {
       return 'master';
     }
-
-    // Fallback — assume main.
-    return 'main';
   } catch {
-    return 'main';
+    // No remote or `git branch -r` failed — fall through to local heuristics.
   }
+
+  // 3. Local branches named main/master, for a repo that has no remote yet.
+  try {
+    const { stdout } = await execa('git', ['branch', '--list', 'main', 'master'], {
+      cwd: repoPath,
+    });
+    const locals = stdout
+      .split('\n')
+      .map((b) => b.replace(/^[*+]?\s*/, '').trim())
+      .filter(Boolean);
+    if (locals.includes('main')) {
+      return 'main';
+    }
+    if (locals.includes('master')) {
+      return 'master';
+    }
+  } catch {
+    // No local main/master — fall through.
+  }
+
+  // 4. The checked-out branch is the most sensible base for a remote-less repo.
+  try {
+    const { stdout } = await execa('git', ['symbolic-ref', '--short', 'HEAD'], {
+      cwd: repoPath,
+    });
+    const current = stdout.trim();
+    if (current) {
+      return current;
+    }
+  } catch {
+    // Detached HEAD or not a repo — fall through to the last-resort default.
+  }
+
+  // 5. Last resort — assume main.
+  return 'main';
 }
 
 /**

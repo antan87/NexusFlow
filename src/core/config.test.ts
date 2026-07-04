@@ -73,6 +73,39 @@ describe('config core module', () => {
       expect(config.version).toBe('1.0.0');
       expect(config.localLlm?.enabled).toBe(false);
     });
+
+    it('warns and falls back to local on an unknown storage provider', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ storageProvider: 'bogus' }));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await loadConfig();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('bogus'));
+      expect(config.storageProvider).toBe('bogus');
+      warn.mockRestore();
+    });
+
+    it('suppresses the storage-fallback warning when quiet', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ storageProvider: 'bogus' }));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await loadConfig({ quiet: true });
+
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('warns and returns defaults on invalid JSON', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('{ this is not valid json ');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await loadConfig();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid JSON'));
+      expect(config.version).toBe('1.0.0');
+      expect(config.localLlm?.enabled).toBe(false);
+      warn.mockRestore();
+    });
   });
 
   describe('saveConfig', () => {
