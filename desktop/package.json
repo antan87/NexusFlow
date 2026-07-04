@@ -1,6 +1,6 @@
 {
   "name": "nexusflow-desktop",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "build": "node build.js",
@@ -9,6 +9,6 @@
     "update": "npx neu update"
   },
   "devDependencies": {
-    "@neutralinojs/neu": "^11.1.0"
+    "@neutralinojs/neu": "^11.7.2"
   }
 }

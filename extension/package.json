@@ -2,10 +2,10 @@
   "name": "nexusflow-vscode",
   "displayName": "NexusFlow Multi-Repo Workspace Orchestrator",
   "description": "Manage multiple repositories as a single feature workspace, orchestrate background services, and align AI coding contexts natively inside VS Code.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "nexusflow",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.125.0"
   },
   "categories": [
     "Other"
@@ -100,18 +100,17 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.0.0",
-    "@vscode/codicons": "^0.0.45",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.1.0",
     "@types/vscode": "^1.125.0",
-    "@types/glob": "^8.1.0",
-    "@types/mocha": "^10.0.1",
-    "@types/node": "^25.9.3",
-    "@typescript-eslint/eslint-plugin": "^8.61.1",
-    "@typescript-eslint/parser": "^8.61.0",
-    "eslint": "^10.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.62.1",
+    "@typescript-eslint/parser": "^8.62.1",
+    "@vscode/codicons": "^0.0.45",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "eslint": "^10.6.0",
     "glob": "^13.0.6",
     "mocha": "^11.7.6",
-    "typescript": "~5.7.3",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript": "~6.0.3"
   }
 }
