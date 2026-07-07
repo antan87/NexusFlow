@@ -3,7 +3,7 @@
  * Interactive CLI prompts for NexusFlow using @inquirer/prompts.
  */
 
-import { input, checkbox, confirm, select, search } from '@inquirer/prompts';
+import { input, checkbox, confirm, select, search, editor } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
@@ -216,6 +216,7 @@ export async function promptSelectEditor(
 
 /**
  * Prompts the user to select a teamwork collaboration strategy.
+ * Shows a preview of the selected template before confirming.
  */
 export async function promptSelectStrategy(
   templates: WorkflowTemplate[]
@@ -230,38 +231,87 @@ export async function promptSelectStrategy(
     })),
   ];
 
-  return select({
-    message: 'Select a teamwork collaboration strategy:',
-    choices,
-  });
+  while (true) {
+    const selectedId = await select({
+      message: 'Select a teamwork collaboration strategy:',
+      choices,
+    });
+
+    // Auto and create_new don't need a preview
+    if (selectedId === 'auto' || selectedId === 'create_new') {
+      return selectedId;
+    }
+
+    // Show preview for template-based strategies
+    const template = templates.find((t) => t.id === selectedId);
+    if (template) {
+      console.log(chalk.bold(`\n📄 Preview: ${template.name}\n`));
+      console.log(chalk.dim('─'.repeat(60)));
+      console.log(template.content);
+      console.log(chalk.dim('─'.repeat(60)));
+
+      const confirmed = await confirm({
+        message: 'Use this strategy?',
+        default: true,
+      });
+
+      if (confirmed) {
+        return selectedId;
+      }
+      // Loop back to selection if not confirmed
+      console.log();
+    } else {
+      return selectedId;
+    }
+  }
 }
 
 /**
  * Prompts the user for a new strategy name and content.
+ * Offers two input modes: open $EDITOR for multi-line authoring, or load from a file.
  */
 export async function promptNewStrategy(): Promise<{ name: string; content: string }> {
-  const { readFile } = await import('node:fs/promises');
-  const { existsSync } = await import('node:fs');
-
   const name = await input({
     message: 'New Strategy Name:',
     validate: (value) => value.trim().length > 0 || 'Name cannot be empty',
   });
 
-  const descInput = await input({
-    message: 'Strategy Content (or paste a path to a .md/.txt file):',
-    validate: (value) => value.trim().length > 0 || 'Content cannot be empty',
+  const mode = await select({
+    message: 'How do you want to provide the strategy content?',
+    choices: [
+      { name: '📝 Write in editor', value: 'editor', description: 'Opens your $EDITOR for multi-line content' },
+      { name: '📂 Load from file', value: 'file', description: 'Paste a path to a .md or .txt file' },
+    ],
   });
 
-  const trimmed = descInput.trim();
-  let content = trimmed;
+  let content: string;
 
-  if (existsSync(trimmed)) {
-    try {
-      content = await readFile(trimmed, 'utf-8');
-      console.log(chalk.dim(`  Read strategy from ${trimmed}`));
-    } catch {}
+  if (mode === 'file') {
+    const { readFile } = await import('node:fs/promises');
+    const { existsSync } = await import('node:fs');
+
+    const filePath = await input({
+      message: 'Path to strategy file (.md or .txt):',
+      validate: (value) => {
+        if (!value.trim()) return 'Path cannot be empty';
+        if (!existsSync(value.trim())) return 'File not found';
+        return true;
+      },
+    });
+
+    content = await readFile(filePath.trim(), 'utf-8');
+    console.log(chalk.dim(`  Read strategy from ${filePath.trim()}`));
+  } else {
+    content = await editor({
+      message: 'Write your strategy content (save and close the editor when done):',
+      default: `# ${name.trim()}\n\nDescribe your teamwork cooperation guidelines here.\n\n## Guidelines\n\n- \n`,
+      waitForUserInput: false,
+    });
   }
 
-  return { name: name.trim(), content };
+  if (!content.trim()) {
+    content = `# ${name.trim()}\n\nCustom strategy template.`;
+  }
+
+  return { name: name.trim(), content: content.trim() };
 }

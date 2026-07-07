@@ -1,9 +1,12 @@
 /**
  * @module utils/workflow-advisor
  * Dynamically suggests task difficulty and teamwork strategy guidelines.
+ * Uses the canonical template files from resources/workflows/ as the source
+ * of truth, falling back to inline defaults only when templates are unavailable.
  */
 
 import { callLocalLlm } from './local-ai.js';
+import { getWorkflowTemplates } from './workflows.js';
 import type { LocalLlmConfig, RepoInfo } from '../types.js';
 
 export interface WorkflowSuggestion {
@@ -11,6 +14,23 @@ export interface WorkflowSuggestion {
   rationale: string;
   suggestedWorkflowId: 'solo-developer' | 'research-verify' | 'plan-implement-review';
   customInstructions: string;
+}
+
+/**
+ * Loads the content of a workflow template by ID. Falls back to a default
+ * string if the template file cannot be found.
+ */
+async function loadTemplateContent(templateId: string, fallback: string): Promise<string> {
+  try {
+    const templates = await getWorkflowTemplates();
+    const template = templates.find((t) => t.id === templateId);
+    if (template) {
+      return template.content;
+    }
+  } catch {
+    // Silently fall back to inline default
+  }
+  return fallback;
 }
 
 /**
@@ -23,7 +43,7 @@ export async function suggestWorkflow(
 ): Promise<WorkflowSuggestion> {
   const repoNames = repos.map((r) => r.name);
   
-  const runHeuristic = (): WorkflowSuggestion => {
+  const runHeuristic = async (): Promise<WorkflowSuggestion> => {
     const descLower = (description || '').toLowerCase();
     const isComplexWord = descLower.includes('refactor') ||
                           descLower.includes('migrate') ||
@@ -50,25 +70,37 @@ export async function suggestWorkflow(
                          descLower.includes('doc');
 
     if (repos.length > 2 || isComplexWord) {
+      const content = await loadTemplateContent(
+        'plan-implement-review',
+        `# Team Strategy: Plan, Implement, Review\n\nThis workspace involves complex changes across multiple projects: ${repoNames.join(', ')}.\n\n## Roles & Coordination\n1. **Lead Planner**: Analyzes requirements and details a step-by-step design plan in \`implementation_plan.md\`.\n2. **Code Implementer**: Executes modifications project-by-project following the approved design.\n3. **Code Reviewer**: Runs testing/verification and approves before completion.\n\nPlease follow these roles strictly.`
+      );
       return {
         difficulty: 'complex',
         suggestedWorkflowId: 'plan-implement-review',
         rationale: `This task spans multiple repositories or involves architectural components (${repoNames.join(', ')}). A structured Plan-Implement-Review strategy is recommended to coordinate changes carefully.`,
-        customInstructions: `# Team Strategy: Plan, Implement, Review\n\nThis workspace involves complex changes across multiple projects: ${repoNames.join(', ')}.\n\n## Roles & Coordination\n1. **Lead Planner**: Analyzes requirements and details a step-by-step design plan in \`implementation_plan.md\`.\n2. **Code Implementer**: Executes modifications project-by-project following the approved design.\n3. **Code Reviewer**: Runs testing/verification and approves before completion.\n\nPlease follow these roles strictly.`
+        customInstructions: content,
       };
     } else if (repos.length === 1 && isSimpleWord && !isComplexWord) {
+      const content = await loadTemplateContent(
+        'solo-developer',
+        `# Team Strategy: Solo Developer\n\nThis task is a localized fix in ${repoNames[0] || 'the project'}.\n\n## Guidelines\n- Direct implementation by the main agent.\n- Run tests and compile code immediately.\n- Avoid spawning subagents to reduce overhead.`
+      );
       return {
         difficulty: 'simple',
         suggestedWorkflowId: 'solo-developer',
         rationale: `This is a localized fix/tweak within a single repository (${repoNames.join(', ')}). A Solo Developer pattern minimizes overhead and speeds up the modification.`,
-        customInstructions: `# Team Strategy: Solo Developer\n\nThis task is a localized fix in ${repoNames[0] || 'the project'}.\n\n## Guidelines\n- Direct implementation by the main agent.\n- Run tests and compile code immediately.\n- Avoid spawning subagents to reduce overhead.`
+        customInstructions: content,
       };
     } else {
+      const content = await loadTemplateContent(
+        'research-verify',
+        `# Team Strategy: Research & Verify\n\nThis task involves moderate changes in ${repoNames.join(', ')}.\n\n## Guidelines\n1. **Research Phase**: Inspect existing components and API interfaces first.\n2. **Implementation Phase**: Write modular code changes.\n3. **Verification Phase**: Confirm build and runs correctly.`
+      );
       return {
         difficulty: 'moderate',
         suggestedWorkflowId: 'research-verify',
         rationale: `This is a feature of moderate scope affecting ${repoNames.join(', ')}. We recommend first researching the codebase and dependencies, followed by targeted implementation.`,
-        customInstructions: `# Team Strategy: Research & Verify\n\nThis task involves moderate changes in ${repoNames.join(', ')}.\n\n## Guidelines\n1. **Research Phase**: Inspect existing components and API interfaces first.\n2. **Implementation Phase**: Write modular code changes.\n3. **Verification Phase**: Confirm build and runs correctly.`
+        customInstructions: content,
       };
     }
   };

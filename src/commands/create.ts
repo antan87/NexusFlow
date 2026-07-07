@@ -126,7 +126,6 @@ export async function createCommand(): Promise<void> {
     }
   }
 
-
   // ── 6. Create workspace ─────────────────────────────────────────────
   const workspacePath = path.join(config.workspacesDir, branchName);
   const feature: Feature = {
