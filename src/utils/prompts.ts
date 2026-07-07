@@ -31,34 +31,58 @@ export async function promptBranchName(): Promise<string> {
 
 /**
  * Prompts the user for a feature description.
- * Accepts plain text or a path to a file.
+ * Offers short inline typing, multi-line editor (safe for pasting), or loading from file.
  */
 export async function promptDescription(): Promise<string> {
+  const mode = await select({
+    message: 'How do you want to provide the feature description?',
+    choices: [
+      { name: '✍️  Type short description', value: 'short', description: 'Type a single-line description directly in the terminal' },
+      { name: '📝 Write in editor', value: 'editor', description: 'Opens your $EDITOR (safest for copy-pasting multi-line text)' },
+      { name: '📂 Load from file', value: 'file', description: 'Paste a path to a .md or .txt file' },
+    ],
+  });
+
+  if (mode === 'short') {
+    const desc = await input({
+      message: 'Feature description:',
+      validate: (value: string) => {
+        if (!value.trim()) return 'Description cannot be empty';
+        return true;
+      },
+    });
+    return desc.trim();
+  }
+
+  if (mode === 'editor') {
+    const desc = await editor({
+      message: 'Write or paste your feature description (save and close the editor when done):',
+      default: '',
+      waitForUserInput: false,
+    });
+    if (!desc.trim()) {
+      console.log(chalk.yellow('  ⚠ Empty description provided.'));
+      return 'No description provided.';
+    }
+    return desc.trim();
+  }
+
+  // File mode
   const { readFile } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');
 
-  const descInput = await input({
-    message: 'Describe the feature (or paste a path to a .md/.txt file):',
-    validate: (value: string) => {
-      if (!value.trim()) return 'Description cannot be empty';
+  const filePath = await input({
+    message: 'Path to description file (.md or .txt):',
+    validate: (value) => {
+      if (!value.trim()) return 'Path cannot be empty';
+      if (!existsSync(value.trim())) return 'File not found';
       return true;
     },
   });
 
-  const trimmed = descInput.trim();
-
-  // Check if it's a file path
-  if (existsSync(trimmed)) {
-    try {
-      const content = await readFile(trimmed, 'utf-8');
-      console.log(chalk.dim(`  Read description from ${trimmed}`));
-      return content;
-    } catch {
-      // Fall through to use as plain text
-    }
-  }
-
-  return trimmed;
+  const content = await readFile(filePath.trim(), 'utf-8');
+  console.log(chalk.dim(`  Read description from ${filePath.trim()}`));
+  return content.trim();
 }
 
 /**
