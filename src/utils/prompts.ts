@@ -8,6 +8,7 @@ import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
 import { isValidBranchName } from './git.js';
+import type { WorkflowTemplate } from './workflows.js';
 
 /**
  * Prompts the user for a feature branch name.
@@ -211,4 +212,56 @@ export async function promptSelectEditor(
   if (selected.length === 0) return null;
 
   return available.find((e) => e.command === selected[0]) ?? null;
+}
+
+/**
+ * Prompts the user to select a teamwork collaboration strategy.
+ */
+export async function promptSelectStrategy(
+  templates: WorkflowTemplate[]
+): Promise<string> {
+  const choices = [
+    { name: '✨ Auto-suggest using AI', value: 'auto', description: 'Dynamically analyzes the task to recommend a strategy' },
+    { name: '✏️  Create new custom strategy', value: 'create_new', description: 'Write a new strategy or load from a file' },
+    ...templates.map((t) => ({
+      name: `${t.name}${t.custom ? ' (Custom)' : ''}`,
+      value: t.id,
+      description: t.description,
+    })),
+  ];
+
+  return select({
+    message: 'Select a teamwork collaboration strategy:',
+    choices,
+  });
+}
+
+/**
+ * Prompts the user for a new strategy name and content.
+ */
+export async function promptNewStrategy(): Promise<{ name: string; content: string }> {
+  const { readFile } = await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+
+  const name = await input({
+    message: 'New Strategy Name:',
+    validate: (value) => value.trim().length > 0 || 'Name cannot be empty',
+  });
+
+  const descInput = await input({
+    message: 'Strategy Content (or paste a path to a .md/.txt file):',
+    validate: (value) => value.trim().length > 0 || 'Content cannot be empty',
+  });
+
+  const trimmed = descInput.trim();
+  let content = trimmed;
+
+  if (existsSync(trimmed)) {
+    try {
+      content = await readFile(trimmed, 'utf-8');
+      console.log(chalk.dim(`  Read strategy from ${trimmed}`));
+    } catch {}
+  }
+
+  return { name: name.trim(), content };
 }
