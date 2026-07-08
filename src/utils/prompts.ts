@@ -235,7 +235,7 @@ export async function promptSelectEditor(
     return null;
   }
 
-  const selected = await checkbox({
+  const selectedCommand = await select({
     message: 'Select editor:',
     choices: available.map((editor) => ({
       name: editor.name,
@@ -243,9 +243,7 @@ export async function promptSelectEditor(
     })),
   });
 
-  if (selected.length === 0) return null;
-
-  return available.find((e) => e.command === selected[0]) ?? null;
+  return available.find((e) => e.command === selectedCommand) ?? null;
 }
 
 /**
