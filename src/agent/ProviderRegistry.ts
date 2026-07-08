@@ -1,9 +1,9 @@
-import { execa, type ExecaChildProcess } from 'execa';
+import { execa } from 'execa';
 import { SessionPersistence, type ProviderSession } from './SessionPersistence.js';
 
 export class ProviderRegistry {
   private persistence: SessionPersistence;
-  private activeProcesses: Map<string, ExecaChildProcess<string>> = new Map();
+  private activeProcesses: Map<string, any> = new Map();
 
   constructor(workspacePath: string) {
     this.persistence = new SessionPersistence(workspacePath);
