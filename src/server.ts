@@ -1266,10 +1266,11 @@ app.get('/api/workspace/:id/sessions', async (c) => {
       const dbSessions = persistence.listSessions(workspacePath);
       agentSessions = dbSessions.map(s => ({
         id: s.id,
-        harness: s.provider,
+        assistant: 'review-loop',
+        provider: s.provider,
         title: `Agent Review Loop (${s.status})`,
         lastActive: s.updatedAt,
-        messages: 0,
+        messages: 1,
         mode: 'review-loop'
       }));
     } catch (e) {
@@ -1286,9 +1287,20 @@ app.get('/api/workspace/:id/sessions', async (c) => {
 
 // 16. Fetch transcript for a specific AI session
 app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
+  const assistant = c.req.param('assistant');
+  const sessionId = c.req.param('sessionId');
   try {
-    const assistant = c.req.param('assistant');
-    const sessionId = c.req.param('sessionId');
+    if (assistant === 'review-loop') {
+      return c.json({
+        messages: [
+          {
+            role: 'assistant',
+            content: 'This is an automated review loop session backed by SQLite.\n\nSince this is an orchestration scaffolding, individual prompts and completions are forwarded directly to the configured provider (`' + sessionId + '`) and are not saved to disk as a unified transcript yet.',
+            timestamp: new Date().toISOString()
+          }
+        ]
+      });
+    }
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
   } catch (error) {
