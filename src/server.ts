@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
+import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
 import { createWriteStream, existsSync } from 'node:fs';
 import * as path from 'node:path';
@@ -72,6 +73,26 @@ const __dirname = path.dirname(__filename);
 const guiPath = path.join(__dirname, 'gui');
 
 export const app = new Hono();
+
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
+app.get('/ws', upgradeWebSocket((c) => {
+  return {
+    onMessage(event, ws) {
+      console.log(`[WS] Received message: ${event.data}`);
+      // Basic ping-pong for now, will connect to Effect RPC router later
+      if (typeof event.data === 'string' && event.data.includes('ping')) {
+        ws.send(JSON.stringify({ type: 'pong' }));
+      }
+    },
+    onOpen(_event, _ws) {
+      console.log('[WS] Client connected');
+    },
+    onClose(_event, _ws) {
+      console.log('[WS] Client disconnected');
+    },
+  };
+}));
 
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
@@ -1603,6 +1624,8 @@ export function startServer(
       startScheduler({ log: (message) => console.log(`[scheduler] ${message}`) });
       resolve({ port: info.port, server });
     }) as import('node:http').Server;
+
+    injectWebSocket(server);
 
     server.on('error', (e: any) => {
       if (e.code === 'EADDRINUSE') {
