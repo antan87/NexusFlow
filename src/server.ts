@@ -29,6 +29,7 @@ import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import { SessionPersistence } from './agent/SessionPersistence.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -1256,7 +1257,28 @@ app.get('/api/workspace/:id/sessions', async (c) => {
     }
 
     const sessions = await findSessions(workspacePath, feature.repos);
-    return c.json({ sessions });
+    
+    // Also get Agentic Review Loop Sessions from SQLite
+    let agentSessions: any[] = [];
+    let persistence: SessionPersistence | undefined;
+    try {
+      persistence = new SessionPersistence(workspacePath);
+      const dbSessions = persistence.listSessions(workspacePath);
+      agentSessions = dbSessions.map(s => ({
+        id: s.id,
+        harness: s.provider,
+        title: `Agent Review Loop (${s.status})`,
+        lastActive: s.updatedAt,
+        messages: 0,
+        mode: 'review-loop'
+      }));
+    } catch (e) {
+      console.error('Error fetching agent sessions', e);
+    } finally {
+      persistence?.close();
+    }
+
+    return c.json({ sessions: [...agentSessions, ...sessions] });
   } catch (error) {
     return errorResponse(c, error);
   }

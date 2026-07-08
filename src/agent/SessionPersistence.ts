@@ -21,6 +21,7 @@ export class SessionPersistence {
     }
     const dbPath = path.join(dbDir, 'sessions.db');
     this.db = new Database(dbPath);
+    this.db.pragma('journal_mode = WAL');
     this.initSchema();
   }
 

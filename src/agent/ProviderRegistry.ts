@@ -35,7 +35,8 @@ export class ProviderRegistry {
     this.activeProcesses.set(sessionId, proc);
 
     // 3. Monitor process to update status when it dies
-    proc.catch((err) => {
+    proc.catch((err: any) => {
+      if (!this.activeProcesses.has(sessionId)) return; // Was manually stopped/shut down
       console.error(`Agent process ${sessionId} error:`, err);
       this.persistence.updateSessionStatus(sessionId, 'error');
       this.activeProcesses.delete(sessionId);
@@ -74,6 +75,7 @@ export class ProviderRegistry {
       proc.kill();
       this.persistence.updateSessionStatus(id, 'paused');
     }
+    this.activeProcesses.clear(); // Prevent late-firing .catch handlers from writing
     this.persistence.close();
   }
 }
