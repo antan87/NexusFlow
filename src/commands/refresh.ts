@@ -4,19 +4,21 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
-import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
+import { listWorkspaces, loadFeatureConfig, saveFeatureConfig } from '../core/workspace.js';
 import { refreshWorkspace } from '../core/refresh.js';
+import { getWorkflowTemplates } from '../utils/workflows.js';
+import { suggestWorkflow } from '../utils/workflow-advisor.js';
 
 /**
  * Runs the refresh command.
  * Updates context files, maps, and plans — re-analyzing only repos whose
  * content changed since the last run (use --force to re-analyze everything).
  *
- * @param options - CLI options, e.g. { repo: 'API_CoworkerFacade', force: true }.
+ * @param options - CLI options, e.g. { repo: 'API_CoworkerFacade', force: true, strategy: 'solo-developer' }.
  * @param workspaceArg - Optional workspace path.
  */
 export async function refreshCommand(
-  options: { repo?: string; base?: boolean; force?: boolean },
+  options: { repo?: string; base?: boolean; force?: boolean; strategy?: string },
   workspaceArg?: string,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
@@ -28,6 +30,37 @@ export async function refreshCommand(
   if (!feature) {
     console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
     return;
+  }
+
+  // Handle --strategy flag: update teamworkInstructions before regenerating
+  if (options.strategy) {
+    const strategyId = options.strategy;
+
+    if (strategyId === 'auto') {
+      const config = await loadConfig();
+      const { resolveRepoInfos } = await import('../core/workspace.js');
+      const repos = await resolveRepoInfos(feature.repos);
+      try {
+        const suggestion = await suggestWorkflow(feature.description, repos, config.localLlm);
+        feature.teamworkInstructions = suggestion.customInstructions;
+        console.log(chalk.green(`  ✔ Auto-updated strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`));
+      } catch (err) {
+        console.log(chalk.yellow(`  ⚠ Failed to auto-suggest strategy: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    } else {
+      const templates = await getWorkflowTemplates();
+      const template = templates.find((t) => t.id === strategyId);
+      if (template) {
+        feature.teamworkInstructions = template.content;
+        console.log(chalk.green(`  ✔ Updated strategy to: ${chalk.bold(template.name)}`));
+      } else {
+        console.error(chalk.red(`  ✖ Strategy template "${strategyId}" not found. Use "nexusflow strategy list" to see available templates.`));
+        return;
+      }
+    }
+
+    // Persist the updated feature config
+    await saveFeatureConfig(workspacePath, feature);
   }
 
   const onlyRepo = options.repo;

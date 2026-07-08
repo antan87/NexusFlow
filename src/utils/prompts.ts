@@ -3,11 +3,12 @@
  * Interactive CLI prompts for NexusFlow using @inquirer/prompts.
  */
 
-import { input, checkbox, confirm, select, search } from '@inquirer/prompts';
+import { input, checkbox, confirm, select, search, editor } from '@inquirer/prompts';
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
 import { isValidBranchName } from './git.js';
+import type { WorkflowTemplate } from './workflows.js';
 
 /**
  * Prompts the user for a feature branch name.
@@ -29,35 +30,69 @@ export async function promptBranchName(): Promise<string> {
 }
 
 /**
- * Prompts the user for a feature description.
- * Accepts plain text or a path to a file.
+ * Generic prompt for multi-line text input.
+ * Offers short inline typing, multi-line editor (safe for pasting), or loading from file.
+ *
+ * @param entityName e.g., 'feature description', 'commit message'
+ * @param emptyFallback Default text to return if left empty in editor mode
  */
-export async function promptDescription(): Promise<string> {
+export async function promptMultiLineInput(entityName: string, emptyFallback = ''): Promise<string> {
+  const mode = await select({
+    message: `How do you want to provide the ${entityName}?`,
+    choices: [
+      { name: `✍️  Type short ${entityName}`, value: 'short', description: `Type a single-line ${entityName} directly in the terminal` },
+      { name: `📝 Write in editor`, value: 'editor', description: 'Opens your $EDITOR (safest for copy-pasting multi-line text)' },
+      { name: `📂 Load from file`, value: 'file', description: 'Paste a path to a .md or .txt file' },
+    ],
+  });
+
+  if (mode === 'short') {
+    const text = await input({
+      message: `${entityName.charAt(0).toUpperCase() + entityName.slice(1)}:`,
+      validate: (value: string) => {
+        if (!value.trim() && !emptyFallback) return `${entityName} cannot be empty`;
+        return true;
+      },
+    });
+    return text.trim() || emptyFallback;
+  }
+
+  if (mode === 'editor') {
+    const text = await editor({
+      message: `Write or paste your ${entityName} (save and close the editor when done):`,
+      default: '',
+      waitForUserInput: false,
+    });
+    if (!text.trim()) {
+      console.log(chalk.yellow(`  ⚠ Empty ${entityName} provided.`));
+      return emptyFallback;
+    }
+    return text.trim();
+  }
+
+  // File mode
   const { readFile } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');
 
-  const descInput = await input({
-    message: 'Describe the feature (or paste a path to a .md/.txt file):',
-    validate: (value: string) => {
-      if (!value.trim()) return 'Description cannot be empty';
+  const filePath = await input({
+    message: `Path to ${entityName} file (.md or .txt):`,
+    validate: (value) => {
+      if (!value.trim()) return 'Path cannot be empty';
+      if (!existsSync(value.trim())) return 'File not found';
       return true;
     },
   });
 
-  const trimmed = descInput.trim();
+  const content = await readFile(filePath.trim(), 'utf-8');
+  console.log(chalk.dim(`  Read ${entityName} from ${filePath.trim()}`));
+  return content.trim() || emptyFallback;
+}
 
-  // Check if it's a file path
-  if (existsSync(trimmed)) {
-    try {
-      const content = await readFile(trimmed, 'utf-8');
-      console.log(chalk.dim(`  Read description from ${trimmed}`));
-      return content;
-    } catch {
-      // Fall through to use as plain text
-    }
-  }
-
-  return trimmed;
+/**
+ * Prompts the user for a feature description.
+ */
+export async function promptDescription(): Promise<string> {
+  return promptMultiLineInput('feature description', 'No description provided.');
 }
 
 /**
@@ -200,7 +235,7 @@ export async function promptSelectEditor(
     return null;
   }
 
-  const selected = await checkbox({
+  const selectedCommand = await select({
     message: 'Select editor:',
     choices: available.map((editor) => ({
       name: editor.name,
@@ -208,7 +243,107 @@ export async function promptSelectEditor(
     })),
   });
 
-  if (selected.length === 0) return null;
+  return available.find((e) => e.command === selectedCommand) ?? null;
+}
 
-  return available.find((e) => e.command === selected[0]) ?? null;
+/**
+ * Prompts the user to select a teamwork collaboration strategy.
+ * Shows a preview of the selected template before confirming.
+ */
+export async function promptSelectStrategy(
+  templates: WorkflowTemplate[]
+): Promise<string> {
+  const choices = [
+    { name: '✨ Auto-suggest using AI', value: 'auto', description: 'Dynamically analyzes the task to recommend a strategy' },
+    { name: '✏️  Create new custom strategy', value: 'create_new', description: 'Write a new strategy or load from a file' },
+    ...templates.map((t) => ({
+      name: `${t.name}${t.custom ? ' (Custom)' : ''}`,
+      value: t.id,
+      description: t.description,
+    })),
+  ];
+
+  while (true) {
+    const selectedId = await select({
+      message: 'Select a teamwork collaboration strategy:',
+      choices,
+    });
+
+    // Auto and create_new don't need a preview
+    if (selectedId === 'auto' || selectedId === 'create_new') {
+      return selectedId;
+    }
+
+    // Show preview for template-based strategies
+    const template = templates.find((t) => t.id === selectedId);
+    if (template) {
+      console.log(chalk.bold(`\n📄 Preview: ${template.name}\n`));
+      console.log(chalk.dim('─'.repeat(60)));
+      console.log(template.content);
+      console.log(chalk.dim('─'.repeat(60)));
+
+      const confirmed = await confirm({
+        message: 'Use this strategy?',
+        default: true,
+      });
+
+      if (confirmed) {
+        return selectedId;
+      }
+      // Loop back to selection if not confirmed
+      console.log();
+    } else {
+      return selectedId;
+    }
+  }
+}
+
+/**
+ * Prompts the user for a new strategy name and content.
+ * Offers two input modes: open $EDITOR for multi-line authoring, or load from a file.
+ */
+export async function promptNewStrategy(): Promise<{ name: string; content: string }> {
+  const name = await input({
+    message: 'New Strategy Name:',
+    validate: (value) => value.trim().length > 0 || 'Name cannot be empty',
+  });
+
+  const mode = await select({
+    message: 'How do you want to provide the strategy content?',
+    choices: [
+      { name: '📝 Write in editor', value: 'editor', description: 'Opens your $EDITOR for multi-line content' },
+      { name: '📂 Load from file', value: 'file', description: 'Paste a path to a .md or .txt file' },
+    ],
+  });
+
+  let content: string;
+
+  if (mode === 'file') {
+    const { readFile } = await import('node:fs/promises');
+    const { existsSync } = await import('node:fs');
+
+    const filePath = await input({
+      message: 'Path to strategy file (.md or .txt):',
+      validate: (value) => {
+        if (!value.trim()) return 'Path cannot be empty';
+        if (!existsSync(value.trim())) return 'File not found';
+        return true;
+      },
+    });
+
+    content = await readFile(filePath.trim(), 'utf-8');
+    console.log(chalk.dim(`  Read strategy from ${filePath.trim()}`));
+  } else {
+    content = await editor({
+      message: 'Write your strategy content (save and close the editor when done):',
+      default: `# ${name.trim()}\n\nDescribe your teamwork cooperation guidelines here.\n\n## Guidelines\n\n- \n`,
+      waitForUserInput: false,
+    });
+  }
+
+  if (!content.trim()) {
+    content = `# ${name.trim()}\n\nCustom strategy template.`;
+  }
+
+  return { name: name.trim(), content: content.trim() };
 }

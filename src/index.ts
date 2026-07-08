@@ -35,6 +35,7 @@ import { handoffCommand } from './commands/handoff.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
+import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
 import { finishCommand } from './commands/finish.js';
 import { desktopCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
@@ -357,7 +358,8 @@ program
   .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
   .option('-b, --base', 'Only refresh base-layer maps and codebase knowledge from main')
   .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
-  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean; force?: boolean }) => {
+  .option('-s, --strategy <id>', 'Update the teamwork strategy (use template ID, or "auto" for AI suggestion)')
+  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean; force?: boolean; strategy?: string }) => {
     try {
       await refreshCommand(options, workspace);
     } catch (error) {
@@ -460,6 +462,100 @@ knowledgeCmd
   .action(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
     try {
       await knowledgePromoteCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Strategy command group
+const strategyCmd = program
+  .command('strategy')
+  .alias('strat')
+  .description('Manage teamwork collaboration strategy templates');
+
+strategyCmd
+  .command('list')
+  .alias('ls')
+  .description('List all available strategy templates (built-in and custom)')
+  .action(async () => {
+    try {
+      await strategyListCommand();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+strategyCmd
+  .command('create')
+  .description('Create a new custom strategy template')
+  .option('-n, --name <name>', 'Strategy name')
+  .option('-f, --file <path>', 'Load content from a .md or .txt file')
+  .action(async (options: { name?: string; file?: string }) => {
+    try {
+      await strategyCreateCommand(options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+strategyCmd
+  .command('edit')
+  .description('Edit an existing custom strategy template')
+  .option('--id <id>', 'Template ID to edit (skips the selection prompt)')
+  .action(async (options: { id?: string }) => {
+    try {
+      await strategyEditCommand(options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+strategyCmd
+  .command('delete')
+  .alias('rm')
+  .description('Delete a custom strategy template')
+  .option('--id <id>', 'Template ID to delete (skips the selection prompt)')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(async (options: { id?: string; yes?: boolean }) => {
+    try {
+      await strategyDeleteCommand(options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+strategyCmd
+  .command('show')
+  .description('Display the full content of a strategy template')
+  .option('--id <id>', 'Template ID to show (skips the selection prompt)')
+  .action(async (options: { id?: string }) => {
+    try {
+      await strategyShowCommand(options);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');

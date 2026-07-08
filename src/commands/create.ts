@@ -26,9 +26,12 @@ import {
   promptSelectRepos,
   promptSelectAI,
   promptSelectEditor,
+  promptSelectStrategy,
+  promptNewStrategy,
 } from '../utils/prompts.js';
 import type { Feature, WorkspaceContext } from '../types.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
+import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
 
 /**
  * Executes the full "create workspace" flow:
@@ -89,16 +92,38 @@ export async function createCommand(): Promise<void> {
     : false;
 
   // ── 5.5. Suggest workflow strategy ───────────────────────────────
-  const workflowSpinner = ora('Suggesting teamwork collaboration strategy...').start();
+  const templates = await getWorkflowTemplates();
+  const selectedStrategyId = await promptSelectStrategy(templates);
+
   let teamworkInstructions = '';
-  try {
-    const suggestion = await suggestWorkflow(description, selectedRepos, config.localLlm);
-    teamworkInstructions = suggestion.customInstructions;
-    workflowSpinner.succeed(`Auto-selected strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    workflowSpinner.fail(`Failed to suggest teamwork strategy (${reason}) — continuing without one`);
-    debugLog('workflow-advisor', 'suggestWorkflow', err);
+
+  if (selectedStrategyId === 'auto') {
+    const workflowSpinner = ora('Suggesting teamwork collaboration strategy...').start();
+    try {
+      const suggestion = await suggestWorkflow(description, selectedRepos, config.localLlm);
+      teamworkInstructions = suggestion.customInstructions;
+      workflowSpinner.succeed(`Auto-selected strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      workflowSpinner.fail(`Failed to suggest teamwork strategy (${reason}) — continuing without one`);
+      debugLog('workflow-advisor', 'suggestWorkflow', err);
+    }
+  } else if (selectedStrategyId === 'create_new') {
+    const { name, content } = await promptNewStrategy();
+    try {
+      const newTemplate = await saveWorkflowTemplate(name, content);
+      teamworkInstructions = newTemplate.content;
+      console.log(chalk.green(`  ✔ Saved and selected new strategy: ${chalk.bold(newTemplate.name)}`));
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ Failed to save strategy: ${String(err)}`));
+      teamworkInstructions = content;
+    }
+  } else {
+    const selectedTemplate = templates.find((t) => t.id === selectedStrategyId);
+    if (selectedTemplate) {
+      teamworkInstructions = selectedTemplate.content;
+      console.log(chalk.green(`  ✔ Selected strategy: ${chalk.bold(selectedTemplate.name)}`));
+    }
   }
 
   // ── 6. Create workspace ─────────────────────────────────────────────
