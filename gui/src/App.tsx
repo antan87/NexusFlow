@@ -24,6 +24,7 @@ import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { WorkspacesPage } from './pages/WorkspacesPage.js';
+import { ChatMarkdown } from './components/ChatMarkdown.js';
 import { API_BASE } from './lib/apiBase.js';
 
 
@@ -3510,7 +3511,7 @@ Core Instructions:
                         ? 'bg-indigo-650 text-white rounded-tr-none shadow-md border border-indigo-500/10'
                         : 'bg-gray-900 border border-gray-800 text-gray-200 rounded-tl-none shadow-sm font-sans'
                     }`}>
-                      {msg.content}
+                      <ChatMarkdown content={msg.content} />
                     </div>
                   </div>
                 ))
