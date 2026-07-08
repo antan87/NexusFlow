@@ -76,23 +76,36 @@ export const app = new Hono();
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
-app.get('/ws', upgradeWebSocket((c) => {
-  return {
-    onMessage(event, ws) {
-      console.log(`[WS] Received message: ${event.data}`);
-      // Basic ping-pong for now, will connect to Effect RPC router later
-      if (typeof event.data === 'string' && event.data.includes('ping')) {
-        ws.send(JSON.stringify({ type: 'pong' }));
-      }
-    },
-    onOpen(_event, _ws) {
-      console.log('[WS] Client connected');
-    },
-    onClose(_event, _ws) {
-      console.log('[WS] Client disconnected');
-    },
-  };
-}));
+app.get('/ws', async (c, next) => {
+  // Prevent Cross-Site WebSocket Hijacking (CSWSH)
+  const origin = c.req.header('origin');
+  if (origin) {
+    try {
+      const { hostname } = new URL(origin);
+      const isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+      if (!isLocal) return c.text('Forbidden', 403);
+    } catch {
+      return c.text('Forbidden', 403);
+    }
+  }
+  
+  return upgradeWebSocket((c) => {
+    return {
+      onMessage(event, ws) {
+        console.log(`[WS] Received message: ${event.data}`);
+        if (typeof event.data === 'string' && event.data.includes('ping')) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
+      },
+      onOpen(_event, _ws) {
+        console.log('[WS] Client connected');
+      },
+      onClose(_event, _ws) {
+        console.log('[WS] Client disconnected');
+      },
+    };
+  })(c, next);
+});
 
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
