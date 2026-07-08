@@ -127,6 +127,7 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
 | `nexusflow finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
+| `nexusflow review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
 | `nexusflow knowledge` | Capture & manage workspace learnings: `add` (decision/gotcha/progress/…), `show`, `promote` into per-repo base knowledge |
 | `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
 | `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
