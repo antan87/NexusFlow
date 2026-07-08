@@ -10,6 +10,7 @@ import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
+import { AgentChat } from '../features/chat/AgentChat.js';
 
 type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan';
 
@@ -107,7 +108,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const availableRepos = selected ? repos.filter((r) => !selected.repos.includes(r.path)) : [];
 
   return (
-    <div className="mx-auto max-w-7xl animate-fade-in">
+    <div className="flex flex-col h-full animate-fade-in">
       <PageHeader
         title="Workspaces"
         subtitle="Select a workspace to inspect its changes, services, sessions and context."
@@ -123,9 +124,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         }
       />
 
-      <div className="flex flex-col gap-5 lg:flex-row">
-        {/* ── List pane ─────────────────────────────────────────── */}
-        <div className="lg:w-80 lg:shrink-0">
+      <div className="flex gap-4 h-[calc(100vh-120px)] overflow-hidden pb-4">
+        {/* ── Left pane: Workspaces ─────────────────────────────────────────── */}
+        <div className="w-60 shrink-0 flex flex-col overflow-y-auto pr-1">
           <div className="relative mb-3">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-faint" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search workspaces" className="pl-8" />
@@ -187,8 +188,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           )}
         </div>
 
-        {/* ── Detail pane ───────────────────────────────────────── */}
-        <div className="min-w-0 flex-1">
+        {/* ── Center pane: Agent Chat ───────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-w-0 border border-hairline rounded-xl overflow-hidden bg-surface shadow-sm">
+          {!selected ? (
+            <div className="flex-1 flex items-center justify-center p-10 text-center text-sm text-content-faint">
+              Select a workspace to start chatting.
+            </div>
+          ) : (
+            <AgentChat ws={selected} />
+          )}
+        </div>
+
+        {/* ── Right pane: Detail & Context ───────────────────────────────────────── */}
+        <div className="w-80 shrink-0 flex flex-col overflow-y-auto pl-1">
           {!selected ? (
             <Card>
               <EmptyState
@@ -200,28 +212,29 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           ) : (
             <div>
               <Card className="mb-4 p-5">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-3">
                   <div className="min-w-0">
-                    <h2 className="font-display text-xl font-bold text-content">{selected.branchName}</h2>
-                    <div className="mt-1 flex items-center gap-2 text-xs text-content-faint">
+                    <h2 className="font-display text-xl font-bold text-content break-all">{selected.branchName}</h2>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-content-faint flex-wrap">
                       <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
                       <span>·</span>
                       <span>{selected.repos.length} repos</span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="primary"
                       icon={<Play size={13} className={resumingWs === selected.branchName ? 'animate-spin' : ''} />}
                       disabled={resumingWs === selected.branchName}
                       onClick={() => handleResumeSession(selected)}
+                      className="flex-1 justify-center"
                     >
                       {resumingWs === selected.branchName ? 'Resuming…' : 'Resume in Editor'}
                     </Button>
                     <Menu
                       label="More actions"
                       trigger={
-                        <span className="grid h-9 w-9 place-items-center rounded-md border border-hairline bg-surface text-content-muted hover:bg-raised hover:text-content">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-hairline bg-surface text-content-muted hover:bg-raised hover:text-content">
                           <MoreVertical size={16} />
                         </span>
                       }
