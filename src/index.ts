@@ -32,6 +32,7 @@ import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
+import { reviewCommand } from './commands/review.js';
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
@@ -341,10 +342,23 @@ program
 program
   .command('handoff')
   .description('Generate a compact handoff bundle (nexusflow-handoff.md) for session resumption')
-  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
+  .argument('[workspace]', 'Path to the workspace')
+  .action(async (workspace) => {
     try {
       await handoffCommand(workspace);
+    } catch (error) {
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('review')
+  .description('Start an iterative reviewer-implementer agent loop')
+  .option('-t, --task <task>', 'Initial task prompt for the implementer')
+  .action(async (options) => {
+    try {
+      await reviewCommand(options);
     } catch (error) {
       console.error(error);
       process.exit(1);
