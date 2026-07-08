@@ -3506,7 +3506,7 @@ Core Instructions:
                       {msg.role === 'user' ? 'Developer' : activeSession.assistant === 'antigravity' ? 'Antigravity' : activeSession.assistant === 'claude' ? 'Claude' : activeSession.assistant === 'codex' ? 'Codex' : 'Copilot'}
                       {msg.timestamp && ` • ${new Date(msg.timestamp).toLocaleTimeString()}`}
                     </div>
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap ${
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${
                       msg.role === 'user'
                         ? 'bg-indigo-650 text-white rounded-tr-none shadow-md border border-indigo-500/10'
                         : 'bg-gray-900 border border-gray-800 text-gray-200 rounded-tl-none shadow-sm font-sans'
