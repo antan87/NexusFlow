@@ -83,7 +83,8 @@ export async function finishCommand(
   let message = options.message;
   const hasDirty = preflight.repos.some((r) => r.dirty && r.onExpectedBranch);
   if (hasDirty && !message) {
-    message = await input({ message: 'Commit message for the remaining changes:' });
+    const { promptMultiLineInput } = await import('../utils/prompts.js');
+    message = await promptMultiLineInput('commit message for the remaining changes');
     if (!message.trim()) {
       console.log(chalk.yellow('No commit message — leaving uncommitted changes in place.\n'));
       message = undefined;

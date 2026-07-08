@@ -30,41 +30,44 @@ export async function promptBranchName(): Promise<string> {
 }
 
 /**
- * Prompts the user for a feature description.
+ * Generic prompt for multi-line text input.
  * Offers short inline typing, multi-line editor (safe for pasting), or loading from file.
+ *
+ * @param entityName e.g., 'feature description', 'commit message'
+ * @param emptyFallback Default text to return if left empty in editor mode
  */
-export async function promptDescription(): Promise<string> {
+export async function promptMultiLineInput(entityName: string, emptyFallback = ''): Promise<string> {
   const mode = await select({
-    message: 'How do you want to provide the feature description?',
+    message: `How do you want to provide the ${entityName}?`,
     choices: [
-      { name: '✍️  Type short description', value: 'short', description: 'Type a single-line description directly in the terminal' },
-      { name: '📝 Write in editor', value: 'editor', description: 'Opens your $EDITOR (safest for copy-pasting multi-line text)' },
-      { name: '📂 Load from file', value: 'file', description: 'Paste a path to a .md or .txt file' },
+      { name: `✍️  Type short ${entityName}`, value: 'short', description: `Type a single-line ${entityName} directly in the terminal` },
+      { name: `📝 Write in editor`, value: 'editor', description: 'Opens your $EDITOR (safest for copy-pasting multi-line text)' },
+      { name: `📂 Load from file`, value: 'file', description: 'Paste a path to a .md or .txt file' },
     ],
   });
 
   if (mode === 'short') {
-    const desc = await input({
-      message: 'Feature description:',
+    const text = await input({
+      message: `${entityName.charAt(0).toUpperCase() + entityName.slice(1)}:`,
       validate: (value: string) => {
-        if (!value.trim()) return 'Description cannot be empty';
+        if (!value.trim() && !emptyFallback) return `${entityName} cannot be empty`;
         return true;
       },
     });
-    return desc.trim();
+    return text.trim() || emptyFallback;
   }
 
   if (mode === 'editor') {
-    const desc = await editor({
-      message: 'Write or paste your feature description (save and close the editor when done):',
+    const text = await editor({
+      message: `Write or paste your ${entityName} (save and close the editor when done):`,
       default: '',
       waitForUserInput: false,
     });
-    if (!desc.trim()) {
-      console.log(chalk.yellow('  ⚠ Empty description provided.'));
-      return 'No description provided.';
+    if (!text.trim()) {
+      console.log(chalk.yellow(`  ⚠ Empty ${entityName} provided.`));
+      return emptyFallback;
     }
-    return desc.trim();
+    return text.trim();
   }
 
   // File mode
@@ -72,7 +75,7 @@ export async function promptDescription(): Promise<string> {
   const { existsSync } = await import('node:fs');
 
   const filePath = await input({
-    message: 'Path to description file (.md or .txt):',
+    message: `Path to ${entityName} file (.md or .txt):`,
     validate: (value) => {
       if (!value.trim()) return 'Path cannot be empty';
       if (!existsSync(value.trim())) return 'File not found';
@@ -81,8 +84,15 @@ export async function promptDescription(): Promise<string> {
   });
 
   const content = await readFile(filePath.trim(), 'utf-8');
-  console.log(chalk.dim(`  Read description from ${filePath.trim()}`));
-  return content.trim();
+  console.log(chalk.dim(`  Read ${entityName} from ${filePath.trim()}`));
+  return content.trim() || emptyFallback;
+}
+
+/**
+ * Prompts the user for a feature description.
+ */
+export async function promptDescription(): Promise<string> {
+  return promptMultiLineInput('feature description', 'No description provided.');
 }
 
 /**
