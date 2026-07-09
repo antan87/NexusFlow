@@ -29,7 +29,8 @@ import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
-import { SessionPersistence } from './agent/SessionPersistence.js';
+import { ProviderRegistry } from './agent/adapters.js';
+import { AgentHarness } from './agent/ProviderRegistry.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -77,6 +78,10 @@ export const app = new Hono();
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+app.get('/api/adapters/status', (c) => {
+  return c.json(ProviderRegistry.getAllStatus());
+});
+
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
   const origin = c.req.header('origin');
@@ -91,11 +96,57 @@ app.get('/ws', async (c, next) => {
   }
   
   return upgradeWebSocket((c) => {
+    let agent: AgentHarness | null = null;
+
     return {
       onMessage(event, ws) {
-        console.log(`[WS] Received message: ${event.data}`);
-        if (typeof event.data === 'string' && event.data.includes('ping')) {
-          ws.send(JSON.stringify({ type: 'pong' }));
+        if (typeof event.data === 'string') {
+          if (event.data.includes('ping')) {
+            ws.send(JSON.stringify({ type: 'pong' }));
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'start') {
+              if (agent) {
+                agent.stop();
+              }
+              const provider = ProviderRegistry.getProvider(payload.command);
+              if (provider) {
+                agent = provider.createInstance();
+                agent.start(payload.args[0], payload.cwd);
+              } else {
+                ws.send(JSON.stringify({ type: 'error', error: new Error(`No provider found for ${payload.command}. Please create a dedicated adapter.`) }));
+                return;
+              }
+              
+              agent.on('data', (text: string) => {
+                ws.send(JSON.stringify({ type: 'stream', text }));
+              });
+              agent.on('diff_proposal', (diff: string) => {
+                ws.send(JSON.stringify({ type: 'diff', diff }));
+              });
+              agent.on('close', (code: number) => {
+                ws.send(JSON.stringify({ type: 'close', code }));
+              });
+              agent.on('error', (error: Error) => {
+                ws.send(JSON.stringify({ type: 'error', error }));
+              });
+              
+            } else if (payload.type === 'input') {
+              if (agent) {
+                agent.send(payload.input);
+              }
+            } else if (payload.type === 'stop') {
+              if (agent) {
+                agent.stop();
+                agent = null;
+              }
+            }
+          } catch (err) {
+            console.error('[WS] Failed to parse message', err);
+          }
         }
       },
       onOpen(_event, _ws) {
@@ -103,6 +154,10 @@ app.get('/ws', async (c, next) => {
       },
       onClose(_event, _ws) {
         console.log('[WS] Client disconnected');
+        if (agent) {
+          agent.stop();
+          agent = null;
+        }
       },
     };
   })(c, next);
@@ -1257,29 +1312,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
     }
 
     const sessions = await findSessions(workspacePath, feature.repos);
-    
-    // Also get Agentic Review Loop Sessions from SQLite
-    let agentSessions: any[] = [];
-    let persistence: SessionPersistence | undefined;
-    try {
-      persistence = new SessionPersistence(workspacePath);
-      const dbSessions = persistence.listSessions(workspacePath);
-      agentSessions = dbSessions.map(s => ({
-        id: s.id,
-        assistant: 'review-loop',
-        provider: s.provider,
-        title: `Agent Review Loop (${s.status})`,
-        lastActive: s.updatedAt,
-        messages: 1,
-        mode: 'review-loop'
-      }));
-    } catch (e) {
-      console.error('Error fetching agent sessions', e);
-    } finally {
-      persistence?.close();
-    }
-
-    return c.json({ sessions: [...agentSessions, ...sessions] });
+    return c.json({ sessions });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1290,17 +1323,7 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
   const assistant = c.req.param('assistant');
   const sessionId = c.req.param('sessionId');
   try {
-    if (assistant === 'review-loop') {
-      return c.json({
-        messages: [
-          {
-            role: 'assistant',
-            content: 'This is an automated review loop session backed by SQLite.\n\nSince this is an orchestration scaffolding, individual prompts and completions are forwarded directly to the configured provider (`' + sessionId + '`) and are not saved to disk as a unified transcript yet.',
-            timestamp: new Date().toISOString()
-          }
-        ]
-      });
-    }
+
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
   } catch (error) {

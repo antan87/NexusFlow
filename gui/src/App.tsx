@@ -1857,6 +1857,27 @@ Core Instructions:
               </div>
             )}
 
+            {/* Offline / Backend Unreachable State */}
+            {!config && (
+              <div className="flex flex-col items-center justify-center py-40 gap-6">
+                <div className="bg-red-500/10 p-6 rounded-full">
+                  <AlertTriangle className="text-red-400" size={48} />
+                </div>
+                <div className="text-center max-w-md">
+                  <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>
+                  <p className="text-sm text-gray-400 mb-6">
+                    The NexusFlow GUI could not connect to the local server. Make sure you started the GUI correctly via <code>nexusflow ui</code> or that the backend is running.
+                  </p>
+                  <button
+                    onClick={() => { setConfigLoading(true); fetchConfig(); }}
+                    className="px-4 py-2 bg-accent hover:bg-accent-hover text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
+                  >
+                    <RefreshCw size={16} /> Try Again
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* View: Dashboard (Overview) */}
             {view === 'dashboard' && config && (
               <DashboardPage

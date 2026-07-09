@@ -43,7 +43,6 @@ export function DashboardPage({
       <PageHeader
         title="Overview"
         subtitle="Your multi-repo environment at a glance."
-        actions={<Button variant="primary" icon={<Plus size={16} />} onClick={onNewWorkspace}>New workspace</Button>}
       />
 
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">

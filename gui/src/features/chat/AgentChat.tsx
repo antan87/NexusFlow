@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, PlaySquare, Square, Sparkles, Cpu, Bot } from 'lucide-react';
-import { Button, Textarea } from '../../components/ui/index.js';
+import { Button, Textarea, Menu } from '../../components/ui/index.js';
 import { cn } from '../../components/ui/cn.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { DiffPanel } from './DiffPanel.js';
+import AnsiImport from 'ansi-to-react';
+
+const Ansi = (AnsiImport as any).default || AnsiImport;
 
 interface AgentChatProps {
   ws: Feature;
@@ -13,6 +16,7 @@ interface AgentChatProps {
 
 export function AgentChat({ ws }: AgentChatProps) {
   const [aiAssistants, setAiAssistants] = useState<{ name: string; displayName: string; detected: boolean; command?: string }[]>([]);
+  const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
   const storageKey = `nexusflow_chat_${ws.branchName}`;
 
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; diff?: string; diffStatus?: 'pending' | 'approved' | 'rejected' }[]>(() => {
@@ -40,14 +44,21 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [messages, storageKey]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/ai-detect`)
-      .then(res => res.json())
-      .then(data => {
-        setAiAssistants(data);
-        const first = data.find((ai: any) => ai.detected && ai.command);
-        if (first) setAgentName(first.command);
+    Promise.all([
+      fetch(`${API_BASE}/api/ai-detect`).then(res => res.json()),
+      fetch(`${API_BASE}/api/adapters/status`).then(res => res.json())
+    ])
+      .then(([detectData, providerData]) => {
+        setAiAssistants(detectData);
+        setProviders(providerData);
+        
+        // Auto-select first configured provider or first available provider
+        const firstProvider = providerData.find((p: any) => p.isConfigured) || providerData[0];
+        if (firstProvider) {
+          setAgentName(firstProvider.id);
+        }
       })
-      .catch(err => console.error('Failed to fetch aiAssistants', err));
+      .catch(err => console.error('Failed to fetch agent data', err));
   }, []);
 
   useEffect(() => {
@@ -169,58 +180,16 @@ export function AgentChat({ ws }: AgentChatProps) {
     <div className="flex h-full flex-col bg-surface relative">
       <div className="flex items-center justify-between border-b border-hairline p-4 shrink-0 bg-surface z-10">
         <div className="flex items-center gap-3">
-          <h3 className="font-display font-semibold text-content">Live Agent Chat</h3>
+          <h3 className="font-display font-semibold text-content">Chat</h3>
           {messages.length > 0 && (
             <button onClick={clearChat} className="text-xs text-content-faint hover:text-rose-400 transition-colors cursor-pointer">
               Clear
             </button>
           )}
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex bg-raised rounded-lg p-1 border border-hairline gap-1">
-            <button
-              onClick={() => setAgentName('openai-native')}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                agentName === 'openai-native' ? 'bg-accent text-white shadow-sm' : 'text-content-muted hover:text-content'
-              )}
-              disabled={connected}
-            >
-              <Sparkles size={14} />
-              OpenAI
-            </button>
-            <button
-              onClick={() => setAgentName('claude-native')}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                agentName === 'claude-native' ? 'bg-accent text-white shadow-sm' : 'text-content-muted hover:text-content'
-              )}
-              disabled={connected}
-            >
-              <Bot size={14} />
-              Claude
-            </button>
-            {aiAssistants.filter(ai => ai.detected && ai.command).map(ai => (
-              <button
-                key={ai.name}
-                onClick={() => setAgentName(ai.command!)}
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                  agentName === ai.command ? 'bg-accent text-white shadow-sm' : 'text-content-muted hover:text-content'
-                )}
-                disabled={connected}
-              >
-                <Cpu size={14} />
-                {ai.displayName}
-              </button>
-            ))}
-          </div>
-          {!connected ? (
-            <Button variant="primary" icon={<PlaySquare size={14} />} onClick={startAgent} disabled={!agentName}>
-              Start Agent
-            </Button>
-          ) : (
-            <Button variant="secondary" icon={<Square size={14} />} onClick={stopAgent}>
+        <div className="flex items-center gap-2">
+          {connected && (
+            <Button size="sm" variant="secondary" icon={<Square size={14} className="text-rose-400" />} onClick={stopAgent}>
               Stop
             </Button>
           )}
@@ -240,7 +209,13 @@ export function AgentChat({ ws }: AgentChatProps) {
                 <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <ChatMarkdown content={msg.content} />
+                  {msg.content.includes('\x1b') ? (
+                    <div className="font-mono text-xs overflow-x-auto whitespace-pre-wrap bg-[#1e1e1e] text-gray-300 p-2 rounded-md">
+                      <Ansi>{msg.content}</Ansi>
+                    </div>
+                  ) : (
+                    <ChatMarkdown content={msg.content} />
+                  )}
                   {msg.diff && (
                     <DiffPanel
                       diffText={msg.diff}
@@ -264,24 +239,69 @@ export function AgentChat({ ws }: AgentChatProps) {
       </div>
 
       <div className="absolute inset-x-0 bottom-0 z-20 p-4 pt-10 bg-gradient-to-t from-surface via-surface/80 to-transparent pointer-events-none">
-        <div className="flex items-end gap-2 bg-surface/50 backdrop-blur-md border border-hairline p-2 rounded-xl shadow-lg pointer-events-auto max-w-4xl mx-auto">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder={connected ? 'Message the agent... (Shift+Enter for new line)' : 'Start the agent first...'}
-            disabled={!connected}
-            className="flex-1 min-h-[44px] max-h-[200px] resize-none bg-transparent border-none focus:ring-0 px-3 py-2 text-sm text-content"
-            rows={1}
-          />
-          <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<Send size={14} />} onClick={sendMessage} disabled={!connected || !input.trim()}>
-            Send
-          </Button>
+        <div className="flex flex-col gap-2 pointer-events-auto max-w-4xl mx-auto w-full">
+          {(() => {
+            const currentProvider = providers.find(p => p.id === agentName);
+            if (currentProvider && !currentProvider.isConfigured) {
+              return (
+                <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs px-3 py-2 rounded-lg self-center mb-2">
+                  <span className="font-semibold">{currentProvider.name} provider status:</span>
+                  <span>{currentProvider.message}</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
+          <div className="flex flex-col bg-surface/80 backdrop-blur-md border border-hairline rounded-xl shadow-lg w-full">
+            <div className="flex items-center border-b border-hairline/50 p-2 gap-2">
+              <Menu
+                label="Select Provider"
+                trigger={
+                  <span className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-raised transition-colors cursor-pointer",
+                    connected ? "opacity-50 pointer-events-none" : "text-content"
+                  )}>
+                    {providers.find(p => p.id === agentName)?.icon === 'Sparkles' ? <Sparkles size={14} className="text-accent" /> : providers.find(p => p.id === agentName)?.icon === 'Bot' ? <Bot size={14} className="text-accent" /> : <Cpu size={14} className="text-accent" />}
+                    {providers.find(p => p.id === agentName)?.name || 'Select Agent'}
+                  </span>
+                }
+                items={[
+                  ...providers.map(p => ({
+                    label: p.name,
+                    icon: p.icon === 'Sparkles' ? <Sparkles size={14} /> : p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />,
+                    onClick: () => { if (!connected) setAgentName(p.id) }
+                  }))
+                ]}
+              />
+              <div className="h-4 w-px bg-hairline"></div>
+              <span className="text-xs text-content-faint">Full access</span>
+            </div>
+            <div className="flex items-end gap-2 p-2">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!connected) startAgent();
+                    else sendMessage();
+                  }
+                }}
+                placeholder={connected ? 'Message the agent... (Shift+Enter for new line)' : 'Start the agent or press Enter...'}
+                className="flex-1 min-h-[44px] max-h-[200px] resize-none bg-transparent border-none focus:ring-0 px-3 py-2 text-sm text-content"
+                rows={1}
+              />
+              {!connected ? (
+                <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<PlaySquare size={14} />} onClick={startAgent} disabled={!agentName || (providers.find(p => p.id === agentName) && !providers.find(p => p.id === agentName)!.isConfigured)}>
+                  Start
+                </Button>
+              ) : (
+                <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<Send size={14} />} onClick={sendMessage} disabled={!input.trim()}>
+                  Send
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

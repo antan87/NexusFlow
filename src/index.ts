@@ -32,7 +32,7 @@ import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
-import { reviewCommand } from './commands/review.js';
+
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
@@ -352,18 +352,6 @@ program
     }
   });
 
-program
-  .command('review')
-  .description('Start an iterative reviewer-implementer agent loop')
-  .option('-t, --task <task>', 'Initial task prompt for the implementer')
-  .action(async (options) => {
-    try {
-      await reviewCommand(options);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
 
 program
   .command('refresh')

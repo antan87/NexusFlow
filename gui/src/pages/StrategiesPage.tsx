@@ -324,12 +324,14 @@ export function StrategiesPage(props: StrategiesPageProps) {
                         )}
                       </div>
                     ) : (
-                      <div className="h-[400px] bg-surface/10 border border-gray-800/60 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-6">
-                        <FolderOpen size={36} className="text-gray-600 mb-3" />
-                        <span className="text-sm font-semibold text-gray-400">No strategy template selected</span>
-                        <p className="text-xs text-gray-500 mt-1 max-w-sm font-sans">
-                          Select a template from the list to view, edit, or analyze it, or add a new custom teamwork workflow template.
-                        </p>
+                      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+                        <div className="max-w-md w-full bg-surface/30 border border-hairline-strong border-dashed rounded-xl flex flex-col items-center justify-center text-center p-8 backdrop-blur-sm shadow-sm">
+                          <FolderOpen size={40} className="text-content-faint mb-4" />
+                          <span className="text-sm font-semibold text-content">No strategy template selected</span>
+                          <p className="text-xs text-content-muted mt-2 max-w-sm font-sans">
+                            Select a template from the list to view, edit, or analyze it, or add a new custom teamwork workflow template.
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

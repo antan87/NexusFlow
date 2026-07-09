@@ -2,13 +2,16 @@
   "name": "nexusflow-desktop",
   "version": "1.5.0",
   "type": "module",
+  "main": "main.js",
   "scripts": {
-    "build": "node build.js",
-    "build:installer": "node build-installer.js",
-    "start": "npx neu run",
-    "update": "npx neu update"
+    "start": "electron .",
+    "build": "electron-builder"
   },
   "devDependencies": {
-    "@neutralinojs/neu": "^11.7.2"
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "allowScripts": {
+    "electron@28.3.3": true
   }
 }

@@ -343,11 +343,14 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
           timestamp: obj.created_at || obj.timestamp,
         });
       } else if (obj.type === 'PLANNER_RESPONSE') {
-        messages.push({
-          role: 'assistant',
-          content: (obj.content || '').trim(),
-          timestamp: obj.created_at || obj.timestamp,
-        });
+        const content = (obj.content || '').trim();
+        if (content) {
+          messages.push({
+            role: 'assistant',
+            content,
+            timestamp: obj.created_at || obj.timestamp,
+          });
+        }
       }
     }
   } else if (assistant === 'claude') {

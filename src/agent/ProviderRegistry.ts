@@ -1,81 +1,47 @@
-import { execa } from 'execa';
-import { SessionPersistence, type ProviderSession } from './SessionPersistence.js';
+export interface ProviderStatus {
+  id: string;
+  name: string;
+  isConfigured: boolean;
+  message?: string;
+  icon?: string;
+}
 
-export class ProviderRegistry {
-  private persistence: SessionPersistence;
-  private activeProcesses: Map<string, any> = new Map();
+export interface AgentHarness {
+  start(prompt: string | undefined, cwd: string): Promise<void>;
+  send(data: string): Promise<void>;
+  stop(): void;
+  on(event: 'data' | 'diff_proposal' | 'close' | 'error', listener: (...args: any[]) => void): this;
+}
 
-  constructor(workspacePath: string) {
-    this.persistence = new SessionPersistence(workspacePath);
+export interface ProviderAdapter {
+  id: string;
+  name: string;
+  icon?: string;
+  isConfigured(): boolean;
+  getStatusMessage(): string | undefined;
+  createInstance(): AgentHarness;
+}
+
+class ProviderRegistryImpl {
+  private providers: Map<string, ProviderAdapter> = new Map();
+
+  register(provider: ProviderAdapter) {
+    this.providers.set(provider.id, provider);
   }
 
-  /**
-   * Spins up a local instance of an agent and stores its state in SQLite.
-   */
-  public async launchAgent(
-    sessionId: string,
-    providerName: string,
-    workspacePath: string,
-    commandArgs: string[]
-  ): Promise<ProviderSession> {
-    // 1. Create or resume session in SQLite
-    let session = this.persistence.getSession(sessionId);
-    if (!session) {
-      session = this.persistence.createSession(sessionId, providerName, workspacePath);
-    } else {
-      this.persistence.updateSessionStatus(sessionId, 'active');
-    }
-
-    // 2. Launch the agent process (e.g. CLI for Cursor/Codex/Claude)
-    const proc = execa(commandArgs[0], commandArgs.slice(1), {
-      cwd: workspacePath,
-      env: { ...process.env, NEXUSFLOW_SESSION_ID: sessionId },
-    });
-
-    this.activeProcesses.set(sessionId, proc);
-
-    // 3. Monitor process to update status when it dies
-    proc.catch((err: any) => {
-      if (!this.activeProcesses.has(sessionId)) return; // Was manually stopped/shut down
-      console.error(`Agent process ${sessionId} error:`, err);
-      this.persistence.updateSessionStatus(sessionId, 'error');
-      this.activeProcesses.delete(sessionId);
-    }).then(() => {
-      if (this.activeProcesses.has(sessionId)) {
-        this.persistence.updateSessionStatus(sessionId, 'completed');
-        this.activeProcesses.delete(sessionId);
-      }
-    });
-
-    return session;
+  getProvider(id: string): ProviderAdapter | undefined {
+    return this.providers.get(id);
   }
 
-  /**
-   * Connect to an existing session (e.g. checking its status or logs)
-   */
-  public getSessionState(sessionId: string): ProviderSession | undefined {
-    return this.persistence.getSession(sessionId);
-  }
-
-  public listSessions(workspacePath: string): ProviderSession[] {
-    return this.persistence.listSessions(workspacePath);
-  }
-
-  public async stopAgent(sessionId: string): Promise<void> {
-    const proc = this.activeProcesses.get(sessionId);
-    if (proc) {
-      proc.kill();
-      this.activeProcesses.delete(sessionId);
-      this.persistence.updateSessionStatus(sessionId, 'paused');
-    }
-  }
-
-  public shutdown() {
-    for (const [id, proc] of this.activeProcesses.entries()) {
-      proc.kill();
-      this.persistence.updateSessionStatus(id, 'paused');
-    }
-    this.activeProcesses.clear(); // Prevent late-firing .catch handlers from writing
-    this.persistence.close();
+  getAllStatus(): ProviderStatus[] {
+    return Array.from(this.providers.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      icon: p.icon,
+      isConfigured: p.isConfigured(),
+      message: p.getStatusMessage()
+    }));
   }
 }
+
+export const ProviderRegistry = new ProviderRegistryImpl();

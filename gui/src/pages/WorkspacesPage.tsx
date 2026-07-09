@@ -131,14 +131,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-faint" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search workspaces" className="pl-8" />
           </div>
-          <div className="mb-3 flex items-center gap-1">
+          <div className="mb-3 flex items-center gap-1 bg-surface border border-hairline p-1 rounded-lg">
             {FILTERS.map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors cursor-pointer',
-                  filter === f ? 'bg-accent-soft text-accent' : 'text-content-faint hover:text-content',
+                  'flex-1 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors cursor-pointer text-center',
+                  filter === f ? 'bg-accent text-white shadow-sm' : 'text-content-faint hover:text-content hover:bg-surface-elevated',
                 )}
               >
                 {f}
@@ -188,32 +188,25 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           )}
         </div>
 
-        {/* ── Center pane: Agent Chat ───────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0 border border-hairline rounded-xl overflow-hidden bg-surface shadow-sm">
+        {/* ── Center pane: Detail & Context ───────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-y-auto pr-4 pl-1 min-w-0">
           {!selected ? (
-            <div className="flex-1 flex items-center justify-center p-10 text-center text-sm text-content-faint">
-              Select a workspace to start chatting.
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="max-w-md w-full">
+                <Card className="border-dashed bg-surface/30 border-hairline-strong shadow-sm p-6 backdrop-blur-sm">
+                  <EmptyState
+                    icon={<FolderGit2 size={40} className="text-content-faint" />}
+                    title="No workspace selected"
+                    description="Pick a workspace from the list to see its status, repositories, changes, services and sessions."
+                  />
+                </Card>
+              </div>
             </div>
-          ) : (
-            <AgentChat ws={selected} />
-          )}
-        </div>
-
-        {/* ── Right pane: Detail & Context ───────────────────────────────────────── */}
-        <div className="w-80 shrink-0 flex flex-col overflow-y-auto pl-1">
-          {!selected ? (
-            <Card>
-              <EmptyState
-                icon={<FolderGit2 size={40} />}
-                title="No workspace selected"
-                description="Pick a workspace from the list to see its status, repositories, changes, services and sessions."
-              />
-            </Card>
           ) : (
             <div>
               <Card className="mb-4 p-5">
-                <div className="flex flex-col gap-3">
-                  <div className="min-w-0">
+                <div className="flex flex-row justify-between items-start gap-4">
+                  <div className="min-w-0 flex-1">
                     <h2 className="font-display text-xl font-bold text-content break-all">{selected.branchName}</h2>
                     <div className="mt-1 flex items-center gap-2 text-xs text-content-faint flex-wrap">
                       <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
@@ -221,13 +214,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <span>{selected.repos.length} repos</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <Button
                       variant="primary"
                       icon={<Play size={13} className={resumingWs === selected.branchName ? 'animate-spin' : ''} />}
                       disabled={resumingWs === selected.branchName}
                       onClick={() => handleResumeSession(selected)}
-                      className="flex-1 justify-center"
                     >
                       {resumingWs === selected.branchName ? 'Resuming…' : 'Resume in Editor'}
                     </Button>
@@ -357,6 +349,17 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 {subTab === 'plan' && <ImplementationPlan {...planProps} />}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* ── Right pane: Agent Chat ───────────────────────────────────────── */}
+        <div className="w-[400px] shrink-0 flex flex-col min-w-0 border border-hairline rounded-xl overflow-hidden bg-surface shadow-sm">
+          {!selected ? (
+            <div className="flex-1 flex items-center justify-center p-10 text-center text-sm text-content-faint">
+              Select a workspace to start chatting.
+            </div>
+          ) : (
+            <AgentChat ws={selected} />
           )}
         </div>
       </div>
