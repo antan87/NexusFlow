@@ -97,6 +97,15 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
+/** A repo chosen for a new workspace, with an optional branch override. */
+export interface RepoSelection extends RepoInfo {
+  /**
+   * Existing branch to check out for this repo instead of creating the
+   * feature branch. Must already exist locally or on origin.
+   */
+  existingBranch?: string;
+}
+
 /** Metadata about a past AI session. */
 export interface AISession {
   id: string;
@@ -142,6 +151,12 @@ export interface Feature {
 
   /** Absolute paths to the original repositories. */
   originalRepos?: string[];
+
+  /**
+   * Per-repo branch overrides (repo name → existing branch that was checked
+   * out instead of {@link branchName}). Absent for repos on the feature branch.
+   */
+  repoBranches?: Record<string, string>;
 
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];

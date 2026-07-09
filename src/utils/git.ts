@@ -123,6 +123,49 @@ export async function detectDefaultBranch(repoPath: string): Promise<string> {
   return 'main';
 }
 
+/** Local and origin branches of a repository. */
+export interface RepoBranches {
+  /** Local branch names. */
+  local: string[];
+  /** Branches on origin (without the `origin/` prefix, `origin/HEAD` excluded). */
+  remote: string[];
+}
+
+/**
+ * Lists the local and origin branches of a repository.
+ *
+ * Reads the local refs only (no fetch) — callers that need fresh remote state
+ * should fetch first. Returns empty lists when the path is not a git repo.
+ *
+ * @param repoPath - Absolute path to the repo root.
+ */
+export async function listBranches(repoPath: string): Promise<RepoBranches> {
+  const local: string[] = [];
+  const remote: string[] = [];
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes/origin'],
+      { cwd: repoPath },
+    );
+    for (const line of stdout.split('\n')) {
+      const ref = line.trim();
+      if (!ref) continue;
+      if (ref.startsWith('origin/')) {
+        const name = ref.slice('origin/'.length);
+        if (name && name !== 'HEAD') {
+          remote.push(name);
+        }
+      } else {
+        local.push(ref);
+      }
+    }
+  } catch {
+    // Not a git repo or git failed — report no branches.
+  }
+  return { local, remote };
+}
+
 /**
  * Checks if the given branch name matches Git branch conventions (based on git-check-ref-format):
  * - No spaces, backslashes, or control characters.

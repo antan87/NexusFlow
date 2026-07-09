@@ -1,7 +1,6 @@
 import type { StoragePort, StorageAdapterMeta } from '../ports/storage.js';
 import { LocalStorageAdapter } from './local-storage.js';
 import { CentralVaultAdapter } from './vault-storage.js';
-import { ObsidianStorageAdapter } from './obsidian-storage.js';
 
 const storageProviders = new Map<string, StoragePort>();
 let activeProvider: StoragePort | null = null;
@@ -13,7 +12,6 @@ export function registerStorageProvider(name: string, provider: StoragePort) {
 // Auto-register built-in adapters
 registerStorageProvider('local', new LocalStorageAdapter());
 registerStorageProvider('central-vault', new CentralVaultAdapter());
-registerStorageProvider('obsidian', new ObsidianStorageAdapter());
 
 /** Returns metadata for all registered storage providers. */
 export function listStorageProviders(): StorageAdapterMeta[] {
