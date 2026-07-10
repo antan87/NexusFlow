@@ -28,8 +28,11 @@ import {
   promptSelectEditor,
   promptSelectStrategy,
   promptNewStrategy,
+  promptNewProjectName,
+  promptRepoBranches,
 } from '../utils/prompts.js';
-import type { Feature, WorkspaceContext } from '../types.js';
+import { createNewRepo } from '../core/new-repo.js';
+import type { Feature, RepoSelection, WorkspaceContext } from '../types.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
 import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
 
@@ -73,7 +76,27 @@ export async function createCommand(): Promise<void> {
   }
 
   // ── 4. Select repos ────────────────────────────────────────────────
-  const selectedRepos = await promptSelectRepos(repos);
+  const selectedRepos: RepoSelection[] = await promptSelectRepos(repos);
+
+  // ── 4.1. Optionally scaffold brand-new projects ─────────────────────
+  while (
+    await confirm({
+      message: '➕ Create a brand-new project to include in this workspace?',
+      default: false,
+    })
+  ) {
+    const projectName = await promptNewProjectName(config.devDir);
+    const newRepoSpinner = ora(`Creating new project ${projectName}...`).start();
+    try {
+      const newRepo = await createNewRepo(config.devDir, projectName);
+      selectedRepos.push(newRepo);
+      newRepoSpinner.succeed(`Created ${chalk.bold(newRepo.name)} at ${newRepo.path}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      newRepoSpinner.fail(`Could not create project: ${message}`);
+    }
+  }
+
   if (selectedRepos.length === 0) {
     console.log(chalk.yellow('No projects selected. Exiting.'));
     return;
@@ -82,6 +105,16 @@ export async function createCommand(): Promise<void> {
   console.log(
     chalk.dim(`  Selected: ${selectedRepos.map((r) => r.name).join(', ')}`),
   );
+
+  // ── 4.2. Optionally use existing branches per repo ──────────────────
+  const branchOverrides = await promptRepoBranches(selectedRepos, branchName);
+  for (const repo of selectedRepos) {
+    const override = branchOverrides.get(repo.name);
+    if (override) {
+      repo.existingBranch = override;
+      console.log(chalk.dim(`  ${repo.name}: using existing branch "${override}"`));
+    }
+  }
 
   // ── 5. Detect and select AI assistants ──────────────────────────────
   const detectedAI = await detectAIAssistants();
@@ -134,6 +167,7 @@ export async function createCommand(): Promise<void> {
     description,
     repos: selectedRepos.map((r) => path.join(workspacePath, r.name)),
     originalRepos: selectedRepos.map((r) => r.path),
+    repoBranches: branchOverrides.size > 0 ? Object.fromEntries(branchOverrides) : undefined,
     assistants: selectedAI,
     workspacePath,
     createdAt: new Date().toISOString(),

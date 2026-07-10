@@ -84,6 +84,16 @@ interface RepoInfo {
   defaultBranch: string;
 }
 
+interface RepoSelection extends RepoInfo {
+  /** Existing branch to check out instead of creating the feature branch. */
+  existingBranch?: string;
+}
+
+interface RepoBranches {
+  local: string[];
+  remote: string[];
+}
+
 interface Feature {
   id: string;
   branchName: string;
@@ -182,7 +192,10 @@ function AppInner() {
   const [activeStep, setActiveStep] = useState(0);
   const [branchName, setBranchName] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedRepos, setSelectedRepos] = useState<RepoInfo[]>([]);
+  const [selectedRepos, setSelectedRepos] = useState<RepoSelection[]>([]);
+  const [repoBranches, setRepoBranches] = useState<Record<string, RepoBranches>>({});
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
   const [selectedAI, setSelectedAI] = useState<string[]>([]);
   const [selectedEditor, setSelectedEditor] = useState<DetectedEditor | null>(null);
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
@@ -883,6 +896,52 @@ function AppInner() {
       setSelectedRepos(selectedRepos.filter((r) => r.path !== repo.path));
     } else {
       setSelectedRepos([...selectedRepos, repo]);
+      // Lazily load this repo's branches for the existing-branch dropdown.
+      if (!repoBranches[repo.path]) {
+        fetch(`${API_BASE}/api/repos/branches?path=${encodeURIComponent(repo.path)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((branches) => {
+            if (branches) {
+              setRepoBranches((prev) => ({ ...prev, [repo.path]: branches }));
+            }
+          })
+          .catch(console.error);
+      }
+    }
+  };
+
+  const handleSetRepoBranch = (repoPath: string, existingBranch: string) => {
+    setSelectedRepos((prev) =>
+      prev.map((r) =>
+        r.path === repoPath ? { ...r, existingBranch: existingBranch || undefined } : r,
+      ),
+    );
+  };
+
+  const handleCreateNewProject = async () => {
+    const name = newProjectName.trim();
+    if (!name || creatingProject) return;
+    setCreatingProject(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/repos/new`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRepos((prev) => [...prev, data.repo]);
+        setSelectedRepos((prev) => [...prev, data.repo]);
+        setNewProjectName('');
+        showToast(`Created new project "${data.repo.name}".`, 'success');
+      } else {
+        showToast(data.error || 'Failed to create project.', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Network error while creating the project.', 'error');
+    } finally {
+      setCreatingProject(false);
     }
   };
 
@@ -1512,7 +1571,7 @@ Core Instructions:
                     ) : (
                       <>
                         <option value="local">Local Workspace (Folders)</option>
-                        <option value="central-vault">Obsidian Central Vault</option>
+                        <option value="central-vault">Central Vault</option>
                       </>
                     )}
                   </select>
@@ -2137,31 +2196,89 @@ Core Instructions:
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[380px] overflow-y-auto p-2 border border-gray-800/60 rounded-lg bg-gray-950/20 mb-8">
                         {filteredRepos.map((repo) => {
-                          const isSelected = selectedRepos.some((r) => r.path === repo.path);
+                          const selected = selectedRepos.find((r) => r.path === repo.path);
+                          const isSelected = !!selected;
+                          const branches = repoBranches[repo.path];
                           return (
                             <div
                               key={repo.path}
-                              className={`bg-surface/60 border rounded-xl p-4 flex items-start gap-3 cursor-pointer hover:bg-gray-800/20 hover:border-gray-700 transition-all ${
+                              className={`bg-surface/60 border rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:bg-gray-800/20 hover:border-gray-700 transition-all ${
                                 isSelected ? 'border-indigo-500 bg-indigo-500/5' : 'border-gray-800/80'
                               }`}
                               onClick={() => handleToggleRepo(repo)}
                             >
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4 accent-indigo-500 rounded cursor-pointer"
-                                checked={isSelected}
-                                readOnly
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-semibold text-white truncate">{repo.name}</div>
-                                <div className="text-[10px] text-gray-500 truncate mt-1">{repo.path}</div>
+                              <div className="flex items-start gap-3">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1 h-4 w-4 accent-indigo-500 rounded cursor-pointer"
+                                  checked={isSelected}
+                                  readOnly
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-semibold text-white truncate">{repo.name}</div>
+                                  <div className="text-[10px] text-gray-500 truncate mt-1">{repo.path}</div>
+                                </div>
+                                <span className="text-[9px] px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-semibold uppercase">{repo.defaultBranch}</span>
                               </div>
-                              <span className="text-[9px] px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-semibold uppercase">{repo.defaultBranch}</span>
+                              {isSelected && (
+                                <div className="flex items-center gap-2 pl-7" onClick={(e) => e.stopPropagation()}>
+                                  <label className="text-[10px] text-gray-500 whitespace-nowrap">Branch</label>
+                                  <select
+                                    className="flex-1 min-w-0 text-[11px] bg-surface border border-gray-800 rounded-lg px-2 py-1.5 text-gray-200 focus:outline-none focus:border-indigo-500"
+                                    value={selected.existingBranch || ''}
+                                    onChange={(e) => handleSetRepoBranch(repo.path, e.target.value)}
+                                  >
+                                    <option value="">
+                                      New branch{branchName ? `: ${branchName}` : ''}
+                                    </option>
+                                    {branches?.local.map((b) => (
+                                      <option key={`l-${b}`} value={b}>
+                                        {b}
+                                      </option>
+                                    ))}
+                                    {branches?.remote
+                                      .filter((b) => !branches.local.includes(b))
+                                      .map((b) => (
+                                        <option key={`r-${b}`} value={b}>
+                                          {b} (remote)
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
                       </div>
                     )}
+
+                    <div className="flex items-center gap-3 mb-8 p-4 border border-dashed border-gray-800 rounded-xl bg-gray-950/20">
+                      <PlusCircle size={16} className="text-indigo-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-white">Start a brand-new project</div>
+                        <div className="text-[10px] text-gray-500">
+                          Creates a fresh git repository in your dev directory and includes it in this workspace.
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        className="w-48 bg-surface border border-gray-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-white placeholder-gray-600 outline-none text-xs"
+                        placeholder="my-new-project"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleCreateNewProject();
+                        }}
+                      />
+                      <button
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-gray-900 border border-gray-800 hover:bg-indigo-500/10 hover:border-indigo-500/40 text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={!newProjectName.trim() || creatingProject}
+                        onClick={handleCreateNewProject}
+                      >
+                        {creatingProject ? <RefreshCw size={12} className="animate-spin" /> : <PlusCircle size={12} />}
+                        Create
+                      </button>
+                    </div>
 
                     <div className="flex justify-between">
                       <button
@@ -3129,7 +3246,7 @@ Core Instructions:
                         ) : (
                           <>
                             <option value="local">Local Workspace (Folders)</option>
-                            <option value="central-vault">Obsidian Central Vault</option>
+                            <option value="central-vault">Central Vault</option>
                           </>
                         )}
                       </select>

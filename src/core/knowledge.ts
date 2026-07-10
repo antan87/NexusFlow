@@ -5,13 +5,14 @@
  * `promote_knowledge` tools.
  *
  * All file I/O routes through the active storage adapter (`core/storage.ts`)
- * so the local, central-vault, and Obsidian backends keep working — the
- * previous direct-`fs` knowledge routes silently wrote to a file the
- * generators never read under the Obsidian adapter.
+ * so the local and central-vault backends keep working — the previous
+ * direct-`fs` knowledge routes silently wrote to a file the generators never
+ * read under vault adapters.
  *
  * The markdown helpers (`insertUnderHeading`, `formatEntry`,
  * `parseKnowledgeEntries`) are pure and section-aware: they insert under the
- * correct heading, tolerate leading YAML frontmatter (Obsidian) and CRLF, and
+ * correct heading, tolerate leading YAML frontmatter (written by the removed
+ * Obsidian adapter; such files still exist in user vaults) and CRLF, and
  * never destroy existing content.
  */
 

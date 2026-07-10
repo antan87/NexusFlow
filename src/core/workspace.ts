@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { execa } from 'execa';
 
-import type { Feature, RepoInfo, WorkspaceContext } from '../types.js';
+import type { Feature, RepoInfo, RepoSelection, WorkspaceContext } from '../types.js';
 import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
@@ -39,6 +39,8 @@ export function getWorkspacePath(
 interface WorktreeRollbackAction {
   repoPath: string;
   worktreePath: string;
+  /** The branch materialized in this worktree (feature branch or a per-repo override). */
+  branchName: string;
   createdBranch: boolean;
 }
 
@@ -50,7 +52,6 @@ interface WorktreeRollbackAction {
  */
 async function rollbackWorkspace(
   workspacePath: string,
-  branchName: string,
   actions: WorktreeRollbackAction[],
 ): Promise<void> {
   for (const action of [...actions].reverse()) {
@@ -67,7 +68,7 @@ async function rollbackWorkspace(
     // Only delete a branch this run created — never a pre-existing one.
     if (action.createdBranch) {
       try {
-        await execa('git', ['branch', '-D', branchName], { cwd: action.repoPath });
+        await execa('git', ['branch', '-D', action.branchName], { cwd: action.repoPath });
       } catch {
         // The branch may already be gone with its worktree; ignore.
       }
@@ -96,13 +97,15 @@ async function rollbackWorkspace(
  * leaves debris behind.
  *
  * @param feature    - The feature definition.
- * @param repos      - Resolved repo metadata for every repo in the feature.
+ * @param repos      - Resolved repo metadata for every repo in the feature. A
+ *                     repo with `existingBranch` set checks out that branch
+ *                     (which must exist) instead of the feature branch.
  * @param onProgress - Optional per-repo progress callback (repo name, index, total).
  * @returns The absolute path to the newly created workspace.
  */
 export async function createWorkspace(
   feature: Feature,
-  repos: RepoInfo[],
+  repos: RepoSelection[],
   onProgress?: (repoName: string, index: number, total: number) => void,
 ): Promise<string> {
   const workspacePath = feature.workspacePath;
@@ -208,13 +211,17 @@ export async function createWorkspace(
       const repo = repos[i]!;
       onProgress?.(repo.name, i, repos.length);
       const worktreeTarget = path.join(workspacePath, repo.name);
+      const branchName = repo.existingBranch ?? feature.branchName;
       const { createdBranch } = await createWorktree(
         repo.path,
         worktreeTarget,
-        feature.branchName,
+        branchName,
         repo.defaultBranch,
+        // An explicitly chosen branch must exist — silently creating a fresh
+        // one would defeat the point of picking it.
+        { mustExist: repo.existingBranch !== undefined },
       );
-      rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, createdBranch });
+      rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
     }
 
     // Persist the feature manifest.
@@ -223,7 +230,7 @@ export async function createWorkspace(
     // Exclude NexusFlow files from git
     await excludeNexusFlowFiles(workspacePath, feature);
   } catch (error) {
-    await rollbackWorkspace(workspacePath, feature.branchName, rollbackActions);
+    await rollbackWorkspace(workspacePath, rollbackActions);
     throw error;
   }
 
@@ -292,8 +299,7 @@ export async function saveFeatureConfig(
   // The manifest is workspace-structural: it must live at the workspace root
   // (where listWorkspaces scans and the git-worktree container lives),
   // independent of the storage adapter. Routing it through an adapter would
-  // send it to a vault (invisible to the scan) and, for Obsidian, prepend YAML
-  // frontmatter that makes the JSON unparseable.
+  // send it to a vault, invisible to the scan.
   await fs.mkdir(workspacePath, { recursive: true });
   await fs.writeFile(path.join(workspacePath, MANIFEST_FILE), data, 'utf-8');
 }

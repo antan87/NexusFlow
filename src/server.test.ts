@@ -11,6 +11,7 @@ import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
+import * as newRepo from './core/new-repo.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -26,6 +27,7 @@ vi.mock('./utils/workflows.js');
 vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
+vi.mock('./core/new-repo.js');
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -211,15 +213,70 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.adapters).toBeDefined();
       expect(Array.isArray(data.adapters)).toBe(true);
-      // It should include at least 'local', 'central-vault', and 'obsidian'
+      // It should include at least 'local' and 'central-vault'
       const names = data.adapters.map((a: any) => a.name);
       expect(names).toContain('local');
       expect(names).toContain('central-vault');
-      expect(names).toContain('obsidian');
+    });
+  });
 
-      const obsidian = data.adapters.find((a: any) => a.name === 'obsidian');
-      expect(obsidian.displayName).toBe('Obsidian Vault');
-      expect(obsidian.configFields.length).toBeGreaterThan(0);
+  describe('GET /api/repos/branches', () => {
+    it('should return 400 when the path parameter is missing', async () => {
+      const response = await app.request('/api/repos/branches');
+      expect(response.status).toBe(400);
+    });
+
+    it('should return 400 when the path escapes devDir', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ devDir: '/mock/dev' } as any);
+
+      const response = await app.request(
+        `/api/repos/branches?path=${encodeURIComponent('/mock/dev/../../etc')}`,
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it('should list local and origin branches for a repo inside devDir', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ devDir: '/mock/dev' } as any);
+      vi.mocked(execa).mockResolvedValue({
+        stdout: 'main\nfeature/x\norigin/HEAD\norigin/main\norigin/remote-only',
+      } as any);
+
+      const response = await app.request(
+        `/api/repos/branches?path=${encodeURIComponent('/mock/dev/repo1')}`,
+      );
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.local).toEqual(['main', 'feature/x']);
+      expect(data.remote).toEqual(['main', 'remote-only']);
+    });
+  });
+
+  describe('POST /api/repos/new', () => {
+    it('should return 400 when the name is missing', async () => {
+      const response = await app.request('/api/repos/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it('should scaffold a repo in devDir and return it', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ devDir: '/mock/dev' } as any);
+      const repo = { name: 'newproj', path: '/mock/dev/newproj', defaultBranch: 'main' };
+      vi.mocked(newRepo.createNewRepo).mockResolvedValue(repo);
+
+      const response = await app.request('/api/repos/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'newproj' }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.repo).toEqual(repo);
+      expect(newRepo.createNewRepo).toHaveBeenCalledWith('/mock/dev', 'newproj');
     });
   });
 

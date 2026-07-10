@@ -15,24 +15,39 @@ export interface CreateWorktreeResult {
   createdBranch: boolean;
 }
 
+/** Options for {@link createWorktree}. */
+export interface CreateWorktreeOptions {
+  /**
+   * Require `branchName` to already exist (locally or on origin) and fail
+   * instead of creating a new branch. Set when the user explicitly picked an
+   * existing branch, where silently creating a fresh one would be wrong.
+   */
+  mustExist?: boolean;
+}
+
 /**
- * Creates a new git worktree for a feature branch.
+ * Creates a git worktree for a branch, materializing the branch as needed:
  *
- * Runs:
  * 1. `git fetch origin` — ensure we have the latest remote refs.
- * 2. `git worktree add <targetPath> -b <branchName> origin/<baseBranch>`
+ * 2. If `branchName` exists locally, check it out into the worktree.
+ * 3. Else if `origin/<branchName>` exists, create a tracking local branch
+ *    from it in the worktree.
+ * 4. Else create a new branch from `origin/<baseBranch>` (or the local
+ *    `baseBranch` when there is no remote).
  *
  * @param repoPath   - Absolute path to the main repo checkout.
  * @param targetPath - Absolute path where the worktree should be created.
- * @param branchName - Name of the new local branch to create.
- * @param baseBranch - Remote branch to base the new branch on (e.g. 'main').
- * @returns Whether a new branch was created (vs. checking out an existing one).
+ * @param branchName - Branch to check out or create.
+ * @param baseBranch - Branch to base a newly created branch on (e.g. 'main').
+ * @param options    - See {@link CreateWorktreeOptions}.
+ * @returns Whether a new local branch ref was created (vs. checking out an existing one).
  */
 export async function createWorktree(
   repoPath: string,
   targetPath: string,
   branchName: string,
   baseBranch: string,
+  options: CreateWorktreeOptions = {},
 ): Promise<CreateWorktreeResult> {
   let fetched = false;
   // Fetch latest remote state.
@@ -83,10 +98,27 @@ export async function createWorktree(
   // Check if the target branch already exists locally
   let branchExists = false;
   try {
-    await execa('git', ['rev-parse', '--verify', branchName], { cwd: repoPath });
+    await execa('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd: repoPath });
     branchExists = true;
   } catch {
     // Branch does not exist locally
+  }
+
+  // Check for a remote-only branch (origin/<branchName> without a local ref).
+  let remoteBranchExists = false;
+  if (!branchExists) {
+    try {
+      await execa('git', ['rev-parse', '--verify', `refs/remotes/origin/${branchName}`], { cwd: repoPath });
+      remoteBranchExists = true;
+    } catch {
+      // Branch does not exist on origin either
+    }
+  }
+
+  if (options.mustExist && !branchExists && !remoteBranchExists) {
+    throw new Error(
+      `Branch "${branchName}" does not exist locally or on origin in ${repoPath}.`,
+    );
   }
 
   // Create the worktree
@@ -95,6 +127,14 @@ export async function createWorktree(
     await execa(
       'git',
       ['worktree', 'add', targetPath, branchName],
+      { cwd: repoPath },
+    );
+  } else if (remoteBranchExists) {
+    // Materialize the remote-only branch as a local tracking branch. The local
+    // ref is new, so rollback may delete it — the remote still has the branch.
+    await execa(
+      'git',
+      ['worktree', 'add', '--track', '-b', branchName, targetPath, `origin/${branchName}`],
       { cwd: repoPath },
     );
   } else {
