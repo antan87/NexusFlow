@@ -4,25 +4,35 @@ import { spawn, type ChildProcess } from 'node:child_process';
 export class ClaudeCliAdapter extends EventEmitter {
   private isProcessing: boolean = false;
   private cwd: string = '';
+  private isFirstTurn: boolean = true;
   private child: ChildProcess | null = null;
-  // Note: We might need to handle session IDs for Claude if it doesn't auto-resume the folder's session,
-  // but for now we just use the -p flag so it doesn't hang without a TTY.
+  private stopped: boolean = false;
 
   public async start(cwd: string) {
     this.cwd = cwd;
+    this.isFirstTurn = true;
   }
 
   public async send(data: string) {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    // Pass -p to print and exit. This works without a TTY!
-    const cliProcess = spawn('claude', ['-p', data], {
+    // -p prints and exits, so it works without a TTY. -c continues the
+    // conversation started by the first turn. The prompt goes over stdin:
+    // with shell:true (needed to resolve claude.cmd on Windows) an argv
+    // prompt would be split at spaces because spawn does not quote args.
+    const args = this.isFirstTurn ? ['-p'] : ['-c', '-p'];
+    this.isFirstTurn = false;
+    this.stopped = false;
+
+    const cliProcess = spawn('claude', args, {
       cwd: this.cwd,
       shell: true,
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
     this.child = cliProcess;
+    cliProcess.stdin?.write(data);
+    cliProcess.stdin?.end();
 
     let producedOutput = false;
     let stderrTail = '';
@@ -48,7 +58,8 @@ export class ClaudeCliAdapter extends EventEmitter {
     cliProcess.on('close', (code) => {
       this.isProcessing = false;
       this.child = null;
-      if (code !== 0 && !producedOutput) {
+      // A non-zero exit after an intentional stop is expected, not an error.
+      if (!this.stopped && code !== 0 && !producedOutput) {
         this.emit('error', new Error(`claude CLI exited with code ${code}${stderrTail ? `: ${stderrTail.trim()}` : ''}`));
       }
       this.emit('data', '\n\n'); // Add separation between turns
@@ -56,6 +67,7 @@ export class ClaudeCliAdapter extends EventEmitter {
   }
 
   public stop() {
+    this.stopped = true;
     killTree(this.child);
     this.child = null;
     this.isProcessing = false;

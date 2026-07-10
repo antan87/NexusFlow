@@ -7,6 +7,7 @@ export class AntigravityCliAdapter extends EventEmitter {
   private cwd: string = '';
   private isFirstTurn: boolean = true;
   private child: ChildProcess | null = null;
+  private stopped: boolean = false;
 
   public async start(cwd: string) {
     this.cwd = cwd;
@@ -20,6 +21,7 @@ export class AntigravityCliAdapter extends EventEmitter {
     // Use -p to run a single prompt. If it's not the first turn, use -c to continue the conversation.
     const args = this.isFirstTurn ? ['-p', data] : ['-c', '-p', data];
     this.isFirstTurn = false;
+    this.stopped = false;
 
     const cliProcess = spawn('agy', args, {
       cwd: this.cwd,
@@ -51,7 +53,8 @@ export class AntigravityCliAdapter extends EventEmitter {
     cliProcess.on('close', (code) => {
       this.isProcessing = false;
       this.child = null;
-      if (code !== 0 && !producedOutput) {
+      // A non-zero exit after an intentional stop is expected, not an error.
+      if (!this.stopped && code !== 0 && !producedOutput) {
         this.emit('error', new Error(`agy CLI exited with code ${code}${stderrTail ? `: ${stderrTail.trim()}` : ''}`));
       }
       // We don't emit 'close' here because we want the frontend to keep the chat session open for the next prompt.
@@ -61,6 +64,7 @@ export class AntigravityCliAdapter extends EventEmitter {
   }
 
   public stop() {
+    this.stopped = true;
     killTree(this.child);
     this.child = null;
     this.isProcessing = false;
