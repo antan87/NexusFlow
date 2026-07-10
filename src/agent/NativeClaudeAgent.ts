@@ -9,12 +9,14 @@ export class NativeClaudeAgent extends EventEmitter {
   private messages: any[] = [];
   private cwd: string = '';
   private isProcessing: boolean = false;
+  private modelName: string;
 
   constructor() {
     super();
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY || ''
     });
+    this.modelName = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
   }
 
   public async start(cwd: string) {
@@ -35,10 +37,9 @@ export class NativeClaudeAgent extends EventEmitter {
     this.messages.push({ role: 'user', content: userInput });
 
     try {
-      const system = `You are an expert coding assistant running within the NexusFlow IDE. 
-You have access to the user's workspace at ${this.cwd}.
-Use your tools to read files, run tests, and propose code changes.
-When proposing changes, output the diff directly in your text response.`;
+      const system = `You are an expert coding assistant running within the NexusFlow IDE.
+You have read-only access to the user's workspace at ${this.cwd} through your tools: you can read files and list directories, but you cannot edit files or run commands.
+When suggesting code changes, include the proposed diff directly in your text response so the user can apply it themselves.`;
 
       const tools: Anthropic.Tool[] = [
         {
@@ -65,11 +66,13 @@ When proposing changes, output the diff directly in your text response.`;
         }
       ];
 
+      let completed = false;
+
       for (let step = 0; step < 5; step++) {
         if (this.abortController.signal.aborted) break;
 
         const stream = await this.anthropic.messages.create({
-          model: 'claude-3-5-sonnet-20241022',
+          model: this.modelName,
           max_tokens: 8192,
           system,
           messages: this.messages,
@@ -118,6 +121,7 @@ When proposing changes, output the diff directly in your text response.`;
         this.messages.push({ role: 'assistant', content: assistantContent });
 
         if (toolCalls.length === 0) {
+          completed = true;
           break; // Done with loop
         }
 
@@ -155,6 +159,10 @@ When proposing changes, output the diff directly in your text response.`;
           role: 'user',
           content: toolResultContent
         });
+      }
+
+      if (!completed && !this.abortController.signal.aborted) {
+        self.emit('data', '\n\n*Stopped after reaching the tool-step limit without a final answer. Send a follow-up message to continue.*\n');
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {

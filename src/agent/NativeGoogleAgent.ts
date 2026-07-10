@@ -38,10 +38,9 @@ export class NativeGoogleAgent extends EventEmitter {
 
     try {
       const config: any = {
-        systemInstruction: `You are an expert coding assistant running within the NexusFlow IDE. 
-You have access to the user's workspace at ${this.cwd}.
-Use your tools to read files, run tests, and propose code changes.
-When proposing changes, output the diff directly in your text response.`,
+        systemInstruction: `You are an expert coding assistant running within the NexusFlow IDE.
+You have read-only access to the user's workspace at ${this.cwd} through your tools: you can read files and list directories, but you cannot edit files or run commands.
+When suggesting code changes, include the proposed diff directly in your text response so the user can apply it themselves.`,
         tools: [{
           functionDeclarations: [
             {
@@ -65,6 +64,8 @@ When proposing changes, output the diff directly in your text response.`,
           ]
         }]
       };
+
+      let completed = false;
 
       for (let step = 0; step < 5; step++) {
         if (this.abortController.signal.aborted) break;
@@ -95,6 +96,7 @@ When proposing changes, output the diff directly in your text response.`,
         this.history.push({ role: 'model', parts: modelParts });
 
         if (functionCalls.length === 0) {
+          completed = true;
           break; // Done
         }
 
@@ -125,6 +127,10 @@ When proposing changes, output the diff directly in your text response.`,
         }
         
         this.history.push({ role: 'user', parts: functionResponses });
+      }
+
+      if (!completed && !this.abortController.signal.aborted) {
+        this.emit('data', '\n\n*Stopped after reaching the tool-step limit without a final answer. Send a follow-up message to continue.*\n');
       }
 
     } catch (err: any) {

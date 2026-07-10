@@ -9,12 +9,14 @@ export class NativeAgent extends EventEmitter {
   private messages: any[] = [];
   private cwd: string = '';
   private isProcessing: boolean = false;
+  private modelName: string;
 
   constructor() {
     super();
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY || ''
     });
+    this.modelName = process.env.OPENAI_MODEL || 'gpt-4o';
   }
 
   public async start(cwd: string) {
@@ -23,9 +25,8 @@ export class NativeAgent extends EventEmitter {
       {
         role: 'system',
         content: `You are an expert coding assistant running within the NexusFlow IDE.
-You have access to the user's workspace at ${cwd}.
-Use your tools to read files, run tests, and propose code changes.
-When proposing changes, output the diff directly in your text response.`
+You have read-only access to the user's workspace at ${cwd} through your tools: you can read files and list directories, but you cannot edit files or run commands.
+When suggesting code changes, include the proposed diff directly in your text response so the user can apply it themselves.`
       }
     ];
   }
@@ -74,11 +75,13 @@ When proposing changes, output the diff directly in your text response.`
         }
       ];
 
+      let completed = false;
+
       for (let step = 0; step < 5; step++) {
         if (this.abortController.signal.aborted) break;
 
         const stream: any = await this.openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: this.modelName,
           messages: this.messages,
           tools: tools as any,
           stream: true
@@ -117,6 +120,7 @@ When proposing changes, output the diff directly in your text response.`
         this.messages.push({ role: 'assistant', content, tool_calls: toolCalls.length > 0 ? toolCalls : undefined });
 
         if (toolCalls.length === 0) {
+          completed = true;
           break; // Done with loop
         }
 
@@ -149,6 +153,10 @@ When proposing changes, output the diff directly in your text response.`
             });
           }
         }
+      }
+
+      if (!completed && !this.abortController.signal.aborted) {
+        self.emit('data', '\n\n*Stopped after reaching the tool-step limit without a final answer. Send a follow-up message to continue.*\n');
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
