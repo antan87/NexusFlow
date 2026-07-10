@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, PlaySquare, Square, Sparkles, Cpu, Bot } from 'lucide-react';
+import { Send, PlaySquare, Square, Sparkles, Cpu, Bot, History } from 'lucide-react';
 import { Button, Textarea, Menu } from '../../components/ui/index.js';
 import { cn } from '../../components/ui/cn.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
+import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
@@ -28,6 +29,8 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [agentName, setAgentName] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -181,6 +184,38 @@ export function AgentChat({ ws }: AgentChatProps) {
     setInput('');
   };
 
+  const pickSession = async (session: PickableSession) => {
+    setPickerError(null);
+    if (wsRef.current) {
+      stopAgent();
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/session/claude/${encodeURIComponent(session.id)}/transcript`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const transcript: ChatMessage[] = (data.messages || [])
+        // The transcript parser yields empty strings for tool_use/tool_result
+        // records; drop them instead of rendering empty bubbles.
+        .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+        .map((m: any) => ({
+          role: m.role,
+          content: m.content,
+          ts: m.timestamp ? Date.parse(m.timestamp) || undefined : undefined,
+        }));
+
+      sessionIdRef.current = session.id;
+      sessionStartedRef.current = true;
+      setAgentName(SESSION_PROVIDER);
+      setMessages([
+        ...transcript,
+        { role: 'system', kind: 'note', content: 'Loaded session — your next message resumes it.', ts: Date.now() },
+      ]);
+      setPickerOpen(false);
+    } catch {
+      setPickerError('Failed to load the session transcript.');
+    }
+  };
+
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear this chat history? This also starts a new agent session.')) {
       // A fresh UUID is required: the old session file still exists, so
@@ -204,6 +239,13 @@ export function AgentChat({ ws }: AgentChatProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setPickerError(null); setPickerOpen(true); }}
+            className="grid h-7 w-7 place-items-center rounded-md text-content-faint hover:text-content hover:bg-raised transition-colors cursor-pointer"
+            title="Resume a past session"
+          >
+            <History size={14} />
+          </button>
           {connected && (
             <Button size="sm" variant="secondary" icon={<Square size={14} className="text-rose-400" />} onClick={stopAgent}>
               Stop
@@ -211,6 +253,8 @@ export function AgentChat({ ws }: AgentChatProps) {
           )}
         </div>
       </div>
+
+      <SessionPicker open={pickerOpen} onClose={() => setPickerOpen(false)} ws={ws} onPick={pickSession} error={pickerError} />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-40">
         {messages.length === 0 && (
