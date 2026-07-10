@@ -5,6 +5,7 @@ import { cn } from '../../components/ui/cn.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
+import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
@@ -13,33 +14,36 @@ interface AgentChatProps {
   ws: Feature;
 }
 
+/** Providers whose conversations can be resumed by session id. */
+const SESSION_PROVIDER = 'claude-cli';
+
 export function AgentChat({ ws }: AgentChatProps) {
   const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
-  const storageKey = `nexusflow_chat_${ws.branchName}`;
 
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
+  // The component is remounted per workspace (keyed by branch), so the
+  // one-time initializer always reads the right store.
+  const [initialStore] = useState(() => loadChatStore(ws.branchName));
+  const [messages, setMessages] = useState<ChatMessage[]>(initialStore.messages);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [agentName, setAgentName] = useState('');
 
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string | null>(initialStore.sessionId);
+  const sessionStartedRef = useRef<boolean>(initialStore.sessionStarted);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(messages));
-    } catch (e) {
-      console.error('Failed to save chat to localStorage', e);
-    }
-  }, [messages, storageKey]);
+    saveChatStore(ws.branchName, {
+      v: 2,
+      sessionId: sessionIdRef.current,
+      providerId: agentName || initialStore.providerId,
+      sessionStarted: sessionStartedRef.current,
+      messages,
+    });
+  }, [messages, agentName, ws.branchName]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/adapters/status`)
@@ -47,8 +51,11 @@ export function AgentChat({ ws }: AgentChatProps) {
       .then(providerData => {
         setProviders(providerData);
 
-        // Auto-select first configured provider or first available provider
-        const firstProvider = providerData.find((p: any) => p.isConfigured) || providerData[0];
+        // Prefer the provider used last time, else the first configured one.
+        const persisted = initialStore.providerId
+          ? providerData.find((p: any) => p.id === initialStore.providerId)
+          : undefined;
+        const firstProvider = persisted || providerData.find((p: any) => p.isConfigured) || providerData[0];
         if (firstProvider) {
           setAgentName(firstProvider.id);
         }
@@ -64,9 +71,13 @@ export function AgentChat({ ws }: AgentChatProps) {
     };
   }, []);
 
+  const appendSystemNote = (content: string, kind: 'error' | 'note') => {
+    setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
+  };
+
   const startAgent = () => {
     if (wsRef.current) return;
-    
+
     // Convert API_BASE to ws:// or wss://
     let wsUrl = API_BASE;
     if (wsUrl.startsWith('http')) {
@@ -79,18 +90,32 @@ export function AgentChat({ ws }: AgentChatProps) {
     const socket = new WebSocket(wsUrl);
     socket.onopen = () => {
       setConnected(true);
-      socket.send(JSON.stringify({
+
+      const startPayload: Record<string, unknown> = {
         type: 'start',
         command: agentName,
-        cwd: ws.workspacePath
-      }));
+        cwd: ws.workspacePath,
+      };
+      // Only claude-cli supports resume-by-id; give it a stable session UUID
+      // so the conversation survives reconnects and app restarts.
+      if (agentName === SESSION_PROVIDER) {
+        if (!sessionIdRef.current) {
+          sessionIdRef.current = crypto.randomUUID();
+          sessionStartedRef.current = false;
+        }
+        startPayload.sessionId = sessionIdRef.current;
+        startPayload.resume = sessionStartedRef.current;
+      }
+      socket.send(JSON.stringify(startPayload));
+
       // If the user already typed a message, send it as the first turn so
       // Enter connects and sends in one step instead of requiring a second Enter.
       const firstMessage = input.trim();
       if (firstMessage) {
         socket.send(JSON.stringify({ type: 'input', input: firstMessage }));
-        setMessages(prev => [...prev, { role: 'user', content: firstMessage }]);
+        setMessages(prev => [...prev, { role: 'user', content: firstMessage, ts: Date.now() }]);
         setInput('');
+        setBusy(true);
       }
     };
 
@@ -98,6 +123,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       try {
         const payload = JSON.parse(event.data);
         if (payload.type === 'stream') {
+          sessionStartedRef.current = true;
           setMessages(prev => {
             if (prev.length > 0) {
               const last = prev[prev.length - 1];
@@ -107,12 +133,18 @@ export function AgentChat({ ws }: AgentChatProps) {
                 return newArr;
               }
             }
-            return [...prev, { role: 'assistant', content: payload.text }];
+            return [...prev, { role: 'assistant', content: payload.text, ts: Date.now() }];
           });
+        } else if (payload.type === 'status') {
+          setBusy(payload.state === 'busy');
+        } else if (payload.type === 'system') {
+          appendSystemNote(payload.message, 'note');
         } else if (payload.type === 'error') {
-          setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${payload.message}` }]);
+          appendSystemNote(payload.message, 'error');
+          setBusy(false);
         } else if (payload.type === 'close') {
           setConnected(false);
+          setBusy(false);
           socket.close();
           wsRef.current = null;
         }
@@ -123,6 +155,7 @@ export function AgentChat({ ws }: AgentChatProps) {
 
     socket.onclose = () => {
       setConnected(false);
+      setBusy(false);
       wsRef.current = null;
     };
 
@@ -135,25 +168,27 @@ export function AgentChat({ ws }: AgentChatProps) {
       wsRef.current.close();
       wsRef.current = null;
       setConnected(false);
+      setBusy(false);
     }
   };
 
   const sendMessage = () => {
-    if (!input.trim() || !wsRef.current) return;
-    
-    wsRef.current.send(JSON.stringify({
-      type: 'input',
-      input: input
-    }));
+    const text = input.trim();
+    if (!text || !wsRef.current) return;
 
-    setMessages(prev => [...prev, { role: 'user', content: input }]);
+    wsRef.current.send(JSON.stringify({ type: 'input', input: text }));
+    setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
     setInput('');
   };
 
   const clearChat = () => {
-    if (window.confirm('Are you sure you want to clear this chat history?')) {
+    if (window.confirm('Are you sure you want to clear this chat history? This also starts a new agent session.')) {
+      // A fresh UUID is required: the old session file still exists, so
+      // reusing the id with --session-id would collide.
+      sessionIdRef.current = null;
+      sessionStartedRef.current = false;
       setMessages([]);
-      localStorage.removeItem(storageKey);
+      clearChatStore(ws.branchName);
     }
   };
 
@@ -184,6 +219,18 @@ export function AgentChat({ ws }: AgentChatProps) {
           </div>
         )}
         {messages.map((msg, idx) => (
+          msg.role === 'system' ? (
+            <div key={idx} className="flex justify-center">
+              <span className={cn(
+                'text-[11px] px-3 py-1 rounded-full border',
+                msg.kind === 'error'
+                  ? 'text-rose-400 border-rose-500/20 bg-rose-500/10'
+                  : 'text-content-faint border-hairline bg-raised'
+              )}>
+                {msg.content}
+              </span>
+            </div>
+          ) : (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[80%] rounded-lg p-3 ${msg.role === 'user' ? 'bg-accent text-white' : 'bg-surface border border-hairline'}`}>
               {msg.role === 'user' ? (
@@ -201,6 +248,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               )}
             </div>
           </div>
+          )
         ))}
         <div ref={messagesEndRef} />
       </div>
@@ -263,7 +311,7 @@ export function AgentChat({ ws }: AgentChatProps) {
                   Start
                 </Button>
               ) : (
-                <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<Send size={14} />} onClick={sendMessage} disabled={!input.trim()}>
+                <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<Send size={14} />} onClick={sendMessage} disabled={!input.trim() || busy}>
                   Send
                 </Button>
               )}
