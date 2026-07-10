@@ -14,7 +14,6 @@ interface AgentChatProps {
 }
 
 export function AgentChat({ ws }: AgentChatProps) {
-  const [aiAssistants, setAiAssistants] = useState<{ name: string; displayName: string; detected: boolean; command?: string }[]>([]);
   const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
   const storageKey = `nexusflow_chat_${ws.branchName}`;
 
@@ -43,14 +42,11 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [messages, storageKey]);
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${API_BASE}/api/ai-detect`).then(res => res.json()),
-      fetch(`${API_BASE}/api/adapters/status`).then(res => res.json())
-    ])
-      .then(([detectData, providerData]) => {
-        setAiAssistants(detectData);
+    fetch(`${API_BASE}/api/adapters/status`)
+      .then(res => res.json())
+      .then(providerData => {
         setProviders(providerData);
-        
+
         // Auto-select first configured provider or first available provider
         const firstProvider = providerData.find((p: any) => p.isConfigured) || providerData[0];
         if (firstProvider) {

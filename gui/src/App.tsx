@@ -2,22 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import {
   PlusCircle,
   Settings as SettingsIcon,
-  Terminal,
   Play,
   Check,
   AlertTriangle,
   AlertCircle,
-  FolderOpen,
   ArrowRight,
-  ArrowLeft,
   RefreshCw,
-  Search,
   Sparkles,
   Copy,
   X,
-  Cpu,
-  Trash2,
-  CheckCircle,
 } from 'lucide-react';
 import './App.css';
 import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
@@ -199,9 +192,6 @@ function AppInner() {
     { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
   ]);
 
-  const [toolsStatus, setToolsStatus] = useState<any[]>([]);
-  const [toolsLoading, setToolsLoading] = useState(false);
-  const [updatingToolId, setUpdatingToolId] = useState<string | null>(null);
 
   // App Autoupdate State
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -326,45 +316,6 @@ function AppInner() {
       }
     } catch (e) {
       console.error('Failed to fetch update status:', e);
-    }
-  };
-
-  const fetchToolsStatus = async (force = false) => {
-    setToolsLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/updates/tools${force ? '?force=true' : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        setToolsStatus(data);
-      }
-    } catch (e) {
-      console.error('Failed to fetch tools status:', e);
-    } finally {
-      setToolsLoading(false);
-    }
-  };
-
-  const handleUpdateTool = async (toolId: string) => {
-    setUpdatingToolId(toolId);
-    try {
-      const res = await fetch(`${API_BASE}/api/updates/install`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toolId }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`${toolId} updated successfully!\n\nOutput:\n${data.output}`, 'success');
-        fetchToolsStatus(true);
-        fetchUpdateStatus();
-      } else {
-        showToast(`Error: ${data.error || 'Failed to update tool'}`, 'error');
-      }
-    } catch (e) {
-      console.error(e);
-      showToast('Network error when updating tool.', 'error');
-    } finally {
-      setUpdatingToolId(null);
     }
   };
 
@@ -882,22 +833,6 @@ function AppInner() {
 
   // ─── Actions ────────────────────────────────────────────────────────────
 
-  const handleToggleRepo = (repo: RepoInfo) => {
-    if (selectedRepos.some((r) => r.path === repo.path)) {
-      setSelectedRepos(selectedRepos.filter((r) => r.path !== repo.path));
-    } else {
-      setSelectedRepos([...selectedRepos, repo]);
-    }
-  };
-
-  const handleToggleAI = (aiName: string) => {
-    if (selectedAI.includes(aiName)) {
-      setSelectedAI(selectedAI.filter((x) => x !== aiName));
-    } else {
-      setSelectedAI([...selectedAI, aiName]);
-    }
-  };
-
   const handleSuggestWorkflow = async () => {
     if (!description) {
       showToast('Please enter a description for the workspace details first.', 'info');
@@ -1171,10 +1106,9 @@ function AppInner() {
     else setView('dashboard');
   }, [location.pathname]);
 
-  // Load tool updates status and LLM recommendations when settings view is open
+  // Load LLM recommendations when settings view is open
   useEffect(() => {
     if (view === 'settings') {
-      fetchToolsStatus();
       fetchLlmRecommendation();
     }
   }, [view]);
@@ -1317,10 +1251,6 @@ Core Instructions:
       setAddRepoLoading(false);
     }
   };
-
-  const filteredRepos = repos.filter((r) =>
-    r.name.toLowerCase().includes(repoSearch.toLowerCase())
-  );
 
   if (!configExists && config) {
     const isFormValid = config.devDir.trim() !== '' && config.workspacesDir.trim() !== '';
