@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { ProviderRegistry } from './ProviderRegistry.js';
 import type { ProviderAdapter, AgentHarness } from './ProviderRegistry.js';
 
@@ -12,51 +12,50 @@ class MockAgentHarness implements AgentHarness {
   on(event: string, listener: any) { return this; }
 }
 
+// The registry is a shared singleton without a reset method, so each test
+// registers its own uniquely-named provider to stay order-independent.
+function makeProvider(id: string, overrides: Partial<ProviderAdapter> = {}): ProviderAdapter {
+  return {
+    id,
+    name: 'Mock',
+    isConfigured: () => true,
+    getStatusMessage: () => undefined,
+    createInstance: () => new MockAgentHarness(),
+    ...overrides
+  };
+}
+
 describe('ProviderRegistry', () => {
-  beforeEach(() => {
-    // We don't have a reset method, but we can verify existing behavior
-  });
-
   it('should register and retrieve a provider', () => {
-    const mockProvider: ProviderAdapter = {
-      id: 'mock-provider',
-      name: 'Mock',
-      isConfigured: () => true,
-      getStatusMessage: () => undefined,
-      createInstance: () => new MockAgentHarness()
-    };
+    ProviderRegistry.register(makeProvider('mock-retrieve'));
 
-    ProviderRegistry.register(mockProvider);
-
-    const retrieved = ProviderRegistry.getProvider('mock-provider');
+    const retrieved = ProviderRegistry.getProvider('mock-retrieve');
     expect(retrieved).toBeDefined();
-    expect(retrieved?.id).toBe('mock-provider');
+    expect(retrieved?.id).toBe('mock-retrieve');
     expect(retrieved?.name).toBe('Mock');
   });
 
   it('should list all statuses correctly', () => {
-    const mockUnconfigured: ProviderAdapter = {
-      id: 'mock-unconfigured',
+    ProviderRegistry.register(makeProvider('mock-unconfigured', {
       name: 'Unconfigured',
       isConfigured: () => false,
-      getStatusMessage: () => 'Missing API Key',
-      createInstance: () => new MockAgentHarness()
-    };
-
-    ProviderRegistry.register(mockUnconfigured);
+      getStatusMessage: () => 'Missing API Key'
+    }));
 
     const statuses = ProviderRegistry.getAllStatus();
     const unconfiguredStatus = statuses.find(s => s.id === 'mock-unconfigured');
-    
+
     expect(unconfiguredStatus).toBeDefined();
     expect(unconfiguredStatus?.isConfigured).toBe(false);
     expect(unconfiguredStatus?.message).toBe('Missing API Key');
   });
 
   it('should create an instance correctly', () => {
-    const provider = ProviderRegistry.getProvider('mock-provider');
+    ProviderRegistry.register(makeProvider('mock-instance'));
+
+    const provider = ProviderRegistry.getProvider('mock-instance');
     expect(provider).toBeDefined();
-    
+
     if (provider) {
       const instance = provider.createInstance() as MockAgentHarness;
       expect(instance).toBeDefined();
