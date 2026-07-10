@@ -124,7 +124,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         }
       />
 
-      <div className="flex gap-4 h-[calc(100vh-120px)] overflow-hidden pb-4">
+      <div className="flex gap-4 h-[calc(100vh-120px)] overflow-x-auto overflow-y-hidden pb-4">
         {/* ── Left pane: Workspaces ─────────────────────────────────────────── */}
         <div className="w-60 shrink-0 flex flex-col overflow-y-auto pr-1">
           <div className="relative mb-3">
@@ -189,7 +189,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         </div>
 
         {/* ── Center pane: Detail & Context ───────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-y-auto pr-4 pl-1 min-w-0">
+        <div className="flex-1 min-w-[360px] flex flex-col overflow-y-auto pr-4 pl-1">
           {!selected ? (
             <div className="flex-1 flex items-center justify-center p-8">
               <div className="max-w-md w-full">
@@ -207,7 +207,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               <Card className="mb-4 p-5">
                 <div className="flex flex-row justify-between items-start gap-4">
                   <div className="min-w-0 flex-1">
-                    <h2 className="font-display text-xl font-bold text-content break-all">{selected.branchName}</h2>
+                    <h2 className="font-display text-xl font-bold text-content truncate" title={selected.branchName}>{selected.branchName}</h2>
                     <div className="mt-1 flex items-center gap-2 text-xs text-content-faint flex-wrap">
                       <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
                       <span>·</span>
@@ -353,13 +353,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         </div>
 
         {/* ── Right pane: Agent Chat ───────────────────────────────────────── */}
-        <div className="w-[400px] shrink-0 flex flex-col min-w-0 border border-hairline rounded-xl overflow-hidden bg-surface shadow-sm">
+        <div className="w-[340px] 2xl:w-[400px] shrink-0 flex flex-col border border-hairline rounded-xl overflow-hidden bg-surface shadow-sm">
           {!selected ? (
             <div className="flex-1 flex items-center justify-center p-10 text-center text-sm text-content-faint">
               Select a workspace to start chatting.
             </div>
           ) : (
-            <AgentChat ws={selected} />
+            <AgentChat key={selected.branchName} ws={selected} />
           )}
         </div>
       </div>
