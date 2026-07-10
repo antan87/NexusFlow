@@ -112,6 +112,12 @@ export function AgentChat({ ws }: AgentChatProps) {
             ...prev,
             { role: 'assistant', content: 'I have proposed some code changes for your review:', diff: payload.diff, diffStatus: 'pending' }
           ]);
+        } else if (payload.type === 'error') {
+          setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${payload.message}` }]);
+        } else if (payload.type === 'close') {
+          setConnected(false);
+          socket.close();
+          wsRef.current = null;
         }
       } catch (err) {
         console.error('Failed to parse WS message', err);

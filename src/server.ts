@@ -117,7 +117,7 @@ app.get('/ws', async (c, next) => {
                 agent = provider.createInstance();
                 agent.start(payload.args[0], payload.cwd);
               } else {
-                ws.send(JSON.stringify({ type: 'error', error: new Error(`No provider found for ${payload.command}. Please create a dedicated adapter.`) }));
+                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
                 return;
               }
               
@@ -131,7 +131,7 @@ app.get('/ws', async (c, next) => {
                 ws.send(JSON.stringify({ type: 'close', code }));
               });
               agent.on('error', (error: Error) => {
-                ws.send(JSON.stringify({ type: 'error', error }));
+                ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
               });
               
             } else if (payload.type === 'input') {
