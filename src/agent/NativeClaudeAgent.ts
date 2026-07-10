@@ -137,7 +137,7 @@ When proposing changes, output the diff directly in your text response.`;
               result = await fs.readFile(absolutePath, 'utf8');
             } else if (tc.name === 'list_directory') {
               const absolutePath = path.join(this.cwd, args.dirPath);
-              result = (await fs.readdir(absolutePath)).join('\\n');
+              result = (await fs.readdir(absolutePath)).join('\n');
             }
 
             toolResultContent.push({
