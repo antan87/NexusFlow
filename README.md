@@ -287,7 +287,7 @@ The dashboard integrates an **AI Strategy Analysis** inspector:
 
 ## 🖥️ Dashboard (Desktop App & Browser)
 
-The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). The dashboard is a full-featured dark-themed GUI:
+The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). For the platform rationale (Electron vs Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
 - **Sessions tab** — view past AI conversation transcripts and resume sessions
