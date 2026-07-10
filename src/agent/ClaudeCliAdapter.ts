@@ -8,11 +8,8 @@ export class ClaudeCliAdapter extends EventEmitter {
   // Note: We might need to handle session IDs for Claude if it doesn't auto-resume the folder's session,
   // but for now we just use the -p flag so it doesn't hang without a TTY.
 
-  public async start(prompt: string | undefined, cwd: string) {
+  public async start(cwd: string) {
     this.cwd = cwd;
-    if (prompt) {
-      await this.send(prompt);
-    }
   }
 
   public async send(data: string) {

@@ -115,7 +115,7 @@ app.get('/ws', async (c, next) => {
               const provider = ProviderRegistry.getProvider(payload.command);
               if (provider) {
                 agent = provider.createInstance();
-                agent.start(payload.args[0], payload.cwd);
+                agent.start(payload.cwd);
               } else {
                 ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
                 return;

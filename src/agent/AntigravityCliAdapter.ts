@@ -8,12 +8,9 @@ export class AntigravityCliAdapter extends EventEmitter {
   private isFirstTurn: boolean = true;
   private child: ChildProcess | null = null;
 
-  public async start(prompt: string | undefined, cwd: string) {
+  public async start(cwd: string) {
     this.cwd = cwd;
     this.isFirstTurn = true;
-    if (prompt) {
-      await this.send(prompt);
-    }
   }
 
   public async send(data: string) {

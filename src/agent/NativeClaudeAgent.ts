@@ -17,13 +17,9 @@ export class NativeClaudeAgent extends EventEmitter {
     });
   }
 
-  public async start(prompt: string | undefined, cwd: string) {
+  public async start(cwd: string) {
     this.cwd = cwd;
     this.messages = [];
-    
-    if (prompt) {
-      await this.runLoop(prompt);
-    }
   }
 
   public async send(data: string) {

@@ -20,12 +20,9 @@ export class NativeGoogleAgent extends EventEmitter {
     this.modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
   }
 
-  public async start(prompt: string | undefined, cwd: string) {
+  public async start(cwd: string) {
     this.cwd = cwd;
     this.history = [];
-    if (prompt) {
-      await this.runLoop(prompt);
-    }
   }
 
   public async send(data: string) {

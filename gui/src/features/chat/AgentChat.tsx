@@ -87,9 +87,16 @@ export function AgentChat({ ws }: AgentChatProps) {
       socket.send(JSON.stringify({
         type: 'start',
         command: agentName,
-        args: [], // maybe need to pass specific args later
         cwd: ws.workspacePath
       }));
+      // If the user already typed a message, send it as the first turn so
+      // Enter connects and sends in one step instead of requiring a second Enter.
+      const firstMessage = input.trim();
+      if (firstMessage) {
+        socket.send(JSON.stringify({ type: 'input', input: firstMessage }));
+        setMessages(prev => [...prev, { role: 'user', content: firstMessage }]);
+        setInput('');
+      }
     };
 
     socket.onmessage = (event) => {

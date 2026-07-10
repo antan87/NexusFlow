@@ -17,21 +17,17 @@ export class NativeAgent extends EventEmitter {
     });
   }
 
-  public async start(prompt: string | undefined, cwd: string) {
+  public async start(cwd: string) {
     this.cwd = cwd;
     this.messages = [
       {
         role: 'system',
-        content: `You are an expert coding assistant running within the NexusFlow IDE. 
+        content: `You are an expert coding assistant running within the NexusFlow IDE.
 You have access to the user's workspace at ${cwd}.
 Use your tools to read files, run tests, and propose code changes.
 When proposing changes, output the diff directly in your text response.`
       }
     ];
-
-    if (prompt) {
-      await this.runLoop(prompt);
-    }
   }
 
   public async send(data: string) {

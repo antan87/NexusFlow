@@ -7,7 +7,7 @@ export interface ProviderStatus {
 }
 
 export interface AgentHarness {
-  start(prompt: string | undefined, cwd: string): Promise<void>;
+  start(cwd: string): Promise<void>;
   send(data: string): Promise<void>;
   stop(): void;
   on(event: 'data' | 'diff_proposal' | 'close' | 'error', listener: (...args: any[]) => void): this;

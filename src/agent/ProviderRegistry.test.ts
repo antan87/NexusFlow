@@ -4,7 +4,7 @@ import type { ProviderAdapter, AgentHarness } from './ProviderRegistry.js';
 
 class MockAgentHarness implements AgentHarness {
   public started = false;
-  async start(prompt: string | undefined, cwd: string) {
+  async start(cwd: string) {
     this.started = true;
   }
   async send(data: string) {}
@@ -61,7 +61,7 @@ describe('ProviderRegistry', () => {
       const instance = provider.createInstance() as MockAgentHarness;
       expect(instance).toBeDefined();
       expect(instance.started).toBe(false);
-      instance.start('test', '/');
+      instance.start('/');
       expect(instance.started).toBe(true);
     }
   });
