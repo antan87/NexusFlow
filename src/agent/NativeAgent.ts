@@ -165,6 +165,7 @@ When suggesting code changes, include the proposed diff directly in your text re
       }
     } finally {
       this.isProcessing = false;
+      this.emit('idle');
     }
   }
 

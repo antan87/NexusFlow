@@ -1,3 +1,5 @@
+import type { AgentSession } from './session.js';
+
 export interface ProviderStatus {
   id: string;
   name: string;
@@ -7,10 +9,10 @@ export interface ProviderStatus {
 }
 
 export interface AgentHarness {
-  start(cwd: string): Promise<void>;
+  start(cwd: string, session?: AgentSession): Promise<void>;
   send(data: string): Promise<void>;
   stop(): void;
-  on(event: 'data' | 'close' | 'error', listener: (...args: any[]) => void): this;
+  on(event: 'data' | 'close' | 'error' | 'system' | 'idle', listener: (...args: any[]) => void): this;
 }
 
 export interface ProviderAdapter {

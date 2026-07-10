@@ -31,6 +31,7 @@ import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import { AgentHarness } from './agent/ProviderRegistry.js';
+import { isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -95,45 +96,66 @@ app.get('/ws', async (c, next) => {
     }
   }
   
+  // Chat protocol:
+  //   client -> server: {type:'start', command, cwd, sessionId?, resume?} | {type:'input', input} | {type:'stop'} | 'ping'
+  //   server -> client: {type:'stream', text} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
+  //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
 
     return {
       onMessage(event, ws) {
         if (typeof event.data === 'string') {
-          if (event.data.includes('ping')) {
+          if (event.data === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }));
             return;
           }
 
           try {
             const payload = JSON.parse(event.data);
-            if (payload.type === 'start') {
+            if (payload.type === 'ping') {
+              ws.send(JSON.stringify({ type: 'pong' }));
+            } else if (payload.type === 'start') {
               if (agent) {
                 agent.stop();
               }
               const provider = ProviderRegistry.getProvider(payload.command);
-              if (provider) {
-                agent = provider.createInstance();
-                agent.start(payload.cwd);
-              } else {
+              if (!provider) {
                 ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
                 return;
               }
-              
+
+              let session: AgentSession | undefined;
+              if (payload.sessionId !== undefined && payload.sessionId !== null) {
+                if (!isValidSessionUuid(payload.sessionId)) {
+                  ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
+                  return;
+                }
+                session = { id: payload.sessionId, resume: Boolean(payload.resume) };
+              }
+
+              agent = provider.createInstance();
               agent.on('data', (text: string) => {
                 ws.send(JSON.stringify({ type: 'stream', text }));
+              });
+              agent.on('system', (message: string) => {
+                ws.send(JSON.stringify({ type: 'system', message }));
+              });
+              agent.on('idle', () => {
+                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
               agent.on('close', (code: number) => {
                 ws.send(JSON.stringify({ type: 'close', code }));
               });
               agent.on('error', (error: Error) => {
                 ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
+                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
-              
+              agent.start(payload.cwd, session);
             } else if (payload.type === 'input') {
               if (agent) {
                 agent.send(payload.input);
+                ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
               }
             } else if (payload.type === 'stop') {
               if (agent) {

@@ -60,6 +60,7 @@ export class AntigravityCliAdapter extends EventEmitter {
       // We don't emit 'close' here because we want the frontend to keep the chat session open for the next prompt.
       // We just print a newline to separate turns visually.
       this.emit('data', '\n\n');
+      this.emit('idle');
     });
   }
 

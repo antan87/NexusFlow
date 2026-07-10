@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { buildClaudeTurnArgs, type AgentSession } from './session.js';
 
 export class ClaudeCliAdapter extends EventEmitter {
   private isProcessing: boolean = false;
@@ -7,24 +8,35 @@ export class ClaudeCliAdapter extends EventEmitter {
   private isFirstTurn: boolean = true;
   private child: ChildProcess | null = null;
   private stopped: boolean = false;
+  private session: AgentSession | undefined;
+  private sessionEstablished: boolean = false;
 
-  public async start(cwd: string) {
+  public async start(cwd: string, session?: AgentSession) {
     this.cwd = cwd;
     this.isFirstTurn = true;
+    this.session = session;
+    this.sessionEstablished = false;
   }
 
   public async send(data: string) {
     if (this.isProcessing) return;
     this.isProcessing = true;
-
-    // -p prints and exits, so it works without a TTY. -c continues the
-    // conversation started by the first turn. The prompt goes over stdin:
-    // with shell:true (needed to resolve claude.cmd on Windows) an argv
-    // prompt would be split at spaces because spawn does not quote args.
-    const args = this.isFirstTurn ? ['-p'] : ['-c', '-p'];
-    this.isFirstTurn = false;
     this.stopped = false;
 
+    const args = buildClaudeTurnArgs(this.isFirstTurn, this.session);
+    this.isFirstTurn = false;
+
+    // A --resume of a purged session fails on the very first turn; in that
+    // case the id is free again, so one retry with --session-id recreates
+    // the conversation under the same id.
+    const allowResumeFallback = this.session?.resume === true && !this.sessionEstablished;
+    this.runTurn(args, data, allowResumeFallback);
+  }
+
+  private runTurn(args: string[], data: string, allowResumeFallback: boolean) {
+    // -p prints and exits, so it works without a TTY. The prompt goes over
+    // stdin: with shell:true (needed to resolve claude.cmd on Windows) an
+    // argv prompt would be split at spaces because spawn does not quote args.
     const cliProcess = spawn('claude', args, {
       cwd: this.cwd,
       shell: true,
@@ -53,16 +65,28 @@ export class ClaudeCliAdapter extends EventEmitter {
       this.isProcessing = false;
       this.child = null;
       this.emit('error', new Error(`Failed to start claude CLI: ${err.message}`));
+      this.emit('idle');
     });
 
     cliProcess.on('close', (code) => {
-      this.isProcessing = false;
       this.child = null;
+
+      if (!this.stopped && code !== 0 && !producedOutput && allowResumeFallback) {
+        this.emit('system', 'Could not resume the previous session — starting a new one.');
+        this.runTurn(['-p', '--session-id', this.session!.id], data, false);
+        return;
+      }
+
+      this.isProcessing = false;
+      if (code === 0 || producedOutput) {
+        this.sessionEstablished = true;
+      }
       // A non-zero exit after an intentional stop is expected, not an error.
       if (!this.stopped && code !== 0 && !producedOutput) {
         this.emit('error', new Error(`claude CLI exited with code ${code}${stderrTail ? `: ${stderrTail.trim()}` : ''}`));
       }
       this.emit('data', '\n\n'); // Add separation between turns
+      this.emit('idle');
     });
   }
 
