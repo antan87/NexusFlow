@@ -124,9 +124,6 @@ app.get('/ws', async (c, next) => {
               agent.on('data', (text: string) => {
                 ws.send(JSON.stringify({ type: 'stream', text }));
               });
-              agent.on('diff_proposal', (diff: string) => {
-                ws.send(JSON.stringify({ type: 'diff', diff }));
-              });
               agent.on('close', (code: number) => {
                 ws.send(JSON.stringify({ type: 'close', code }));
               });

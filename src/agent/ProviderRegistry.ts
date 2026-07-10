@@ -10,7 +10,7 @@ export interface AgentHarness {
   start(cwd: string): Promise<void>;
   send(data: string): Promise<void>;
   stop(): void;
-  on(event: 'data' | 'diff_proposal' | 'close' | 'error', listener: (...args: any[]) => void): this;
+  on(event: 'data' | 'close' | 'error', listener: (...args: any[]) => void): this;
 }
 
 export interface ProviderAdapter {

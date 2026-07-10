@@ -5,7 +5,6 @@ import { cn } from '../../components/ui/cn.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
-import { DiffPanel } from './DiffPanel.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
@@ -19,7 +18,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
   const storageKey = `nexusflow_chat_${ws.branchName}`;
 
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; diff?: string; diffStatus?: 'pending' | 'approved' | 'rejected' }[]>(() => {
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>(() => {
     try {
       const stored = localStorage.getItem(storageKey);
       return stored ? JSON.parse(stored) : [];
@@ -114,11 +113,6 @@ export function AgentChat({ ws }: AgentChatProps) {
             }
             return [...prev, { role: 'assistant', content: payload.text }];
           });
-        } else if (payload.type === 'diff') {
-          setMessages(prev => [
-            ...prev,
-            { role: 'assistant', content: 'I have proposed some code changes for your review:', diff: payload.diff, diffStatus: 'pending' }
-          ]);
         } else if (payload.type === 'error') {
           setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${payload.message}` }]);
         } else if (payload.type === 'close') {
@@ -158,28 +152,6 @@ export function AgentChat({ ws }: AgentChatProps) {
 
     setMessages(prev => [...prev, { role: 'user', content: input }]);
     setInput('');
-  };
-
-  const handleApproveDiff = (msgIdx: number) => {
-    if (!wsRef.current) return;
-    const msg = 'Looks good, please apply those changes.';
-    wsRef.current.send(JSON.stringify({ type: 'input', input: msg }));
-    setMessages(prev => {
-      const newArr = [...prev];
-      newArr[msgIdx] = { ...newArr[msgIdx], diffStatus: 'approved' };
-      return [...newArr, { role: 'user', content: msg }];
-    });
-  };
-
-  const handleRejectDiff = (msgIdx: number, feedback: string) => {
-    if (!wsRef.current) return;
-    const msg = `I am rejecting the proposed diff. Please fix it based on this feedback:\n\n${feedback}`;
-    wsRef.current.send(JSON.stringify({ type: 'input', input: msg }));
-    setMessages(prev => {
-      const newArr = [...prev];
-      newArr[msgIdx] = { ...newArr[msgIdx], diffStatus: 'rejected' };
-      return [...newArr, { role: 'user', content: msg }];
-    });
   };
 
   const clearChat = () => {
@@ -228,20 +200,6 @@ export function AgentChat({ ws }: AgentChatProps) {
                     </div>
                   ) : (
                     <ChatMarkdown content={msg.content} />
-                  )}
-                  {msg.diff && (
-                    <DiffPanel
-                      diffText={msg.diff}
-                      onApprove={() => handleApproveDiff(idx)}
-                      onReject={(feedback) => handleRejectDiff(idx, feedback)}
-                      disabled={msg.diffStatus !== 'pending'}
-                    />
-                  )}
-                  {msg.diffStatus === 'approved' && (
-                    <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">✓ Approved</span>
-                  )}
-                  {msg.diffStatus === 'rejected' && (
-                    <span className="text-[10px] text-rose-500 font-bold uppercase tracking-wider">✗ Rejected</span>
                   )}
                 </div>
               )}
