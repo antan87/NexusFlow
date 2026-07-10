@@ -4,3 +4,5 @@ resources/
 bin/
 dist-installer/
 dist-installer-output/
+test-results/
+playwright-report/
