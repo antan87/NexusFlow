@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Send, PlaySquare, Square, Sparkles, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
 import { Button, Textarea, Menu, StatusPill } from '../../components/ui/index.js';
 import { cn } from '../../components/ui/cn.js';
@@ -20,6 +20,70 @@ const SESSION_PROVIDER = 'claude-cli';
 
 const formatTime = (ts?: number) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+
+/**
+ * One chat message. Memoized so a streaming chunk only re-renders (and
+ * re-parses the markdown of) the last bubble, not the whole history.
+ */
+const MessageBubble = memo(function MessageBubble({
+  msg,
+  idx,
+  copied,
+  onCopy,
+}: {
+  msg: ChatMessage;
+  idx: number;
+  copied: boolean;
+  onCopy: (idx: number, content: string) => void;
+}) {
+  if (msg.role === 'system') {
+    return (
+      <div className="flex justify-center">
+        <span className={cn(
+          'text-[11px] px-3 py-1 rounded-full border text-center',
+          msg.kind === 'error'
+            ? 'text-rose-400 border-rose-500/20 bg-rose-500/10'
+            : 'text-content-faint border-hairline bg-raised'
+        )}>
+          {msg.content}
+        </span>
+      </div>
+    );
+  }
+
+  const isUser = msg.role === 'user';
+  const hasAnsi = !isUser && msg.content.includes('\x1b');
+
+  return (
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-accent text-white' : 'bg-surface border border-hairline'}`}>
+        {isUser ? (
+          <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {hasAnsi ? (
+              <div className="font-mono text-xs overflow-x-auto whitespace-pre-wrap bg-[#1e1e1e] text-gray-300 p-2 rounded-md">
+                <Ansi>{msg.content}</Ansi>
+              </div>
+            ) : (
+              <ChatMarkdown content={msg.content} />
+            )}
+            <button
+              onClick={() => onCopy(idx, msg.content)}
+              className="absolute -top-2.5 -right-2.5 hidden group-hover:grid h-6 w-6 place-items-center rounded-md border border-hairline bg-surface text-content-faint hover:text-content shadow-sm cursor-pointer"
+              title="Copy message"
+            >
+              {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+            </button>
+          </div>
+        )}
+      </div>
+      {msg.ts && (
+        <span className="mt-1 text-[10px] text-content-faint">{formatTime(msg.ts)}</span>
+      )}
+    </div>
+  );
+});
 
 export function AgentChat({ ws }: AgentChatProps) {
   const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
@@ -48,22 +112,42 @@ export function AgentChat({ ws }: AgentChatProps) {
   // opened by the current turn) — prevents merging into errors or old turns.
   const turnOpenRef = useRef(false);
   const endedNoteRef = useRef(false);
+  // Latest snapshot for the debounced/unmount flush, updated every render.
+  const latestRef = useRef({ messages, agentName });
+  latestRef.current = { messages, agentName };
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // Don't yank the view down while the user is reading history; always
-    // follow their own just-sent message.
-    const last = messages[messages.length - 1];
-    if (nearBottomRef.current || last?.role === 'user') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+  const flushPersist = useCallback(() => {
+    persistTimer.current = null;
     saveChatStore(ws.branchName, {
       v: 2,
       sessionId: sessionIdRef.current,
-      providerId: agentName || initialStore.providerId,
+      providerId: latestRef.current.agentName || initialStore.providerId,
       sessionStarted: sessionStartedRef.current,
-      messages,
+      messages: latestRef.current.messages,
     });
-  }, [messages, agentName, ws.branchName]);
+  }, [ws.branchName, initialStore.providerId]);
+
+  useEffect(() => {
+    // Don't yank the view down while the user is reading history; always
+    // follow their own just-sent message. Use smooth only for the user's own
+    // send — a smooth animation restarted on every stream chunk stutters.
+    const last = messages[messages.length - 1];
+    if (nearBottomRef.current || last?.role === 'user') {
+      messagesEndRef.current?.scrollIntoView({ behavior: last?.role === 'user' ? 'smooth' : 'auto' });
+    }
+    // Persisting the whole transcript on every stream chunk was O(chunks x
+    // history); debounce so a burst of chunks writes at most once.
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(flushPersist, 400);
+  }, [messages, agentName, flushPersist]);
+
+  useEffect(() => {
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+      flushPersist();
+    };
+  }, [flushPersist]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/adapters/status`)
@@ -241,12 +325,12 @@ export function AgentChat({ ws }: AgentChatProps) {
     sendTurn(wsRef.current, text);
   };
 
-  const copyMessage = (idx: number, content: string) => {
+  const copyMessage = useCallback((idx: number, content: string) => {
     navigator.clipboard.writeText(content).then(() => {
       setCopiedIdx(idx);
       setTimeout(() => setCopiedIdx(prev => (prev === idx ? null : prev)), 1500);
     }).catch(() => {});
-  };
+  }, []);
 
   const pickSession = async (session: PickableSession) => {
     setPickerError(null);
@@ -345,46 +429,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           </div>
         )}
         {messages.map((msg, idx) => (
-          msg.role === 'system' ? (
-            <div key={idx} className="flex justify-center">
-              <span className={cn(
-                'text-[11px] px-3 py-1 rounded-full border text-center',
-                msg.kind === 'error'
-                  ? 'text-rose-400 border-rose-500/20 bg-rose-500/10'
-                  : 'text-content-faint border-hairline bg-raised'
-              )}>
-                {msg.content}
-              </span>
-            </div>
-          ) : (
-          <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className={`group relative max-w-[85%] rounded-lg p-3 ${msg.role === 'user' ? 'bg-accent text-white' : 'bg-surface border border-hairline'}`}>
-              {msg.role === 'user' ? (
-                <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {msg.content.includes('\x1b') ? (
-                    <div className="font-mono text-xs overflow-x-auto whitespace-pre-wrap bg-[#1e1e1e] text-gray-300 p-2 rounded-md">
-                      <Ansi>{msg.content}</Ansi>
-                    </div>
-                  ) : (
-                    <ChatMarkdown content={msg.content} />
-                  )}
-                  <button
-                    onClick={() => copyMessage(idx, msg.content)}
-                    className="absolute -top-2.5 -right-2.5 hidden group-hover:grid h-6 w-6 place-items-center rounded-md border border-hairline bg-surface text-content-faint hover:text-content shadow-sm cursor-pointer"
-                    title="Copy message"
-                  >
-                    {copiedIdx === idx ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                  </button>
-                </div>
-              )}
-            </div>
-            {msg.ts && (
-              <span className="mt-1 text-[10px] text-content-faint">{formatTime(msg.ts)}</span>
-            )}
-          </div>
-          )
+          <MessageBubble key={idx} msg={msg} idx={idx} copied={copiedIdx === idx} onCopy={copyMessage} />
         ))}
         {showThinking && (
           <div className="flex justify-start">

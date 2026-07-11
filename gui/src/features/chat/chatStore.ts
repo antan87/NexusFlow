@@ -58,9 +58,16 @@ export function loadChatStore(branchName: string): ChatStore {
   }
 }
 
+/** Cap on persisted messages — CLI output can be large; the live in-memory
+ *  transcript is unaffected, only what survives a reload is trimmed. */
+const MAX_PERSISTED_MESSAGES = 500;
+
 export function saveChatStore(branchName: string, store: ChatStore): void {
   try {
-    localStorage.setItem(chatStorageKey(branchName), JSON.stringify(store));
+    const trimmed = store.messages.length > MAX_PERSISTED_MESSAGES
+      ? { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
+      : store;
+    localStorage.setItem(chatStorageKey(branchName), JSON.stringify(trimmed));
   } catch (e) {
     console.error('Failed to save chat to localStorage', e);
   }
