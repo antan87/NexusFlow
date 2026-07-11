@@ -136,7 +136,7 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
 | `nexusflow adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
 | `nexusflow mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
-| `nexusflow desktop` | Launch the legacy Neutralino desktop build (the current Electron app lives in `desktop/` — run `npm start` there) |
+| `nexusflow desktop` | Launch the Electron desktop app from the workspace `desktop/` project (requires a built CLI and `desktop/` deps installed) |
 
 ## 🤖 Supported AI Assistants
 
