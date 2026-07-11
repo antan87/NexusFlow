@@ -11,10 +11,14 @@ import type { AISession, ChatMessage } from '../types.js';
 /**
  * Derives the directory name that Claude Code uses inside `~/.claude/projects/`
  * for a given absolute project directory path.
- * It replaces special characters /, \, space, -, and _ with a hyphen.
+ *
+ * Claude Code replaces EVERY non-alphanumeric character with a hyphen and does
+ * not collapse runs, so a Windows path like `C:\Users\a.b\Git\improve_las`
+ * becomes `C--Users-a-b-Git-improve-las` (the drive colon and the `\` each map
+ * to their own dash → `C--`, and the `.` in the user name becomes a dash).
  */
 export function getClaudeProjectFolderName(absolutePath: string): string {
-  return absolutePath.replace(/[\\\/ _-]+/g, '-');
+  return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 /**
