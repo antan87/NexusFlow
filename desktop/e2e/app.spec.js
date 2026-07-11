@@ -4,6 +4,14 @@ import { fileURLToPath } from 'node:url';
 
 const desktopDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
+// When NEXUSFLOW_PACKAGED_EXE is set (CI, after electron-builder), drive the
+// real packaged binary — exercising the app.isPackaged path in main.js that
+// runs the bundled backend via ELECTRON_RUN_AS_NODE. Otherwise run the dev
+// build (`electron .`).
+const packagedExe = process.env.NEXUSFLOW_PACKAGED_EXE
+  ? path.resolve(desktopDir, process.env.NEXUSFLOW_PACKAGED_EXE)
+  : null;
+
 test.describe('desktop app', () => {
   /** @type {import('playwright').ElectronApplication} */
   let app;
@@ -11,7 +19,9 @@ test.describe('desktop app', () => {
   let window;
 
   test.beforeAll(async () => {
-    app = await electron.launch({ args: ['.'], cwd: desktopDir });
+    app = packagedExe
+      ? await electron.launch({ executablePath: packagedExe })
+      : await electron.launch({ args: ['.'], cwd: desktopDir });
     window = await app.firstWindow();
     // The window stays blank until main.js parses the backend port from
     // stdout and calls loadURL.

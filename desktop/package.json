@@ -35,6 +35,9 @@
     "win": {
       "target": "nsis"
     },
+    "nsis": {
+      "artifactName": "NexusFlowSetup.exe"
+    },
     "mac": {
       "target": "dmg"
     },
