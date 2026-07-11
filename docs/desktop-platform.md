@@ -30,17 +30,33 @@ Any non-Electron shell still has to run that Node backend somehow.
 | Packaging/auto-update maturity | electron-builder / Squirrel — very mature (we use Inno Setup) | Good and improving | Weak | Decent |
 | Migration effort from today | — | Rewrite shell in Rust config + build Node sidecar pipeline; GUI/backend unchanged | Already migrated away | Shell rewrite + sidecar pipeline |
 
-## Known limitation: packaged builds need backend bundling
+## Packaging
 
-The current shell runs `node ../dist/index.js` from the source checkout with
-`node` assumed on PATH. That works when running from the repo (`npm start`),
-but a packaged/installed app has no `../dist` and may have no Node. Shipping a
-real installer still requires: bundling `dist/` (electron-builder
-`files`/`extraResources`) and either bundling a Node runtime or compiling the
-backend to a single executable. `desktop/main.js` now fails loudly (a visible
-error page) instead of showing a blank window when the backend can't start,
-but the bundling work itself is open. Until then, "distribution" means running
-from a built checkout.
+The desktop app packages as a standalone installer via electron-builder:
+
+- `npm run prepare-backend` (in `desktop/`) builds the CLI, copies `dist/` and
+  the manifests into `desktop/backend/`, and installs production-only deps
+  there. The staged `backend/` runs the whole server standalone (verified:
+  `node backend/dist/index.js ui` serves both the API and the built GUI).
+- `desktop/package.json` `build` config ships `backend/` as an
+  `extraResources` folder, so it lands at `resources/backend/` in the packaged
+  app.
+- At runtime `main.js` branches on `app.isPackaged`: in dev it runs
+  `../dist/index.js` with `node`; when packaged it runs
+  `resources/backend/dist/index.js` using Electron's own binary as Node
+  (`ELECTRON_RUN_AS_NODE=1`), so **no separate Node runtime has to ship**.
+- `npm run pack` produces an unpacked app (`--dir`); `npm run build` produces
+  the installer.
+
+Build-host note: `electron-builder` unpacks a code-signing toolchain that
+contains symlinks, so the packaging step must run on a host with symlink
+privilege — Linux/macOS CI, or Windows with Developer Mode (or admin) enabled.
+On a stock non-elevated Windows account it fails while extracting that cache.
+The backend bundle and runtime wiring are complete and verified; only the
+installer-producing step depends on that host capability.
+
+`main.js` also fails loudly (a visible error page) rather than showing a blank
+window if the backend can't start.
 
 ## Recommendation
 

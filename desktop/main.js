@@ -37,11 +37,26 @@ function createWindow() {
     }
   });
 
-  // Start the NexusFlow backend server dynamically on port 0 (OS assigns port)
-  const backendPath = path.join(__dirname, '../dist/index.js');
+  // Start the NexusFlow backend server dynamically on port 0 (OS assigns port).
+  // Dev: run ../dist with node on PATH. Packaged: run the backend bundled under
+  // resources/backend using Electron's own binary as Node (ELECTRON_RUN_AS_NODE),
+  // so no separate Node runtime has to ship.
+  let backendCmd;
+  let backendArgs;
+  let backendEnv = { ...process.env };
+  if (app.isPackaged) {
+    const backendPath = path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
+    backendCmd = process.execPath;
+    backendArgs = [backendPath, 'ui', '--port=0'];
+    backendEnv.ELECTRON_RUN_AS_NODE = '1';
+  } else {
+    backendCmd = 'node';
+    backendArgs = [path.join(__dirname, '../dist/index.js'), 'ui', '--port=0'];
+  }
 
-  backendProcess = spawn('node', [backendPath, 'ui', '--port=0'], {
-    stdio: ['pipe', 'pipe', 'pipe']
+  backendProcess = spawn(backendCmd, backendArgs, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: backendEnv
   });
 
   // Surface a spawn failure (node missing, backend path absent in a packaged
