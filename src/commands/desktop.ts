@@ -11,25 +11,24 @@ import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 
 /**
- * Resolves the workspace root directory.
+ * Resolves the repo root directory.
  *
- * Standard NexusFlow workspace layout, where the Electron `desktop/` project
- * is a sibling of this CLI project:
+ * The Electron `desktop/` project lives inside this repo:
  *
- *   <workspace-root>/
- *     NexusFlow/          ← this CLI project
- *     desktop/            ← Electron desktop app (main.js)
+ *   NexusFlow/            ← repo root
+ *     dist/commands/desktop.js   ← this file at runtime
+ *     desktop/                   ← Electron desktop app (main.js)
  *
- * At runtime this file is compiled to `NexusFlow/dist/commands/desktop.js`,
- * so the workspace root is three levels up.
+ * This file compiles to `NexusFlow/dist/commands/desktop.js`, so the repo
+ * root is two levels up (and `desktop/` sits beside `dist/`).
  */
-function resolveWorkspaceRoot(): string {
+function resolveRepoRoot(): string {
   const thisDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(thisDir, '..', '..', '..');
+  return path.resolve(thisDir, '..', '..');
 }
 
 function getDesktopDir(): string {
-  return path.join(resolveWorkspaceRoot(), 'desktop');
+  return path.join(resolveRepoRoot(), 'desktop');
 }
 
 /**
