@@ -103,6 +103,15 @@ export function AgentChat({ ws }: AgentChatProps) {
     setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
   };
 
+  // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
+  const sendTurn = (socket: WebSocket, text: string) => {
+    socket.send(JSON.stringify({ type: 'input', input: text }));
+    setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
+    setInput('');
+    setBusy(true);
+    closeTurn();
+  };
+
   const noteSessionEnded = () => {
     if (endedNoteRef.current) return;
     endedNoteRef.current = true;
@@ -124,6 +133,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     endedNoteRef.current = false;
     const socket = new WebSocket(wsUrl);
     socket.onopen = () => {
+      if (wsRef.current !== socket) return;
       setConnected(true);
 
       const startPayload: Record<string, unknown> = {
@@ -133,7 +143,8 @@ export function AgentChat({ ws }: AgentChatProps) {
       };
       // Only claude-cli supports resume-by-id; give it a stable session UUID
       // so the conversation survives reconnects and app restarts.
-      if (agentName === SESSION_PROVIDER) {
+      const isSessionProvider = agentName === SESSION_PROVIDER;
+      if (isSessionProvider) {
         if (!sessionIdRef.current) {
           sessionIdRef.current = crypto.randomUUID();
           sessionStartedRef.current = false;
@@ -142,24 +153,25 @@ export function AgentChat({ ws }: AgentChatProps) {
         startPayload.resume = sessionStartedRef.current;
       }
       socket.send(JSON.stringify(startPayload));
+      // Mark the session started as soon as we've asked the CLI to create it.
+      // claude -p only prints at the end of a turn, so if we waited for the
+      // first chunk a reload mid-turn would replay --session-id and collide;
+      // resuming instead (fallback recovers if the file isn't there yet).
+      if (isSessionProvider) sessionStartedRef.current = true;
 
       // If the user already typed a message, send it as the first turn so
       // Enter connects and sends in one step instead of requiring a second Enter.
       const firstMessage = input.trim();
       if (firstMessage) {
-        socket.send(JSON.stringify({ type: 'input', input: firstMessage }));
-        setMessages(prev => [...prev, { role: 'user', content: firstMessage, ts: Date.now() }]);
-        setInput('');
-        setBusy(true);
-        closeTurn();
+        sendTurn(socket, firstMessage);
       }
     };
 
     socket.onmessage = (event) => {
+      if (wsRef.current !== socket) return;
       try {
         const payload = JSON.parse(event.data);
         if (payload.type === 'stream') {
-          sessionStartedRef.current = true;
           const append = turnOpenRef.current;
           turnOpenRef.current = true;
           setTurnOpen(true);
@@ -196,14 +208,14 @@ export function AgentChat({ ws }: AgentChatProps) {
     };
 
     socket.onclose = () => {
+      // Only the active socket's close affects UI state; a socket that was
+      // already superseded (Stop then immediate Start) must not clobber the
+      // new connection or emit a spurious "Session ended".
+      if (wsRef.current !== socket) return;
       setConnected(false);
       setBusy(false);
       closeTurn();
-      if (wsRef.current) {
-        // Unexpected drop (server restart, network) — the intentional paths
-        // clear wsRef before closing.
-        noteSessionEnded();
-      }
+      noteSessionEnded();
       wsRef.current = null;
     };
 
@@ -226,12 +238,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const sendMessage = () => {
     const text = input.trim();
     if (!text || !wsRef.current || busy) return;
-
-    wsRef.current.send(JSON.stringify({ type: 'input', input: text }));
-    setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
-    setInput('');
-    setBusy(true);
-    closeTurn();
+    sendTurn(wsRef.current, text);
   };
 
   const copyMessage = (idx: number, content: string) => {
@@ -275,10 +282,14 @@ export function AgentChat({ ws }: AgentChatProps) {
 
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear this chat history? This also starts a new agent session.')) {
+      // Tear down the live agent first so the next message can't resume the
+      // conversation we're clearing.
+      if (wsRef.current) stopAgent();
       // A fresh UUID is required: the old session file still exists, so
       // reusing the id with --session-id would collide.
       sessionIdRef.current = null;
       sessionStartedRef.current = false;
+      endedNoteRef.current = false;
       setMessages([]);
       clearChatStore(ws.branchName);
     }
