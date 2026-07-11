@@ -1,5 +1,15 @@
-import { Check, AlertTriangle, Cpu } from 'lucide-react';
+import { Check, AlertTriangle, Cpu, RefreshCw, Sparkles } from 'lucide-react';
 import type { NexusFlowConfig, StorageAdapterMeta, DetectedEditor } from '../types.js';
+
+interface ToolStatus {
+  id: string;
+  name: string;
+  installed: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  updateCmd: string;
+}
 
 interface SettingsPageProps {
   config: NexusFlowConfig | null;
@@ -13,6 +23,11 @@ interface SettingsPageProps {
   testingLlm: boolean;
   testStatus: { success: boolean; message: string } | null;
   testLlmConnection: () => void;
+  toolsStatus: ToolStatus[];
+  toolsLoading: boolean;
+  updatingToolId: string | null;
+  fetchToolsStatus: (force?: boolean) => void;
+  handleUpdateTool: (toolId: string) => void;
 }
 
 export function SettingsPage({
@@ -26,7 +41,12 @@ export function SettingsPage({
   recommendation,
   testingLlm,
   testStatus,
-  testLlmConnection
+  testLlmConnection,
+  toolsStatus,
+  toolsLoading,
+  updatingToolId,
+  fetchToolsStatus,
+  handleUpdateTool
 }: SettingsPageProps) {
   if (!config) return null;
 
@@ -358,6 +378,96 @@ export function SettingsPage({
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* AI Toolchain Updates */}
+      <div className="bg-surface/40 border border-gray-800/80 rounded-xl p-8 shadow-xl backdrop-blur-sm mt-6">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-white mb-1">AI Toolchain Updates</h3>
+            <p className="text-xs text-content-faint">Monitor and update the CLI packages and assistants in your workflow.</p>
+          </div>
+          <button
+            onClick={() => fetchToolsStatus(true)}
+            disabled={toolsLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-800 hover:border-gray-700 bg-gray-950/20 text-xs font-semibold text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={13} className={toolsLoading ? 'animate-spin' : ''} />
+            {toolsLoading ? 'Checking...' : 'Check Now'}
+          </button>
+        </div>
+
+        {toolsLoading && toolsStatus.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-2 text-content-faint">
+            <RefreshCw className="animate-spin text-indigo-400" size={24} />
+            <span className="text-xs">Fetching registry version details...</span>
+          </div>
+        ) : toolsStatus.length === 0 ? (
+          <p className="text-xs text-content-faint py-4">No toolchain information available.</p>
+        ) : (
+          <div className="space-y-4">
+            {toolsStatus.map((tool) => (
+              <div key={tool.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 border border-gray-800/60 rounded-xl bg-gray-950/10">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    {tool.name}
+                    <span className={`text-[9px] px-2 py-0.5 rounded font-semibold uppercase ${
+                      tool.installed ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-800 text-gray-500'
+                    }`}>
+                      {tool.installed ? 'Installed' : 'Not Installed'}
+                    </span>
+                  </h4>
+                  <div className="flex items-center gap-4 mt-1.5 text-xs text-content-faint">
+                    <span>Installed version: <code className="text-content font-mono text-[10px]">{tool.currentVersion}</code></span>
+                    {tool.installed && (
+                      <span>Latest: <code className="text-content font-mono text-[10px]">{tool.latestVersion}</code></span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-content-faint mt-1 font-mono">{tool.updateCmd}</p>
+                </div>
+
+                <div className="shrink-0 flex items-center gap-3">
+                  {tool.updateAvailable ? (
+                    <button
+                      onClick={() => handleUpdateTool(tool.id)}
+                      disabled={updatingToolId !== null}
+                      className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    >
+                      {updatingToolId === tool.id
+                        ? (<><RefreshCw className="animate-spin" size={12} /> Updating...</>)
+                        : (<><Sparkles size={12} /> Update Tool</>)}
+                    </button>
+                  ) : tool.installed ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10">
+                        <Check size={12} /> Up to Date
+                      </span>
+                      <button
+                        onClick={() => handleUpdateTool(tool.id)}
+                        disabled={updatingToolId !== null}
+                        className="px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 text-content font-bold text-xs rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                      >
+                        {updatingToolId === tool.id
+                          ? (<><RefreshCw className="animate-spin" size={12} /> Reinstalling...</>)
+                          : 'Reinstall'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleUpdateTool(tool.id)}
+                      disabled={updatingToolId !== null}
+                      className="px-3.5 py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 text-white font-bold text-xs rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {updatingToolId === tool.id
+                        ? (<><RefreshCw className="animate-spin" size={12} /> Installing...</>)
+                        : 'Install CLI'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

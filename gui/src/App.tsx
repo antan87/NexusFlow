@@ -283,6 +283,11 @@ function AppInner() {
   const [serviceLogs, setServiceLogs] = useState<string>('');
   const logsEndRef = useRef<HTMLDivElement | null>(null);
 
+  // AI toolchain update states
+  const [toolsStatus, setToolsStatus] = useState<any[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [updatingToolId, setUpdatingToolId] = useState<string | null>(null);
+
   // Local LLM states
   const [recommendation, setRecommendation] = useState<{ totalRamGb: number; gpuName: string; recommendedModel: string } | null>(null);
   const [testStatus, setTestStatus] = useState<{ success: boolean; message: string } | null>(null);
@@ -1106,9 +1111,48 @@ function AppInner() {
     else setView('dashboard');
   }, [location.pathname]);
 
-  // Load LLM recommendations when settings view is open
+  const fetchToolsStatus = async (force = false) => {
+    setToolsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/updates/tools${force ? '?force=true' : ''}`);
+      if (res.ok) {
+        setToolsStatus(await res.json());
+      }
+    } catch (e) {
+      console.error('Failed to fetch tools status:', e);
+    } finally {
+      setToolsLoading(false);
+    }
+  };
+
+  const handleUpdateTool = async (toolId: string) => {
+    setUpdatingToolId(toolId);
+    try {
+      const res = await fetch(`${API_BASE}/api/updates/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toolId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`${toolId} updated successfully!\n\nOutput:\n${data.output}`, 'success');
+        fetchToolsStatus(true);
+        fetchUpdateStatus();
+      } else {
+        showToast(`Error: ${data.error || 'Failed to update tool'}`, 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Network error when updating tool.', 'error');
+    } finally {
+      setUpdatingToolId(null);
+    }
+  };
+
+  // Load tool statuses and LLM recommendations when settings view is open
   useEffect(() => {
     if (view === 'settings') {
+      fetchToolsStatus();
       fetchLlmRecommendation();
     }
   }, [view]);
@@ -2039,6 +2083,8 @@ Core Instructions:
                 config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
                 saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid} recommendation={recommendation}
                 testingLlm={testingLlm} testStatus={testStatus} testLlmConnection={testLlmConnection}
+                toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
+                fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}
               />
             )}
           </>
