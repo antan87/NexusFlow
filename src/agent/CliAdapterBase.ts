@@ -3,14 +3,16 @@ import { spawn, type ChildProcess } from 'node:child_process';
 
 /**
  * Shared lifecycle for CLI-backed agents (claude, agy). Each turn spawns the
- * binary once in print mode, pipes the prompt over stdin, streams stdout as
- * `data`, and emits `idle` when the turn ends. Subclasses supply the binary,
- * the per-turn args, and (optionally) a one-shot fallback used when the first
- * attempt of a turn fails with no output.
+ * binary once in print mode, streams stdout as `data`, and emits `idle` when
+ * the turn ends. Subclasses supply the binary, the per-turn args, how the
+ * prompt is delivered, and (optionally) a one-shot fallback used when the
+ * first attempt of a turn fails with no output.
  *
- * The prompt always goes over stdin, never argv: `shell: true` is required to
- * resolve the `.cmd` shim on Windows, and under a shell an argv prompt would
- * be split on spaces (spawn does not quote args).
+ * Prompt delivery differs per CLI: `claude` is an npm `.cmd` shim that needs
+ * `shell: true` on Windows, and under a shell an argv prompt would be split on
+ * spaces, so its prompt goes over stdin. `agy` is a native binary that reads
+ * the prompt from argv and needs no shell (argv is passed literally, so no
+ * quoting hazard).
  */
 export abstract class CliAdapterBase extends EventEmitter {
   protected cwd: string = '';
@@ -23,9 +25,14 @@ export abstract class CliAdapterBase extends EventEmitter {
   protected abstract readonly binary: string;
   /** Short label for stderr/error diagnostics. */
   protected abstract readonly label: string;
+  /** Spawn through a shell (needed to resolve a `.cmd` shim on Windows). */
+  protected readonly useShell: boolean = false;
+  /** Pipe the prompt to stdin (true) vs. include it in argv via buildArgs (false). */
+  protected readonly promptViaStdin: boolean = false;
 
-  /** Args for one print-mode turn (prompt is piped via stdin, not argv). */
-  protected abstract buildArgs(isFirstTurn: boolean): string[];
+  /** Args for one print-mode turn. Receives the prompt so argv-mode CLIs can
+   *  include it; stdin-mode CLIs ignore it. */
+  protected abstract buildArgs(isFirstTurn: boolean, prompt: string): string[];
 
   /**
    * Args to retry with when the first attempt of a turn exits non-zero with no
@@ -51,7 +58,7 @@ export abstract class CliAdapterBase extends EventEmitter {
     this.isProcessing = true;
     this.stopped = false;
 
-    const args = this.buildArgs(this.isFirstTurn);
+    const args = this.buildArgs(this.isFirstTurn, data);
     this.isFirstTurn = false;
     this.runTurn(args, data, true);
   }
@@ -59,12 +66,14 @@ export abstract class CliAdapterBase extends EventEmitter {
   private runTurn(args: string[], data: string, allowFallback: boolean) {
     const cliProcess = spawn(this.binary, args, {
       cwd: this.cwd,
-      shell: true,
+      shell: this.useShell,
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
     this.child = cliProcess;
-    cliProcess.stdin?.write(data);
-    cliProcess.stdin?.end();
+    if (this.promptViaStdin) {
+      cliProcess.stdin?.write(data);
+      cliProcess.stdin?.end();
+    }
 
     let producedOutput = false;
     let stderrTail = '';
