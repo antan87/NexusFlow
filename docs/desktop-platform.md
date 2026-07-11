@@ -30,6 +30,18 @@ Any non-Electron shell still has to run that Node backend somehow.
 | Packaging/auto-update maturity | electron-builder / Squirrel — very mature (we use Inno Setup) | Good and improving | Weak | Decent |
 | Migration effort from today | — | Rewrite shell in Rust config + build Node sidecar pipeline; GUI/backend unchanged | Already migrated away | Shell rewrite + sidecar pipeline |
 
+## Known limitation: packaged builds need backend bundling
+
+The current shell runs `node ../dist/index.js` from the source checkout with
+`node` assumed on PATH. That works when running from the repo (`npm start`),
+but a packaged/installed app has no `../dist` and may have no Node. Shipping a
+real installer still requires: bundling `dist/` (electron-builder
+`files`/`extraResources`) and either bundling a Node runtime or compiling the
+backend to a single executable. `desktop/main.js` now fails loudly (a visible
+error page) instead of showing a blank window when the backend can't start,
+but the bundling work itself is open. Until then, "distribution" means running
+from a built checkout.
+
 ## Recommendation
 
 **Stay on Electron.** The usual Tauri wins (binary size, memory) mostly evaporate
