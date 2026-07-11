@@ -143,7 +143,13 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [messages, agentName, flushPersist]);
 
   useEffect(() => {
+    // pagehide fires on a hard window/tab close where React's unmount cleanup
+    // may not run (e.g. the Electron window closing), so the last exchange is
+    // still persisted despite the debounce.
+    const onHide = () => flushPersist();
+    window.addEventListener('pagehide', onHide);
     return () => {
+      window.removeEventListener('pagehide', onHide);
       if (persistTimer.current) clearTimeout(persistTimer.current);
       flushPersist();
     };
@@ -190,6 +196,11 @@ export function AgentChat({ ws }: AgentChatProps) {
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
   const sendTurn = (socket: WebSocket, text: string) => {
     socket.send(JSON.stringify({ type: 'input', input: text }));
+    // A turn has been dispatched, so the CLI will create/extend the session:
+    // future reconnects should resume it. Only meaningful for the session
+    // provider (unread otherwise). Marking it here — rather than on connect —
+    // avoids a spurious resume of a session that was never actually started.
+    sessionStartedRef.current = true;
     setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
     setInput('');
     setBusy(true);
@@ -237,11 +248,6 @@ export function AgentChat({ ws }: AgentChatProps) {
         startPayload.resume = sessionStartedRef.current;
       }
       socket.send(JSON.stringify(startPayload));
-      // Mark the session started as soon as we've asked the CLI to create it.
-      // claude -p only prints at the end of a turn, so if we waited for the
-      // first chunk a reload mid-turn would replay --session-id and collide;
-      // resuming instead (fallback recovers if the file isn't there yet).
-      if (isSessionProvider) sessionStartedRef.current = true;
 
       // If the user already typed a message, send it as the first turn so
       // Enter connects and sends in one step instead of requiring a second Enter.

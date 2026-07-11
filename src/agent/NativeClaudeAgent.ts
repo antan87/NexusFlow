@@ -90,9 +90,14 @@ export class NativeClaudeAgent extends NativeAgentBase {
         }
       }
 
-      if (assistantContent.length > 0) {
-        this.messages.push({ role: 'assistant', content: assistantContent });
+      // Anthropic requires strictly alternating user/assistant turns with
+      // non-empty content. If the model returned nothing usable (no text and
+      // only malformed tool calls), record a minimal assistant turn so the
+      // next user message doesn't produce two consecutive user turns (400).
+      if (assistantContent.length === 0) {
+        assistantContent.push({ type: 'text', text: '(no response)' });
       }
+      this.messages.push({ role: 'assistant', content: assistantContent });
 
       if (validCalls.length === 0) {
         completed = true;

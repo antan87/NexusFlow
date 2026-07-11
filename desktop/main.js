@@ -48,6 +48,7 @@ function createWindow() {
   // build) as a readable page instead of a permanently blank window.
   backendProcess.on('error', (err) => {
     console.error('[Backend] failed to spawn:', err);
+    if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
     showBackendError(`Failed to launch the backend process: ${err.message}`);
   });
 
