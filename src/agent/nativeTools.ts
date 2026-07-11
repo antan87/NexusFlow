@@ -33,16 +33,30 @@ export const NATIVE_TOOLS: NativeToolMeta[] = [
   { name: 'list_directory', description: 'List the contents of a directory', argName: 'dirPath', argDescription: 'Path to directory relative to workspace' },
 ];
 
-/** Resolve a workspace-relative path and refuse anything that escapes `cwd`. */
-function resolveWithin(cwd: string, rel: unknown): string {
-  const base = path.resolve(cwd);
-  const resolved = path.resolve(base, typeof rel === 'string' ? rel : '');
+function assertWithin(base: string, target: string, rel: unknown): void {
   // Trailing separator stops a sibling like `workspace-secret` from passing
   // the prefix test for base `workspace`.
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+  if (target !== base && !target.startsWith(base + path.sep)) {
     throw new Error(`Path escapes the workspace: ${String(rel)}`);
   }
-  return resolved;
+}
+
+/**
+ * Resolve a workspace-relative path and refuse anything that escapes `cwd`,
+ * including via symlinks. The lexical check catches `..`/absolute paths; the
+ * realpath check catches a symlink inside the workspace that points outside.
+ */
+async function resolveWithin(cwd: string, rel: unknown): Promise<string> {
+  const base = path.resolve(cwd);
+  const resolved = path.resolve(base, typeof rel === 'string' ? rel : '');
+  assertWithin(base, resolved, rel);
+
+  // Follow symlinks and re-check. realpath throws ENOENT for a missing target,
+  // which the fs read below would raise anyway — let it surface as-is.
+  const realBase = await fs.realpath(base);
+  const realTarget = await fs.realpath(resolved);
+  assertWithin(realBase, realTarget, rel);
+  return realTarget;
 }
 
 /**
@@ -52,11 +66,11 @@ function resolveWithin(cwd: string, rel: unknown): string {
  */
 export async function executeNativeTool(cwd: string, name: string, args: any): Promise<string> {
   if (name === 'read_file') {
-    const abs = resolveWithin(cwd, args?.filePath);
+    const abs = await resolveWithin(cwd, args?.filePath);
     return await fs.readFile(abs, 'utf8');
   }
   if (name === 'list_directory') {
-    const abs = resolveWithin(cwd, args?.dirPath);
+    const abs = await resolveWithin(cwd, args?.dirPath);
     return (await fs.readdir(abs)).join('\n');
   }
   throw new Error(`Unknown tool: ${name}`);

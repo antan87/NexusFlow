@@ -42,6 +42,27 @@ describe('executeNativeTool', () => {
     await expect(executeNativeTool(workspace, 'delete_everything', {}))
       .rejects.toThrow(/Unknown tool/);
   });
+
+  it('rejects a symlink inside the workspace that points outside it', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nf-outside-'));
+    const secret = path.join(outsideDir, 'secret.txt');
+    await fs.writeFile(secret, 'top secret', 'utf8');
+    const link = path.join(workspace, 'escape.txt');
+    try {
+      await fs.symlink(secret, link);
+    } catch {
+      // Symlink creation needs privileges on Windows; skip if unavailable.
+      await fs.remove(outsideDir);
+      return;
+    }
+    try {
+      await expect(executeNativeTool(workspace, 'read_file', { filePath: 'escape.txt' }))
+        .rejects.toThrow(/escapes the workspace/);
+    } finally {
+      await fs.remove(link);
+      await fs.remove(outsideDir);
+    }
+  });
 });
 
 describe('buildSystemPrompt', () => {
