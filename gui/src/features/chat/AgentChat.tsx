@@ -462,6 +462,8 @@ export function AgentChat({ ws }: AgentChatProps) {
           <div className="flex items-center border-b border-hairline/50 p-2 gap-2">
             <Menu
               label="Select Provider"
+              align="left"
+              placement="top"
               trigger={
                 <span className={cn(
                   "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-raised transition-colors cursor-pointer",
