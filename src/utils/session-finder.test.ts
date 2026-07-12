@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText } from './session-finder.js';
+import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText, codexMessageText, isInjectedContextText } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -51,5 +51,26 @@ describe('claudeRecordText', () => {
   });
   it('joins text blocks from array content', () => {
     expect(claudeRecordText({ message: { content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } })).toBe('a b');
+  });
+});
+
+describe('codexMessageText', () => {
+  it('joins the text parts of a response_item message payload', () => {
+    expect(codexMessageText({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello ' }, { type: 'input_text', text: 'world' }] }))
+      .toBe('hello world');
+  });
+  it('handles string content', () => {
+    expect(codexMessageText({ content: 'plain' })).toBe('plain');
+  });
+});
+
+describe('isInjectedContextText', () => {
+  it('flags Codex and Copilot injected context', () => {
+    expect(isInjectedContextText('<environment_context>\n  <cwd>...')).toBe(true);
+    expect(isInjectedContextText('<user_instructions>do X</user_instructions>')).toBe(true);
+    expect(isInjectedContextText('<system_reminder> Custom instructions')).toBe(true);
+  });
+  it('does not flag a real prompt', () => {
+    expect(isInjectedContextText('Refactor the auth module')).toBe(false);
   });
 });

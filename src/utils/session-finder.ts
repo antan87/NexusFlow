@@ -48,6 +48,26 @@ export function isNoiseUserRecord(record: any, text: string): boolean {
   return /^<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|bash-input|bash-stdout|bash-stderr)>/.test(t);
 }
 
+/** Extract plain text from a Codex `response_item` message payload. */
+export function codexMessageText(payload: any): string {
+  const content = payload?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join('');
+  }
+  return '';
+}
+
+/**
+ * True for a user message that is CLI-injected context (Codex
+ * <environment_context>/<user_instructions>, Copilot <system_reminder>) rather
+ * than something the user typed.
+ */
+export function isInjectedContextText(text: string): boolean {
+  const t = text.trimStart();
+  return /^<(system_reminder|system-reminder|environment_context|user_instructions)>/.test(t);
+}
+
 /**
  * Opens GitHub Copilot's SQLite session store (`~/.copilot/session-store.db`)
  * read-only via Node's built-in `node:sqlite`. Returns null when the store is
@@ -252,42 +272,55 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     }
   } catch {}
 
-  // ─── 3. Scan OpenAI Codex Sessions ──────────────────────────────────────
-  const codexDir = path.join(os.homedir(), '.codex');
-  const codexSessionsDir = path.join(codexDir, 'sessions');
+  // ─── 3. OpenAI Codex Sessions (rollout-*.jsonl) ──────────────────────────
+  // Codex writes a `session_meta` record (payload.cwd) followed by
+  // `response_item` records (payload.type==='message', role, content[].text).
+  const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
   try {
     const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
     for (const file of codexFiles) {
       try {
         const content = await fs.readFile(file, 'utf-8');
-        // Heuristic: check if the file references our workspace path or folder name
-        if (!content.toLowerCase().includes(normWorkspace) && !content.includes(wsFolderName)) {
-          continue;
-        }
-
         const lines = content.split('\n').filter(Boolean);
+
+        let sessionCwd: string | null = null;
         let messageCount = 0;
         let createdAt: string | null = null;
         let updatedAt: string | null = null;
         let title = 'Codex Session';
 
         for (const line of lines) {
-          try {
-            const record = JSON.parse(line);
-            if (record.timestamp) {
-              if (!createdAt) createdAt = new Date(record.timestamp).toISOString();
-              updatedAt = new Date(record.timestamp).toISOString();
+          let record: any;
+          try { record = JSON.parse(line); } catch { continue; }
+
+          const ts = record.timestamp || record.payload?.timestamp;
+          if (ts) {
+            const iso = new Date(ts).toISOString();
+            if (!createdAt) createdAt = iso;
+            updatedAt = iso;
+          }
+
+          if (record.type === 'session_meta' && record.payload?.cwd) {
+            sessionCwd = record.payload.cwd;
+          } else if (record.type === 'response_item' && record.payload?.type === 'message') {
+            const role = record.payload.role;
+            if (role !== 'user' && role !== 'assistant') continue;
+            const text = codexMessageText(record.payload).trim();
+            if (role === 'user' && (!text || isInjectedContextText(text))) continue;
+            messageCount++;
+            if (role === 'user' && title === 'Codex Session' && text) {
+              title = text;
             }
-            const role = record.role || record.message?.role || (record.prompt ? 'user' : record.completion ? 'assistant' : null);
-            if (role === 'user' || role === 'assistant') {
-              messageCount++;
-              if (role === 'user' && title === 'Codex Session') {
-                const text = record.content || record.prompt || record.message?.content || '';
-                if (text) title = text.trim();
-              }
-            }
-          } catch {}
+          }
         }
+
+        // Match on the recorded cwd; fall back to a content scan for older files.
+        const matched = sessionCwd
+          ? isPathMatch(sessionCwd)
+          : (content.toLowerCase().includes(normWorkspace) || content.includes(wsFolderName));
+        if (!matched) continue;
+        // Skip contentless sessions (only injected context, no real turns).
+        if (messageCount === 0) continue;
 
         const sessionId = path.basename(file, '.jsonl');
         sessions.push({
@@ -329,6 +362,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           const first = copilotDb.prepare(
             `SELECT user_message FROM turns
              WHERE session_id = ? AND TRIM(COALESCE(user_message, '')) != ''
+               AND TRIM(user_message) NOT LIKE '<%'
              ORDER BY turn_index LIMIT 1`
           ).get(row.id) as any;
           title = (first?.user_message || '').trim();
@@ -465,14 +499,19 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
     const lines = content.split('\n').filter(Boolean);
 
     for (const line of lines) {
-      const record = JSON.parse(line);
-      const role = record.role || record.message?.role || (record.prompt ? 'user' : record.completion ? 'assistant' : null);
+      let record: any;
+      try { record = JSON.parse(line); } catch { continue; }
+      if (record.type !== 'response_item' || record.payload?.type !== 'message') continue;
+      const role = record.payload.role;
       if (role === 'user' || role === 'assistant') {
-        const text = record.content || record.prompt || record.completion || record.message?.content || '';
+        const text = codexMessageText(record.payload).trim();
+        if (role === 'user' && isInjectedContextText(text)) continue;
+        if (!text) continue;
+        const ts = record.timestamp || record.payload?.timestamp;
         messages.push({
           role: role as 'user' | 'assistant',
-          content: text.trim(),
-          timestamp: record.timestamp ? new Date(record.timestamp).toISOString() : undefined,
+          content: text,
+          timestamp: ts ? new Date(ts).toISOString() : undefined,
         });
       }
     }
@@ -488,7 +527,10 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
       for (const t of turns) {
         const user = (t.user_message || '').trim();
         const assistantText = (t.assistant_response || '').trim();
-        if (user) messages.push({ role: 'user', content: user, timestamp: t.timestamp });
+        // Skip Copilot's injected <system_reminder> pseudo-turns.
+        if (user && !isInjectedContextText(user)) {
+          messages.push({ role: 'user', content: user, timestamp: t.timestamp });
+        }
         if (assistantText) messages.push({ role: 'assistant', content: assistantText, timestamp: t.timestamp });
       }
     } finally {
