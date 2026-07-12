@@ -98,6 +98,59 @@ describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', () => {
     await expect(fs.access(path.join(target, 'NEW.md'))).resolves.toBeUndefined();
   });
 
+  it('checks out a remote-only branch as a local tracking branch', async () => {
+    // Bare "remote" seeded from an initial repo.
+    const seed = path.join(base, 'seed');
+    await initRepo(seed);
+    const remote = path.join(base, 'remote.git');
+    await git(base, 'clone', '--bare', seed, remote);
+
+    // The working repo clones the remote; another clone pushes a branch that
+    // the working repo never checks out locally.
+    await git(base, 'clone', remote, mainRepo);
+    const pusher = path.join(base, 'pusher');
+    await git(base, 'clone', remote, pusher);
+    await git(pusher, 'config', 'user.email', 'test@example.com');
+    await git(pusher, 'config', 'user.name', 'Test');
+    await git(pusher, 'checkout', '-b', 'feature/existing');
+    await fs.writeFile(path.join(pusher, 'EXISTING.md'), 'existing\n');
+    await git(pusher, 'add', '.');
+    await git(pusher, 'commit', '-m', 'existing branch change');
+    await git(pusher, 'push', 'origin', 'feature/existing');
+
+    const target = path.join(base, 'wt');
+    const result = await createWorktree(mainRepo, target, 'feature/existing', 'main', { mustExist: true });
+
+    // A new local ref was created (from the remote branch), with its content.
+    expect(result.createdBranch).toBe(true);
+    await expect(fs.access(path.join(target, 'EXISTING.md'))).resolves.toBeUndefined();
+    // The local branch tracks origin/feature/existing.
+    const upstream = await git(target, 'rev-parse', '--abbrev-ref', 'feature/existing@{upstream}');
+    expect(upstream.trim()).toBe('origin/feature/existing');
+  });
+
+  it('mustExist fails when the branch exists neither locally nor on origin', async () => {
+    await initRepo(mainRepo);
+    const target = path.join(base, 'wt');
+
+    await expect(
+      createWorktree(mainRepo, target, 'feature/nope', 'main', { mustExist: true }),
+    ).rejects.toThrow(/does not exist locally or on origin/);
+    // Nothing was created.
+    await expect(fs.access(target)).rejects.toBeTruthy();
+  });
+
+  it('mustExist checks out an existing local branch', async () => {
+    await initRepo(mainRepo);
+    await git(mainRepo, 'branch', 'feature/x');
+    const target = path.join(base, 'wt');
+
+    const result = await createWorktree(mainRepo, target, 'feature/x', 'main', { mustExist: true });
+
+    expect(result.createdBranch).toBe(false);
+    await expect(fs.access(path.join(target, '.git'))).resolves.toBeUndefined();
+  });
+
   it('still creates from the local base when fetch fails (bad remote)', async () => {
     await initRepo(mainRepo);
     await git(mainRepo, 'remote', 'add', 'origin', path.join(base, 'does-not-exist.git'));

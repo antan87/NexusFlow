@@ -57,7 +57,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   );
 
   // Parse knowledge from the workspace knowledge file via the active storage
-  // adapter (it may live outside the workspace directory, e.g. an Obsidian vault).
+  // adapter (it may live outside the workspace directory, e.g. the central vault).
   let extractedGotchas = '_None recorded yet._';
   let extractedDecisions = '_None recorded yet._';
   let extractedQuestions = '_None recorded yet._';
@@ -65,7 +65,8 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   try {
     const raw = await readWorkspaceKnowledge(workspacePath);
     if (raw) {
-      // Drop a leading YAML frontmatter block (added by the Obsidian adapter).
+      // Drop a leading YAML frontmatter block (left behind by the removed
+      // Obsidian adapter; such files still exist in user vaults).
       const knowledgeContent = raw.replace(/^---\n[\s\S]*?\n---\n*/, '');
       extractedGotchas = extractSection(knowledgeContent, ['Known Gotchas', 'Discovered Gotchas & Watch-outs', 'Discovered Gotchas']);
       extractedDecisions = extractSection(knowledgeContent, 'Architecture Decisions');

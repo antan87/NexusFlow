@@ -153,14 +153,14 @@ NexusFlow auto-detects which assistants are available on your machine and genera
 
 NexusFlow is built around a single loop:
 
-1. **`nexusflow create`** — open a workspace of git worktrees on a feature branch with AI context files generated.
+1. **`nexusflow create`** — open a workspace of git worktrees on a feature branch with AI context files generated. Along the way you can **scaffold a brand-new project** (a fresh local git repo in your dev directory) and, per repo, **check out an existing branch** — local or remote — instead of creating the feature branch.
 2. **Work** — your AI assistant edits code across repos. As it goes, it records learnings:
    ```bash
    nexusflow knowledge add -t decision -m "Chose worktrees over submodules for isolation"
    nexusflow knowledge add -t gotcha   -m "fs.rm needs maxRetries on Windows (EBUSY)"
    nexusflow knowledge add -t progress -m "Rollback-on-failure implemented"
    ```
-   Entries land under the right heading in `nexusflow-knowledge.md` (routed through your storage adapter — local, central vault, or Obsidian — so the GUI and the generators all see the same file). No hand-editing, no accidental overwrites.
+   Entries land under the right heading in `nexusflow-knowledge.md` (routed through your storage adapter — local or central vault — so the GUI and the generators all see the same file). No hand-editing, no accidental overwrites.
 3. **`nexusflow finish`** — close it out:
    - Shows a preflight status table (branch, dirty files, unpushed commits) per repo.
    - Commits any remaining changes (repos on the wrong branch or in a detached HEAD are skipped, never committed) and pushes every branch.
@@ -224,8 +224,7 @@ NexusFlow supports multiple storage backends to control where workspace context 
 
 Available storage providers:
 - **Local (`local`)** — Stores files directly in the workspace directory (default).
-- **Central Vault (`central-vault`)** — Stores files in a centralized folder on your machine at `~/.nexusflow/vault/`.
-- **Obsidian Vault (`obsidian`)** — Stores files in a designated folder inside your Obsidian Vault, wrapped in a `nexusflow/` subdirectory (e.g. `vault/nexusflow/workspaces/<featureId>`). Auto-wraps files with YAML frontmatter metadata and tags for easy Obsidian indexing.
+- **Central Vault (`central-vault`)** — Stores files in a centralized folder on your machine at `~/.nexusflow/vault/`. The folder is plain markdown, so it can be opened as (or symlinked into) an Obsidian vault.
 
 ### CLI Adapter Management
 
@@ -236,10 +235,10 @@ Configure storage adapters from the command line:
 nexusflow adapter list
 
 # View configurations and fields for a specific adapter
-nexusflow adapter info obsidian
+nexusflow adapter info central-vault
 
-# Switch to a different adapter (e.g. obsidian) and configure its settings
-nexusflow adapter use obsidian
+# Switch to a different adapter (e.g. central-vault) and configure its settings
+nexusflow adapter use central-vault
 
 # Scaffolds a template for creating a new custom storage adapter plugin
 nexusflow adapter init my-custom-plugin

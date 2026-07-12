@@ -7,7 +7,8 @@ import { input, checkbox, confirm, select, search, editor } from '@inquirer/prom
 import chalk from 'chalk';
 
 import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
-import { isValidBranchName } from './git.js';
+import { isValidBranchName, listBranches } from './git.js';
+import { isValidProjectName } from '../core/new-repo.js';
 import type { WorkflowTemplate } from './workflows.js';
 
 /**
@@ -170,10 +171,8 @@ export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> 
     });
 
     if (result === 'done') {
-      if (selectedPaths.size === 0) {
-        console.log(chalk.red('  Please select at least one repository.'));
-        continue;
-      }
+      // An empty selection is allowed — the create flow can still scaffold a
+      // brand-new project afterwards, and exits if nothing ends up selected.
       break;
     }
 
@@ -191,6 +190,73 @@ export async function promptSelectRepos(repos: RepoInfo[]): Promise<RepoInfo[]> 
   }
 
   return repos.filter((r) => selectedPaths.has(r.path));
+}
+
+/**
+ * Prompts for the name of a brand-new project to scaffold in `devDir`.
+ */
+export async function promptNewProjectName(devDir: string): Promise<string> {
+  const name = await input({
+    message: `New project name (created in ${devDir}):`,
+    validate: (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) return 'Project name cannot be empty';
+      if (!isValidProjectName(trimmed)) return 'Not a valid directory name';
+      return true;
+    },
+  });
+  return name.trim();
+}
+
+/**
+ * Optionally lets the user pick an existing branch per repo instead of
+ * creating the feature branch.
+ *
+ * @param repos         - The repos selected for the workspace.
+ * @param featureBranch - The feature branch that would be created by default.
+ * @returns Map of repo name → existing branch, for overridden repos only.
+ */
+export async function promptRepoBranches(
+  repos: RepoInfo[],
+  featureBranch: string,
+): Promise<Map<string, string>> {
+  const overrides = new Map<string, string>();
+
+  const useExisting = await confirm({
+    message: 'Check out an existing branch for any repo (instead of creating the feature branch)?',
+    default: false,
+  });
+  if (!useExisting) return overrides;
+
+  for (const repo of repos) {
+    const { local, remote } = await listBranches(repo.path);
+    const branchNames = Array.from(new Set([...local, ...remote]));
+
+    if (branchNames.length === 0) {
+      console.log(chalk.dim(`  ${repo.name}: no branches found — will create "${featureBranch}".`));
+      continue;
+    }
+
+    const picked = await select({
+      message: `Branch for ${repo.name}:`,
+      choices: [
+        {
+          name: `➕ Create new branch "${featureBranch}" (default)`,
+          value: '',
+        },
+        ...branchNames.map((b) => ({
+          name: local.includes(b) ? b : `${b} ${chalk.dim('(remote only)')}`,
+          value: b,
+        })),
+      ],
+    });
+
+    if (picked) {
+      overrides.set(repo.name, picked);
+    }
+  }
+
+  return overrides;
 }
 
 /**

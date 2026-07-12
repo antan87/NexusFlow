@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 import { createWorkspace } from './workspace.js';
 import * as worktree from './worktree.js';
-import type { Feature, RepoInfo } from '../types.js';
+import type { Feature, RepoInfo, RepoSelection } from '../types.js';
 
 vi.mock('execa');
 vi.mock('./worktree.js');
@@ -98,6 +98,43 @@ describe('createWorkspace rollback', () => {
 
     await expect(createWorkspace(feature(repos), repos)).rejects.toThrow(/already exists and is not empty/);
     expect(worktree.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it('checks out a per-repo existing branch (mustExist) instead of the feature branch', async () => {
+    vi.mocked(worktree.createWorktree).mockResolvedValue({ createdBranch: false });
+    const repos: RepoSelection[] = repoInfos('api', 'web');
+    repos[0]!.existingBranch = 'legacy/branch';
+
+    await createWorkspace(feature(repos), repos);
+
+    expect(worktree.createWorktree).toHaveBeenCalledWith(
+      path.join('/src', 'api'),
+      path.join(workspacePath, 'api'),
+      'legacy/branch',
+      'main',
+      { mustExist: true },
+    );
+    expect(worktree.createWorktree).toHaveBeenCalledWith(
+      path.join('/src', 'web'),
+      path.join(workspacePath, 'web'),
+      'feat-branch',
+      'main',
+      { mustExist: false },
+    );
+  });
+
+  it('rollback deletes the per-repo override branch, not the feature branch', async () => {
+    // The override branch was remote-only, so a local ref was created for it.
+    vi.mocked(worktree.createWorktree)
+      .mockResolvedValueOnce({ createdBranch: true }) // api on 'legacy/branch'
+      .mockRejectedValueOnce(new Error('boom')); // web fails
+    const repos: RepoSelection[] = repoInfos('api', 'web');
+    repos[0]!.existingBranch = 'legacy/branch';
+
+    await expect(createWorkspace(feature(repos), repos)).rejects.toThrow(/boom/);
+
+    expect(gitCalls()).toContainEqual(['branch', '-D', 'legacy/branch']);
+    expect(gitCalls()).not.toContainEqual(['branch', '-D', 'feat-branch']);
   });
 
   it('completes rollback even when removeWorktree fails (prunes and removes the dir)', async () => {

@@ -21,6 +21,8 @@ import { spawn } from 'node:child_process';
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
+import { createNewRepo } from './core/new-repo.js';
+import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
@@ -64,7 +66,7 @@ import {
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
-import type { Feature, RepoInfo, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
+import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 
 // Resolve static files directory
@@ -351,6 +353,38 @@ app.get('/api/repos', async (c) => {
   }
 });
 
+// 3a. List local and origin branches of a repository (for existing-branch selection)
+app.get('/api/repos/branches', async (c) => {
+  try {
+    const repoPath = c.req.query('path');
+    if (!repoPath) {
+      return c.json({ error: 'Missing "path" query parameter' }, 400);
+    }
+    const config = await loadConfig();
+    // Only repos under devDir are offered by the scanner; refuse anything else.
+    const resolved = assertWithin(config.devDir, repoPath);
+    const branches = await listBranches(resolved);
+    return c.json(branches);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 3b. Scaffold a brand-new local git repository in devDir
+app.post('/api/repos/new', async (c) => {
+  try {
+    const body = await c.req.json() as { name?: string };
+    if (!body.name || typeof body.name !== 'string') {
+      return c.json({ error: 'Missing "name" in request body' }, 400);
+    }
+    const config = await loadConfig();
+    const repo = await createNewRepo(config.devDir, body.name);
+    return c.json({ success: true, repo });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 4. List existing workspaces
 app.get('/api/workspaces', async (c) => {
   try {
@@ -622,12 +656,21 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       job.workspacePath = workspacePath;
     }
 
+    // Record which repos ride an existing branch instead of the feature branch.
+    const repoBranches: Record<string, string> = {};
+    for (const r of body.repos as RepoSelection[]) {
+      if (r.existingBranch) {
+        repoBranches[r.name] = r.existingBranch;
+      }
+    }
+
     const feature: Feature = {
       id: body.branchName,
       branchName: body.branchName,
       description: body.description,
       repos: body.repos.map((r: any) => path.join(workspacePath, r.name)),
       originalRepos: body.repos.map((r: any) => r.path),
+      repoBranches: Object.keys(repoBranches).length > 0 ? repoBranches : undefined,
       assistants: body.assistants,
       workspacePath,
       createdAt: new Date().toISOString(),
@@ -683,7 +726,7 @@ app.post('/api/workspace', async (c) => {
     const body = await c.req.json() as {
       branchName: string;
       description: string;
-      repos: RepoInfo[];
+      repos: RepoSelection[];
       assistants: any[];
       localLlmEnabled?: boolean;
       teamworkInstructions?: string;
@@ -1103,7 +1146,7 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
 // 13a. Get workspace knowledge (nexusflow-knowledge.md)
 // Routed through the active storage adapter so the GUI edits the same file the
-// generators write (under the Obsidian/vault adapters this lives outside the
+// generators write (under the central-vault adapter this lives outside the
 // workspace directory).
 app.get('/api/workspace/:id/knowledge', async (c) => {
   try {

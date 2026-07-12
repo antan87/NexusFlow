@@ -5,7 +5,6 @@ import * as path from 'node:path';
 
 import { LocalStorageAdapter } from './local-storage.js';
 import { CentralVaultAdapter } from './vault-storage.js';
-import { ObsidianStorageAdapter } from './obsidian-storage.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:os', async () => {
@@ -125,77 +124,4 @@ describe('Storage Adapters', () => {
     });
   });
 
-  describe('ObsidianStorageAdapter', () => {
-    it('should declare correct meta and configuration settings', () => {
-      const adapter = new ObsidianStorageAdapter();
-      expect(adapter.meta.name).toBe('obsidian');
-      expect(adapter.meta.configFields.some(f => f.key === 'vaultPath')).toBe(true);
-    });
-
-    it('should respect custom vaultPath configuration', async () => {
-      const adapter = new ObsidianStorageAdapter();
-      adapter.configure({ vaultPath: '/custom/obsidian/vault' });
-
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-      await adapter.writeWorkspaceFile('/ws/path', 'feature-1', 'test.txt', 'hello');
-
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        path.normalize('/custom/obsidian/vault/nexusflow/workspaces/feature-1/test.txt'),
-        expect.any(String),
-        'utf8'
-      );
-    });
-
-    it('should wrap content with YAML frontmatter by default', async () => {
-      const adapter = new ObsidianStorageAdapter();
-      adapter.configure({ vaultPath: '/custom/obsidian/vault', addFrontmatter: true });
-
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-      await adapter.writeWorkspaceFile('/ws/path', 'feature-1', 'test.txt', 'hello');
-
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining('tags: ["feature-1", "workspace"]'),
-        'utf8'
-      );
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining('generator: nexusflow'),
-        'utf8'
-      );
-    });
-
-    it('should not wrap content with frontmatter if addFrontmatter is disabled', async () => {
-      const adapter = new ObsidianStorageAdapter();
-      adapter.configure({ vaultPath: '/custom/obsidian/vault', addFrontmatter: false });
-
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-      await adapter.writeWorkspaceFile('/ws/path', 'feature-1', 'test.txt', 'hello');
-
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.any(String),
-        'hello',
-        'utf8'
-      );
-    });
-
-    it('should delete workspace folder from custom vault path under nexusflow', async () => {
-      const adapter = new ObsidianStorageAdapter();
-      adapter.configure({ vaultPath: '/custom/obsidian/vault' });
-      vi.mocked(fs.rm).mockResolvedValue(undefined);
-
-      await adapter.deleteWorkspace('/ws/path', 'feature-1');
-
-      expect(fs.rm).toHaveBeenCalledWith(
-        path.normalize('/custom/obsidian/vault/nexusflow/workspaces/feature-1'),
-        { recursive: true, force: true }
-      );
-    });
-  });
 });
