@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getClaudeProjectFolderName } from './session-finder.js';
+import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -19,5 +19,37 @@ describe('getClaudeProjectFolderName', () => {
 
   it('preserves case', () => {
     expect(getClaudeProjectFolderName('C:\\Git\\NexusFlow')).toBe('C--Git-NexusFlow');
+  });
+});
+
+describe('isNoiseUserRecord', () => {
+  const mk = (text: string, extra: any = {}) => ({ type: 'user', message: { content: text }, ...extra });
+
+  it('flags meta records', () => {
+    expect(isNoiseUserRecord({ isMeta: true, message: { content: 'anything' } }, 'anything')).toBe(true);
+  });
+
+  it('flags local-command caveats and slash-command wrappers', () => {
+    expect(isNoiseUserRecord(mk('<local-command-caveat>Caveat: ...'), '<local-command-caveat>Caveat: ...')).toBe(true);
+    expect(isNoiseUserRecord(mk('<command-name>/plan</command-name>'), '<command-name>/plan</command-name>')).toBe(true);
+    expect(isNoiseUserRecord(mk('<local-command-stdout>done</local-command-stdout>'), '<local-command-stdout>done</local-command-stdout>')).toBe(true);
+  });
+
+  it('flags empty text and tool-result-only content', () => {
+    expect(isNoiseUserRecord(mk(''), '')).toBe(true);
+    expect(isNoiseUserRecord({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } }, '')).toBe(true);
+  });
+
+  it('accepts a real typed prompt', () => {
+    expect(isNoiseUserRecord(mk('Please refactor the auth module'), 'Please refactor the auth module')).toBe(false);
+  });
+});
+
+describe('claudeRecordText', () => {
+  it('reads string content', () => {
+    expect(claudeRecordText({ message: { content: 'hello' } })).toBe('hello');
+  });
+  it('joins text blocks from array content', () => {
+    expect(claudeRecordText({ message: { content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } })).toBe('a b');
   });
 });

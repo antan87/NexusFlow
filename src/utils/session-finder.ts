@@ -21,6 +21,33 @@ export function getClaudeProjectFolderName(absolutePath: string): string {
   return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+/** Extract plain text from a Claude transcript record's message. */
+export function claudeRecordText(record: any): string {
+  const raw = record?.message?.text ?? record?.message?.content ?? record?.text ?? '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw.map((b: any) => (typeof b === 'string' ? b : b?.text || b?.content || '')).join(' ');
+  }
+  return '';
+}
+
+/**
+ * True for a Claude "user" record that is CLI-injected noise rather than a
+ * typed prompt: meta caveats, slash-command wrappers, command stdout, or a
+ * tool-result payload. These pollute session titles and loaded transcripts.
+ */
+export function isNoiseUserRecord(record: any, text: string): boolean {
+  if (record?.isMeta) return true;
+  // Content that is only tool_result / non-text blocks isn't a real prompt.
+  const raw = record?.message?.content;
+  if (Array.isArray(raw) && !raw.some((b: any) => typeof b === 'string' || b?.type === 'text')) {
+    return true;
+  }
+  const t = text.trimStart();
+  if (t === '') return true;
+  return /^<(command-name|command-message|command-args|local-command-stdout|local-command-caveat|bash-input|bash-stdout|bash-stderr)>/.test(t);
+}
+
 /**
  * Recursively retrieves all files in a directory that match a specific extension.
  */
@@ -176,14 +203,14 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               }
 
               if (record.type === 'user' || record.type === 'assistant') {
+                const text = claudeRecordText(record);
+                // CLI-injected caveats, slash commands and tool results aren't
+                // real turns — exclude them from the count and the title.
+                const isNoise = record.type === 'user' && isNoiseUserRecord(record, text);
+                if (isNoise) continue;
                 messageCount++;
-                if (record.type === 'user' && title === 'Claude Session') {
-                  const rawText = record.message?.text || record.message?.content || '';
-                  if (typeof rawText === 'string') {
-                    title = rawText.trim();
-                  } else if (Array.isArray(rawText)) {
-                    title = rawText.map((b: any) => b.text || b.content || '').join(' ').trim();
-                  }
+                if (record.type === 'user' && title === 'Claude Session' && text.trim()) {
+                  title = text.trim();
                 }
               }
             }
@@ -381,27 +408,22 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
 
     for (const line of lines) {
       const record = JSON.parse(line);
-      if (record.type === 'user' || record.role === 'user') {
-        const rawText = record.message?.text || record.message?.content || record.text || '';
-        let cleanText = '';
-        if (typeof rawText === 'string') {
-          cleanText = rawText.trim();
-        } else if (Array.isArray(rawText)) {
-          cleanText = rawText.map((b: any) => b.text || b.content || '').join(' ').trim();
-        }
+      const isUser = record.type === 'user' || record.role === 'user';
+      const isAssistant = record.type === 'assistant' || record.role === 'assistant';
+      if (!isUser && !isAssistant) continue;
+
+      const cleanText = claudeRecordText(record).trim();
+      // Drop CLI-injected caveats/slash-commands/tool-results and empty turns.
+      if (isUser && isNoiseUserRecord(record, cleanText)) continue;
+      if (!cleanText) continue;
+
+      if (isUser) {
         messages.push({
           role: 'user',
           content: cleanText,
           timestamp: record.timestamp || record.created_at,
         });
-      } else if (record.type === 'assistant' || record.role === 'assistant') {
-        const rawText = record.message?.text || record.message?.content || record.text || '';
-        let cleanText = '';
-        if (typeof rawText === 'string') {
-          cleanText = rawText.trim();
-        } else if (Array.isArray(rawText)) {
-          cleanText = rawText.map((b: any) => b.text || b.content || '').join(' ').trim();
-        }
+      } else {
         messages.push({
           role: 'assistant',
           content: cleanText,
