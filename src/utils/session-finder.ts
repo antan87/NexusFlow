@@ -49,6 +49,24 @@ export function isNoiseUserRecord(record: any, text: string): boolean {
 }
 
 /**
+ * Opens GitHub Copilot's SQLite session store (`~/.copilot/session-store.db`)
+ * read-only via Node's built-in `node:sqlite`. Returns null when the store is
+ * absent or the runtime lacks node:sqlite (e.g. an older bundled Node in a
+ * packaged Electron build) so Copilot support degrades gracefully instead of
+ * throwing. Caller must close the returned handle.
+ */
+async function openCopilotDb(): Promise<any | null> {
+  try {
+    const dbPath = path.join(os.homedir(), '.copilot', 'session-store.db');
+    await fs.access(dbPath);
+    const { DatabaseSync } = await import('node:sqlite');
+    return new DatabaseSync(dbPath, { readOnly: true });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Recursively retrieves all files in a directory that match a specific extension.
  */
 async function getFilesRecursively(dir: string, extension: string): Promise<string[]> {
@@ -285,60 +303,55 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     }
   } catch {}
 
-  // ─── 4. Scan GitHub Copilot Sessions ────────────────────────────────────
-  const copilotDir = path.join(os.homedir(), '.copilot');
-  const copilotSessionsDirs = [
-    path.join(copilotDir, 'session-state'),
-    path.join(copilotDir, 'history-session-state')
-  ];
-  for (const dir of copilotSessionsDirs) {
+  // ─── 4. GitHub Copilot Sessions (SQLite session store) ───────────────────
+  // Copilot keeps sessions in ~/.copilot/session-store.db: a `sessions` table
+  // (id, cwd, summary, timestamps) and a `turns` table (user_message /
+  // assistant_response per turn). Match on `cwd` like the other harnesses.
+  const copilotDb = await openCopilotDb();
+  if (copilotDb) {
     try {
-      const copilotFiles = await getFilesRecursively(dir, '.json');
-      for (const file of copilotFiles) {
-        try {
-          const content = await fs.readFile(file, 'utf-8');
-          // Heuristic check
-          if (!content.toLowerCase().includes(normWorkspace) && !content.includes(wsFolderName)) {
-            continue;
-          }
+      const rows = copilotDb.prepare(
+        'SELECT id, cwd, summary, created_at, updated_at FROM sessions'
+      ).all() as any[];
+      for (const row of rows) {
+        if (!isPathMatch(row.cwd)) continue;
 
-          const record = JSON.parse(content);
-          let messageCount = 0;
-          let title = 'Copilot Session';
-          let messagesList: any[] = [];
+        const counted = copilotDb.prepare(
+          `SELECT
+             SUM(CASE WHEN TRIM(COALESCE(user_message, '')) != '' THEN 1 ELSE 0 END)
+             + SUM(CASE WHEN TRIM(COALESCE(assistant_response, '')) != '' THEN 1 ELSE 0 END) AS n
+           FROM turns WHERE session_id = ?`
+        ).get(row.id) as any;
+        const messageCount = Number(counted?.n ?? 0);
 
-          if (Array.isArray(record)) {
-            messagesList = record;
-          } else if (record && Array.isArray(record.messages)) {
-            messagesList = record.messages;
-          }
+        let title = (row.summary || '').trim();
+        if (!title) {
+          const first = copilotDb.prepare(
+            `SELECT user_message FROM turns
+             WHERE session_id = ? AND TRIM(COALESCE(user_message, '')) != ''
+             ORDER BY turn_index LIMIT 1`
+          ).get(row.id) as any;
+          title = (first?.user_message || '').trim();
+        }
+        // Skip contentless sessions (no summary and no turns).
+        if (!title && messageCount === 0) continue;
+        if (!title) title = 'Copilot Session';
 
-          for (const msg of messagesList) {
-            const role = msg.role || (msg.type === 'user' ? 'user' : msg.type === 'assistant' ? 'assistant' : null);
-            if (role === 'user' || role === 'assistant') {
-              messageCount++;
-              if (role === 'user' && title === 'Copilot Session') {
-                const text = msg.content || msg.text || '';
-                if (text) title = text.trim();
-              }
-            }
-          }
-
-          const stats = await fs.stat(file);
-          const sessionId = path.basename(file, '.json');
-
-          sessions.push({
-            id: sessionId,
-            assistant: 'copilot',
-            title: title.length > 80 ? title.substring(0, 80) + '...' : title,
-            createdAt: stats.birthtime.toISOString(),
-            updatedAt: stats.mtime.toISOString(),
-            messageCount,
-            workspacePath,
-          });
-        } catch {}
+        sessions.push({
+          id: row.id,
+          assistant: 'copilot',
+          title: title.length > 80 ? title.substring(0, 80) + '...' : title,
+          createdAt: row.created_at || new Date().toISOString(),
+          updatedAt: row.updated_at || new Date().toISOString(),
+          messageCount,
+          workspacePath,
+        });
       }
-    } catch {}
+    } catch {
+      // Leave Copilot out rather than fail the whole listing.
+    } finally {
+      try { copilotDb.close(); } catch {}
+    }
   }
 
   // Sort by updatedAt descending
@@ -464,47 +477,22 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
       }
     }
   } else if (assistant === 'copilot') {
-    const copilotDir = path.join(os.homedir(), '.copilot');
-    const copilotSessionsDirs = [
-      path.join(copilotDir, 'session-state'),
-      path.join(copilotDir, 'history-session-state')
-    ];
-    let transcriptPath: string | null = null;
-
-    for (const dir of copilotSessionsDirs) {
-      const files = await getFilesRecursively(dir, '.json');
-      for (const file of files) {
-        if (path.basename(file, '.json') === sessionId) {
-          transcriptPath = file;
-          break;
-        }
+    const copilotDb = await openCopilotDb();
+    if (!copilotDb) {
+      throw new Error('Copilot session store is unavailable in this runtime.');
+    }
+    try {
+      const turns = copilotDb.prepare(
+        'SELECT user_message, assistant_response, timestamp FROM turns WHERE session_id = ? ORDER BY turn_index'
+      ).all(sessionId) as any[];
+      for (const t of turns) {
+        const user = (t.user_message || '').trim();
+        const assistantText = (t.assistant_response || '').trim();
+        if (user) messages.push({ role: 'user', content: user, timestamp: t.timestamp });
+        if (assistantText) messages.push({ role: 'assistant', content: assistantText, timestamp: t.timestamp });
       }
-      if (transcriptPath) break;
-    }
-
-    if (!transcriptPath) {
-      throw new Error(`Copilot session ${sessionId} not found`);
-    }
-
-    const content = await fs.readFile(transcriptPath, 'utf-8');
-    const record = JSON.parse(content);
-    let messagesList: any[] = [];
-
-    if (Array.isArray(record)) {
-      messagesList = record;
-    } else if (record && Array.isArray(record.messages)) {
-      messagesList = record.messages;
-    }
-
-    for (const msg of messagesList) {
-      const role = msg.role || (msg.type === 'user' ? 'user' : msg.type === 'assistant' ? 'assistant' : null);
-      if (role === 'user' || role === 'assistant') {
-        messages.push({
-          role: role as 'user' | 'assistant',
-          content: (msg.content || msg.text || '').trim(),
-          timestamp: msg.timestamp || msg.created_at,
-        });
-      }
+    } finally {
+      try { copilotDb.close(); } catch {}
     }
   }
 
