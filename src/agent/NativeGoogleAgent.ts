@@ -10,15 +10,22 @@ import {
 
 export class NativeGoogleAgent extends NativeAgentBase {
   protected readonly label = 'NativeGoogleAgent';
-  private ai: GoogleGenAI;
+  private ai: GoogleGenAI | null = null;
   private history: any[] = [];
   private modelName: string;
 
   constructor() {
     super();
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
     // Allow users to override the model via env var, fallback to gemini-2.0-flash
     this.modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  }
+
+  private client(): GoogleGenAI {
+    return (this.ai ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' }));
+  }
+
+  protected configError(): string | null {
+    return process.env.GEMINI_API_KEY ? null : 'Google API key is not configured (set GEMINI_API_KEY).';
   }
 
   protected resetHistory() {
@@ -50,7 +57,7 @@ export class NativeGoogleAgent extends NativeAgentBase {
     for (let step = 0; step < NATIVE_STEP_LIMIT; step++) {
       if (signal.aborted) break;
 
-      const responseStream = await this.ai.models.generateContentStream({
+      const responseStream = await this.client().models.generateContentStream({
         model: this.modelName,
         contents: this.history,
         config,

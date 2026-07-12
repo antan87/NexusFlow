@@ -19,6 +19,15 @@ export abstract class NativeAgentBase extends EventEmitter {
   /** Run one user turn's agent loop, honoring `signal` for cancellation. */
   protected abstract runLoop(userInput: string, signal: AbortSignal): Promise<void>;
 
+  /**
+   * Returns a user-facing message when the provider isn't usable (e.g. missing
+   * API key), or null when it is. Checked before each turn so a misconfigured
+   * provider gives a clear error instead of a raw SDK auth exception.
+   */
+  protected configError(): string | null {
+    return null;
+  }
+
   public async start(cwd: string): Promise<void> {
     this.cwd = cwd;
     this.resetHistory();
@@ -26,6 +35,14 @@ export abstract class NativeAgentBase extends EventEmitter {
 
   public async send(data: string): Promise<void> {
     if (this.isProcessing) return;
+
+    const cfgError = this.configError();
+    if (cfgError) {
+      this.emit('error', new Error(cfgError));
+      this.emit('idle');
+      return;
+    }
+
     this.isProcessing = true;
     const controller = new AbortController();
     this.abortController = controller;

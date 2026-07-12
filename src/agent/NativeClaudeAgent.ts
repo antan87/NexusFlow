@@ -10,14 +10,21 @@ import {
 
 export class NativeClaudeAgent extends NativeAgentBase {
   protected readonly label = 'NativeClaudeAgent';
-  private anthropic: Anthropic;
+  private anthropic: Anthropic | null = null;
   private messages: any[] = [];
   private modelName: string;
 
   constructor() {
     super();
-    this.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
     this.modelName = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+  }
+
+  private client(): Anthropic {
+    return (this.anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' }));
+  }
+
+  protected configError(): string | null {
+    return process.env.ANTHROPIC_API_KEY ? null : 'Anthropic API key is not configured (set ANTHROPIC_API_KEY).';
   }
 
   protected resetHistory() {
@@ -43,7 +50,7 @@ export class NativeClaudeAgent extends NativeAgentBase {
     for (let step = 0; step < NATIVE_STEP_LIMIT; step++) {
       if (signal.aborted) break;
 
-      const stream = await this.anthropic.messages.create({
+      const stream = await this.client().messages.create({
         model: this.modelName,
         max_tokens: 8192,
         system,

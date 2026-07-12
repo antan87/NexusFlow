@@ -10,14 +10,23 @@ import {
 
 export class NativeAgent extends NativeAgentBase {
   protected readonly label = 'NativeAgent';
-  private openai: OpenAI;
+  private openai: OpenAI | null = null;
   private messages: any[] = [];
   private modelName: string;
 
   constructor() {
     super();
-    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
     this.modelName = process.env.OPENAI_MODEL || 'gpt-4o';
+  }
+
+  // The OpenAI SDK throws on an empty key, so build the client lazily — after
+  // configError() has gated on the key being present.
+  private client(): OpenAI {
+    return (this.openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' }));
+  }
+
+  protected configError(): string | null {
+    return process.env.OPENAI_API_KEY ? null : 'OpenAI API key is not configured (set OPENAI_API_KEY).';
   }
 
   protected resetHistory() {
@@ -45,7 +54,7 @@ export class NativeAgent extends NativeAgentBase {
     for (let step = 0; step < NATIVE_STEP_LIMIT; step++) {
       if (signal.aborted) break;
 
-      const stream: any = await this.openai.chat.completions.create({
+      const stream: any = await this.client().chat.completions.create({
         model: this.modelName,
         messages: this.messages,
         tools: tools as any,
