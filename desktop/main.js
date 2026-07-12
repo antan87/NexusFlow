@@ -87,8 +87,10 @@ function createWindow() {
       console.log(`[Electron] Backend detected on port ${assignedPort}`);
       mainWindow.loadURL(`http://localhost:${assignedPort}`);
 
-      mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        console.log(`[Browser Console] ${message}`);
+      // Electron >= 37 passes a single event object (message on the event);
+      // older versions passed positional args. Support both.
+      mainWindow.webContents.on('console-message', (event, _level, message) => {
+        console.log(`[Browser Console] ${event?.message ?? message ?? ''}`);
       });
     }
   });
