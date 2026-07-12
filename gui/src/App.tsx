@@ -79,6 +79,9 @@ interface RepoInfo {
   name: string;
   path: string;
   defaultBranch: string;
+  // Set in the wizard to base a repo's worktree on an existing branch instead
+  // of the new feature branch.
+  existingBranch?: string;
 }
 
 interface Feature {
@@ -2022,8 +2025,8 @@ Core Instructions:
             {view === 'create' && config && (
               <WizardPage
                 activeStep={activeStep} setActiveStep={setActiveStep} branchName={branchName} setBranchName={setBranchName}
-                description={description} setDescription={setDescription} repos={repos} reposLoading={reposLoading}
-                repoSearch={repoSearch} setRepoSearch={setRepoSearch} selectedRepos={selectedRepos} setSelectedRepos={setSelectedRepos}
+                description={description} setDescription={setDescription} repos={repos} setRepos={setRepos} reposLoading={reposLoading}
+                repoSearch={repoSearch} setRepoSearch={setRepoSearch} selectedRepos={selectedRepos} setSelectedRepos={setSelectedRepos} showToast={showToast}
                 aiAssistants={aiAssistants} selectedAI={selectedAI} setSelectedAI={setSelectedAI}
                 editors={editors} selectedEditor={selectedEditor} setSelectedEditor={setSelectedEditor}
                 config={config} setConfig={setConfig} saveAppConfig={saveAppConfig} localLlmEnabled={localLlmEnabled} setLocalLlmEnabled={setLocalLlmEnabled}
