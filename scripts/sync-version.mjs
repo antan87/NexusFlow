@@ -3,13 +3,13 @@
 //
 // The version in the root package.json is authoritative. This script propagates
 // it to every other version-bearing file so all release channels (npm, VS Code
-// extension, desktop installer) ship in lockstep.
+// extension, Electron desktop app) ship in lockstep.
 //
 //   node scripts/sync-version.mjs           # write root version into all targets
 //   node scripts/sync-version.mjs --check   # verify every target matches (exit 1 on drift)
 //
-// The desktop Inno Setup version is NOT handled here — it is injected at build
-// time via an ISCC /DAppVersion define (see desktop/build-installer.js).
+// The desktop installer version is handled by electron-builder, which reads it
+// from desktop/package.json (already a target below).
 
 import fs from 'fs';
 import path from 'path';
@@ -18,16 +18,12 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
-// Files whose top-level "version" field tracks the root version.
-// For neutralino.config.json this is the app version only — its cli.binaryVersion
-// / cli.clientVersion (the Neutralino framework versions) are deliberately left
-// untouched because the replace targets the FIRST "version" key, which is the
-// top-level app version.
+// Files whose top-level "version" field tracks the root version. The regex
+// targets the first "version" key, which is the top-level package version.
 const TARGETS = [
   'extension/package.json',
   'desktop/package.json',
   'gui/package.json',
-  'desktop/neutralino.config.json',
 ];
 
 const VERSION_RE = /("version"\s*:\s*")([^"]*)(")/;
