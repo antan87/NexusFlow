@@ -1,5 +1,7 @@
 import { test, expect, _electron as electron } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const desktopDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -12,6 +14,18 @@ const packagedExe = process.env.NEXUSFLOW_PACKAGED_EXE
   ? path.resolve(desktopDir, process.env.NEXUSFLOW_PACKAGED_EXE)
   : null;
 
+// main.js mirrors its startup + backend output here so a boot failure is
+// diagnosable even when Playwright doesn't surface the main-process console.
+const logPath = path.join(os.tmpdir(), `nexusflow-desktop-e2e-${process.pid}.log`);
+
+function dumpBackendLog(label) {
+  try {
+    console.log(`\n===== ${label}: ${logPath} =====\n${readFileSync(logPath, 'utf8')}\n=====================================\n`);
+  } catch {
+    console.log(`\n(no backend log at ${logPath})\n`);
+  }
+}
+
 test.describe('desktop app', () => {
   /** @type {import('playwright').ElectronApplication} */
   let app;
@@ -19,18 +33,20 @@ test.describe('desktop app', () => {
   let window;
 
   test.beforeAll(async () => {
+    const launchEnv = { ...process.env, NEXUSFLOW_DESKTOP_LOG: logPath };
     app = packagedExe
-      ? await electron.launch({ executablePath: packagedExe })
-      : await electron.launch({ args: ['.'], cwd: desktopDir });
-    // Surface the Electron main-process output (main.js logs the backend
-    // spawn path and its stdout/stderr) so a backend startup failure is
-    // visible in the test log instead of an opaque navigation timeout.
-    app.process().stdout?.on('data', (d) => console.log(`[main] ${d.toString().trimEnd()}`));
-    app.process().stderr?.on('data', (d) => console.log(`[main:err] ${d.toString().trimEnd()}`));
-    window = await app.firstWindow();
-    // The window stays blank until main.js parses the backend port from
-    // stdout and calls loadURL.
-    await window.waitForURL(/localhost:\d+/, { timeout: 60_000 });
+      ? await electron.launch({ executablePath: packagedExe, env: launchEnv })
+      : await electron.launch({ args: ['.'], cwd: desktopDir, env: launchEnv });
+    try {
+      window = await app.firstWindow();
+      // The window stays blank until main.js parses the backend port from
+      // stdout and calls loadURL.
+      await window.waitForURL(/localhost:\d+/, { timeout: 60_000 });
+    } catch (e) {
+      // Backend never reported a port — surface main.js's log so CI shows why.
+      dumpBackendLog('backend boot log (failure)');
+      throw e;
+    }
   });
 
   test.afterAll(async () => {

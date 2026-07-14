@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, createWriteStream } from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,6 +9,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BACKEND_READY_TIMEOUT_MS = 20000;
+
+// Reliable diagnostics: Playwright doesn't consistently surface the Electron
+// main-process console, so mirror startup + backend output to a log file
+// (overridable via NEXUSFLOW_DESKTOP_LOG) as well as stderr.
+const LOG_PATH = process.env.NEXUSFLOW_DESKTOP_LOG || path.join(os.tmpdir(), 'nexusflow-desktop.log');
+let logStream;
+try { logStream = createWriteStream(LOG_PATH, { flags: 'w' }); } catch { logStream = null; }
+function diag(msg) {
+  const line = `${new Date().toISOString()} ${msg}\n`;
+  try { logStream?.write(line); } catch { /* ignore */ }
+  try { process.stderr.write(`[nf] ${line}`); } catch { /* ignore */ }
+}
 
 let mainWindow;
 let backendProcess;
@@ -42,15 +55,21 @@ function createWindow() {
   // Dev: run ../dist with node on PATH. Packaged: run the backend bundled under
   // resources/backend using Electron's own binary as Node (ELECTRON_RUN_AS_NODE),
   // so no separate Node runtime has to ship.
+  // Don't leak the launcher's Node debug/inspector options into the backend
+  // child (Playwright/CI can set these; an inherited --inspect-brk would make
+  // the child hang before it ever binds a port).
+  let backendEnv = { ...process.env };
+  delete backendEnv.NODE_OPTIONS;
+  delete backendEnv.ELECTRON_RUN_AS_NODE;
+
   let backendCmd;
   let backendArgs;
-  let backendEnv = { ...process.env };
   if (app.isPackaged) {
     const backendPath = path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
     backendCmd = process.execPath;
     backendArgs = [backendPath, 'ui', '--port=0'];
     backendEnv.ELECTRON_RUN_AS_NODE = '1';
-    console.log(`[Electron] packaged backend: ${backendPath} (exists=${existsSync(backendPath)})`);
+    diag(`packaged backend: ${backendPath} (exists=${existsSync(backendPath)})`);
     if (!existsSync(backendPath)) {
       showBackendError(`Bundled backend not found at ${backendPath}.`);
       return;
@@ -59,7 +78,8 @@ function createWindow() {
     backendCmd = 'node';
     backendArgs = [path.join(__dirname, '../dist/index.js'), 'ui', '--port=0'];
   }
-  console.log(`[Electron] isPackaged=${app.isPackaged} spawning: ${backendCmd} ${backendArgs.join(' ')}`);
+  diag(`isPackaged=${app.isPackaged} execPath=${process.execPath}`);
+  diag(`spawning: ${backendCmd} ${backendArgs.join(' ')}`);
 
   backendProcess = spawn(backendCmd, backendArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -69,9 +89,13 @@ function createWindow() {
   // Surface a spawn failure (node missing, backend path absent in a packaged
   // build) as a readable page instead of a permanently blank window.
   backendProcess.on('error', (err) => {
-    console.error('[Backend] failed to spawn:', err);
+    diag(`backend failed to spawn: ${err.message}`);
     if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
     showBackendError(`Failed to launch the backend process: ${err.message}`);
+  });
+
+  backendProcess.on('exit', (code, signal) => {
+    diag(`backend exited code=${code} signal=${signal} (port ${assignedPort || 'not yet detected'})`);
   });
 
   // If the backend never reports a port, tell the user rather than hang.
@@ -84,14 +108,14 @@ function createWindow() {
   // Parse the assigned port from stdout
   backendProcess.stdout.on('data', (data) => {
     const output = data.toString();
-    console.log(`[Backend] ${output}`);
+    diag(`[backend:out] ${output.trimEnd()}`);
 
     // Look for a log like "Dashboard is already active at: http://localhost:PORT"
     const match = output.match(/http:\/\/localhost:(\d+)/);
     if (match && !assignedPort) {
       assignedPort = parseInt(match[1], 10);
       if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
-      console.log(`[Electron] Backend detected on port ${assignedPort}`);
+      diag(`backend ready on port ${assignedPort}`);
       mainWindow.loadURL(`http://localhost:${assignedPort}`);
 
       // Electron >= 37 passes a single event object (message on the event);
@@ -103,7 +127,7 @@ function createWindow() {
   });
 
   backendProcess.stderr.on('data', (data) => {
-    console.error(`[Backend Error] ${data}`);
+    diag(`[backend:err] ${data.toString().trimEnd()}`);
   });
 
   // Expose the port to the frontend via IPC
