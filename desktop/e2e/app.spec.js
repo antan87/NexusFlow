@@ -1,5 +1,6 @@
 import { test, expect, _electron as electron } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -51,13 +52,23 @@ test.describe('desktop app', () => {
 
   test.afterAll(async () => {
     if (!app) return;
-    // close() waits for the app to exit; don't let a wedged shutdown eat
-    // the whole hook timeout — force-kill as a fallback.
+    const proc = app.process();
+    // close() can hang if the app doesn't exit cleanly; cap it, then force-kill
+    // the whole process tree (the app + its spawned backend server child), so
+    // the Playwright worker teardown doesn't time out.
     await Promise.race([
-      app.close(),
-      new Promise((resolve) => setTimeout(resolve, 15_000)),
+      app.close().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 8_000)),
     ]);
-    try { app.process().kill(); } catch { /* already gone */ }
+    try {
+      if (proc?.pid) {
+        if (process.platform === 'win32') {
+          spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+        } else {
+          proc.kill('SIGKILL');
+        }
+      }
+    } catch { /* already gone */ }
   });
 
   test('boots the backend and loads the dashboard shell', async () => {
@@ -68,7 +79,9 @@ test.describe('desktop app', () => {
   });
 
   test('workspaces page renders with the chat panel', async () => {
-    await window.getByRole('button', { name: 'Workspaces' }).click();
+    const workspacesNav = window.getByRole('button', { name: 'Workspaces' });
+    await expect(workspacesNav).toBeVisible({ timeout: 30_000 });
+    await workspacesNav.click();
 
     await expect(window.getByText('Select a workspace to start chatting.')).toBeVisible({ timeout: 15_000 });
   });

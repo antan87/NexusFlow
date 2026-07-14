@@ -137,10 +137,26 @@ function createWindow() {
   ipcMain.handle('get-server-port', () => assignedPort);
 }
 
+// Kill the backend and its whole tree — the child is a listening server that
+// won't die from a plain kill on Windows, which otherwise keeps the app (and
+// CI teardown) hanging.
+function stopBackend() {
+  if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
+  const child = backendProcess;
+  backendProcess = null;
+  if (!child || child.killed || child.exitCode !== null || !child.pid) return;
+  if (process.platform === 'win32') {
+    try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ignore */ }
+  } else {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  }
+}
+
 app.whenReady().then(createWindow);
 
+app.on('before-quit', stopBackend);
+
 app.on('window-all-closed', () => {
-  if (readyTimer) clearTimeout(readyTimer);
-  if (backendProcess) backendProcess.kill();
+  stopBackend();
   if (process.platform !== 'darwin') app.quit();
 });
