@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -20,9 +21,9 @@ function showBackendError(detail) {
     code{background:#333;padding:2px 6px;border-radius:4px}</style>
     <h2>NexusFlow could not start its backend</h2>
     <p>${detail}</p>
-    <p>The desktop app launches the backend from <code>../dist/index.js</code> using
-    <code>node</code> on your PATH. Ensure the project is built (<code>npm run build</code>
-    at the repo root) and Node is installed.</p>`;
+    <p>In development the backend is run from <code>../dist</code> with <code>node</code>;
+    a packaged build runs the bundled backend under <code>resources/backend</code>. If this
+    persists, rebuild (<code>npm run build</code>) and relaunch.</p>`;
   mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
 
@@ -49,10 +50,16 @@ function createWindow() {
     backendCmd = process.execPath;
     backendArgs = [backendPath, 'ui', '--port=0'];
     backendEnv.ELECTRON_RUN_AS_NODE = '1';
+    console.log(`[Electron] packaged backend: ${backendPath} (exists=${existsSync(backendPath)})`);
+    if (!existsSync(backendPath)) {
+      showBackendError(`Bundled backend not found at ${backendPath}.`);
+      return;
+    }
   } else {
     backendCmd = 'node';
     backendArgs = [path.join(__dirname, '../dist/index.js'), 'ui', '--port=0'];
   }
+  console.log(`[Electron] isPackaged=${app.isPackaged} spawning: ${backendCmd} ${backendArgs.join(' ')}`);
 
   backendProcess = spawn(backendCmd, backendArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],

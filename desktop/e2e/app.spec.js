@@ -22,6 +22,11 @@ test.describe('desktop app', () => {
     app = packagedExe
       ? await electron.launch({ executablePath: packagedExe })
       : await electron.launch({ args: ['.'], cwd: desktopDir });
+    // Surface the Electron main-process output (main.js logs the backend
+    // spawn path and its stdout/stderr) so a backend startup failure is
+    // visible in the test log instead of an opaque navigation timeout.
+    app.process().stdout?.on('data', (d) => console.log(`[main] ${d.toString().trimEnd()}`));
+    app.process().stderr?.on('data', (d) => console.log(`[main:err] ${d.toString().trimEnd()}`));
     window = await app.firstWindow();
     // The window stays blank until main.js parses the backend port from
     // stdout and calls loadURL.
