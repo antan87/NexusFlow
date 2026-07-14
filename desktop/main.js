@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { existsSync, createWriteStream } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -139,17 +139,20 @@ function createWindow() {
 
 // Kill the backend and its whole tree — the child is a listening server that
 // won't die from a plain kill on Windows, which otherwise keeps the app (and
-// CI teardown) hanging.
+// CI teardown) hanging. Synchronous so it completes before the app exits.
 function stopBackend() {
   if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
   const child = backendProcess;
   backendProcess = null;
-  if (!child || child.killed || child.exitCode !== null || !child.pid) return;
-  if (process.platform === 'win32') {
-    try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ignore */ }
-  } else {
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  if (child && !child.killed && child.exitCode === null && child.pid) {
+    if (process.platform === 'win32') {
+      try { spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ignore */ }
+    } else {
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+    }
   }
+  // Release the log file handle so it can't keep the event loop alive.
+  try { logStream?.end(); logStream = null; } catch { /* ignore */ }
 }
 
 app.whenReady().then(createWindow);
@@ -158,5 +161,7 @@ app.on('before-quit', stopBackend);
 
 app.on('window-all-closed', () => {
   stopBackend();
-  if (process.platform !== 'darwin') app.quit();
+  // exit(0) terminates immediately (no lingering handles / graceful-close
+  // wait), so Playwright's app.close() resolves and teardown doesn't hang.
+  if (process.platform !== 'darwin') app.exit(0);
 });
