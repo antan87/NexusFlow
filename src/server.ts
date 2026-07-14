@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
+import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
 import { createWriteStream, existsSync } from 'node:fs';
 import * as path from 'node:path';
@@ -30,6 +31,9 @@ import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import { ProviderRegistry } from './agent/adapters.js';
+import { AgentHarness } from './agent/ProviderRegistry.js';
+import { isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -74,6 +78,111 @@ const __dirname = path.dirname(__filename);
 const guiPath = path.join(__dirname, 'gui');
 
 export const app = new Hono();
+
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
+app.get('/api/adapters/status', (c) => {
+  return c.json(ProviderRegistry.getAllStatus());
+});
+
+app.get('/ws', async (c, next) => {
+  // Prevent Cross-Site WebSocket Hijacking (CSWSH)
+  const origin = c.req.header('origin');
+  if (origin) {
+    try {
+      const { hostname } = new URL(origin);
+      const isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+      if (!isLocal) return c.text('Forbidden', 403);
+    } catch {
+      return c.text('Forbidden', 403);
+    }
+  }
+  
+  // Chat protocol:
+  //   client -> server: {type:'start', command, cwd, sessionId?, resume?} | {type:'input', input} | {type:'stop'} | 'ping'
+  //   server -> client: {type:'stream', text} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
+  //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
+  return upgradeWebSocket((c) => {
+    let agent: AgentHarness | null = null;
+
+    return {
+      onMessage(event, ws) {
+        if (typeof event.data === 'string') {
+          if (event.data === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }));
+            return;
+          }
+
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'ping') {
+              ws.send(JSON.stringify({ type: 'pong' }));
+            } else if (payload.type === 'start') {
+              if (agent) {
+                agent.stop();
+              }
+              const provider = ProviderRegistry.getProvider(payload.command);
+              if (!provider) {
+                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
+                return;
+              }
+
+              let session: AgentSession | undefined;
+              if (payload.sessionId !== undefined && payload.sessionId !== null) {
+                if (!isValidSessionUuid(payload.sessionId)) {
+                  ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
+                  return;
+                }
+                session = { id: payload.sessionId, resume: Boolean(payload.resume) };
+              }
+
+              agent = provider.createInstance();
+              agent.on('data', (text: string) => {
+                ws.send(JSON.stringify({ type: 'stream', text }));
+              });
+              agent.on('system', (message: string) => {
+                ws.send(JSON.stringify({ type: 'system', message }));
+              });
+              agent.on('idle', () => {
+                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
+              });
+              agent.on('close', (code: number) => {
+                ws.send(JSON.stringify({ type: 'close', code }));
+              });
+              agent.on('error', (error: Error) => {
+                ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
+                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
+              });
+              agent.start(payload.cwd, session);
+            } else if (payload.type === 'input') {
+              if (agent) {
+                agent.send(payload.input);
+                ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
+              }
+            } else if (payload.type === 'stop') {
+              if (agent) {
+                agent.stop();
+                agent = null;
+              }
+            }
+          } catch (err) {
+            console.error('[WS] Failed to parse message', err);
+          }
+        }
+      },
+      onOpen(_event, _ws) {
+        console.log('[WS] Client connected');
+      },
+      onClose(_event, _ws) {
+        console.log('[WS] Client disconnected');
+        if (agent) {
+          agent.stop();
+          agent = null;
+        }
+      },
+    };
+  })(c, next);
+});
 
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
@@ -1273,9 +1382,10 @@ app.get('/api/workspace/:id/sessions', async (c) => {
 
 // 16. Fetch transcript for a specific AI session
 app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
+  const assistant = c.req.param('assistant');
+  const sessionId = c.req.param('sessionId');
   try {
-    const assistant = c.req.param('assistant');
-    const sessionId = c.req.param('sessionId');
+
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
   } catch (error) {
@@ -1646,6 +1756,8 @@ export function startServer(
       startScheduler({ log: (message) => console.log(`[scheduler] ${message}`) });
       resolve({ port: info.port, server });
     }) as import('node:http').Server;
+
+    injectWebSocket(server);
 
     server.on('error', (e: any) => {
       if (e.code === 'EADDRINUSE') {

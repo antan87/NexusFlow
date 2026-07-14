@@ -13,11 +13,13 @@ export function Menu({
   trigger,
   items,
   align = 'right',
+  placement = 'bottom',
   label,
 }: {
   trigger: ReactNode;
   items: MenuItem[];
   align?: 'left' | 'right';
+  placement?: 'bottom' | 'top';
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -39,8 +41,9 @@ export function Menu({
           <div
             role="menu"
             className={cn(
-              'absolute z-50 mt-1.5 min-w-48 rounded-lg border border-hairline bg-raised py-1 shadow-xl animate-fade-in',
+              'absolute z-50 min-w-48 rounded-lg border border-hairline bg-raised py-1 shadow-xl animate-fade-in',
               align === 'right' ? 'right-0' : 'left-0',
+              placement === 'top' ? 'bottom-full mb-1.5' : 'mt-1.5',
             )}
           >
             {items.map((it, i) => (

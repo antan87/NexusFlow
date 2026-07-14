@@ -76,8 +76,8 @@ nexusflow init
 # 2 — Create a feature workspace
 nexusflow create
 
-# 3 — Or launch the Web Dashboard
-nexusflow ui
+# 3 — Or use the GUI: desktop app (see desktop/) or browser dashboard
+nexusflow dashboard
 ```
 
 The `create` wizard walks you through:
@@ -120,13 +120,14 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow stop` | Stop all running services |
 | `nexusflow status` | Show running/stopped status and PIDs |
 | `nexusflow logs` | Tail aggregated logs from all services |
-| `nexusflow ui` | Launch the interactive Web Dashboard (`--port`, `--server-only`, `--strict-port`) |
-| `nexusflow dashboard` | Instantly open the Web Dashboard in your browser (alias: `dash`) |
+| `nexusflow ui` | Start the dashboard server — the backend the desktop app embeds (`--port`, `--open`, `--strict-port`) |
+| `nexusflow dashboard` | Open the dashboard in your browser (alias: `dash`) |
 | `nexusflow tui` | Open the interactive terminal (TUI) dashboard |
 | `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
 | `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `nexusflow sync` | Rebase all repositories in the workspace with default base branches |
 | `nexusflow finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
+| `nexusflow review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
 | `nexusflow knowledge` | Capture & manage workspace learnings: `add` (decision/gotcha/progress/…), `show`, `promote` into per-repo base knowledge |
 | `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
 | `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
@@ -135,7 +136,7 @@ Open this folder in your editor → your AI assistant picks up the context → i
 | `nexusflow config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
 | `nexusflow adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
 | `nexusflow mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
-| `nexusflow desktop` | Launch the NexusFlow desktop application |
+| `nexusflow desktop` | Launch the Electron desktop app from the workspace `desktop/` project (requires a built CLI and `desktop/` deps installed) |
 
 ## 🤖 Supported AI Assistants
 
@@ -260,7 +261,7 @@ nexusflow schedule disable <id>
 nexusflow schedule run <id>
 ```
 
-Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow server is running — start one with `nexusflow ui` (use `--daemon --server-only` for a background host). A job whose interval elapsed while no server was running simply runs on the next scheduler tick.
+Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow server is running — start one with `nexusflow ui` (use `--daemon` for a background host). A job whose interval elapsed while no server was running simply runs on the next scheduler tick.
 
 Scheduled runs are **token-efficient by design**: they use the same analysis cache as `nexusflow refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
@@ -283,9 +284,9 @@ The dashboard integrates an **AI Strategy Analysis** inspector:
 2. (Optional) Provide a comment or specific evaluation focus (e.g. *"Ensure subagent roles are distinct"*).
 3. Click **Inspect Strategy** to have the AI analyze the strategy rules, identify ambiguities/contradictions, rate its orchestration effectiveness, and generate an optimized rewritten guideline.
 
-## 🌐 Web Dashboard
+## 🖥️ Dashboard (Desktop App & Browser)
 
-Launch with `nexusflow ui` to get a full-featured dark-themed GUI:
+The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). For the platform rationale (Electron vs Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
 - **Sessions tab** — view past AI conversation transcripts and resume sessions

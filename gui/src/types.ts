@@ -1,5 +1,12 @@
 // Types matched with src/types.ts
 
+export interface StorageAdapterMeta {
+  name: string;
+  displayName: string;
+  description: string;
+  configFields?: any[];
+}
+
 export interface NexusFlowConfig {
   version: string;
   devDir: string;
@@ -7,6 +14,15 @@ export interface NexusFlowConfig {
   defaultAssistant: string | null;
   defaultEditor?: string | null;
   scanDepth: number;
+  storageProvider?: string;
+  adapterConfig?: Record<string, Record<string, any>>;
+  localLlm?: {
+    enabled: boolean;
+    provider: 'ollama' | 'openai-compatible';
+    endpoint: string;
+    model: string;
+    apiKey?: string;
+  };
 }
 
 export interface DetectedAI {
@@ -78,4 +94,11 @@ export interface RunningService {
   pid: number;
   config: ServiceConfig;
   startedAt: string;
+}
+
+export interface Toast {
+  id: string;
+  title: string;
+  message?: string;
+  type: 'success' | 'error' | 'info' | 'warning';
 }

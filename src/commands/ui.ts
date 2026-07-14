@@ -1,6 +1,7 @@
 /**
  * @module commands/ui
- * Starts the Hono web server and opens the browser to the NexusFlow GUI.
+ * Starts the Hono dashboard server (the backend the desktop app embeds).
+ * Opening a browser is opt-in via --open.
  */
 
 import chalk from 'chalk';
@@ -41,11 +42,13 @@ function openBrowser(url: string): void {
 }
 
 /**
- * Starts the local GUI server and opens the dashboard in the default browser.
+ * Starts the local dashboard server. Pass `open: true` to also launch the
+ * default browser. `serverOnly` is deprecated (server-only is the default)
+ * but still accepted so existing callers keep working.
  *
- * @param options - CLI options, including optional port, daemon, and server-only.
+ * @param options - CLI options, including optional port, daemon, and open.
  */
-export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean }): Promise<void> {
+export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }): Promise<void> {
   const port = options.port ? parseInt(options.port, 10) : 3000;
   const url = `http://localhost:${port}`;
 
@@ -55,7 +58,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
   const active = await isPortActive(port);
   if (active) {
     console.log(chalk.green(`  ✔ Dashboard is already active at: ${chalk.bold(url)}`));
-    if (!options.serverOnly) {
+    if (options.open) {
       console.log(chalk.dim('  Opening browser...'));
       openBrowser(url);
     }
@@ -76,11 +79,13 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
       child.unref();
 
       console.log(chalk.green(`  ✔ Dashboard daemon successfully spawned.`));
-      if (!options.serverOnly) {
+      if (options.open) {
         console.log(chalk.dim('  Opening browser...'));
         // Give the background process a brief moment to start listening
         await new Promise((resolve) => setTimeout(resolve, 600));
         openBrowser(url);
+      } else {
+        console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or 'nexusflow dashboard' to open it.`));
       }
       return;
     } catch (err) {
@@ -99,7 +104,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
     console.log(chalk.green(`  ✔ Dashboard running at: ${chalk.bold(actualUrl)}`));
     console.log(chalk.dim('  Press Ctrl+C to stop.\n'));
 
-    if (!options.serverOnly) {
+    if (options.open) {
       openBrowser(actualUrl);
     }
 

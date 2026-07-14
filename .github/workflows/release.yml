@@ -147,29 +147,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
-
       - run: npm ci
       - run: npm ci --prefix gui
       - run: npm ci --prefix desktop
 
-      # Build the root project FIRST (tsc + gui) so the compiled server exists for
-      # the installer to bundle — the old desktop workflow skipped this.
-      - name: Build server + GUI
-        run: npm run build
-
-      - name: Build desktop binary (Neutralino)
+      # electron-builder: prepare-backend builds the CLI + gui and stages the
+      # backend, then the NSIS installer is produced at desktop/dist/NexusFlowSetup.exe.
+      - name: Build desktop installer (electron-builder)
         run: npm run build --prefix desktop
-
-      - name: Build standalone installer (Inno Setup)
-        run: npm run build:installer --prefix desktop
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: nexusflow-setup
-          path: desktop/dist-installer-output/NexusFlowSetup.exe
+          path: desktop/dist/NexusFlowSetup.exe
           if-no-files-found: error
 
   # ── One GitHub Release for the tag, with every artifact attached ───────────────

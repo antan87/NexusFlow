@@ -45,3 +45,46 @@ jobs:
 
       - name: Run GUI E2E Tests
         run: npm run test:gui
+
+  # Verify the Electron desktop app packages into a standalone build and the
+  # PACKAGED binary boots its bundled backend (the app.isPackaged path that
+  # can't be exercised in dev). Windows runners have the symlink privilege
+  # electron-builder's code-sign cache needs.
+  desktop-package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install GUI Dependencies
+        run: npm ci --prefix gui
+
+      - name: Install Desktop Dependencies
+        run: npm ci --prefix desktop
+
+      # `npm run build --prefix desktop` runs prepare-backend (builds the CLI +
+      # gui, stages dist/ and prod deps into desktop/backend) then packages the
+      # NSIS installer; it also leaves the unpacked app in desktop/dist/win-unpacked.
+      - name: Package desktop app (installer + unpacked)
+        run: npm run build --prefix desktop
+
+      - name: Run packaged-app E2E
+        working-directory: desktop
+        env:
+          NEXUSFLOW_PACKAGED_EXE: dist/win-unpacked/NexusFlow.exe
+        run: npm run test:e2e
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexusflow-desktop-setup
+          path: desktop/dist/NexusFlowSetup.exe
+          if-no-files-found: error

@@ -32,6 +32,7 @@ import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
+
 import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
@@ -201,12 +202,13 @@ program
 
 program
   .command('ui')
-  .description('Open the web GUI dashboard for NexusFlow')
+  .description('Start the NexusFlow dashboard server (the backend the desktop app embeds)')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
   .option('-d, --daemon', 'Run the dashboard server in the background (daemon mode)')
-  .option('--server-only', 'Start the dashboard server without opening the browser')
+  .option('--open', 'Also open the dashboard in your default browser')
+  .option('--server-only', '(deprecated — server-only is now the default)')
   .option('--strict-port', 'Fail instead of auto-incrementing when the port is in use')
-  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean }) => {
+  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }) => {
     try {
       await uiCommand(options);
     } catch (error) {
@@ -218,11 +220,11 @@ program
 program
   .command('dashboard')
   .alias('dash')
-  .description('Instantly open the web GUI dashboard in your default browser')
+  .description('Open the web dashboard in your default browser')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
   .action(async (options: { port?: string }) => {
     try {
-      await uiCommand({ ...options, daemon: true });
+      await uiCommand({ ...options, daemon: true, open: true });
     } catch (error) {
       console.error(error);
       process.exit(1);
@@ -341,8 +343,8 @@ program
 program
   .command('handoff')
   .description('Generate a compact handoff bundle (nexusflow-handoff.md) for session resumption')
-  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
+  .argument('[workspace]', 'Path to the workspace')
+  .action(async (workspace) => {
     try {
       await handoffCommand(workspace);
     } catch (error) {
@@ -350,6 +352,7 @@ program
       process.exit(1);
     }
   });
+
 
 program
   .command('refresh')
