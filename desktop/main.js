@@ -62,12 +62,15 @@ function createWindow() {
   delete backendEnv.NODE_OPTIONS;
   delete backendEnv.ELECTRON_RUN_AS_NODE;
 
+  // Run the minimal server entry (dist/desktop-server.js), not the full CLI —
+  // the CLI pulls in commander/pm2/inquirer, and under Electron-as-Node its
+  // commander import can resolve to pm2's ancient nested copy and crash.
   let backendCmd;
   let backendArgs;
   if (app.isPackaged) {
-    const backendPath = path.join(process.resourcesPath, 'backend', 'dist', 'index.js');
+    const backendPath = path.join(process.resourcesPath, 'backend', 'dist', 'desktop-server.js');
     backendCmd = process.execPath;
-    backendArgs = [backendPath, 'ui', '--port=0'];
+    backendArgs = [backendPath];
     backendEnv.ELECTRON_RUN_AS_NODE = '1';
     diag(`packaged backend: ${backendPath} (exists=${existsSync(backendPath)})`);
     if (!existsSync(backendPath)) {
@@ -76,7 +79,7 @@ function createWindow() {
     }
   } else {
     backendCmd = 'node';
-    backendArgs = [path.join(__dirname, '../dist/index.js'), 'ui', '--port=0'];
+    backendArgs = [path.join(__dirname, '../dist/desktop-server.js')];
   }
   diag(`isPackaged=${app.isPackaged} execPath=${process.execPath}`);
   diag(`spawning: ${backendCmd} ${backendArgs.join(' ')}`);
