@@ -478,7 +478,7 @@ export function SettingsPage({
           onClick={() => saveAppConfig(config)}
           disabled={!isSettingsFormValid}
         >
-          <Check size={16} /> Save Settings
+          <Check size={16} /> Save Configuration
         </button>
       </div>
 
