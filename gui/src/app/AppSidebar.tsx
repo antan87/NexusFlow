@@ -29,19 +29,19 @@ export function AppSidebar({
   const linkClass = (active: boolean) =>
     cn(
       'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer',
-      active ? 'bg-accent-soft text-accent' : 'text-content-muted hover:bg-raised hover:text-content',
+      active ? 'bg-primary-soft text-primary' : 'text-content-muted hover:bg-raised hover:text-content',
     );
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-hairline bg-surface/40 p-4">
       <div className="mb-5 flex items-center gap-2.5 px-2 py-1">
-        <div className="grid h-8 w-8 place-items-center rounded-md bg-accent font-display text-sm font-bold text-white">NF</div>
+        <div className="grid h-8 w-8 place-items-center rounded-md bg-primary font-display text-sm font-bold text-white">NF</div>
         <span className="font-display text-sm font-semibold text-content">NexusFlow</span>
       </div>
 
       <button
         onClick={onNewWorkspace}
-        className="mb-5 inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover cursor-pointer"
+        className="mb-5 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover cursor-pointer"
       >
         <Plus size={16} /> New workspace
       </button>

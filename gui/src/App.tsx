@@ -1847,7 +1847,7 @@ Core Instructions:
                   </p>
                   <button
                     onClick={() => { setConfigLoading(true); fetchConfig(); }}
-                    className="px-4 py-2 bg-accent hover:bg-accent-hover text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
                   >
                     <RefreshCw size={16} /> Try Again
                   </button>

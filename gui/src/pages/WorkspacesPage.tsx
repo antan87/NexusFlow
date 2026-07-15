@@ -115,7 +115,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         actions={
           <Button
             variant="secondary"
-            icon={<RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-accent' : ''} />}
+            icon={<RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-primary' : ''} />}
             onClick={fetchWorkspaces}
             disabled={workspacesLoading}
           >
@@ -138,7 +138,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 onClick={() => setFilter(f)}
                 className={cn(
                   'flex-1 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors cursor-pointer text-center',
-                  filter === f ? 'bg-accent text-white shadow-sm' : 'text-content-faint hover:text-content hover:bg-surface-elevated',
+                  filter === f ? 'bg-primary text-white shadow-sm' : 'text-content-faint hover:text-content hover:bg-surface-elevated',
                 )}
               >
                 {f}
@@ -166,7 +166,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     onClick={() => onSelect(w.branchName)}
                     className={cn(
                       'rounded-lg border p-3 text-left transition-colors cursor-pointer',
-                      active ? 'border-accent/50 bg-accent-soft' : 'border-hairline bg-surface hover:border-hairline-strong hover:bg-raised',
+                      active ? 'border-primary/50 bg-primary-soft' : 'border-hairline bg-surface hover:border-hairline-strong hover:bg-raised',
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -232,7 +232,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       }
                       items={[
                         { label: 'Open Folder', icon: <ExternalLink size={14} />, onClick: () => void handleOpenInEditor(selected.workspacePath) },
-                        { label: 'Copy AI Context', icon: <Sparkles size={14} className="text-accent" />, onClick: () => handleCopyPrompt(selected) },
+                        { label: 'Copy AI Context', icon: <Sparkles size={14} className="text-primary" />, onClick: () => handleCopyPrompt(selected) },
                         {
                           label: deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace',
                           icon: <Trash2 size={14} />,

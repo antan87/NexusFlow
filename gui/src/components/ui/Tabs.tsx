@@ -28,7 +28,7 @@ export function Tabs({
             onClick={() => onChange(it.value)}
             className={cn(
               '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors cursor-pointer',
-              active ? 'text-content border-accent' : 'text-content-faint border-transparent hover:text-content',
+              active ? 'text-content border-primary' : 'text-content-faint border-transparent hover:text-content',
             )}
           >
             {it.label}

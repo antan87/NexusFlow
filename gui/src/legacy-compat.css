@@ -1,0 +1,97 @@
+/* ─── TEMPORARY legacy compatibility layer ────────────────────────────────────
+   Every token/class the not-yet-migrated screens still reference, pinned to the
+   old fixed dark values so those screens render unchanged while the app is
+   locked to dark mode. Screens migrate onto the semantic tokens in index.css;
+   when the last one lands (phase B5) this file is DELETED — do not add new
+   usages of anything defined here. */
+@theme {
+  /* Old "mission control" surface/content tokens (bg-base, text-content, …) */
+  --color-base: #0b0c0e;
+  --color-surface: #141619;
+  --color-raised: #1b1e22;
+  --color-hairline: #24272c;
+  --color-hairline-strong: #333840;
+
+  --color-content: #e7e9ec;
+  --color-content-muted: #9aa0a8;
+  --color-content-faint: #6a7078;
+
+  /* Legacy-only brand variants (old accent-hover/accent-soft, renamed onto
+     the primary token family the semantic system uses for the brand blue). */
+  --color-primary-hover: #6b8fff;
+  --color-primary-soft: #1b2540;
+
+  --color-danger: #f85149;
+  --color-idle: #6a7078;
+
+  /* The old display font is retired — alias to the sans stack. */
+  --font-display: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Old palette remap for pre-redesign class names (indigo/violet/gray/slate/
+     cyan shades) still present in legacy JSX. */
+  --color-indigo-300: #8aa5ff;
+  --color-indigo-400: #6b8fff;
+  --color-indigo-500: #4f7cff;
+  --color-indigo-600: #3f68e0;
+  --color-indigo-650: #3f68e0;
+  --color-indigo-700: #3459c9;
+  --color-indigo-950: #182038;
+  --color-violet-500: #6b8fff;
+  --color-violet-600: #4f7cff;
+
+  --color-gray-300: #e7e9ec;
+  --color-gray-400: #9aa0a8;
+  --color-gray-500: #6a7078;
+  --color-gray-550: #6a7078;
+  --color-gray-555: #6a7078;
+  --color-gray-600: #565c64;
+  --color-gray-700: #333840;
+  --color-gray-800: #24272c;
+  --color-gray-850: #1b1e22;
+  --color-gray-900: #141619;
+  --color-gray-950: #0f1113;
+
+  --color-slate-300: #cfd3d8;
+  --color-slate-350: #b6bcc4;
+  --color-slate-400: #9aa0a8;
+  --color-slate-455: #8b929b;
+  --color-slate-500: #6a7078;
+  --color-slate-550: #6a7078;
+  --color-slate-700: #333840;
+  --color-slate-800: #24272c;
+  --color-slate-850: #1b1e22;
+  --color-slate-900: #141619;
+  --color-slate-905: #121417;
+  --color-slate-950: #0f1113;
+
+  --color-cyan-455: #2db6c9;
+  --color-cyan-650: #2596a6;
+  --color-emerald-650: #2f9e46;
+}
+
+/* Old compatibility utilities still referenced by legacy components. */
+@utility glass-card {
+  background: #141619;
+  border: 1px solid #24272c;
+}
+@utility animate-slide-in {
+  animation: rise 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@utility animate-spin-slow {
+  animation: spin 8s linear infinite;
+}
+@utility animate-pulse-glow-green {
+  animation: soft-pulse 2s infinite ease-in-out;
+}
+@utility animate-pulse-glow-cyan {
+  animation: soft-pulse 2.5s infinite ease-in-out;
+}
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}

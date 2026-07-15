@@ -1,124 +1,172 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono";
 @import "tailwindcss";
+@import "./legacy-compat.css";
 @plugin "@tailwindcss/typography";
 
-/* ─── Design tokens ───────────────────────────────────────────────────────────
-   "Mission control for parallel feature branches": neutral dark surfaces, a single
-   restrained blue accent, and a strict semantic status palette. Sans-serif UI,
-   monospace only for code/paths/data. */
-@theme {
-  /* Surfaces */
-  --color-base: #0b0c0e;
-  --color-surface: #141619;
-  --color-raised: #1b1e22;
-  --color-hairline: #24272c;
-  --color-hairline-strong: #333840;
+@custom-variant dark (&:is(.dark, .dark *));
 
-  /* Foreground / text */
-  --color-content: #e7e9ec;
-  --color-content-muted: #9aa0a8;
-  --color-content-faint: #6a7078;
+/* ─── Semantic tokens ─────────────────────────────────────────────────────────
+   shadcn-style semantic palette: light values at :root, dark overrides in the
+   @variant dark block. Utilities (bg-background, text-muted-foreground, …) are
+   generated from the @theme inline mapping below. The single brand hue is the
+   restrained NexusFlow blue (#4f7cff ≈ oklch 0.6 0.19 264). */
+:root {
+  color-scheme: light;
+  --radius: 0.5rem;
+  --background: var(--color-white);
+  --foreground: var(--color-neutral-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-800);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-800);
+  --primary: oklch(0.55 0.19 264);
+  --primary-foreground: var(--color-white);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: var(--color-neutral-800);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: var(--color-neutral-800);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --border: --alpha(var(--color-black) / 8%);
+  --input: --alpha(var(--color-black) / 10%);
+  --ring: oklch(0.55 0.19 264);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --running: var(--color-cyan-600);
+  --running-foreground: var(--color-cyan-700);
 
-  /* Interactive accent (nav active, primary actions, focus rings) */
-  --color-accent: #4f7cff;
-  --color-accent-hover: #6b8fff;
-  --color-accent-soft: #1b2540;
+  @variant dark {
+    color-scheme: dark;
+    --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+    --foreground: var(--color-neutral-100);
+    --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
+    --card-foreground: var(--color-neutral-100);
+    --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
+    --popover-foreground: var(--color-neutral-100);
+    --primary: oklch(0.62 0.19 264);
+    --primary-foreground: var(--color-white);
+    --secondary: --alpha(var(--color-white) / 4%);
+    --secondary-foreground: var(--color-neutral-100);
+    --muted: --alpha(var(--color-white) / 4%);
+    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+    --accent: --alpha(var(--color-white) / 4%);
+    --accent-foreground: var(--color-neutral-100);
+    --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+    --destructive-foreground: var(--color-red-400);
+    --border: --alpha(var(--color-white) / 6%);
+    --input: --alpha(var(--color-white) / 8%);
+    --ring: oklch(0.62 0.19 264);
+    --info: var(--color-blue-500);
+    --info-foreground: var(--color-blue-400);
+    --success: var(--color-emerald-500);
+    --success-foreground: var(--color-emerald-400);
+    --warning: var(--color-amber-500);
+    --warning-foreground: var(--color-amber-400);
+    --running: var(--color-cyan-500);
+    --running-foreground: var(--color-cyan-400);
+  }
+}
 
-  /* Semantic status language */
-  --color-success: #3fb950;
-  --color-warning: #d29922;
-  --color-danger: #f85149;
-  --color-running: #2db6c9;
-  --color-idle: #6a7078;
+@theme inline {
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "SFMono-Regular", Consolas, monospace;
 
-  /* Typography */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-running: var(--running);
+  --color-running-foreground: var(--running-foreground);
 
-  /* Radii */
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 
-  /* ── Legacy palette remap ──────────────────────────────────────────────────
-     Maps the color names still used by not-yet-rewritten views (Create wizard,
-     Settings, Strategies) and the reused feature components onto the new tokens,
-     so every legacy element harmonizes with the modern theme without JSX edits.
-     Also defines the custom shades those views reference (which were previously
-     undefined and rendered with no color). */
-  --color-indigo-300: #8aa5ff;
-  --color-indigo-400: #6b8fff;
-  --color-indigo-500: #4f7cff;
-  --color-indigo-600: #3f68e0;
-  --color-indigo-650: #3f68e0;
-  --color-indigo-700: #3459c9;
-  --color-indigo-950: #182038;
-  --color-violet-500: #6b8fff;
-  --color-violet-600: #4f7cff;
-
-  --color-gray-300: #e7e9ec;
-  --color-gray-400: #9aa0a8;
-  --color-gray-500: #6a7078;
-  --color-gray-550: #6a7078;
-  --color-gray-555: #6a7078;
-  --color-gray-600: #565c64;
-  --color-gray-700: #333840;
-  --color-gray-800: #24272c;
-  --color-gray-850: #1b1e22;
-  --color-gray-900: #141619;
-  --color-gray-950: #0f1113;
-
-  --color-slate-300: #cfd3d8;
-  --color-slate-350: #b6bcc4;
-  --color-slate-400: #9aa0a8;
-  --color-slate-455: #8b929b;
-  --color-slate-500: #6a7078;
-  --color-slate-550: #6a7078;
-  --color-slate-700: #333840;
-  --color-slate-800: #24272c;
-  --color-slate-850: #1b1e22;
-  --color-slate-900: #141619;
-  --color-slate-905: #121417;
-  --color-slate-950: #0f1113;
-
-  --color-cyan-400: #2db6c9;
-  --color-cyan-455: #2db6c9;
-  --color-cyan-500: #2db6c9;
-  --color-cyan-650: #2596a6;
-  --color-emerald-650: #2f9e46;
+  --animate-skeleton: skeleton 2s -1s infinite linear;
+  @keyframes skeleton {
+    to {
+      background-position: -200% 0;
+    }
+  }
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────────── */
-html {
-  color-scheme: dark;
-}
-body {
-  font-family: var(--font-sans);
-  background-color: var(--color-base);
-  color: var(--color-content);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-code, pre, kbd, samp {
-  font-family: var(--font-mono);
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+  }
 }
 
 /* Consistent focus ring for keyboard users */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 2px;
 }
 
-/* Sleek neutral scrollbars */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: #2a2e34;
-  border-radius: 4px;
-  border: 2px solid var(--color-base);
+/* Sleek neutral scrollbars, theme-aware */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-::-webkit-scrollbar-thumb:hover { background: #3a3f47; }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
 
 /* ─── Motion (respecting reduced-motion) ─────────────────────────────────────── */
 @utility animate-fade-in {
@@ -127,42 +175,54 @@ code, pre, kbd, samp {
 @utility animate-rise {
   animation: rise 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
 }
 
-/* ─── Compatibility utilities (used by not-yet-restyled feature components) ─────
-   Remapped to the new neutral tokens so reused components inherit the modern look.
-   CRT/neon/text-glow effects were intentionally dropped. */
-@utility glass-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-hairline);
-}
-@utility animate-slide-in {
-  animation: rise 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@utility animate-spin-slow {
-  animation: spin 8s linear infinite;
-}
-@utility animate-pulse-glow-green {
-  animation: soft-pulse 2s infinite ease-in-out;
-}
-@utility animate-pulse-glow-cyan {
-  animation: soft-pulse 2.5s infinite ease-in-out;
-}
-@keyframes soft-pulse {
-  0%, 100% { opacity: 0.85; }
-  50% { opacity: 1; }
+/* Suppress all transitions during theme changes */
+.no-transitions,
+.no-transitions *,
+.no-transitions *::before,
+.no-transitions *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
 }
 
 /* Terminal log themes for the service logs console */
-.term-matrix { color: #3fb950; background-color: #0b0c0e; }
-.term-dracula { color: #f8f8f2; background-color: #1b1e22; }
-.term-classic { color: var(--color-content); background-color: #0b0f14; }
+.term-matrix {
+  color: #3fb950;
+  background-color: #0b0c0e;
+}
+.term-dracula {
+  color: #f8f8f2;
+  background-color: #1b1e22;
+}
+.term-classic {
+  color: var(--foreground);
+  background-color: #0b0f14;
+}

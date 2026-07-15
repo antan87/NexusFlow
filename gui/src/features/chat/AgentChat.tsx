@@ -56,7 +56,7 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-      <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-accent text-white' : 'bg-surface border border-hairline'}`}>
+      <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-primary text-white' : 'bg-surface border border-hairline'}`}>
         {isUser ? (
           <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
         ) : (
@@ -471,7 +471,7 @@ export function AgentChat({ ws }: AgentChatProps) {
                   "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-raised transition-colors cursor-pointer",
                   connected ? "opacity-50 pointer-events-none" : "text-content"
                 )}>
-                  {currentProvider?.icon === 'Sparkles' ? <Sparkles size={14} className="text-accent" /> : currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-accent" /> : <Cpu size={14} className="text-accent" />}
+                  {currentProvider?.icon === 'Sparkles' ? <Sparkles size={14} className="text-primary" /> : currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-primary" /> : <Cpu size={14} className="text-primary" />}
                   {currentProvider?.name || 'Select Agent'}
                 </span>
               }

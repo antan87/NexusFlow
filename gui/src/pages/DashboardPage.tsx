@@ -46,7 +46,7 @@ export function DashboardPage({
       />
 
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile icon={<FolderGit2 size={18} className="text-accent" />} tone="bg-accent-soft" label="Workspaces" value={workspaces.length} />
+        <StatTile icon={<FolderGit2 size={18} className="text-primary" />} tone="bg-primary-soft" label="Workspaces" value={workspaces.length} />
         <StatTile icon={<GitBranch size={18} className="text-warning" />} tone="bg-warning/10" label="With uncommitted changes" value={withChanges} />
         <StatTile icon={<Play size={18} className="text-running" />} tone="bg-running/10" label="Running services" value={running} />
         <StatTile icon={<AlertTriangle size={18} className="text-warning" />} tone="bg-warning/10" label="Need validation" value={needsValidation} />

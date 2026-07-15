@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes 
 import { cn } from './cn.js';
 
 const base =
-  'w-full bg-base border border-hairline rounded-md px-3 py-2 text-sm text-content placeholder:text-content-faint outline-none focus:border-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+  'w-full bg-base border border-hairline rounded-md px-3 py-2 text-sm text-content placeholder:text-content-faint outline-none focus:border-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(base, className)} {...rest} />;
