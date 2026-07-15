@@ -494,6 +494,84 @@ describe('Server API Endpoints Unit Tests', () => {
     });
 
     // XML context packing tests removed.
+
+    it('rejects in-place creation without a name', async () => {
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'in-place',
+          description: 'nameless',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('name');
+    });
+
+    it('rejects worktree creation without a branch name', async () => {
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: 'branchless',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('branchName');
+    });
+
+    it('creates an in-place workspace against the source repos (no worktree remap)', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+        storageProvider: 'local'
+      } as any);
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/my-quick-fix');
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'in-place',
+          name: 'My Quick Fix',
+          projectId: 'billing',
+          description: 'in-place workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1', defaultBranch: 'main' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      // The name is slugified into the job/workspace id.
+      expect(data.jobId).toBe('my-quick-fix');
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const feature = vi.mocked(workspace.createWorkspace).mock.calls[0][0];
+      expect(feature.mode).toBe('in-place');
+      expect(feature.id).toBe('my-quick-fix');
+      expect(feature.projectId).toBe('billing');
+      // Repos stay at their source paths — no join(workspacePath, name) remap.
+      expect(feature.repos).toEqual(['/mock/repo-1']);
+      // Analysis also runs against the source repos.
+      const analyzed = vi.mocked(analyzers.analyzeAllRepos).mock.calls[0][0];
+      expect(analyzed[0].path).toBe('/mock/repo-1');
+
+      // The SSE stream reports the in-place step set.
+      const streamResponse = await app.request('/api/workspace/create-stream/my-quick-fix');
+      const text = await streamResponse.text();
+      expect(text).toContain('"status":"completed"');
+      expect(text).toContain('Register Workspace');
+      expect(text).not.toContain('Create Git Worktrees');
+    });
   });
 
   describe('Workflows Templates API', () => {

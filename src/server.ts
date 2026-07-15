@@ -22,7 +22,7 @@ import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
-import { loadProjects, createProject, updateProject, removeProject } from './core/projects.js';
+import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
@@ -717,7 +717,11 @@ function updateJobStep(
 
 async function runCreationJob(jobId: string, body: any, config: any) {
   try {
-    const workspacePath = resolveWorkspacePath(config.workspacesDir, body.branchName);
+    const inPlace = body.mode === 'in-place';
+    // Workspace id doubles as the directory name: the branch for worktree
+    // mode, the (slugified) workspace name for in-place mode.
+    const workspaceId = inPlace ? jobId : body.branchName;
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, workspaceId);
     const job = creationJobs.get(jobId);
     if (job) {
       job.workspacePath = workspacePath;
@@ -732,12 +736,18 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     }
 
     const feature: Feature = {
-      id: body.branchName,
-      branchName: body.branchName,
+      id: workspaceId,
+      mode: inPlace ? 'in-place' : 'worktree',
+      projectId: body.projectId,
+      // In-place features never create a branch; keeping branchName populated
+      // (= id) avoids breaking every consumer of the non-optional field.
+      branchName: inPlace ? workspaceId : body.branchName,
       description: body.description,
-      repos: body.repos.map((r: any) => path.join(workspacePath, r.name)),
+      repos: inPlace
+        ? body.repos.map((r: any) => r.path)
+        : body.repos.map((r: any) => path.join(workspacePath, r.name)),
       originalRepos: body.repos.map((r: any) => r.path),
-      repoBranches: Object.keys(repoBranches).length > 0 ? repoBranches : undefined,
+      repoBranches: !inPlace && Object.keys(repoBranches).length > 0 ? repoBranches : undefined,
       assistants: body.assistants,
       workspacePath,
       createdAt: new Date().toISOString(),
@@ -749,17 +759,25 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       job.feature = feature;
     }
 
-    // Step 1: Create worktrees
-    updateJobStep(jobId, 'worktrees', 'running', 'Creating git worktrees...');
-    await createWorkspace(feature, body.repos);
-    updateJobStep(jobId, 'worktrees', 'completed', 'Git worktrees created successfully.');
+    // Step 1: Materialize the workspace (worktrees, or just the lightweight dir).
+    if (inPlace) {
+      updateJobStep(jobId, 'workspace', 'running', 'Registering workspace...');
+      await createWorkspace(feature, body.repos);
+      updateJobStep(jobId, 'workspace', 'completed', 'Workspace registered — working in-place in the source repos.');
+    } else {
+      updateJobStep(jobId, 'worktrees', 'running', 'Creating git worktrees...');
+      await createWorkspace(feature, body.repos);
+      updateJobStep(jobId, 'worktrees', 'completed', 'Git worktrees created successfully.');
+    }
 
-    // Step 2: Analyze repos
+    // Step 2: Analyze repos — against the worktrees, or the source repos in-place.
     updateJobStep(jobId, 'analysis', 'running', 'Analyzing projects and dependencies...');
-    const workspaceRepos = body.repos.map((repo: any) => ({
-      ...repo,
-      path: path.join(workspacePath, repo.name),
-    }));
+    const workspaceRepos = inPlace
+      ? body.repos
+      : body.repos.map((repo: any) => ({
+          ...repo,
+          path: path.join(workspacePath, repo.name),
+        }));
     const analysis = await analyzeAllRepos(workspaceRepos);
     updateJobStep(jobId, 'analysis', 'completed', 'Project analysis complete.');
 
@@ -781,7 +799,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     const job = creationJobs.get(jobId);
     if (job) {
       const runningStep = job.steps.find((s) => s.status === 'running');
-      const failedStepId = runningStep ? runningStep.id : 'worktrees';
+      const failedStepId = runningStep ? runningStep.id : job.steps[0]?.id ?? 'worktrees';
       updateJobStep(jobId, failedStepId, 'failed', msg);
     }
   }
@@ -791,7 +809,11 @@ async function runCreationJob(jobId: string, body: any, config: any) {
 app.post('/api/workspace', async (c) => {
   try {
     const body = await c.req.json() as {
-      branchName: string;
+      mode?: 'worktree' | 'in-place';
+      projectId?: string;
+      /** Workspace name — required for in-place mode (there is no branch). */
+      name?: string;
+      branchName?: string;
       description: string;
       repos: RepoSelection[];
       assistants: any[];
@@ -804,8 +826,20 @@ app.post('/api/workspace', async (c) => {
       };
     };
 
+    const inPlace = body.mode === 'in-place';
+    if (inPlace && !body.name?.trim()) {
+      return c.json({ error: 'In-place workspaces need a "name"' }, 400);
+    }
+    if (!inPlace && !body.branchName) {
+      return c.json({ error: 'Missing "branchName" in request body' }, 400);
+    }
+
     const config = await loadConfig();
-    const jobId = body.branchName;
+    // The job id doubles as the workspace directory name.
+    const jobId = inPlace ? slugifyProjectName(body.name!) : body.branchName!;
+    if (!jobId) {
+      return c.json({ error: `Workspace name "${body.name}" contains no usable characters` }, 400);
+    }
 
     if (creationJobs.has(jobId)) {
       const existing = creationJobs.get(jobId)!;
@@ -815,7 +849,9 @@ app.post('/api/workspace', async (c) => {
     }
 
     const steps: JobStep[] = [
-      { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      inPlace
+        ? { id: 'workspace', name: 'Register Workspace', status: 'pending', message: 'Waiting...' }
+        : { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
     ];
