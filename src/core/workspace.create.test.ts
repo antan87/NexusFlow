@@ -137,6 +137,35 @@ describe('createWorkspace rollback', () => {
     expect(gitCalls()).not.toContainEqual(['branch', '-D', 'feat-branch']);
   });
 
+  it('in-place mode creates no worktrees and points the workspace at the source repos', async () => {
+    const repos = repoInfos('api', 'web');
+    const inPlaceFeature: Feature = {
+      ...feature(repos),
+      id: 'my-feature',
+      branchName: 'my-feature',
+      mode: 'in-place',
+      repos: repos.map((r) => r.path),
+    };
+
+    await createWorkspace(inPlaceFeature, repos);
+
+    // No git worktrees, no repo-subdir .gitignore.
+    expect(worktree.createWorktree).not.toHaveBeenCalled();
+    await expect(fs.access(path.join(workspacePath, '.gitignore'))).rejects.toBeTruthy();
+
+    // The manifest records the mode and the source repo paths.
+    const manifest = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8'));
+    expect(manifest.mode).toBe('in-place');
+    expect(manifest.repos).toEqual([path.join('/src', 'api'), path.join('/src', 'web')]);
+
+    // The .code-workspace references the source repos by absolute path.
+    const wsName = path.basename(workspacePath);
+    const codeWorkspace = JSON.parse(
+      await fs.readFile(path.join(workspacePath, `${wsName}.code-workspace`), 'utf-8'),
+    );
+    expect(codeWorkspace.folders).toContainEqual({ path: path.join('/src', 'api'), name: 'api' });
+  });
+
   it('completes rollback even when removeWorktree fails (prunes and removes the dir)', async () => {
     vi.mocked(worktree.createWorktree)
       .mockResolvedValueOnce({ createdBranch: true })
