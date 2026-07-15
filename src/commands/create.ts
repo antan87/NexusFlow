@@ -20,6 +20,7 @@ import { detectAIAssistants } from '../utils/detect-ai.js';
 import { detectEditors } from '../utils/detect-editors.js';
 import { openInEditor } from '../utils/open-editor.js';
 import { debugLog } from '../utils/debug.js';
+import { getSessionCwd } from '../utils/feature.js';
 import {
   promptBranchName,
   promptDescription,
@@ -270,16 +271,17 @@ export async function createCommand(): Promise<void> {
       if (confirmStart) {
         console.log(chalk.cyan(`\n🚀 Starting ${label} session inside workspace...\n`));
 
+        const sessionCwd = getSessionCwd(feature);
         try {
           await execa(launchCmd, [], {
-            cwd: workspacePath,
+            cwd: sessionCwd,
             stdio: 'inherit',
             shell: process.platform === 'win32',
           });
           console.log(chalk.green(`\n👋 Exited ${label} session.`));
         } catch {
           console.log(
-            chalk.yellow(`\n⚠️  Could not start ${label}. Please start it manually:\n  ${chalk.dim(`cd "${workspacePath}" && ${launchCmd}`)}`)
+            chalk.yellow(`\n⚠️  Could not start ${label}. Please start it manually:\n  ${chalk.dim(`cd "${sessionCwd}" && ${launchCmd}`)}`)
           );
         }
       }

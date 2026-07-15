@@ -44,14 +44,33 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
+/** How a feature attaches to its repos (mirrors src/types.ts). */
+export type WorkspaceMode = 'worktree' | 'in-place';
+
 export interface Feature {
   id: string;
+  /** Absent on manifests written before modes existed — treat as 'worktree'. */
+  mode?: WorkspaceMode;
+  /** Id of the project this feature was created from, if any. */
+  projectId?: string;
   branchName: string;
   description: string;
   repos: string[];
   assistants: string[];
   workspacePath: string;
   createdAt: string;
+}
+
+/**
+ * The directory an agent session should run in (mirrors utils/feature.ts):
+ * in-place single-repo features run in the repo root, everything else in the
+ * workspace dir.
+ */
+export function getSessionCwd(ws: Feature): string {
+  if (ws.mode === 'in-place' && ws.repos.length === 1) {
+    return ws.repos[0];
+  }
+  return ws.workspacePath;
 }
 
 /** Classified outcome of a sync/rebase attempt for a repo (mirrors src/types.ts). */

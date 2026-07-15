@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Send, PlaySquare, Square, Sparkles, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
 import { Button, Textarea, Menu, StatusPill } from '../../components/ui/index.js';
 import { cn } from '../../components/ui/cn.js';
-import type { Feature } from '../../types.js';
+import { getSessionCwd, type Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
@@ -234,7 +234,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       const startPayload: Record<string, unknown> = {
         type: 'start',
         command: agentName,
-        cwd: ws.workspacePath,
+        cwd: getSessionCwd(ws),
       };
       // Only claude-cli supports resume-by-id; give it a stable session UUID
       // so the conversation survives reconnects and app restarts.

@@ -23,7 +23,7 @@ import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
-import { isInPlace } from './utils/feature.js';
+import { getSessionCwd, isInPlace } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
@@ -1474,7 +1474,9 @@ app.post('/api/workspace/:id/resume', async (c) => {
       });
     }
 
-    return c.json({ success: true, resumeCommand, workspacePath });
+    // Where the resume command should be run: the workspace dir, or the repo
+    // root for single-repo in-place features.
+    return c.json({ success: true, resumeCommand, workspacePath, sessionCwd: getSessionCwd(feature) });
   } catch (error) {
     return errorResponse(c, error);
   }

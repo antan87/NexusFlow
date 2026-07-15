@@ -26,3 +26,21 @@ export function normalizeFeature(feature: Feature): Feature {
 export function isInPlace(feature: Feature): boolean {
   return feature.mode === 'in-place';
 }
+
+/**
+ * The directory an agent session should run in for a feature.
+ *
+ * Worktree features use the workspace dir (all repos live inside it). An
+ * in-place feature with a single repo runs in that repo's root so the agent
+ * sees the code directly; with multiple repos it falls back to the workspace
+ * dir, which holds WORKSPACE.md and the cross-repo context files.
+ * Session discovery ({@link import('./session-finder.js')}) matches recorded
+ * cwds against both the workspace path and every repo path, so either choice
+ * stays resumable.
+ */
+export function getSessionCwd(feature: Feature): string {
+  if (isInPlace(feature) && feature.repos.length === 1) {
+    return feature.repos[0]!;
+  }
+  return feature.workspacePath;
+}
