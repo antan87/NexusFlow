@@ -11,7 +11,7 @@ interface NavItem {
 const ITEMS: NavItem[] = [
   { label: 'Overview', to: '/', icon: LayoutDashboard, match: (p) => p === '/' },
   { label: 'Workspaces', to: '/workspaces', icon: FolderGit2, match: (p) => p.startsWith('/workspaces') },
-  { label: 'Strategies', to: '/strategies', icon: Workflow, match: (p) => p.startsWith('/strategies') },
+  { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
 ];
 
