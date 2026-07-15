@@ -1,5 +1,9 @@
-import type { Tone } from '../components/legacy-ui/index.js';
+import type { VariantProps } from 'class-variance-authority';
+
+import type { statusBadgeVariants } from '../components/ui/status-badge.js';
 import type { WorkspaceStatus } from '../types.js';
+
+type Tone = NonNullable<VariantProps<typeof statusBadgeVariants>['tone']>;
 
 /** Maps a workspace sync status to a display label + status-language tone. */
 export function syncMeta(status: WorkspaceStatus['syncStatus']): { label: string; tone: Tone } {

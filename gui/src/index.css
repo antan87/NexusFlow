@@ -1,7 +1,6 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource/jetbrains-mono";
 @import "tailwindcss";
-@import "./legacy-compat.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark, .dark *));

@@ -1,5 +1,6 @@
-import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, Sun, Moon, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils.js';
+import { useTheme } from './ThemeProvider.js';
 
 interface NavItem {
   label: string;
@@ -27,6 +28,7 @@ export function AppSidebar({
   onNavigate: (to: string) => void;
   onNewWorkspace: () => void;
 }) {
+  const { theme, setTheme } = useTheme();
   const linkClass = (active: boolean) =>
     cn(
       'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer',
@@ -60,6 +62,15 @@ export function AppSidebar({
 
       <button onClick={() => onNavigate('/guide')} className={linkClass(pathname.startsWith('/guide'))}>
         <BookOpen size={16} /> Getting started
+      </button>
+
+      <button
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        className={linkClass(false)}
+        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      >
+        {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        {theme === 'dark' ? 'Light theme' : 'Dark theme'}
       </button>
 
       <div className="mt-3 border-t border-border pt-3 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

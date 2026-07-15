@@ -208,7 +208,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
       {/* Interactive Commit Panel */}
       {showCommitModal && (
-        <div className="relative mb-6 rounded-xl border border-border bg-card p-6 shadow-sm animate-slide-in">
+        <div className="relative mb-6 rounded-xl border border-border bg-card p-6 shadow-sm animate-rise">
           <h5 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-foreground">
             <Save size={13} className="text-primary" /> Enter Commit Message
           </h5>

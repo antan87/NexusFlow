@@ -19,7 +19,7 @@ interface DashboardPageProps {
 
 function StatTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: ReactNode; tone: string }) {
   return (
-    <Card className="flex items-center gap-3.5 p-4">
+    <Card className="flex-row items-center gap-3.5 p-4">
       <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${tone}`}>{icon}</div>
       <div className="min-w-0">
         <div className="text-xl font-bold leading-none text-foreground">{value}</div>
@@ -91,7 +91,7 @@ export function DashboardPage({
             return (
               <Card
                 key={ws.id}
-                className="group flex cursor-pointer items-center gap-4 p-4 transition-colors hover:border-foreground/15 hover:bg-accent/50"
+                className="group cursor-pointer flex-row items-center gap-4 p-4 transition-colors hover:border-foreground/15 hover:bg-accent/50"
                 onClick={() => onOpenWorkspace(ws.branchName)}
               >
                 <div className="min-w-0 flex-1">

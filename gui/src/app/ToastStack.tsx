@@ -18,7 +18,7 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps) {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-start justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm transition-all duration-300 animate-slide-in ${
+          className={`pointer-events-auto flex items-start justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm transition-all duration-300 animate-rise ${
             toast.type === 'success'
               ? 'border-success/32 bg-success/10 text-success-foreground'
               : toast.type === 'error'

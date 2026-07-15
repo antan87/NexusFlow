@@ -4,7 +4,6 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import './App.css';
 import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
@@ -1200,7 +1199,7 @@ Core Instructions:
   ) : null;
 
   return (
-    <div className="flex min-h-screen bg-base text-content">
+    <div className="flex min-h-screen bg-background text-foreground">
       <AppSidebar
         pathname={location.pathname}
         appVersion={appVersion}
@@ -1211,8 +1210,8 @@ Core Instructions:
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto p-6 sm:p-8">
         {configLoading ? (
-          <div className="flex flex-col items-center justify-center py-40 gap-4 text-gray-400">
-            <RefreshCw className="animate-spin text-indigo-400" size={32} />
+          <div className="flex flex-col items-center justify-center py-40 gap-4 text-muted-foreground">
+            <RefreshCw className="animate-spin text-primary" size={32} />
             <span className="text-sm font-medium">Loading config settings...</span>
           </div>
         ) : (
@@ -1236,7 +1235,7 @@ Core Instructions:
                         'A new version of NexusFlow is available!'
                       )}
                     </h4>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {updatingApp ? (
                         updateStep === 'downloading' ? 'Fetching installer from GitHub Releases...' : 'Closing app and launching silent installer setup...'
                       ) : (
@@ -1277,12 +1276,12 @@ Core Instructions:
                 </div>
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>
-                  <p className="text-sm text-gray-400 mb-6">
+                  <p className="text-sm text-muted-foreground mb-6">
                     The NexusFlow GUI could not connect to the local server. Make sure you started the GUI correctly via <code>nexusflow ui</code> or that the backend is running.
                   </p>
                   <button
                     onClick={() => { setConfigLoading(true); fetchConfig(); }}
-                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
+                    className="px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
                   >
                     <RefreshCw size={16} /> Try Again
                   </button>

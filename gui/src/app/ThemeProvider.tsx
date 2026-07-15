@@ -5,10 +5,10 @@ export type Theme = 'light' | 'dark';
 const STORAGE_KEY = 'nexusflow-theme';
 
 /**
- * Dark is forced while legacy screens are still pinned to fixed dark values
- * (see legacy-compat.css). Flip to false in phase B5 to expose light mode.
+ * Dark was forced while legacy screens were pinned to fixed dark values;
+ * every screen now renders on the semantic tokens, so both themes are live.
  */
-const FORCE_DARK = true;
+const FORCE_DARK = false;
 
 interface ThemeContextValue {
   theme: Theme;
