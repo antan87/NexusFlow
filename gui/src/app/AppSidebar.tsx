@@ -1,5 +1,5 @@
 import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, type LucideIcon } from 'lucide-react';
-import { cn } from '../components/legacy-ui/index.js';
+import { cn } from '../lib/utils.js';
 
 interface NavItem {
   label: string;
@@ -30,19 +30,19 @@ export function AppSidebar({
   const linkClass = (active: boolean) =>
     cn(
       'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer',
-      active ? 'bg-primary-soft text-primary' : 'text-content-muted hover:bg-raised hover:text-content',
+      active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
     );
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-hairline bg-surface/40 p-4">
+    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card/40 p-4">
       <div className="mb-5 flex items-center gap-2.5 px-2 py-1">
-        <div className="grid h-8 w-8 place-items-center rounded-md bg-primary font-display text-sm font-bold text-white">NF</div>
-        <span className="font-display text-sm font-semibold text-content">NexusFlow</span>
+        <div className="grid h-8 w-8 place-items-center rounded-md bg-primary text-sm font-bold text-primary-foreground">NF</div>
+        <span className="text-sm font-semibold text-foreground">NexusFlow</span>
       </div>
 
       <button
         onClick={onNewWorkspace}
-        className="mb-5 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover cursor-pointer"
+        className="mb-5 inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >
         <Plus size={16} /> Start work
       </button>
@@ -62,7 +62,7 @@ export function AppSidebar({
         <BookOpen size={16} /> Getting started
       </button>
 
-      <div className="mt-3 border-t border-hairline pt-3 text-center text-[10px] font-medium uppercase tracking-wider text-content-faint">
+      <div className="mt-3 border-t border-border pt-3 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         NexusFlow{appVersion ? ` v${appVersion}` : ''}
       </div>
     </aside>

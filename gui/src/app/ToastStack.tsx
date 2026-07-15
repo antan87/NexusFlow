@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Check, Info, X } from 'lucide-react';
 
 export interface Toast {
   id: string;
@@ -18,23 +18,23 @@ export function ToastStack({ toasts, onDismiss }: ToastStackProps) {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-start justify-between gap-3 px-4 py-3 rounded-xl border shadow-2xl transition-all duration-300 animate-slide-in ${
+          className={`pointer-events-auto flex items-start justify-between gap-3 rounded-xl border px-4 py-3 shadow-sm transition-all duration-300 animate-slide-in ${
             toast.type === 'success'
-              ? 'bg-[#062c1b]/95 border-emerald-800/80 text-emerald-100'
+              ? 'border-success/32 bg-success/10 text-success-foreground'
               : toast.type === 'error'
-              ? 'bg-[#2c0e0e]/95 border-red-900/80 text-red-100'
-              : 'bg-[#131926]/95 border-slate-800/80 text-slate-100'
+                ? 'border-destructive/32 bg-destructive/10 text-destructive-foreground'
+                : 'border-info/32 bg-info/10 text-info-foreground'
           }`}
         >
           <div className="flex items-start gap-2.5 text-xs font-semibold flex-1">
-            {toast.type === 'success' && <Check className="text-emerald-400 shrink-0 mt-0.5" size={16} />}
-            {toast.type === 'error' && <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />}
-            {toast.type === 'info' && <Sparkles className="text-indigo-400 shrink-0 mt-0.5" size={16} />}
+            {toast.type === 'success' && <Check className="mt-0.5 shrink-0 text-success" size={16} />}
+            {toast.type === 'error' && <AlertCircle className="mt-0.5 shrink-0 text-destructive" size={16} />}
+            {toast.type === 'info' && <Info className="mt-0.5 shrink-0 text-info" size={16} />}
             <span className="whitespace-pre-line text-left leading-relaxed">{toast.message}</span>
           </div>
           <button
             onClick={() => onDismiss(toast.id)}
-            className="text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0 mt-0.5"
+            className="mt-0.5 shrink-0 cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
           >
             <X size={14} />
           </button>

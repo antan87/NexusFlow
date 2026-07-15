@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
 import { History, MessageSquare } from 'lucide-react';
-import { Modal, Skeleton, EmptyState } from '../../components/legacy-ui/index.js';
+import {
+  Dialog,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from '../../components/ui/dialog.js';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../../components/ui/empty.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 
@@ -43,10 +51,14 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
   }, [open, ws.branchName]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Resume a past session">
-      <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto p-4">
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogPopup className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Resume a past session</DialogTitle>
+        </DialogHeader>
+        <DialogPanel className="flex max-h-[60vh] flex-col gap-2">
         {(error || fetchError) && (
-          <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+          <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
             {error || fetchError}
           </div>
         )}
@@ -57,20 +69,24 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
             <Skeleton className="h-14" />
           </>
         ) : sessions.length === 0 ? (
-          <EmptyState
-            icon={<History size={32} className="text-content-faint" />}
-            title="No Claude sessions found"
-            description="Past Claude Code conversations for this workspace will show up here."
-          />
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <History />
+              </EmptyMedia>
+              <EmptyTitle>No Claude sessions found</EmptyTitle>
+              <EmptyDescription>Past Claude Code conversations for this workspace will show up here.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           sessions.map((s) => (
             <button
               key={s.id}
               onClick={() => onPick(s)}
-              className="rounded-lg border border-hairline bg-surface p-3 text-left transition-colors cursor-pointer hover:border-hairline-strong hover:bg-raised"
+              className="cursor-pointer rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-foreground/15 hover:bg-accent/50"
             >
-              <div className="truncate text-sm font-medium text-content" title={s.title}>{s.title}</div>
-              <div className="mt-1 flex items-center gap-2 text-[11px] text-content-faint">
+              <div className="truncate text-sm font-medium text-foreground" title={s.title}>{s.title}</div>
+              <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                 <span>{new Date(s.updatedAt).toLocaleString()}</span>
                 <span>·</span>
                 <MessageSquare size={11} />
@@ -79,7 +95,8 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
             </button>
           ))
         )}
-      </div>
-    </Modal>
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 }

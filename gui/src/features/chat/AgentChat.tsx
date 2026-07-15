@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
-import { Send, PlaySquare, Square, Sparkles, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
-import { Button, Textarea, Menu, StatusPill } from '../../components/legacy-ui/index.js';
-import { cn } from '../../components/legacy-ui/cn.js';
+import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
+import { Button } from '../../components/ui/button.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
+import { StatusBadge } from '../../components/ui/status-badge.js';
+import { Textarea } from '../../components/ui/textarea.js';
+import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
@@ -40,10 +43,10 @@ const MessageBubble = memo(function MessageBubble({
     return (
       <div className="flex justify-center">
         <span className={cn(
-          'text-[11px] px-3 py-1 rounded-full border text-center',
+          'rounded-full border px-3 py-1 text-center text-[11px]',
           msg.kind === 'error'
-            ? 'text-rose-400 border-rose-500/20 bg-rose-500/10'
-            : 'text-content-faint border-hairline bg-raised'
+            ? 'border-destructive/25 bg-destructive/10 text-destructive-foreground'
+            : 'border-border bg-muted text-muted-foreground'
         )}>
           {msg.content}
         </span>
@@ -56,13 +59,13 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-      <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-primary text-white' : 'bg-surface border border-hairline'}`}>
+      <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-primary text-primary-foreground' : 'border border-border bg-card text-foreground'}`}>
         {isUser ? (
           <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
         ) : (
           <div className="flex flex-col gap-2">
             {hasAnsi ? (
-              <div className="font-mono text-xs overflow-x-auto whitespace-pre-wrap bg-[#1e1e1e] text-gray-300 p-2 rounded-md">
+              <div className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2 font-mono text-xs text-foreground">
                 <Ansi>{msg.content}</Ansi>
               </div>
             ) : (
@@ -70,16 +73,16 @@ const MessageBubble = memo(function MessageBubble({
             )}
             <button
               onClick={() => onCopy(idx, msg.content)}
-              className="absolute -top-2.5 -right-2.5 hidden group-hover:grid h-6 w-6 place-items-center rounded-md border border-hairline bg-surface text-content-faint hover:text-content shadow-sm cursor-pointer"
+              className="absolute -right-2.5 -top-2.5 hidden h-6 w-6 cursor-pointer place-items-center rounded-md border border-border bg-card text-muted-foreground shadow-sm hover:text-foreground group-hover:grid"
               title="Copy message"
             >
-              {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+              {copied ? <Check size={12} className="text-success-foreground" /> : <Copy size={12} />}
             </button>
           </div>
         )}
       </div>
       {msg.ts && (
-        <span className="mt-1 text-[10px] text-content-faint">{formatTime(msg.ts)}</span>
+        <span className="mt-1 text-[10px] text-muted-foreground">{formatTime(msg.ts)}</span>
       )}
     </div>
   );
@@ -112,10 +115,13 @@ export function AgentChat({ ws }: AgentChatProps) {
   // opened by the current turn) — prevents merging into errors or old turns.
   const turnOpenRef = useRef(false);
   const endedNoteRef = useRef(false);
-  // Latest snapshot for the debounced/unmount flush, updated every render.
+  // Latest snapshot for the debounced/unmount flush.
   const latestRef = useRef({ messages, agentName });
-  latestRef.current = { messages, agentName };
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    latestRef.current = { messages, agentName };
+  }, [messages, agentName]);
 
   const flushPersist = useCallback(() => {
     persistTimer.current = null;
@@ -390,29 +396,30 @@ export function AgentChat({ ws }: AgentChatProps) {
   const showThinking = busy && !turnOpen;
 
   return (
-    <div className="flex h-full flex-col bg-surface">
-      <div className="flex items-center justify-between border-b border-hairline px-4 py-3 shrink-0 bg-surface">
+    <div className="flex h-full flex-col bg-card">
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-card px-4 py-3">
         <div className="flex items-center gap-3 min-w-0">
-          <h3 className="font-display font-semibold text-content">Chat</h3>
-          <StatusPill tone={connected ? 'running' : 'idle'} dot>
+          <h3 className="font-semibold text-foreground">Chat</h3>
+          <StatusBadge tone={connected ? 'running' : 'idle'} dot>
             {connected ? currentProvider?.name || 'Connected' : 'Disconnected'}
-          </StatusPill>
+          </StatusBadge>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {messages.length > 0 && (
-            <button onClick={clearChat} className="text-xs text-content-faint hover:text-rose-400 transition-colors cursor-pointer">
+            <button onClick={clearChat} className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-destructive-foreground">
               Clear
             </button>
           )}
           <button
             onClick={() => { setPickerError(null); setPickerOpen(true); }}
-            className="grid h-7 w-7 place-items-center rounded-md text-content-faint hover:text-content hover:bg-raised transition-colors cursor-pointer"
+            className="grid h-7 w-7 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             title="Resume a past session"
           >
             <History size={14} />
           </button>
           {connected && (
-            <Button size="sm" variant="secondary" icon={<Square size={14} className="text-rose-400" />} onClick={stopAgent}>
+            <Button size="sm" variant="outline" onClick={stopAgent}>
+              <Square size={14} className="text-destructive-foreground" />
               Stop
             </Button>
           )}
@@ -429,10 +436,10 @@ export function AgentChat({ ws }: AgentChatProps) {
             nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           }
         }}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 space-y-4 overflow-y-auto p-4"
       >
         {messages.length === 0 && !showThinking && (
-          <div className="flex h-full items-center justify-center text-content-faint">
+          <div className="flex h-full items-center justify-center text-muted-foreground">
             No messages yet. Start the agent and say hello.
           </div>
         )}
@@ -441,50 +448,45 @@ export function AgentChat({ ws }: AgentChatProps) {
         ))}
         {showThinking && (
           <div className="flex justify-start">
-            <div className="rounded-lg border border-hairline bg-surface px-4 py-3">
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-content-faint animate-pulse" />
-                <span className="h-1.5 w-1.5 rounded-full bg-content-faint animate-pulse [animation-delay:150ms]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-content-faint animate-pulse [animation-delay:300ms]" />
-              </span>
+            <div className="rounded-lg border border-border bg-card px-4 py-3 text-muted-foreground">
+              <RefreshCw size={14} className="animate-spin" />
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="shrink-0 border-t border-hairline p-3 flex flex-col gap-2 bg-surface">
+      <div className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
         {currentProvider && !currentProvider.isConfigured && (
-          <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs px-3 py-2 rounded-lg">
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
             <span className="font-semibold">{currentProvider.name} provider status:</span>
             <span>{currentProvider.message}</span>
           </div>
         )}
-        <div className="flex flex-col bg-surface border border-hairline rounded-xl shadow-sm w-full">
-          <div className="flex items-center border-b border-hairline/50 p-2 gap-2">
-            <Menu
-              label="Select Provider"
-              align="left"
-              placement="top"
-              trigger={
-                <span className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md hover:bg-raised transition-colors cursor-pointer",
-                  connected ? "opacity-50 pointer-events-none" : "text-content"
-                )}>
-                  {currentProvider?.icon === 'Sparkles' ? <Sparkles size={14} className="text-primary" /> : currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-primary" /> : <Cpu size={14} className="text-primary" />}
-                  {currentProvider?.name || 'Select Agent'}
-                </span>
-              }
-              items={[
-                ...providers.map(p => ({
-                  label: p.name,
-                  icon: p.icon === 'Sparkles' ? <Sparkles size={14} /> : p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />,
-                  onClick: () => { if (!connected) setAgentName(p.id) }
-                }))
-              ]}
-            />
-            <div className="h-4 w-px bg-hairline"></div>
-            <span className="text-xs text-content-faint">Full access</span>
+        <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex items-center gap-2 border-b border-border/50 p-2">
+            <Menu>
+              <MenuTrigger
+                aria-label="Select Provider"
+                className={cn(
+                  'flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent',
+                  connected ? 'pointer-events-none opacity-50' : 'text-foreground',
+                )}
+              >
+                {currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-primary" /> : <Cpu size={14} className="text-primary" />}
+                {currentProvider?.name || 'Select Agent'}
+              </MenuTrigger>
+              <MenuPopup align="start" side="top">
+                {providers.map((p) => (
+                  <MenuItem key={p.id} onClick={() => { if (!connected) setAgentName(p.id); }}>
+                    {p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />}
+                    {p.name}
+                  </MenuItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+            <div className="h-4 w-px bg-border"></div>
+            <span className="text-xs text-muted-foreground">Full access</span>
           </div>
           <div className="flex items-end gap-2 p-2">
             <Textarea
@@ -509,21 +511,22 @@ export function AgentChat({ ws }: AgentChatProps) {
                 }
               }}
               placeholder={connected ? 'Message the agent... (Shift+Enter for new line)' : 'Start the agent or press Enter...'}
-              className="flex-1 min-h-[44px] max-h-[200px] resize-none bg-transparent border-none focus:ring-0 px-3 py-2 text-sm text-content"
+              unstyled
+              className="flex-1 [&_[data-slot=textarea]]:max-h-[200px] [&_[data-slot=textarea]]:min-h-11 [&_[data-slot=textarea]]:resize-none [&_[data-slot=textarea]]:text-sm"
               rows={1}
             />
             {!connected ? (
-              <Button variant="primary" className="h-[44px] rounded-lg shrink-0" icon={<PlaySquare size={14} />} onClick={startAgent} disabled={!canStart}>
+              <Button className="h-11 shrink-0 rounded-lg" onClick={startAgent} disabled={!canStart}>
+                <PlaySquare size={14} />
                 Start
               </Button>
             ) : (
               <Button
-                variant="primary"
-                className="h-[44px] rounded-lg shrink-0"
-                icon={busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                className="h-11 shrink-0 rounded-lg"
                 onClick={sendMessage}
                 disabled={!input.trim() || busy}
               >
+                {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                 Send
               </Button>
             )}

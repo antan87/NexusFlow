@@ -1,6 +1,10 @@
 import React from 'react';
-import { Play, Square, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2, RefreshCw } from 'lucide-react';
+import { Play, Square, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2 } from 'lucide-react';
 import type { Feature, ServiceConfig, RunningService, OrchestrationDetection } from '../../types.js';
+import { Button } from '../../components/ui/button.js';
+import { Spinner } from '../../components/ui/spinner.js';
+import { StatusBadge } from '../../components/ui/status-badge.js';
+import { cn } from '../../lib/utils.js';
 
 interface ServiceConsoleProps {
   ws: Feature;
@@ -52,7 +56,7 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
 
   const getStatusColor = (name: string) => {
     const isRunning = runningServices.some((rs) => rs.name === name && rs.pid > 0);
-    return isRunning ? 'bg-emerald-500 animate-pulse-glow-green' : 'bg-rose-500';
+    return isRunning ? 'bg-success' : 'bg-destructive';
   };
 
   const isAnyRunning = runningServices.some((rs) => rs.pid > 0);
@@ -60,14 +64,14 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
   return (
     <div className="animate-fade-in">
       {servicesLoading && (
-        <div className="flex items-center gap-2 text-[10px] text-indigo-400 mb-4 animate-pulse">
-          <RefreshCw className="animate-spin" size={12} />
+        <div className="mb-4 flex items-center gap-2 text-[10px] text-primary">
+          <Spinner className="size-3" />
           <span className="font-semibold tracking-wider uppercase">Scanning service configurations...</span>
         </div>
       )}
       {orchTools && orchTools.length > 0 && (
-        <div className="flex items-center gap-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 mb-5 text-xs text-indigo-300">
-          <AlertTriangle size={16} className="text-indigo-400 shrink-0 animate-bounce" />
+        <div className="mb-5 flex items-center gap-3 rounded-xl border border-info/25 bg-info/10 p-4 text-xs text-info-foreground">
+          <AlertTriangle size={16} className="shrink-0 text-info" />
           <div>
             <strong>Orchestration manifest detected:</strong> {orchTools.map((t) => t.tool).join(', ')}. You can start them inside sub-repos.
           </div>
@@ -76,47 +80,43 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
 
       {/* Workspace service status (real running-process state) */}
       <div className="mb-6">
-        <div className="glass-card p-5 rounded-2xl border border-slate-800/40 relative overflow-hidden transition-all duration-300 before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-indigo-500/10 via-purple-500/10 to-transparent">
-          <div className="flex justify-between items-center text-xs font-semibold text-slate-400 mb-3">
+        <div className="rounded-xl border border-border bg-card p-5 transition-colors">
+          <div className="mb-3 flex items-center justify-between text-xs font-semibold text-muted-foreground">
             <span>Workspace Status</span>
-            <span className={`inline-flex items-center gap-1.5 text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${isAnyRunning ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-slate-500 bg-slate-950/40 border-slate-900"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isAnyRunning ? "bg-emerald-400 animate-ping" : "bg-slate-600"}`}></span>
-              {isAnyRunning ? 'Active' : 'Standby'}
-            </span>
+            <StatusBadge tone={isAnyRunning ? 'running' : 'idle'}>{isAnyRunning ? 'Active' : 'Standby'}</StatusBadge>
           </div>
-          <div className="text-xs text-white font-semibold mb-2">
+          <div className="mb-2 text-xs font-semibold text-foreground">
             {isAnyRunning ? `${runningServices.filter(rs => rs.pid > 0).length} processes active` : "All processes offline"}
           </div>
-          <span className="text-[10px] text-slate-550">Live service state for this workspace</span>
+          <span className="text-[10px] text-muted-foreground">Live service state for this workspace</span>
         </div>
       </div>
 
       {/* Action Controls */}
       <div className="flex gap-3 mb-6">
-        <button
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-650 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-emerald-500/10 hover:-translate-y-0.5 active:translate-y-0"
+        <Button
           onClick={() => handleStartServices(ws.branchName)}
           disabled={isAnyRunning}
         >
           <Play size={14} /> Start All Services
-        </button>
-        <button
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-rose-950/40 border border-rose-900/60 hover:bg-rose-900/60 hover:border-rose-800 text-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:-translate-y-0.5 active:translate-y-0"
+        </Button>
+        <Button
+          variant="destructive"
           onClick={() => handleStopServices(ws.branchName)}
           disabled={!isAnyRunning}
         >
           <Square size={14} /> Stop All
-        </button>
+        </Button>
       </div>
 
       {/* Split-Pane DevOps Console */}
       {services.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 border border-slate-900 rounded-2xl overflow-hidden shadow-2xl bg-slate-950/40 backdrop-blur-md">
+        <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm lg:grid-cols-12">
           
           {/* Left Pane: Services List (4 cols) */}
-          <div className="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-slate-900 p-5 bg-slate-950/60">
-            <h4 className="text-[10px] text-slate-450 uppercase font-bold tracking-wider mb-4 flex items-center gap-1.5 border-b border-slate-900 pb-2">
-              <Terminal size={12} className="text-indigo-400" /> Background Services
+          <div className="border-b border-border bg-muted/30 p-5 lg:col-span-4 lg:border-b-0 lg:border-r">
+            <h4 className="mb-4 flex items-center gap-1.5 border-b border-border pb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Terminal size={12} className="text-primary" /> Background Services
             </h4>
             <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-1">
               {services.map((svc) => {
@@ -124,10 +124,10 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
                 return (
                   <div
                     key={svc.name}
-                    className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${
+                    className={`flex cursor-pointer flex-col rounded-xl border p-3 transition-colors ${
                       isSelected
-                        ? 'bg-indigo-500/10 border-indigo-500/40 text-white shadow-[0_0_15px_rgba(99,102,241,0.05)]'
-                        : 'bg-slate-950/30 border-slate-900 hover:border-slate-800 text-slate-400 hover:text-slate-200'
+                        ? 'border-primary/40 bg-primary/10 text-foreground'
+                        : 'border-border bg-card text-muted-foreground hover:border-foreground/15 hover:bg-accent/50 hover:text-foreground'
                     }`}
                     onClick={() => setSelectedLogService(svc.name)}
                   >
@@ -137,12 +137,12 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
                         <span className="font-bold text-xs truncate">{svc.name}</span>
                       </div>
                       {svc.port && (
-                        <span className="text-[9px] font-mono px-2 py-0.5 bg-slate-900 border border-slate-850 rounded text-slate-400">
+                        <span className="rounded border border-border bg-background px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
                           Port: {svc.port}
                         </span>
                       )}
                     </div>
-                    <code className="text-[9px] font-mono text-slate-500 mt-2 truncate bg-slate-950/50 p-1.5 rounded border border-slate-900/60 block">
+                    <code className="mt-2 block truncate rounded border border-border bg-muted/40 p-1.5 font-mono text-[9px] text-muted-foreground">
                       {svc.command} {svc.args.join(' ')}
                     </code>
                   </div>
@@ -152,22 +152,25 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
           </div>
 
           {/* Right Pane: Logs Console (8 cols) */}
-          <div className="lg:col-span-8 flex flex-col min-w-0 bg-[#03050a]">
+          <div className="flex min-w-0 flex-col bg-background lg:col-span-8">
             {/* Console Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-950/80 px-5 py-3 border-b border-slate-900 gap-3">
+            <div className="flex flex-col gap-3 border-b border-border bg-muted/40 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-xs font-bold text-indigo-400 text-glow-indigo">{selectedLogService || 'no-service'}</span>
-                <span className="text-slate-700">|</span>
-                <span className="text-[9px] font-mono bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded uppercase font-semibold">stdout_stream</span>
+                <span className="font-mono text-xs font-bold text-primary">{selectedLogService || 'no-service'}</span>
+                <span className="text-muted-foreground">|</span>
+                <span className="rounded border border-info/25 bg-info/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-info-foreground">stdout_stream</span>
               </div>
-              
+               
               <div className="flex items-center gap-3 self-end sm:self-auto">
                 {/* Theme Toggle */}
-                <div className="flex bg-slate-900 border border-slate-850 p-0.5 rounded-lg text-[9px] font-semibold text-slate-400">
+                <div className="flex rounded-lg border border-border bg-card p-0.5 text-[9px] font-semibold text-muted-foreground">
                   {(['classic', 'matrix', 'dracula'] as const).map((t) => (
                     <button
                       key={t}
-                      className={`px-2 py-1 rounded-md capitalize cursor-pointer transition-all ${termTheme === t ? 'bg-slate-800 text-white font-bold' : 'hover:text-white'}`}
+                      className={cn(
+                        'cursor-pointer rounded-md px-2 py-1 capitalize transition-colors',
+                        termTheme === t ? 'bg-primary/10 font-bold text-primary' : 'hover:text-foreground',
+                      )}
                       onClick={() => setTermTheme(t)}
                     >
                       {t}
@@ -179,14 +182,14 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
                 <div className="flex gap-1.5">
                   <button
                     onClick={handleClearLogs}
-                    className="p-1.5 bg-slate-900 border border-slate-850 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
+                    className="cursor-pointer rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     title="Clear Console"
                   >
                     <Trash2 size={13} />
                   </button>
                   <button
                     onClick={() => setIsExpanded(!isExpanded)}
-                    className="p-1.5 bg-slate-900 border border-slate-850 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
+                    className="cursor-pointer rounded-lg border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     title={isExpanded ? "Minimize Console" : "Expand Console"}
                   >
                     {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
@@ -196,14 +199,14 @@ export const ServiceConsole: React.FC<ServiceConsoleProps> = ({
             </div>
 
             {/* Terminal Body */}
-            <div className={`p-5 font-mono text-[10.5px] leading-relaxed overflow-y-auto whitespace-pre-wrap select-text selection:bg-indigo-500/30 transition-all duration-300 relative ${getThemeClass()} ${isExpanded ? 'h-[520px]' : 'h-80'}`}>
-              <div className="absolute top-4 right-5 text-[8px] bg-slate-900/60 border border-white/5 text-slate-400/50 px-2.5 py-0.5 rounded-md font-mono select-none uppercase tracking-widest font-bold">
+            <div className={`relative overflow-y-auto whitespace-pre-wrap p-5 font-mono text-[10.5px] leading-relaxed selection:bg-primary/20 ${getThemeClass()} ${isExpanded ? 'h-[520px]' : 'h-80'}`}>
+              <div className="absolute right-5 top-4 select-none rounded-md border border-border bg-card/80 px-2.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-widest text-muted-foreground">
                 LIVE LOGGER
               </div>
               {activeLogs.trim() ? (
                 activeLogs
               ) : (
-                <span className="text-slate-650 italic font-mono">(no log content recorded)</span>
+                <span className="font-mono italic text-muted-foreground">(no log content recorded)</span>
               )}
               <div ref={logsEndRef}></div>
             </div>

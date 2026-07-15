@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
 import { FolderGit2, GitBranch, Play, AlertTriangle, Plus, ArrowRight, RefreshCw } from 'lucide-react';
 import type { Feature, WorkspaceStatus } from '../types.js';
-import { Button, Card, EmptyState, PageHeader, Skeleton, StatusPill } from '../components/legacy-ui/index.js';
+import { Button } from '../components/ui/button.js';
+import { Card } from '../components/ui/card.js';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
+import { Skeleton } from '../components/ui/skeleton.js';
+import { StatusBadge } from '../components/ui/status-badge.js';
 import { syncMeta } from '../lib/status.js';
 
 interface DashboardPageProps {
@@ -18,8 +22,8 @@ function StatTile({ icon, label, value, tone }: { icon: ReactNode; label: string
     <Card className="flex items-center gap-3.5 p-4">
       <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${tone}`}>{icon}</div>
       <div className="min-w-0">
-        <div className="font-display text-xl font-bold leading-none text-content">{value}</div>
-        <div className="mt-1 text-xs text-content-muted">{label}</div>
+        <div className="text-xl font-bold leading-none text-foreground">{value}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{label}</div>
       </div>
     </Card>
   );
@@ -40,20 +44,20 @@ export function DashboardPage({
 
   return (
     <div className="mx-auto max-w-6xl animate-fade-in">
-      <PageHeader
-        title="Overview"
-        subtitle="Your multi-repo environment at a glance."
-      />
+      <header className="mb-6">
+        <h1 className="text-xl font-semibold text-foreground">Overview</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Your multi-repo environment at a glance.</p>
+      </header>
 
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile icon={<FolderGit2 size={18} className="text-primary" />} tone="bg-primary-soft" label="Workspaces" value={workspaces.length} />
+        <StatTile icon={<FolderGit2 size={18} className="text-primary" />} tone="bg-primary/10" label="Workspaces" value={workspaces.length} />
         <StatTile icon={<GitBranch size={18} className="text-warning" />} tone="bg-warning/10" label="With uncommitted changes" value={withChanges} />
         <StatTile icon={<Play size={18} className="text-running" />} tone="bg-running/10" label="Running services" value={running} />
         <StatTile icon={<AlertTriangle size={18} className="text-warning" />} tone="bg-warning/10" label="Need validation" value={needsValidation} />
       </div>
 
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-content-muted">Workspaces</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Workspaces</h2>
       </div>
 
       {workspacesLoading ? (
@@ -63,13 +67,21 @@ export function DashboardPage({
           <Skeleton className="h-20" />
         </div>
       ) : workspaces.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<FolderGit2 size={40} />}
-            title="No workspaces yet"
-            description="Create a feature workspace to group repositories and give your AI assistants shared context."
-            action={<Button variant="primary" icon={<Plus size={16} />} onClick={onNewWorkspace}>New workspace</Button>}
-          />
+        <Card className="border-dashed">
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderGit2 />
+              </EmptyMedia>
+              <EmptyTitle>No workspaces yet</EmptyTitle>
+              <EmptyDescription>
+                Create a feature workspace to group repositories and give your AI assistants shared context.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button onClick={onNewWorkspace}>
+              <Plus size={16} /> New workspace
+            </Button>
+          </Empty>
         </Card>
       ) : (
         <div className="flex flex-col gap-2">
@@ -79,15 +91,15 @@ export function DashboardPage({
             return (
               <Card
                 key={ws.id}
-                className="group flex cursor-pointer items-center gap-4 p-4 transition-colors hover:border-hairline-strong hover:bg-raised"
+                className="group flex cursor-pointer items-center gap-4 p-4 transition-colors hover:border-foreground/15 hover:bg-accent/50"
                 onClick={() => onOpenWorkspace(ws.branchName)}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-mono text-sm font-semibold text-content">{ws.branchName}</span>
-                    <span className="shrink-0 text-xs text-content-faint">{ws.repos.length} repos</span>
+                    <span className="truncate font-mono text-sm font-semibold text-foreground">{ws.branchName}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{ws.repos.length} repos</span>
                   </div>
-                  {ws.description && <p className="mt-0.5 truncate text-xs text-content-muted">{ws.description}</p>}
+                  {ws.description && <p className="mt-0.5 truncate text-xs text-muted-foreground">{ws.description}</p>}
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -96,27 +108,27 @@ export function DashboardPage({
                   ) : st ? (
                     <>
                       {st.changedFiles > 0 ? (
-                        <StatusPill tone="warning" dot>
+                        <StatusBadge tone="warning" dot>
                           {st.changedFiles} changed
-                        </StatusPill>
+                        </StatusBadge>
                       ) : (
-                        <StatusPill tone="idle" dot>
+                        <StatusBadge tone="idle" dot>
                           Clean
-                        </StatusPill>
+                        </StatusBadge>
                       )}
                       {st.runningServices > 0 && (
-                        <StatusPill tone="running" dot>
+                        <StatusBadge tone="running" dot>
                           {st.runningServices} running
-                        </StatusPill>
+                        </StatusBadge>
                       )}
                       {sync && (
-                        <StatusPill tone={sync.tone}>
+                        <StatusBadge tone={sync.tone}>
                           <RefreshCw size={11} /> {sync.label}
-                        </StatusPill>
+                        </StatusBadge>
                       )}
                     </>
                   ) : null}
-                  <ArrowRight size={16} className="text-content-faint transition-transform group-hover:translate-x-0.5 group-hover:text-content" />
+                  <ArrowRight size={16} className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
                 </div>
               </Card>
             );
