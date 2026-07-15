@@ -458,7 +458,13 @@ export async function deleteWorkspace(
     } catch (error) {
       console.warn(`Warning: failed to delete workspace context files from storage:`, error);
     }
+  }
 
+  if (feature && isInPlace(feature)) {
+    // In-place: feature.repos are the user's source repositories — they must
+    // never be touched. Deleting the workspace only removes the lightweight
+    // directory (manifest + context files) below.
+  } else if (feature) {
     const origRepos = feature.originalRepos || [];
     for (let i = 0; i < feature.repos.length; i++) {
       const worktreePath = feature.repos[i]!;
@@ -525,51 +531,75 @@ export async function addRepoToWorkspace(
   }
 
   const newRepoInfo = await resolveRepoInfo(repoPath);
-  const worktreeTarget = path.join(workspacePath, newRepoInfo.name);
+  const inPlace = isInPlace(feature);
+  // In-place workspaces reference the source repo directly; worktree
+  // workspaces get a checkout inside the workspace dir.
+  const repoEntry = inPlace ? newRepoInfo.path : path.join(workspacePath, newRepoInfo.name);
 
-  if (feature.repos.includes(worktreeTarget)) {
+  if (feature.repos.includes(repoEntry)) {
     throw new Error(`Repository ${repoPath} is already in the workspace`);
   }
 
-  // 1. Create the worktree
-  await createWorktree(
-    newRepoInfo.path,
-    worktreeTarget,
-    feature.branchName,
-    newRepoInfo.defaultBranch,
-  );
+  // 1. Create the worktree (worktree mode only)
+  if (!inPlace) {
+    await createWorktree(
+      newRepoInfo.path,
+      repoEntry,
+      feature.branchName,
+      newRepoInfo.defaultBranch,
+    );
+  }
 
   // 2. Update manifest
-  feature.repos.push(worktreeTarget);
+  feature.repos.push(repoEntry);
   if (!feature.originalRepos) {
     feature.originalRepos = [];
   }
   feature.originalRepos.push(repoPath);
   await saveFeatureConfig(workspacePath, feature);
 
-  // 3. Update .gitignore at workspace root
-  try {
-    const gitignorePath = path.join(workspacePath, '.gitignore');
-    let gitignoreContent = '';
+  // 3. Keep editor config in step: worktree mode ignores the new subdir in the
+  // root .gitignore; in-place mode adds the absolute path to the
+  // .code-workspace (otherwise the repo is invisible in the editor).
+  if (!inPlace) {
     try {
-      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    } catch {}
+      const gitignorePath = path.join(workspacePath, '.gitignore');
+      let gitignoreContent = '';
+      try {
+        gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+      } catch {}
 
-    const entry = `/${newRepoInfo.name}/`;
-    if (!gitignoreContent.includes(entry)) {
-      gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
-      await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+      const entry = `/${newRepoInfo.name}/`;
+      if (!gitignoreContent.includes(entry)) {
+        gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
+        await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+      }
+    } catch (error) {
+      console.warn('Warning: Failed to update .gitignore:', error);
     }
-  } catch (error) {
-    console.warn('Warning: Failed to update .gitignore:', error);
+  } else {
+    try {
+      const workspaceName = path.basename(workspacePath);
+      const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+      const codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
+      codeWorkspace.folders = [
+        ...(codeWorkspace.folders ?? []),
+        { path: newRepoInfo.path, name: newRepoInfo.name },
+      ];
+      await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
+    } catch (error) {
+      console.warn('Warning: Failed to update .code-workspace file:', error);
+    }
   }
 
   // 4. Re-run analysis, update configs, and repack workspace
   const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
-  const workspaceRepos = allRepos.map((repo) => ({
-    ...repo,
-    path: path.join(workspacePath, repo.name),
-  }));
+  const workspaceRepos = inPlace
+    ? allRepos
+    : allRepos.map((repo) => ({
+        ...repo,
+        path: path.join(workspacePath, repo.name),
+      }));
   const analysis = await analyzeAllRepos(workspaceRepos);
   const ctx: WorkspaceContext = {
     feature,

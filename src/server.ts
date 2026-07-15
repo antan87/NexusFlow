@@ -23,6 +23,7 @@ import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
+import { isInPlace } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
@@ -513,9 +514,12 @@ app.get('/api/workspaces/status', async (c) => {
         };
 
         try {
-          // Uncommitted changes across the workspace's repo worktrees.
+          // Uncommitted changes across the workspace's repos: worktrees inside
+          // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
-            const worktreePath = path.join(workspacePath, path.basename(repoPath));
+            const worktreePath = isInPlace(ws)
+              ? repoPath
+              : path.join(workspacePath, path.basename(repoPath));
             const repoStatus = await getRepoStatus(worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
@@ -1126,10 +1130,10 @@ app.get('/api/workspace/:id/changes', async (c) => {
 
     const results: any[] = [];
 
-    // Check git status in each repo
+    // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
       const repoName = path.basename(repoPath);
-      const worktreePath = path.join(workspacePath, repoName);
+      const worktreePath = isInPlace(feature) ? repoPath : path.join(workspacePath, repoName);
 
       try {
         const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
@@ -1210,7 +1214,19 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     // Contained within the workspace; rejects `..` and sibling-prefix escapes.
-    const worktreePath = resolveRepoPath(workspacePath, repoName);
+    // In-place repos live outside the workspace, so the name may only resolve
+    // to an exact manifest entry — never an arbitrary path.
+    let worktreePath: string;
+    const feature = await loadFeatureConfig(workspacePath);
+    if (feature && isInPlace(feature)) {
+      const match = feature.repos.find((r) => path.basename(r) === repoName);
+      if (!match) {
+        return c.json({ error: `Unknown repo "${repoName}" in this workspace.` }, 404);
+      }
+      worktreePath = match;
+    } else {
+      worktreePath = resolveRepoPath(workspacePath, repoName);
+    }
 
     let diff = '';
     
