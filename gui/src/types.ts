@@ -44,6 +44,22 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
+/** A repository belonging to a {@link Project} (mirrors src/types.ts). */
+export interface ProjectRepo {
+  path: string;
+  defaultBranch: string;
+}
+
+/** A named, persistent group of source repositories (mirrors src/types.ts). */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  repos: ProjectRepo[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** How a feature attaches to its repos (mirrors src/types.ts). */
 export type WorkspaceMode = 'worktree' | 'in-place';
 

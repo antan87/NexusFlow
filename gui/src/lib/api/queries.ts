@@ -1,0 +1,175 @@
+/**
+ * TanStack Query hooks for the NexusFlow API. One hook per endpoint group;
+ * mutations invalidate the queries they affect so screens stay fresh without
+ * hand-rolled refetch effects.
+ */
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { apiFetch } from './client.js';
+import type {
+  DetectedAI,
+  DetectedEditor,
+  Feature,
+  NexusFlowConfig,
+  Project,
+  RepoInfo,
+  WorkspaceMode,
+  WorkspaceStatus,
+} from '../../types.js';
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+export function useConfig() {
+  return useQuery({
+    queryKey: ['config'],
+    queryFn: () => apiFetch<NexusFlowConfig>('/api/config'),
+  });
+}
+
+// ─── Workspaces ───────────────────────────────────────────────────────────────
+
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => apiFetch<Feature[]>('/api/workspaces'),
+  });
+}
+
+/** At-a-glance status per workspace, refreshed on an interval. */
+export function useWorkspacesStatus(intervalMs = 15_000) {
+  return useQuery({
+    queryKey: ['workspaces-status'],
+    queryFn: () => apiFetch<Record<string, WorkspaceStatus>>('/api/workspaces/status'),
+    refetchInterval: intervalMs,
+  });
+}
+
+export interface CreateWorkspacePayload {
+  mode?: WorkspaceMode;
+  projectId?: string;
+  /** Workspace name — required for in-place mode. */
+  name?: string;
+  branchName?: string;
+  description: string;
+  repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
+  assistants: string[];
+  localLlmEnabled?: boolean;
+  teamworkInstructions?: string;
+  resumption?: { testCommand?: string; mockCommand?: string; startCommand?: string };
+}
+
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateWorkspacePayload) =>
+      apiFetch<{ success: boolean; jobId: string }>('/api/workspace', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
+    },
+  });
+}
+
+export function useDeleteWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/workspace/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
+    },
+  });
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+export function useProjects() {
+  return useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiFetch<Project[]>('/api/projects'),
+  });
+}
+
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { name: string; repos: string[]; description?: string }) =>
+      apiFetch<Project>('/api/projects', { method: 'POST', body: JSON.stringify(payload) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...payload }: { id: string; name?: string; repos?: string[]; description?: string | null }) =>
+      apiFetch<Project>(`/api/projects/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/projects/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  });
+}
+
+// ─── Repos & detection ────────────────────────────────────────────────────────
+
+export function useRepos() {
+  return useQuery({
+    queryKey: ['repos'],
+    queryFn: () => apiFetch<RepoInfo[]>('/api/repos'),
+  });
+}
+
+export function useAiDetect() {
+  return useQuery({
+    queryKey: ['ai-detect'],
+    queryFn: () => apiFetch<DetectedAI[]>('/api/ai-detect'),
+    staleTime: 60_000,
+  });
+}
+
+export function useEditorDetect() {
+  return useQuery({
+    queryKey: ['editor-detect'],
+    queryFn: () => apiFetch<DetectedEditor[]>('/api/editor-detect'),
+    staleTime: 60_000,
+  });
+}
+
+// ─── Workflow strategy templates ──────────────────────────────────────────────
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  custom: boolean;
+}
+
+export function useWorkflowTemplates() {
+  return useQuery({
+    queryKey: ['workflow-templates'],
+    queryFn: async () => {
+      const data = await apiFetch<{ templates: WorkflowTemplate[] }>('/api/workflows/templates');
+      return data.templates;
+    },
+  });
+}

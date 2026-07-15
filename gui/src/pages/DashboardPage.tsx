@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { FolderGit2, GitBranch, Play, AlertTriangle, Plus, ArrowRight, RefreshCw } from 'lucide-react';
 import type { Feature, WorkspaceStatus } from '../types.js';
-import { Button, Card, EmptyState, PageHeader, Skeleton, StatusPill } from '../components/ui/index.js';
+import { Button, Card, EmptyState, PageHeader, Skeleton, StatusPill } from '../components/legacy-ui/index.js';
 import { syncMeta } from '../lib/status.js';
 
 interface DashboardPageProps {

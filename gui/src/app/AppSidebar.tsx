@@ -1,5 +1,5 @@
 import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, type LucideIcon } from 'lucide-react';
-import { cn } from '../components/ui/index.js';
+import { cn } from '../components/legacy-ui/index.js';
 
 interface NavItem {
   label: string;

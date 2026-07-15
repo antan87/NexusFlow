@@ -1,8 +1,8 @@
 import { useMemo, useState, type ComponentProps } from 'react';
 import { RefreshCw, Play, MoreVertical, ExternalLink, Sparkles, Trash2, Search, FolderGit2 } from 'lucide-react';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
-import { Button, Card, EmptyState, Menu, PageHeader, StatusPill, Tabs, Input, Skeleton, cn } from '../components/ui/index.js';
-import type { TabItem } from '../components/ui/index.js';
+import { Button, Card, EmptyState, Menu, PageHeader, StatusPill, Tabs, Input, Skeleton, cn } from '../components/legacy-ui/index.js';
+import type { TabItem } from '../components/legacy-ui/index.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';

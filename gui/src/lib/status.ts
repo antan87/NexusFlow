@@ -1,4 +1,4 @@
-import type { Tone } from '../components/ui/index.js';
+import type { Tone } from '../components/legacy-ui/index.js';
 import type { WorkspaceStatus } from '../types.js';
 
 /** Maps a workspace sync status to a display label + status-language tone. */

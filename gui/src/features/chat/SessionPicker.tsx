@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { History, MessageSquare } from 'lucide-react';
-import { Modal, Skeleton, EmptyState } from '../../components/ui/index.js';
+import { Modal, Skeleton, EmptyState } from '../../components/legacy-ui/index.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 

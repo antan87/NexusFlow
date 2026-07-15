@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Send, PlaySquare, Square, Sparkles, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
-import { Button, Textarea, Menu, StatusPill } from '../../components/ui/index.js';
-import { cn } from '../../components/ui/cn.js';
+import { Button, Textarea, Menu, StatusPill } from '../../components/legacy-ui/index.js';
+import { cn } from '../../components/legacy-ui/cn.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';

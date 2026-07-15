@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import type { RepoInfo } from '../types.js';
-import { Input } from './ui/index.js';
+import { Input } from './legacy-ui/index.js';
 
 /** A searchable popover for attaching another repository to a workspace. */
 export function AddRepoPicker({
