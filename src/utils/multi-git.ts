@@ -11,7 +11,8 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 
 import type { Feature, SyncStatus } from '../types.js';
-import { detectDefaultBranch } from './git.js';
+import { detectDefaultBranch, getCurrentBranch } from './git.js';
+import { isInPlace, normalizeFeature } from './feature.js';
 
 export type { SyncStatus };
 
@@ -142,17 +143,27 @@ export async function getWorkspaceRepos(
 ): Promise<WorkspaceRepo[]> {
   const manifestPath = path.join(workspacePath, 'nexusflow.json');
   const raw = await fs.readFile(manifestPath, 'utf-8');
-  const feature = JSON.parse(raw) as Feature;
+  const feature = normalizeFeature(JSON.parse(raw) as Feature);
 
   return Promise.all(
     feature.repos.map(async (repoPath) => {
       const name = path.basename(repoPath);
-      const absolutePath = path.resolve(workspacePath, name);
+      // Worktree repos live inside the workspace dir (re-derived from the
+      // basename so a relocated workspace still resolves); in-place repos are
+      // the source repositories at their stored absolute paths.
+      const absolutePath = isInPlace(feature)
+        ? repoPath
+        : path.resolve(workspacePath, name);
       const defaultBranch = await detectDefaultBranch(absolutePath);
+      // In-place features have no feature branch — the repo's current branch
+      // is whatever the user is working on right now.
+      const branchName = isInPlace(feature)
+        ? await getCurrentBranch(absolutePath)
+        : feature.branchName;
       return {
         name,
         path: absolutePath,
-        branchName: feature.branchName,
+        branchName,
         defaultBranch,
       };
     })

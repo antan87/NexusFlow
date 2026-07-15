@@ -135,10 +135,26 @@ export interface ResumptionConfig {
   startCommand?: string;
 }
 
+/**
+ * How a feature attaches to its repos:
+ * - `worktree` — each repo is checked out as an isolated git worktree inside
+ *   the workspace directory (the classic flow).
+ * - `in-place` — the feature points at the source repositories directly; no
+ *   branches or worktrees are created and the workspace directory only holds
+ *   the manifest and generated context files.
+ */
+export type WorkspaceMode = 'worktree' | 'in-place';
+
 /** A feature workspace that spans one or more repos. */
 export interface Feature {
-  /** Unique identifier — the git branch name. */
+  /** Unique identifier — the git branch name (worktree mode) or slugified workspace name (in-place mode). */
   id: string;
+
+  /** Repo attachment mode. Absent in manifests written before modes existed — treat as 'worktree'. */
+  mode?: WorkspaceMode;
+
+  /** Id of the {@link Project} this feature was created from, if any. */
+  projectId?: string;
 
   /** Git branch name created for this feature. */
   branchName: string;

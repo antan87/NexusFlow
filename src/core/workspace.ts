@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import { execa } from 'execa';
 
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext } from '../types.js';
+import { normalizeFeature } from '../utils/feature.js';
 import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
@@ -321,7 +322,7 @@ export async function loadFeatureConfig(
   const manifestPath = path.join(workspacePath, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(manifestPath, 'utf-8');
-    return JSON.parse(raw) as Feature;
+    return normalizeFeature(JSON.parse(raw) as Feature);
   } catch {}
 
   // 2. Legacy fallback: manifests written into the central vault before the
@@ -329,7 +330,7 @@ export async function loadFeatureConfig(
   const vaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(vaultManifest, 'utf-8');
-    return JSON.parse(raw) as Feature;
+    return normalizeFeature(JSON.parse(raw) as Feature);
   } catch {}
 
   // 3. Traverse parent directories

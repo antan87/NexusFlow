@@ -34,6 +34,19 @@ export async function gitFetch(repoPath: string): Promise<void> {
 }
 
 /**
+ * Returns the currently checked-out branch of a repository.
+ *
+ * @param repoPath - Absolute path to the repo root.
+ * @returns The branch name, or `'HEAD'` when the repo is in detached-HEAD state.
+ */
+export async function getCurrentBranch(repoPath: string): Promise<string> {
+  const { stdout } = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: repoPath,
+  });
+  return stdout.trim();
+}
+
+/**
  * Detects the default branch of a repository.
  *
  * Tries several strategies in order of authority so that repos without an
