@@ -1211,22 +1211,14 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    // Contained within the workspace; rejects `..` and sibling-prefix escapes.
-    // Fast path: worktree repos always exist as subdirectories, and this
-    // endpoint is hit once per file click — don't pay a manifest read for it.
-    let worktreePath = resolveRepoPath(workspacePath, repoName);
-    let isDir = false;
-    try {
-      isDir = (await fs.stat(worktreePath)).isDirectory();
-    } catch {}
-    if (!isDir) {
-      // Not a subdirectory — in-place repos live at their source paths, and
-      // the name may only resolve to an exact manifest entry, never an
-      // arbitrary path.
-      const feature = await loadFeatureConfig(workspacePath);
-      const matches = feature && isInPlace(feature)
-        ? feature.repos.filter((r) => path.basename(r) === repoName)
-        : [];
+    // Resolve by mode, manifest first: an in-place repo name may only resolve
+    // to an exact manifest entry (its repos live outside the workspace), and
+    // must never be shadowed by a stray same-named subdirectory inside the
+    // workspace dir. Worktree mode keeps the path-containment guard.
+    const feature = await loadFeatureConfig(workspacePath);
+    let worktreePath: string;
+    if (feature && isInPlace(feature)) {
+      const matches = feature.repos.filter((r) => path.basename(r) === repoName);
       if (matches.length === 0) {
         return c.json({ error: `Unknown repo "${repoName}" in this workspace.` }, 404);
       }
@@ -1234,6 +1226,8 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
         return c.json({ error: `Repo name "${repoName}" is ambiguous in this workspace.` }, 400);
       }
       worktreePath = matches[0]!;
+    } else {
+      worktreePath = resolveRepoPath(workspacePath, repoName);
     }
 
     let diff = '';

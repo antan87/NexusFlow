@@ -167,7 +167,7 @@ export async function createProject(
  */
 export async function updateProject(
   id: string,
-  updates: { name?: string; description?: string; repoPaths?: string[] },
+  updates: { name?: string | null; description?: string | null; repoPaths?: string[] },
 ): Promise<Project> {
   const projects = await loadProjects({ quiet: true });
   const index = projects.findIndex((p) => p.id === id);
@@ -176,15 +176,17 @@ export async function updateProject(
   }
 
   const updated: Project = { ...projects[index], updatedAt: new Date().toISOString() };
+  // JSON callers may send explicit nulls: null name is rejected like an empty
+  // one; null description clears it.
   if (updates.name !== undefined) {
-    const name = updates.name.trim();
+    const name = typeof updates.name === 'string' ? updates.name.trim() : '';
     if (!name) {
       throw new Error('Project name cannot be empty');
     }
     updated.name = name;
   }
   if (updates.description !== undefined) {
-    const description = updates.description.trim();
+    const description = typeof updates.description === 'string' ? updates.description.trim() : '';
     if (description) {
       updated.description = description;
     } else {

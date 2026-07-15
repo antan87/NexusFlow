@@ -229,12 +229,17 @@ async function materializeWorktrees(
 }
 
 /**
- * Final bookkeeping shared by both modes: persists the feature manifest and
- * excludes NexusFlow-generated files from each repo's git status.
+ * Final bookkeeping: persists the feature manifest and, for worktree mode,
+ * excludes NexusFlow-generated files from each checkout's git status.
+ * In-place features skip the exclusion — the generated files live only in the
+ * workspace dir, and mutating the user's source repos' .git/info/exclude
+ * would silently hide any CLAUDE.md/.vscode files they later author there.
  */
 async function finalizeWorkspace(feature: Feature): Promise<void> {
   await saveFeatureConfig(feature.workspacePath, feature);
-  await excludeNexusFlowFiles(feature.workspacePath, feature);
+  if (!isInPlace(feature)) {
+    await excludeNexusFlowFiles(feature.workspacePath, feature);
+  }
 }
 
 /**
@@ -535,8 +540,11 @@ export async function addRepoToWorkspace(
   // workspaces get a checkout inside the workspace dir.
   const repoEntry = inPlace ? newRepoInfo.path : path.join(workspacePath, newRepoInfo.name);
 
-  if (feature.repos.includes(repoEntry)) {
-    throw new Error(`Repository ${repoPath} is already in the workspace`);
+  // Identity is the directory name in both modes: worktrees are checked out
+  // as sibling subdirectories, and the changes/diff views address repos by
+  // name — a second "api" from a different parent dir would collide.
+  if (feature.repos.some((r) => path.basename(r) === newRepoInfo.name)) {
+    throw new Error(`A repository named "${newRepoInfo.name}" is already in the workspace`);
   }
 
   // 1. Create the worktree (worktree mode only)
@@ -607,7 +615,9 @@ export async function addRepoToWorkspace(
   };
 
   await generateContextFiles(ctx, feature.assistants, workspacePath);
-  await excludeNexusFlowFiles(workspacePath, feature);
+  if (!inPlace) {
+    await excludeNexusFlowFiles(workspacePath, feature);
+  }
 }
 
 /**

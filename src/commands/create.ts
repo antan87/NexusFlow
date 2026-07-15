@@ -13,7 +13,7 @@ import { confirm, input, select } from '@inquirer/prompts';
 
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
-import { createWorkspace } from '../core/workspace.js';
+import { createWorkspace, resolveRepoInfos } from '../core/workspace.js';
 import { generateContextFiles } from '../generators/index.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { detectAIAssistants } from '../utils/detect-ai.js';
@@ -111,12 +111,19 @@ export async function createCommand(): Promise<void> {
   // ── 3-4. Repos: from the project, or scanned and picked ad hoc ───────
   let selectedRepos: RepoSelection[];
   if (project) {
-    selectedRepos = project.repos.map((r) => ({
-      name: path.basename(r.path),
-      path: r.path,
-      defaultBranch: r.defaultBranch,
-    }));
-    console.log(chalk.dim(`  Repos from ${project.name}: ${selectedRepos.map((r) => r.name).join(', ')}`));
+    // Re-resolve at create time: the registry's defaultBranch is a snapshot
+    // from `project add` and may have gone stale (repo moved, default branch
+    // renamed) — basing a new feature branch on it would be silently wrong.
+    const projectSpinner = ora(`Validating repositories of ${project.name}...`).start();
+    try {
+      selectedRepos = await resolveRepoInfos(project.repos.map((r) => r.path));
+      projectSpinner.succeed(`Repos from ${project.name}: ${selectedRepos.map((r) => r.name).join(', ')}`);
+    } catch (error) {
+      projectSpinner.fail(
+        `A repository of project "${project.name}" is missing or not a git repo — fix it with "nexusflow project add/remove".`,
+      );
+      throw error;
+    }
   } else {
     const spinner = ora('Scanning for projects...').start();
 

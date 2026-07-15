@@ -222,6 +222,9 @@ export async function getUnpushedCount(
   repoPath: string,
   branchName: string,
 ): Promise<number | null> {
+  // Detached HEAD ('HEAD' sentinel from in-place features): origin/HEAD is a
+  // symref to origin's default branch, so the count would be meaningless.
+  if (branchName === 'HEAD') return null;
   try {
     const { stdout } = await execa(
       'git',
@@ -267,6 +270,9 @@ export async function getAheadBehind(
   repoPath: string,
   branchName: string,
 ): Promise<{ ahead: number | null; behind: number | null }> {
+  // Detached HEAD ('HEAD' sentinel from in-place features): origin/HEAD is a
+  // symref to origin's default branch — counts against it would be bogus.
+  if (branchName === 'HEAD') return { ahead: null, behind: null };
   try {
     const { stdout } = await execa(
       'git',
@@ -504,12 +510,18 @@ export async function commitAndPush(
     const fileMatch = commitOutput.match(/(\d+)\s+file/);
     const filesChanged = fileMatch ? parseInt(fileMatch[1], 10) : 0;
 
-    // Push unless opted out.
-    if (!options?.noPush) {
+    // Push unless opted out. A detached HEAD ('HEAD' sentinel from in-place
+    // features) has no branch to push — the commit still counts as success.
+    const canPush = branchName !== 'HEAD';
+    if (!options?.noPush && canPush) {
       await execa('git', ['push', 'origin', branchName], { cwd: repoPath });
     }
 
-    const action = options?.noPush ? 'Committed' : 'Committed and pushed';
+    const action = options?.noPush
+      ? 'Committed'
+      : canPush
+        ? 'Committed and pushed'
+        : 'Committed (detached HEAD — push skipped)';
     return { success: true, commitHash, filesChanged, message: action };
   } catch (error) {
     return {

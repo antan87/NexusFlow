@@ -61,17 +61,6 @@ export interface Feature {
   createdAt: string;
 }
 
-/**
- * The directory an agent session should run in (mirrors utils/feature.ts):
- * in-place single-repo features run in the repo root, everything else in the
- * workspace dir.
- */
-export function getSessionCwd(ws: Feature): string {
-  if (ws.mode === 'in-place' && ws.repos.length === 1) {
-    return ws.repos[0];
-  }
-  return ws.workspacePath;
-}
 
 /** Classified outcome of a sync/rebase attempt for a repo (mirrors src/types.ts). */
 export type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';

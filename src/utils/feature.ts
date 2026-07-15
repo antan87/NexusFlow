@@ -51,19 +51,13 @@ export function resolveFeatureRepoPath(
 }
 
 /**
- * The directory an agent session should run in for a feature.
- *
- * Worktree features use the workspace dir (all repos live inside it). An
- * in-place feature with a single repo runs in that repo's root so the agent
- * sees the code directly; with multiple repos it falls back to the workspace
- * dir, which holds WORKSPACE.md and the cross-repo context files.
- * Session discovery ({@link import('./session-finder.js')}) matches recorded
- * cwds against both the workspace path and every repo path, so either choice
- * stays resumable.
+ * The directory an agent session should run in for a feature: always the
+ * workspace dir. The generated context files (CLAUDE.md, AGENTS.md,
+ * WORKSPACE.md, knowledge) live there and are invisible from anywhere else —
+ * for in-place features those files direct the agent to the source repos'
+ * absolute paths. Kept as the single authority so every launcher (CLI, GUI,
+ * resume endpoint) agrees and session discovery stays consistent.
  */
 export function getSessionCwd(feature: Feature): string {
-  if (isInPlace(feature) && feature.repos.length === 1) {
-    return feature.repos[0]!;
-  }
   return feature.workspacePath;
 }

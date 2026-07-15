@@ -7,7 +7,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type { ServiceConfig, OrchestrationDetection } from '../types.js';
+import type { Feature, ServiceConfig, OrchestrationDetection } from '../types.js';
+import { normalizeFeature, resolveFeatureRepoPath } from '../utils/feature.js';
 
 /**
  * Detects existing orchestration tool configs in a directory.
@@ -274,6 +275,27 @@ export async function detectAllServices(
 ): Promise<ServiceConfig[]> {
   const services: ServiceConfig[] = [];
 
+  // Prefer the manifest: it knows where the repos actually live (worktree
+  // subdirectories, or the source repositories for in-place features, which
+  // have no subdirectories to scan). Parsed directly — not via
+  // core/workspace.js — to keep this module free of import cycles.
+  let feature: Feature | null = null;
+  try {
+    const raw = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    feature = normalizeFeature(JSON.parse(raw) as Feature);
+  } catch {
+    // No/invalid manifest — fall back to scanning subdirectories below.
+  }
+
+  if (feature) {
+    for (const repoPath of feature.repos) {
+      const name = path.basename(repoPath);
+      const projectPath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
+      await detectProjectServices(projectPath, name, services);
+    }
+    return services;
+  }
+
   let entries: import('node:fs').Dirent[];
   try {
     entries = await fs.readdir(workspacePath, { withFileTypes: true });
@@ -286,28 +308,38 @@ export async function detectAllServices(
     // Skip hidden dirs and known non-project dirs
     if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
-    const projectPath = path.join(workspacePath, entry.name);
-    const config = await detectServiceConfig(projectPath, entry.name);
-    if (config) {
-      services.push(config);
-      continue;
-    }
-
-    // If no config at the root, check first-level subdirectories of this project (e.g. nested packages)
-    try {
-      const subEntries = await fs.readdir(projectPath, { withFileTypes: true });
-      for (const subEntry of subEntries) {
-        if (!subEntry.isDirectory()) continue;
-        if (subEntry.name.startsWith('.') || subEntry.name === 'node_modules') continue;
-
-        const subProjectPath = path.join(projectPath, subEntry.name);
-        const subConfig = await detectServiceConfig(subProjectPath, `${entry.name}/${subEntry.name}`);
-        if (subConfig) {
-          services.push(subConfig);
-        }
-      }
-    } catch { /* ignore read errors */ }
+    await detectProjectServices(path.join(workspacePath, entry.name), entry.name, services);
   }
 
   return services;
+}
+
+/**
+ * Detects a project's service config at its root, falling back to first-level
+ * subdirectories (e.g. nested packages), appending results to `services`.
+ */
+async function detectProjectServices(
+  projectPath: string,
+  projectName: string,
+  services: ServiceConfig[],
+): Promise<void> {
+  const config = await detectServiceConfig(projectPath, projectName);
+  if (config) {
+    services.push(config);
+    return;
+  }
+
+  try {
+    const subEntries = await fs.readdir(projectPath, { withFileTypes: true });
+    for (const subEntry of subEntries) {
+      if (!subEntry.isDirectory()) continue;
+      if (subEntry.name.startsWith('.') || subEntry.name === 'node_modules') continue;
+
+      const subProjectPath = path.join(projectPath, subEntry.name);
+      const subConfig = await detectServiceConfig(subProjectPath, `${projectName}/${subEntry.name}`);
+      if (subConfig) {
+        services.push(subConfig);
+      }
+    }
+  } catch { /* ignore read errors */ }
 }

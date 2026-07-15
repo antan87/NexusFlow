@@ -17,7 +17,9 @@ export async function generateDiffContext(
   let hasDiff = false;
 
   for (const repo of ctx.repos) {
-    const repoPath = path.join(workspacePath, repo.name);
+    // RepoInfo.path is already mode-correct: the worktree inside the
+    // workspace, or the source repository for in-place features.
+    const repoPath = repo.path;
     try {
       await fs.access(repoPath);
     } catch {

@@ -122,7 +122,9 @@ export async function generateRepoMap(
   allProducedPackages: Set<string> = new Set(),
 ): Promise<void> {
   const repoName = repo.name;
-  const worktreePath = path.join(workspacePath, repoName);
+  // RepoInfo.path is already mode-correct: the worktree inside the workspace,
+  // or the source repository for in-place features.
+  const worktreePath = repo.path;
 
   const md: string[] = [];
 

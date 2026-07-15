@@ -12,6 +12,7 @@ import * as path from 'node:path';
 
 import type { NexusFlowConfig } from '../types.js';
 import { loadFeatureConfig } from '../core/workspace.js';
+import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { syncWorkspace } from '../core/sync.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
 import { getWorkspaceDiffReport } from '../core/diff.js';
@@ -117,7 +118,7 @@ export const tools: NexusFlowTool[] = [
         let allResults = '';
         for (const repoPath of feature.repos) {
           const repoName = path.basename(repoPath);
-          const worktreePath = path.join(ctx.workspacePath, repoName);
+          const worktreePath = resolveFeatureRepoPath(feature, ctx.workspacePath, repoPath);
           try {
             await fs.access(worktreePath);
             const { stdout } = await execa('git', ['grep', '-n', '-I', query], { cwd: worktreePath, reject: false });
