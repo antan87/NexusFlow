@@ -135,6 +135,35 @@ export interface ResumptionConfig {
   startCommand?: string;
 }
 
+/** A repository belonging to a {@link Project}. */
+export interface ProjectRepo {
+  /** Absolute path to the source repository. */
+  path: string;
+  /** Default branch of the repo (e.g. 'main' or 'master'). */
+  defaultBranch: string;
+}
+
+/**
+ * A named, persistent group of source repositories that features are started
+ * from. Projects live in a central registry (~/.nexusflow/projects.json) and
+ * never own worktrees or branches themselves — they are the durable "what do
+ * I work on" grouping that outlives any individual feature workspace.
+ */
+export interface Project {
+  /** Unique identifier — slugified from the name. */
+  id: string;
+  /** Human-readable project name. */
+  name: string;
+  /** Optional short description. */
+  description?: string;
+  /** Repositories in this project. */
+  repos: ProjectRepo[];
+  /** ISO-8601 timestamp of when the project was registered. */
+  createdAt: string;
+  /** ISO-8601 timestamp of the last registry update. */
+  updatedAt: string;
+}
+
 /**
  * How a feature attaches to its repos:
  * - `worktree` — each repo is checked out as an isolated git worktree inside

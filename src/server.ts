@@ -22,6 +22,7 @@ import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
+import { loadProjects, createProject, updateProject, removeProject } from './core/projects.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
@@ -380,6 +381,72 @@ app.post('/api/repos/new', async (c) => {
     const config = await loadConfig();
     const repo = await createNewRepo(config.devDir, body.name);
     return c.json({ success: true, repo });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 3c. Project registry — named groups of source repos that features start from.
+app.get('/api/projects', async (c) => {
+  try {
+    return c.json(await loadProjects({ quiet: true }));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/projects', async (c) => {
+  try {
+    const body = await c.req.json() as { name?: string; repos?: string[]; description?: string };
+    if (!body.name || typeof body.name !== 'string') {
+      return c.json({ error: 'Missing "name" in request body' }, 400);
+    }
+    if (!Array.isArray(body.repos) || body.repos.length === 0) {
+      return c.json({ error: 'Missing "repos" in request body' }, 400);
+    }
+    const config = await loadConfig();
+    // Only repos under devDir are offered by the scanner; refuse anything else.
+    const repos = body.repos.map((r) => assertWithin(config.devDir, r));
+    const project = await createProject(body.name, repos, body.description);
+    return c.json(project, 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.put('/api/projects/:id', async (c) => {
+  try {
+    const body = await c.req.json() as { name?: string; repos?: string[]; description?: string };
+    let repoPaths: string[] | undefined;
+    if (body.repos !== undefined) {
+      if (!Array.isArray(body.repos) || body.repos.length === 0) {
+        return c.json({ error: '"repos" must be a non-empty array' }, 400);
+      }
+      const config = await loadConfig();
+      repoPaths = body.repos.map((r) => assertWithin(config.devDir, r));
+    }
+    const project = await updateProject(c.req.param('id'), {
+      name: body.name,
+      description: body.description,
+      repoPaths,
+    });
+    return c.json(project);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('No project')) {
+      return c.json({ error: error.message }, 404);
+    }
+    return errorResponse(c, error);
+  }
+});
+
+// Registry-only delete — never touches repos or workspaces on disk.
+app.delete('/api/projects/:id', async (c) => {
+  try {
+    const removed = await removeProject(c.req.param('id'));
+    if (!removed) {
+      return c.json({ error: `No project with id "${c.req.param('id')}"` }, 404);
+    }
+    return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
   }

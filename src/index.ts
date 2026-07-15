@@ -37,6 +37,7 @@ import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
+import { projectListCommand, projectAddCommand, projectShowCommand, projectRemoveCommand } from './commands/project.js';
 import { finishCommand } from './commands/finish.js';
 import { desktopCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
@@ -465,6 +466,84 @@ knowledgeCmd
   .action(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
     try {
       await knowledgePromoteCommand(workspace, options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+// Project command group
+const projectCmd = program
+  .command('project')
+  .alias('proj')
+  .description('Manage the project registry — named groups of repos features start from');
+
+projectCmd
+  .command('list')
+  .alias('ls')
+  .description('List all registered projects')
+  .action(async () => {
+    try {
+      await projectListCommand();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+projectCmd
+  .command('add')
+  .description('Register a new project')
+  .option('-n, --name <name>', 'Project name')
+  .option('-r, --repos <paths...>', 'Absolute paths to the repos to include')
+  .option('-d, --description <text>', 'Short description')
+  .action(async (options: { name?: string; repos?: string[]; description?: string }) => {
+    try {
+      await projectAddCommand(options);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+projectCmd
+  .command('show')
+  .description('Show the details of a project')
+  .argument('[id]', 'Project id (prompts when omitted)')
+  .action(async (id: string | undefined) => {
+    try {
+      await projectShowCommand(id);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+projectCmd
+  .command('remove')
+  .alias('rm')
+  .description('Remove a project from the registry (repos on disk are not touched)')
+  .argument('[id]', 'Project id (prompts when omitted)')
+  .option('-y, --yes', 'Skip the confirmation prompt')
+  .action(async (id: string | undefined, options: { yes?: boolean }) => {
+    try {
+      await projectRemoveCommand(id, options);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');
