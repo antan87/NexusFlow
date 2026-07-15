@@ -28,9 +28,10 @@ export async function listCommand(): Promise<void> {
     const repoCount = ws.repos.length;
     const aiList = ws.assistants.join(', ');
     const date = new Date(ws.createdAt).toLocaleDateString();
+    const modeTag = ws.mode === 'in-place' ? chalk.blue(' [in-place]') : '';
 
     console.log(
-      `  ${chalk.bold(ws.branchName)} ${chalk.dim(`(${date})`)}`,
+      `  ${chalk.bold(ws.branchName)}${modeTag} ${chalk.dim(`(${date})`)}`,
     );
     console.log(
       `    ${chalk.dim('Repos:')}  ${repoCount} project${repoCount !== 1 ? 's' : ''}`,
