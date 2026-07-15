@@ -13,8 +13,9 @@ import { GettingStartedPage } from './features/guide/GettingStartedPage.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { ProjectsPage } from './pages/ProjectsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { WizardPage } from './pages/WizardPage.js';
+import { StartWorkPage } from './pages/StartWorkPage.js';
 import { StrategiesPage } from './pages/StrategiesPage.js';
 import { WorkspacesPage } from './pages/WorkspacesPage.js';
 import { API_BASE } from './lib/apiBase.js';
@@ -75,9 +76,6 @@ interface RepoInfo {
   name: string;
   path: string;
   defaultBranch: string;
-  // Set in the wizard to base a repo's worktree on an existing branch instead
-  // of the new feature branch.
-  existingBranch?: string;
 }
 
 interface Feature {
@@ -162,28 +160,8 @@ function AppInner() {
 
   // Repos & Tools
   const [repos, setRepos] = useState<RepoInfo[]>([]);
-  const [reposLoading, setReposLoading] = useState(false);
-  const [repoSearch, setRepoSearch] = useState('');
   const [aiAssistants, setAiAssistants] = useState<DetectedAI[]>([]);
   const [editors, setEditors] = useState<DetectedEditor[]>([]);
-
-  // Wizard State
-  const [activeStep, setActiveStep] = useState(0);
-  const [branchName, setBranchName] = useState('');
-  const [description, setDescription] = useState('');
-  const [selectedRepos, setSelectedRepos] = useState<RepoInfo[]>([]);
-  const [selectedAI, setSelectedAI] = useState<string[]>([]);
-  const [selectedEditor, setSelectedEditor] = useState<DetectedEditor | null>(null);
-  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createdWorkspace, setCreatedWorkspace] = useState<{ path: string } | null>(null);
-  const [creationError, setCreationError] = useState<string | null>(null);
-  const [creationSteps, setCreationSteps] = useState<any[]>([
-    { id: 'workspace', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
-    { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
-    { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
-  ]);
-
 
   // App Autoupdate State
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -191,11 +169,6 @@ function AppInner() {
 
   // Workflow Strategy State
   const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('plan-implement-review');
-  const [customTeamworkInstructions, setCustomTeamworkInstructions] = useState<string>('');
-  const [suggestingWorkflow, setSuggestingWorkflow] = useState(false);
-  const [suggestedDifficulty, setSuggestedDifficulty] = useState<'simple' | 'moderate' | 'complex' | null>(null);
-  const [suggestedRationale, setSuggestedRationale] = useState('');
 
   // Workflow Strategy Management State
   const [selectedMgtTemplateId, setSelectedMgtTemplateId] = useState<string | null>(null);
@@ -210,26 +183,7 @@ function AppInner() {
   const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
   const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
 
-  // Resumption Commands State
-  const [testCommand, setTestCommand] = useState('npm run test');
-  const [mockCommand, setMockCommand] = useState('');
-  const [startCommand, setStartCommand] = useState('');
   const [resumingWs, setResumingWs] = useState<string | null>(null);
-
-  // Suggest defaults based on selected repos
-  useEffect(() => {
-    if (selectedRepos.length === 0) return;
-    const isDotNet = selectedRepos.some(r => r.name.toLowerCase().includes('dotnet') || r.name.toLowerCase().includes('csharp') || r.name.toLowerCase().includes('microsoft'));
-    const isPython = selectedRepos.some(r => r.name.toLowerCase().includes('django') || r.name.toLowerCase().includes('flask') || r.name.toLowerCase().includes('fastapi') || r.name.toLowerCase().includes('python'));
-    
-    if (isDotNet) {
-      setTestCommand('dotnet test');
-    } else if (isPython) {
-      setTestCommand('pytest');
-    } else {
-      setTestCommand('npm run test');
-    }
-  }, [selectedRepos]);
 
   // Workspaces List
   const [workspaces, setWorkspaces] = useState<Feature[]>([]);
@@ -428,9 +382,8 @@ function AppInner() {
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
-      setLocalLlmEnabled(data.config?.localLlm?.enabled || false);
       
-      fetchEditors(data.config?.defaultEditor);
+      fetchEditors();
       
       if (data.exists && data.config.devDir) {
         fetchRepos();
@@ -465,7 +418,6 @@ function AppInner() {
         setSaveStatus('success');
         setConfig(newConfig);
         setConfigExists(true);
-        setLocalLlmEnabled(newConfig.localLlm?.enabled || false);
         fetchRepos();
         fetchWorkspaces();
       } else {
@@ -478,15 +430,12 @@ function AppInner() {
   };
 
   const fetchRepos = async () => {
-    setReposLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/repos`);
       const data = await res.json();
       setRepos(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
-    } finally {
-      setReposLoading(false);
     }
   };
 
@@ -499,26 +448,16 @@ function AppInner() {
       if (firstHarness) {
         setSelectedInspectAssistant(firstHarness.name);
       }
-      setSelectedAI(data.filter((ai: DetectedAI) => ai.detected).map((ai: DetectedAI) => ai.name));
     } catch (e) {
       console.error(e);
     }
   };
 
-  const fetchEditors = async (savedDefaultEditorCode?: string | null) => {
+  const fetchEditors = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/editor-detect`);
       const data = await res.json();
       setEditors(data);
-      
-      let initialEditor = null;
-      if (savedDefaultEditorCode) {
-        initialEditor = data.find((ed: DetectedEditor) => ed.command === savedDefaultEditorCode);
-      }
-      if (!initialEditor) {
-        initialEditor = data.find((ed: DetectedEditor) => ed.detected);
-      }
-      if (initialEditor) setSelectedEditor(initialEditor);
     } catch (e) {
       console.error(e);
     }
@@ -558,12 +497,6 @@ function AppInner() {
       if (res.ok) {
         const data = await res.json();
         setWorkflowTemplates(data.templates || []);
-        
-        // Default to plan-implement-review template
-        const pir = data.templates?.find((t: any) => t.id === 'plan-implement-review');
-        if (pir) {
-          setCustomTeamworkInstructions(pir.content);
-        }
       }
     } catch (e) {
       console.error('Failed to fetch workflow templates:', e);
@@ -829,132 +762,6 @@ function AppInner() {
 
 
   // ─── Actions ────────────────────────────────────────────────────────────
-
-  const handleSuggestWorkflow = async () => {
-    if (!description) {
-      showToast('Please enter a description for the workspace details first.', 'info');
-      return;
-    }
-    setSuggestingWorkflow(true);
-    setSuggestedDifficulty(null);
-    setSuggestedRationale('');
-    try {
-      const res = await fetch(`${API_BASE}/api/workspace/suggest-workflow`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          description,
-          repos: selectedRepos,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSuggestedDifficulty(data.difficulty);
-        setSuggestedRationale(data.rationale);
-        setSelectedWorkflowId(data.suggestedWorkflowId);
-        setCustomTeamworkInstructions(data.customInstructions);
-        showToast(`Suggested strategy populated successfully: ${data.difficulty.toUpperCase()} difficulty.`, 'success');
-      } else {
-        showToast(data.error || 'Failed to auto-suggest strategy.', 'error');
-      }
-    } catch (e) {
-      console.error(e);
-      showToast('Network error while requesting strategy suggestion.', 'error');
-    } finally {
-      setSuggestingWorkflow(false);
-    }
-  };
-
-  const handleCreateWorkspace = async () => {
-    if (!branchName || selectedRepos.length === 0) return;
-    setCreating(true);
-    setCreationError(null);
-
-    // Reset steps to pending
-    setCreationSteps([
-      { id: 'workspace', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
-      { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
-      { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
-    ]);
-
-    try {
-      const res = await fetch(`${API_BASE}/api/workspace`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          branchName,
-          description,
-          repos: selectedRepos,
-          assistants: selectedAI,
-          localLlmEnabled,
-          teamworkInstructions: customTeamworkInstructions || undefined,
-          resumption: {
-            testCommand,
-            mockCommand: mockCommand || undefined,
-            startCommand: startCommand || undefined,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const jobId = data.jobId;
-
-        // Establish EventSource SSE connection
-        const eventSource = new EventSource(`${API_BASE}/api/workspace/create-stream/${encodeURIComponent(jobId)}`);
-
-        eventSource.addEventListener('progress', (e) => {
-          try {
-            const job = JSON.parse(e.data);
-            if (job.steps) {
-              setCreationSteps(job.steps);
-            }
-            if (job.status === 'completed') {
-              eventSource.close();
-              setCreatedWorkspace({ path: job.workspacePath });
-              setActiveStep(4);
-              setCreating(false);
-              fetchWorkspaces();
-
-              if (selectedEditor) {
-                if (isVsCode) {
-                  window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: job.workspacePath }, '*');
-                } else {
-                  fetch(`${API_BASE}/api/open-editor`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      workspacePath: job.workspacePath,
-                      command: selectedEditor.command,
-                    }),
-                  }).catch(console.error);
-                }
-              }
-            } else if (job.status === 'failed') {
-              eventSource.close();
-              setCreating(false);
-              setCreationError(job.error || 'Failed to create workspace');
-            }
-          } catch (err) {
-            console.error('Failed to parse SSE data:', err);
-          }
-        });
-
-        eventSource.onerror = (err) => {
-          console.error('SSE Error:', err);
-          eventSource.close();
-          setCreating(false);
-          setCreationError('Connection lost while building workspace.');
-        };
-      } else {
-        setCreating(false);
-        setCreationError(data.error || 'Failed to initialize workspace build');
-      }
-    } catch (e) {
-      console.error(e);
-      setCreating(false);
-      setCreationError('Network error when creating workspace.');
-    }
-  };
 
   const handleStartServices = async (wsId: string) => {
     try {
@@ -1319,16 +1126,6 @@ Core Instructions:
     );
   }
 
-  const startNewWorkspace = () => {
-    setActiveStep(0);
-    setCreatedWorkspace(null);
-    setBranchName('');
-    setDescription('');
-    setSelectedRepos([]);
-    setLocalLlmEnabled(config?.localLlm?.enabled || false);
-    navigate('/create');
-  };
-
   const dashboardPage = config ? (
     <DashboardPage
       workspaces={workspaces}
@@ -1336,34 +1133,20 @@ Core Instructions:
       workspacesLoading={workspacesLoading}
       statusesLoading={statusesLoading}
       onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
-      onNewWorkspace={startNewWorkspace}
+      onNewWorkspace={() => navigate('/new')}
     />
   ) : null;
 
   const guidePage = config ? (
     <GettingStartedPage
       config={config}
-      onCreateWorkspace={() => navigate('/create')}
+      onCreateWorkspace={() => navigate('/new')}
       onModifySettings={() => navigate('/settings')}
     />
   ) : null;
 
-  const wizardPage = config ? (
-    <WizardPage
-      activeStep={activeStep} setActiveStep={setActiveStep} branchName={branchName} setBranchName={setBranchName}
-      description={description} setDescription={setDescription} repos={repos} setRepos={setRepos} reposLoading={reposLoading}
-      repoSearch={repoSearch} setRepoSearch={setRepoSearch} selectedRepos={selectedRepos} setSelectedRepos={setSelectedRepos} showToast={showToast}
-      aiAssistants={aiAssistants} selectedAI={selectedAI} setSelectedAI={setSelectedAI}
-      editors={editors} selectedEditor={selectedEditor} setSelectedEditor={setSelectedEditor}
-      config={config} setConfig={setConfig} saveAppConfig={saveAppConfig} localLlmEnabled={localLlmEnabled} setLocalLlmEnabled={setLocalLlmEnabled}
-      testCommand={testCommand} setTestCommand={setTestCommand} mockCommand={mockCommand} setMockCommand={setMockCommand} startCommand={startCommand} setStartCommand={setStartCommand}
-      suggestingWorkflow={suggestingWorkflow} handleSuggestWorkflow={handleSuggestWorkflow} suggestedDifficulty={suggestedDifficulty} suggestedRationale={suggestedRationale}
-      workflowTemplates={workflowTemplates} selectedWorkflowId={selectedWorkflowId} setSelectedWorkflowId={setSelectedWorkflowId}
-      customTeamworkInstructions={customTeamworkInstructions} setCustomTeamworkInstructions={setCustomTeamworkInstructions}
-      creating={creating} handleCreateWorkspace={handleCreateWorkspace} creationSteps={creationSteps} creationError={creationError}
-      setCreating={setCreating} setCreationError={setCreationError} createdWorkspace={createdWorkspace} fetchWorkspaces={fetchWorkspaces} handleOpenInEditor={handleOpenInEditor}
-    />
-  ) : null;
+  const startWorkPage = config ? <StartWorkPage /> : null;
+  const projectsPage = config ? <ProjectsPage /> : null;
 
   const workspacesPage = (
     <WorkspacesPage
@@ -1422,7 +1205,7 @@ Core Instructions:
         pathname={location.pathname}
         appVersion={appVersion}
         onNavigate={navigate}
-        onNewWorkspace={startNewWorkspace}
+        onNewWorkspace={() => navigate('/new')}
       />
 
       {/* Main Content Area */}
@@ -1510,8 +1293,9 @@ Core Instructions:
             <Routes>
               <Route path="/" element={dashboardPage} />
               <Route path="/guide" element={guidePage} />
-              <Route path="/create" element={wizardPage} />
-              <Route path="/new" element={wizardPage} />
+              <Route path="/create" element={startWorkPage} />
+              <Route path="/new" element={startWorkPage} />
+              <Route path="/projects" element={projectsPage} />
               <Route path="/workspaces" element={workspacesPage} />
               <Route path="/workspaces/:workspaceId" element={workspacesPage} />
               <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />

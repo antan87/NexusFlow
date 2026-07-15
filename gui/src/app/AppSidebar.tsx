@@ -10,6 +10,7 @@ interface NavItem {
 
 const ITEMS: NavItem[] = [
   { label: 'Overview', to: '/', icon: LayoutDashboard, match: (p) => p === '/' },
+  { label: 'Projects', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
   { label: 'Workspaces', to: '/workspaces', icon: FolderGit2, match: (p) => p.startsWith('/workspaces') },
   { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
@@ -43,7 +44,7 @@ export function AppSidebar({
         onClick={onNewWorkspace}
         className="mb-5 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover cursor-pointer"
       >
-        <Plus size={16} /> New workspace
+        <Plus size={16} /> Start work
       </button>
 
       <nav className="flex flex-1 flex-col gap-1">
