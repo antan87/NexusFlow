@@ -460,11 +460,10 @@ export async function deleteWorkspace(
     }
   }
 
-  if (feature && isInPlace(feature)) {
-    // In-place: feature.repos are the user's source repositories — they must
-    // never be touched. Deleting the workspace only removes the lightweight
-    // directory (manifest + context files) below.
-  } else if (feature) {
+  // In-place: feature.repos are the user's source repositories — they must
+  // never be touched. Deleting the workspace only removes the lightweight
+  // directory (manifest + context files) at the end of this function.
+  if (feature && !isInPlace(feature)) {
     const origRepos = feature.originalRepos || [];
     for (let i = 0; i < feature.repos.length; i++) {
       const worktreePath = feature.repos[i]!;
@@ -481,7 +480,7 @@ export async function deleteWorkspace(
         }
       }
     }
-  } else {
+  } else if (!feature) {
     // Manifest is missing. Try to detect worktrees by scanning subdirectories
     try {
       const entries = await fs.readdir(workspacePath, { withFileTypes: true });

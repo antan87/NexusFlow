@@ -13,6 +13,7 @@ import { globby } from 'globby';
 
 import { loadConfig } from './config.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
+import { isInPlace } from '../utils/feature.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -113,11 +114,20 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
       // Detached HEAD or git failure — leave as 'unknown'.
     }
 
-    if (branch !== feature.branchName) {
-      warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${feature.branchName}".`);
-      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${feature.branchName})` });
+    if (isInPlace(feature)) {
+      // In-place workspaces have no expected branch — the user manages
+      // branches; a mismatch warning here would fire for every repo forever.
+      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'info', message: `On branch "${branch}" (in-place workspace — branches managed by you)` });
     } else {
-      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}"` });
+      // Per-repo existing-branch overrides are expected to differ from the
+      // feature branch.
+      const expectedBranch = feature.repoBranches?.[repo.name] ?? feature.branchName;
+      if (branch !== expectedBranch) {
+        warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${expectedBranch}".`);
+        checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${expectedBranch})` });
+      } else {
+        checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}"` });
+      }
     }
 
     const status = await getRepoStatus(repo.path);

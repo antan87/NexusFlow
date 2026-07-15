@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
+import { slugify } from './slug.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -130,10 +132,7 @@ export async function saveWorkflowTemplate(name: string, content: string, origin
     }
   }
 
-  const id = parsedName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
+  const id = slugify(parsedName);
 
   if (!id) {
     throw new Error('Invalid template name');

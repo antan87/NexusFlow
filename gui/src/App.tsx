@@ -190,7 +190,7 @@ function AppInner() {
   const [createdWorkspace, setCreatedWorkspace] = useState<{ path: string } | null>(null);
   const [creationError, setCreationError] = useState<string | null>(null);
   const [creationSteps, setCreationSteps] = useState<any[]>([
-    { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+    { id: 'workspace', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
     { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
     { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
   ]);
@@ -883,7 +883,7 @@ function AppInner() {
 
     // Reset steps to pending
     setCreationSteps([
-      { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      { id: 'workspace', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
     ]);

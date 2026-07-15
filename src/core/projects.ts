@@ -14,6 +14,7 @@ import chalk from 'chalk';
 import type { Project, ProjectRepo } from '../types.js';
 import { ensureConfigDir, getConfigDir } from './config.js';
 import { detectDefaultBranch, isGitRepo } from '../utils/git.js';
+import { slugify } from '../utils/slug.js';
 import { debugLog } from '../utils/debug.js';
 
 /** Name of the registry file inside ~/.nexusflow. */
@@ -33,15 +34,10 @@ export function getProjectsFilePath(): string {
 }
 
 /**
- * Derives a registry id from a project name: lowercase, alphanumerics kept,
- * everything else collapsed to single hyphens.
+ * Derives a registry id from a project name (the shared slug rule).
  */
 export function slugifyProjectName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return slugify(name);
 }
 
 /**
@@ -99,6 +95,17 @@ async function resolveProjectRepos(repoPaths: string[]): Promise<ProjectRepo[]> 
   const unique = [...new Set(repoPaths.map((p) => path.resolve(p)))];
   if (unique.length === 0) {
     throw new Error('A project needs at least one repository');
+  }
+  // Repo directory names must be unique: worktree workspaces check them out
+  // as sibling subdirectories, and the changes/diff views address repos by
+  // name — two repos named "api" from different parents would collide.
+  const seenNames = new Set<string>();
+  for (const repoPath of unique) {
+    const name = path.basename(repoPath);
+    if (seenNames.has(name)) {
+      throw new Error(`Two repositories share the directory name "${name}" — repo names must be unique within a project`);
+    }
+    seenNames.add(name);
   }
   return Promise.all(
     unique.map(async (repoPath) => {
@@ -168,18 +175,25 @@ export async function updateProject(
     throw new Error(`No project with id "${id}"`);
   }
 
-  const current = projects[index];
-  const updated: Project = {
-    ...current,
-    ...(updates.name?.trim() ? { name: updates.name.trim() } : {}),
-    ...(updates.description !== undefined
-      ? updates.description.trim()
-        ? { description: updates.description.trim() }
-        : { description: undefined }
-      : {}),
-    ...(updates.repoPaths ? { repos: await resolveProjectRepos(updates.repoPaths) } : {}),
-    updatedAt: new Date().toISOString(),
-  };
+  const updated: Project = { ...projects[index], updatedAt: new Date().toISOString() };
+  if (updates.name !== undefined) {
+    const name = updates.name.trim();
+    if (!name) {
+      throw new Error('Project name cannot be empty');
+    }
+    updated.name = name;
+  }
+  if (updates.description !== undefined) {
+    const description = updates.description.trim();
+    if (description) {
+      updated.description = description;
+    } else {
+      delete updated.description;
+    }
+  }
+  if (updates.repoPaths) {
+    updated.repos = await resolveProjectRepos(updates.repoPaths);
+  }
 
   const next = [...projects];
   next[index] = updated;

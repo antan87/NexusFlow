@@ -23,7 +23,7 @@ import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
-import { getSessionCwd, isInPlace } from './utils/feature.js';
+import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
@@ -517,9 +517,7 @@ app.get('/api/workspaces/status', async (c) => {
           // Uncommitted changes across the workspace's repos: worktrees inside
           // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
-            const worktreePath = isInPlace(ws)
-              ? repoPath
-              : path.join(workspacePath, path.basename(repoPath));
+            const worktreePath = resolveFeatureRepoPath(ws, workspacePath, repoPath);
             const repoStatus = await getRepoStatus(worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
@@ -763,16 +761,16 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       job.feature = feature;
     }
 
-    // Step 1: Materialize the workspace (worktrees, or just the lightweight dir).
-    if (inPlace) {
-      updateJobStep(jobId, 'workspace', 'running', 'Registering workspace...');
-      await createWorkspace(feature, body.repos);
-      updateJobStep(jobId, 'workspace', 'completed', 'Workspace registered — working in-place in the source repos.');
-    } else {
-      updateJobStep(jobId, 'worktrees', 'running', 'Creating git worktrees...');
-      await createWorkspace(feature, body.repos);
-      updateJobStep(jobId, 'worktrees', 'completed', 'Git worktrees created successfully.');
-    }
+    // Step 1: Materialize the workspace (worktrees, or just the lightweight
+    // dir). One stable step id for both modes — only the wording differs.
+    updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
+    await createWorkspace(feature, body.repos);
+    updateJobStep(
+      jobId,
+      'workspace',
+      'completed',
+      inPlace ? 'Workspace registered — working in-place in the source repos.' : 'Git worktrees created successfully.',
+    );
 
     // Step 2: Analyze repos — against the worktrees, or the source repos in-place.
     updateJobStep(jobId, 'analysis', 'running', 'Analyzing projects and dependencies...');
@@ -803,7 +801,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     const job = creationJobs.get(jobId);
     if (job) {
       const runningStep = job.steps.find((s) => s.status === 'running');
-      const failedStepId = runningStep ? runningStep.id : job.steps[0]?.id ?? 'worktrees';
+      const failedStepId = runningStep ? runningStep.id : 'workspace';
       updateJobStep(jobId, failedStepId, 'failed', msg);
     }
   }
@@ -853,9 +851,9 @@ app.post('/api/workspace', async (c) => {
     }
 
     const steps: JobStep[] = [
-      inPlace
-        ? { id: 'workspace', name: 'Register Workspace', status: 'pending', message: 'Waiting...' }
-        : { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      // Stable id 'workspace' in both modes so progress consumers never need
+      // to know the mode; only the display name differs.
+      { id: 'workspace', name: inPlace ? 'Register Workspace' : 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
     ];
@@ -1133,7 +1131,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
     // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
       const repoName = path.basename(repoPath);
-      const worktreePath = isInPlace(feature) ? repoPath : path.join(workspacePath, repoName);
+      const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
         const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
@@ -1214,18 +1212,28 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     // Contained within the workspace; rejects `..` and sibling-prefix escapes.
-    // In-place repos live outside the workspace, so the name may only resolve
-    // to an exact manifest entry — never an arbitrary path.
-    let worktreePath: string;
-    const feature = await loadFeatureConfig(workspacePath);
-    if (feature && isInPlace(feature)) {
-      const match = feature.repos.find((r) => path.basename(r) === repoName);
-      if (!match) {
+    // Fast path: worktree repos always exist as subdirectories, and this
+    // endpoint is hit once per file click — don't pay a manifest read for it.
+    let worktreePath = resolveRepoPath(workspacePath, repoName);
+    let isDir = false;
+    try {
+      isDir = (await fs.stat(worktreePath)).isDirectory();
+    } catch {}
+    if (!isDir) {
+      // Not a subdirectory — in-place repos live at their source paths, and
+      // the name may only resolve to an exact manifest entry, never an
+      // arbitrary path.
+      const feature = await loadFeatureConfig(workspacePath);
+      const matches = feature && isInPlace(feature)
+        ? feature.repos.filter((r) => path.basename(r) === repoName)
+        : [];
+      if (matches.length === 0) {
         return c.json({ error: `Unknown repo "${repoName}" in this workspace.` }, 404);
       }
-      worktreePath = match;
-    } else {
-      worktreePath = resolveRepoPath(workspacePath, repoName);
+      if (matches.length > 1) {
+        return c.json({ error: `Repo name "${repoName}" is ambiguous in this workspace.` }, 400);
+      }
+      worktreePath = matches[0]!;
     }
 
     let diff = '';

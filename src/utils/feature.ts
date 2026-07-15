@@ -3,6 +3,8 @@
  * Helpers for working with {@link Feature} manifests.
  */
 
+import * as path from 'node:path';
+
 import type { Feature, WorkspaceMode } from '../types.js';
 
 /** The mode assumed for manifests written before {@link WorkspaceMode} existed. */
@@ -25,6 +27,27 @@ export function normalizeFeature(feature: Feature): Feature {
  */
 export function isInPlace(feature: Feature): boolean {
   return feature.mode === 'in-place';
+}
+
+/**
+ * Resolves where one of a feature's repos actually lives on disk — THE single
+ * source of truth for the mode rule. Worktree repos live inside the workspace
+ * dir (re-derived from the basename so a relocated workspace still resolves);
+ * in-place repos are the source repositories at their stored absolute paths.
+ *
+ * @param feature       - The feature the repo belongs to.
+ * @param workspacePath - The workspace directory's CURRENT location (callers
+ *                        may know a fresher path than the manifest records).
+ * @param repoPath      - The repo entry as stored in `feature.repos`.
+ */
+export function resolveFeatureRepoPath(
+  feature: Feature,
+  workspacePath: string,
+  repoPath: string,
+): string {
+  return isInPlace(feature)
+    ? repoPath
+    : path.resolve(workspacePath, path.basename(repoPath));
 }
 
 /**

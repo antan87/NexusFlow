@@ -98,7 +98,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
               progress: 100,
               workspacePath: 'C:\\Users\\patro\\dev\\workspaces\\feat-test-branch',
               steps: [
-                { id: 'worktrees', name: 'Create Git Worktrees', status: 'completed', message: 'Done' },
+                { id: 'workspace', name: 'Create Git Worktrees', status: 'completed', message: 'Done' },
                 { id: 'analysis', name: 'Analyze Repositories', status: 'completed', message: 'Done' },
                 { id: 'context', name: 'Generate AI Context Files', status: 'completed', message: 'Done' },
                 { id: 'pack', name: 'Pack Codebase Context', status: 'completed', message: 'Done' },

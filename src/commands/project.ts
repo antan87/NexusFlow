@@ -110,7 +110,7 @@ async function resolveProjectId(id: string | undefined, action: string): Promise
       value: p.id,
     })),
   });
-  return getProject(chosen);
+  return projects.find((p) => p.id === chosen) ?? null;
 }
 
 /**

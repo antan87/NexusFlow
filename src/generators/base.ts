@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
 import { resolveBaseFileUrl, resolveWorkspaceFileUrl } from '../core/storage.js';
+import { isInPlace } from '../utils/feature.js';
 
 /**
  * Formats a ProjectAnalysis into a readable markdown section.
@@ -179,6 +180,43 @@ ${feature.teamworkInstructions}
 `;
   }
 
+  // The structural rules differ fundamentally by mode: worktree workspaces
+  // isolate agents inside checked-out subdirectories, while in-place
+  // workspaces point at the original source repositories — telling an agent
+  // "never touch the original repos" there would forbid the only correct
+  // behavior.
+  const inPlace = isInPlace(feature);
+
+  const projectsIntro = inPlace
+    ? `This workspace references the following projects at their original
+source locations (in-place mode — no worktrees, no feature branch):`
+    : `This workspace contains the following projects, each checked out as a
+git worktree on the feature branch:`;
+
+  const structureGuideline = inPlace
+    ? `- **In-Place Workspace Structure**: This workspace references one or more Git repositories at their original locations on disk (absolute paths listed above). There are no worktrees and no dedicated feature branch — you work directly in the source repositories on whatever branch each repo currently has checked out.
+  - **All code changes** are made directly in the source repository directories listed above.
+  - **Branch awareness**: Check which branch a repo is on before committing (\`git branch --show-current\`); NexusFlow does not manage branches for in-place workspaces.
+  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific repository directories, NOT in this workspace folder (it only holds the manifest and generated context files).
+  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must also be run inside the repository directories.
+  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
+    - \`nexusflow diff\` — view changes across all repositories.
+    - \`nexusflow commit\` — commit and push changes across modified repositories.
+    - \`nexusflow refresh\` — regenerate maps, context files and plans.
+    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
+    - (\`nexusflow sync\` is intentionally a no-op for in-place workspaces — branches are yours to manage.)`
+    : `- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
+  - **All code changes** must be made within the appropriate project subdirectories.
+  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
+  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
+  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
+  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
+    - \`nexusflow diff\` — view changes across all sub-repositories.
+    - \`nexusflow commit\` — commit and push changes across modified repositories.
+    - \`nexusflow sync\` — rebase all repositories with their default base branches.
+    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
+    - \`nexusflow doctor\` — run diagnostics to verify workspace health.`;
+
   const taskSection = setupDone
     ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
     : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
@@ -195,8 +233,7 @@ ${feature.teamworkInstructions}
 
 ## Projects
 
-This workspace contains the following projects, each checked out as a
-git worktree on the feature branch:
+${projectsIntro}
 
 ${projectSections}
 ${existingConfigsSection}
@@ -209,17 +246,7 @@ ${teamworkSection}
 
 ## Guidelines
 
-- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
-  - **All code changes** must be made within the appropriate project subdirectories.
-  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
-  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
-  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
-  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
-    - \`nexusflow diff\` — view changes across all sub-repositories.
-    - \`nexusflow commit\` — commit and push changes across modified repositories.
-    - \`nexusflow sync\` — rebase all repositories with their default base branches.
-    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
-    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
+${structureGuideline}
 - **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
 ${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
