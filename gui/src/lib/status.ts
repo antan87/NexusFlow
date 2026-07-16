@@ -22,7 +22,25 @@ export function syncMeta(status: WorkspaceStatus['syncStatus']): { label: string
   }
 }
 
-/** Short repo basename from a full path. */
+/** Short repo basename from a full path (tolerates trailing separators). */
 export function repoName(repoPath: string): string {
-  return repoPath.split(/[\\/]/).pop() || repoPath;
+  return repoPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || repoPath;
+}
+
+/**
+ * Finds the workspace a recorded agent session belongs to. Sessions record a
+ * cwd (the workspace dir, or a repo dir for in-place features); the workspace
+ * folder name equals the feature id/branchName — THE single matching
+ * heuristic, shared by every session surface.
+ */
+export function findWorkspaceForSession<T extends { branchName: string; workspacePath: string; repos: string[] }>(
+  workspaces: T[],
+  sessionWorkspacePath: string,
+): T | undefined {
+  const base = repoName(sessionWorkspacePath);
+  return (
+    workspaces.find((w) => w.branchName === base) ??
+    // In-place sessions may record a source-repo cwd instead.
+    workspaces.find((w) => w.repos.some((r) => repoName(r) === base))
+  );
 }

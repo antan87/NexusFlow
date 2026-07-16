@@ -1,93 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
-
-const configuredApp = {
-  exists: true,
-  config: {
-    version: '0.2.7',
-    devDir: 'C:\\Users\\patro\\dev',
-    workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
-    defaultAssistant: 'ANTIGRAVITY',
-    scanDepth: 2,
-    localLlm: {
-      enabled: true,
-      provider: 'ollama',
-      endpoint: 'http://localhost:11434',
-      model: 'qwen2.5-coder:1.5b',
-    },
-  },
-};
-
-async function mockAppShell(page: Page) {
-  await page.route('**/api/adapters', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ adapters: [] }) });
-  });
-
-  await page.route('**/api/config', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(configuredApp) });
-  });
-
-  await page.route('**/api/editor-detect', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-
-  await page.route('**/api/workspaces/status', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-  });
-
-  await page.route('**/api/workspaces', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-
-  await page.route('**/api/update-status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ currentVersion: '0.2.7', latestVersion: '0.2.7', updateAvailable: false }),
-    });
-  });
-}
-
-async function mockStartWorkData(page: Page, projects: unknown[] = []) {
-  await page.route('**/api/projects', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(projects) });
-  });
-
-  await page.route('**/api/repos', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([
-        { name: 'nexus-frontend', path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' },
-      ]),
-    });
-  });
-
-  await page.route('**/api/ai-detect', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([{ name: 'claude', displayName: 'Claude CLI', detected: true }]),
-    });
-  });
-
-  await page.route('**/api/workflows/templates', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        templates: [
-          {
-            id: 'plan-implement-review',
-            name: 'Plan Implement Review',
-            description: 'Plan, implement, and review.',
-            content: '# Plan Implement Review\n\nInstructions...',
-            custom: false,
-          },
-        ],
-      }),
-    });
-  });
-}
+import { test, expect, type Page } from './fixtures';
 
 async function mockCompletedCreationStream(page: Page) {
   await page.addInitScript(() => {
@@ -129,11 +40,25 @@ async function mockCompletedCreationStream(page: Page) {
 }
 
 test.describe('NexusFlow E2E GUI Tests', () => {
-  test('should run the onboarding flow when config does not exist', async ({ page }) => {
-    await page.route('**/api/adapters', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ adapters: [] }) });
-    });
+  test.use({
+    reposData: [
+      { name: 'nexus-frontend', path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' },
+    ],
+    aiDetectData: [{ name: 'claude', displayName: 'Claude CLI', detected: true }],
+    workflowsTemplatesData: {
+      templates: [
+        {
+          id: 'plan-implement-review',
+          name: 'Plan Implement Review',
+          description: 'Plan, implement, and review.',
+          content: '# Plan Implement Review\n\nInstructions...',
+          custom: false,
+        },
+      ],
+    },
+  });
 
+  test('should run the onboarding flow when config does not exist', async ({ page }) => {
     await page.route('**/api/config', async (route, request) => {
       if (request.method() === 'GET') {
         await route.fulfill({
@@ -170,26 +95,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
     });
 
-    await page.route('**/api/editor-detect', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/workspaces/status', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-    });
-
-    await page.route('**/api/workspaces', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/update-status', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ currentVersion: '0.2.7', latestVersion: '0.2.7', updateAvailable: false }),
-      });
-    });
-
     await page.route('**/api/workflows/templates', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
     });
@@ -209,17 +114,22 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
   test('should create a workspace in worktree mode from the new Start work flow', async ({ page }) => {
     await mockCompletedCreationStream(page);
-    await mockAppShell(page);
-    await mockStartWorkData(page, [
-      {
-        id: 'demo',
-        name: 'Demo',
-        description: 'Demo project',
-        repos: [{ path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' }],
-        createdAt: '2026-07-15T00:00:00.000Z',
-        updatedAt: '2026-07-15T00:00:00.000Z',
-      },
-    ]);
+    await page.route('**/api/projects', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'demo',
+            name: 'Demo',
+            description: 'Demo project',
+            repos: [{ path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' }],
+            createdAt: '2026-07-15T00:00:00.000Z',
+            updatedAt: '2026-07-15T00:00:00.000Z',
+          },
+        ]),
+      });
+    });
 
     let workspaceBody: any = null;
     await page.route('**/api/workspace', async (route, request) => {
@@ -249,8 +159,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
   test('should create an in-place workspace without showing branch fields', async ({ page }) => {
     await mockCompletedCreationStream(page);
-    await mockAppShell(page);
-    await mockStartWorkData(page);
 
     let workspaceBody: any = null;
     await page.route('**/api/workspace', async (route, request) => {
@@ -280,10 +188,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
   test('should validate Local LLM configuration in settings', async ({ page }) => {
     let savedConfig: any = null;
-
-    await page.route('**/api/adapters', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ adapters: [] }) });
-    });
 
     await page.route('**/api/config', async (route, request) => {
       if (request.method() === 'GET') {
@@ -315,38 +219,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
           body: JSON.stringify({ success: true, config: savedConfig }),
         });
       }
-    });
-
-    await page.route('**/api/repos', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/ai-detect', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/editor-detect', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/workspaces/status', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-    });
-
-    await page.route('**/api/workspaces', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/update-status', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ currentVersion: '0.2.7', latestVersion: '0.2.7', updateAvailable: false }),
-      });
-    });
-
-    await page.route('**/api/workflows/templates', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
     });
 
     await page.route('**/api/updates/tools', async (route) => {

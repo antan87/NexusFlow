@@ -66,9 +66,14 @@ export function useCreationStream() {
         }
       });
 
+      let errorCount = 0;
       source.onerror = () => {
-        // The server closes the stream when the job ends; only treat it as a
-        // failure if we never saw a terminal status.
+        // EventSource reconnects automatically, and on reconnect the server
+        // replays the job's CURRENT state as the initial frame — so transient
+        // drops (or the server closing after completion) self-heal. Only give
+        // up after repeated failures.
+        errorCount += 1;
+        if (errorCount < 5) return;
         setProgress((prev) =>
           prev.status === 'running'
             ? { ...prev, status: 'failed', error: prev.error ?? 'Lost connection to the creation stream.' }

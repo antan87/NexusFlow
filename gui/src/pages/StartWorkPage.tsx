@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Zap } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, ExternalLink, FolderGit2, GitBranch, Sparkles, Zap } from 'lucide-react';
 
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
@@ -16,8 +16,11 @@ import {
 } from '../components/ui/select.js';
 import { RepoChecklist } from '../components/RepoChecklist.js';
 import { cn } from '../lib/utils.js';
+import { repoName } from '../lib/status.js';
+import { apiFetch } from '../lib/api/client.js';
 import {
   useAiDetect,
+  useConfig,
   useCreateWorkspace,
   useProjects,
   useRepos,
@@ -29,6 +32,23 @@ import type { RepoInfo, WorkspaceMode } from '../types.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
+
+const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
+
+const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }> = [
+  {
+    value: 'in-place',
+    icon: Zap,
+    title: 'In-place',
+    body: 'Work directly in the source repos. No branches or worktrees — fastest start.',
+  },
+  {
+    value: 'worktree',
+    icon: GitBranch,
+    title: 'Isolated worktrees',
+    body: 'A feature branch and worktree per repo. Your source checkouts stay untouched.',
+  },
+];
 
 function StepRow({ step }: { step: CreationStep }) {
   return (
@@ -65,6 +85,8 @@ export function StartWorkPage() {
   const repos = useRepos();
   const aiDetect = useAiDetect();
   const templates = useWorkflowTemplates();
+  const configQuery = useConfig();
+  const config = configQuery.data?.config;
   const createWorkspace = useCreateWorkspace();
   const { progress, start } = useCreationStream();
 
@@ -77,17 +99,34 @@ export function StartWorkPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<string>('');
-  /** Optional per-repo existing branch to check out instead of the feature branch (worktree mode). */
+  /** Editable teamwork instructions; prefilled by strategy pick or AI suggestion. */
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestedDifficulty, setSuggestedDifficulty] = useState<string | null>(null);
+  /** Resumption commands written into the manifest for context generation. */
+  const [testCommand, setTestCommand] = useState('npm run test');
+  const [mockCommand, setMockCommand] = useState('');
+  const [startCommand, setStartCommand] = useState('');
+  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
+  /** Optional per-repo existing branch (keyed by repo PATH — names can repeat). */
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [openingEditor, setOpeningEditor] = useState(false);
 
-  // Default the assistant selection to everything detected, once known.
+  // Seed the assistant selection from detection exactly ONCE — a background
+  // refetch must never overwrite a deliberately emptied selection.
+  const assistantsSeededRef = useRef(false);
   useEffect(() => {
-    if (assistants.length === 0 && aiDetect.data) {
+    if (!assistantsSeededRef.current && aiDetect.data) {
+      assistantsSeededRef.current = true;
       setAssistants(aiDetect.data.filter((a) => a.detected).map((a) => a.name));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiDetect.data]);
+
+  // Default the local-LLM toggle from the global config, once known.
+  useEffect(() => {
+    if (config?.localLlm?.enabled) setLocalLlmEnabled(true);
+  }, [config?.localLlm?.enabled]);
 
   const selectedProject = useMemo(
     () => (projects.data ?? []).find((p) => p.id === projectId) ?? null,
@@ -97,7 +136,7 @@ export function StartWorkPage() {
   const selectedRepos: RepoInfo[] = useMemo(() => {
     if (selectedProject) {
       return selectedProject.repos.map((r) => ({
-        name: r.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? r.path,
+        name: repoName(r.path),
         path: r.path,
         defaultBranch: r.defaultBranch,
       }));
@@ -109,9 +148,42 @@ export function StartWorkPage() {
   const identityValid = inPlace ? workspaceName.trim().length > 0 : branchName.trim().length > 0;
   const formValid = identityValid && selectedRepos.length > 0 && description.trim().length > 0;
 
+  const applyStrategy = (id: string) => {
+    setStrategyId(id);
+    setSuggestedDifficulty(null);
+    const template = (templates.data ?? []).find((t) => t.id === id);
+    setCustomInstructions(template?.content ?? '');
+  };
+
+  const suggestStrategy = async () => {
+    if (!description.trim()) {
+      setSubmitError('Describe what you are building first — the suggestion is based on it.');
+      return;
+    }
+    setSubmitError(null);
+    setSuggesting(true);
+    try {
+      const data = await apiFetch<{
+        success: boolean;
+        difficulty: string;
+        suggestedWorkflowId: string;
+        customInstructions: string;
+      }>('/api/workspace/suggest-workflow', {
+        method: 'POST',
+        body: JSON.stringify({ description, repos: selectedRepos }),
+      });
+      setStrategyId(data.suggestedWorkflowId);
+      setCustomInstructions(data.customInstructions);
+      setSuggestedDifficulty(data.difficulty);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
   const submit = async () => {
     setSubmitError(null);
-    const strategy = (templates.data ?? []).find((t) => t.id === strategyId);
     const payload: CreateWorkspacePayload = {
       mode,
       projectId: selectedProject?.id,
@@ -119,10 +191,17 @@ export function StartWorkPage() {
       description: description.trim(),
       repos: selectedRepos.map((repo) => ({
         ...repo,
-        existingBranch: !inPlace && branchOverrides[repo.name]?.trim() ? branchOverrides[repo.name].trim() : undefined,
+        existingBranch:
+          !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
       assistants,
-      teamworkInstructions: strategy?.content,
+      localLlmEnabled,
+      teamworkInstructions: customInstructions.trim() || undefined,
+      resumption: {
+        testCommand: testCommand.trim() || undefined,
+        mockCommand: mockCommand.trim() || undefined,
+        startCommand: startCommand.trim() || undefined,
+      },
     };
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
@@ -132,9 +211,30 @@ export function StartWorkPage() {
     }
   };
 
+  const openInEditor = async () => {
+    if (!progress.workspacePath) return;
+    if (isVsCode) {
+      window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: progress.workspacePath }, '*');
+      return;
+    }
+    if (!config?.defaultEditor) return;
+    setOpeningEditor(true);
+    try {
+      await apiFetch('/api/open-editor', {
+        method: 'POST',
+        body: JSON.stringify({ workspacePath: progress.workspacePath, command: config.defaultEditor }),
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOpeningEditor(false);
+    }
+  };
+
   // ── Creation progress / result panel ─────────────────────────────────────
   if (progress.status !== 'idle') {
     const failedStep = progress.steps.find((s) => s.status === 'failed');
+    const canOpenEditor = isVsCode || Boolean(config?.defaultEditor);
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
@@ -157,11 +257,20 @@ export function StartWorkPage() {
         {progress.status === 'completed' && progress.workspacePath && (
           <p className="mt-4 truncate font-mono text-xs text-muted-foreground">{progress.workspacePath}</p>
         )}
+        {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div className="mt-6 flex gap-2">
           {progress.status === 'completed' && progress.workspaceId && (
-            <Button onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}>
-              Open workspace
-            </Button>
+            <>
+              <Button onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}>
+                Open workspace
+              </Button>
+              {canOpenEditor && (
+                <Button variant="outline" onClick={openInEditor} disabled={openingEditor}>
+                  {openingEditor ? <Spinner /> : <ExternalLink />}
+                  Open in editor
+                </Button>
+              )}
+            </>
           )}
           {progress.status === 'failed' && (
             <Button variant="outline" onClick={() => window.location.reload()}>
@@ -238,31 +347,33 @@ export function StartWorkPage() {
         {/* 2. Mode */}
         <section>
           <span className="mb-1.5 block text-sm font-medium">How do you want to work?</span>
-          <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Work mode">
-            {(
-              [
-                {
-                  value: 'in-place' as const,
-                  icon: Zap,
-                  title: 'In-place',
-                  body: 'Work directly in the source repos. No branches or worktrees — fastest start.',
-                },
-                {
-                  value: 'worktree' as const,
-                  icon: GitBranch,
-                  title: 'Isolated worktrees',
-                  body: 'A feature branch and worktree per repo. Your source checkouts stay untouched.',
-                },
-              ] satisfies Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }>
-            ).map((option) => (
+          {/* Hand-rolled radio cards: Base UI's Radio is a bare circular
+              control that cannot wrap card content, so semantics are provided
+              directly (role, aria-checked, arrow-key roving focus). */}
+          <div
+            role="radiogroup"
+            aria-label="Work mode"
+            className="grid gap-3 sm:grid-cols-2"
+            onKeyDown={(e) => {
+              if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
+                e.preventDefault();
+                const next = mode === 'in-place' ? 'worktree' : 'in-place';
+                setMode(next);
+                document.getElementById(`mode-${next}`)?.focus();
+              }
+            }}
+          >
+            {MODE_OPTIONS.map((option) => (
               <button
                 key={option.value}
+                id={`mode-${option.value}`}
                 type="button"
                 role="radio"
                 aria-checked={mode === option.value}
+                tabIndex={mode === option.value ? 0 : -1}
                 onClick={() => setMode(option.value)}
                 className={cn(
-                  'rounded-xl border p-4 text-left transition-colors',
+                  'cursor-pointer rounded-xl border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                   mode === option.value
                     ? 'border-primary bg-primary/5 ring-1 ring-primary'
                     : 'border-border bg-card hover:border-foreground/20',
@@ -310,9 +421,9 @@ export function StartWorkPage() {
                       <label key={repo.path} className="flex items-center gap-2">
                         <span className="w-40 shrink-0 truncate text-xs">{repo.name}</span>
                         <Input
-                          value={branchOverrides[repo.name] ?? ''}
+                          value={branchOverrides[repo.path] ?? ''}
                           onChange={(e) =>
-                            setBranchOverrides((prev) => ({ ...prev, [repo.name]: e.target.value }))
+                            setBranchOverrides((prev) => ({ ...prev, [repo.path]: e.target.value }))
                           }
                           placeholder="existing branch (must exist)"
                           className="h-7 font-mono text-xs"
@@ -378,9 +489,16 @@ export function StartWorkPage() {
                   ))}
                 </div>
               </div>
+
               <div>
-                <span className="mb-1.5 block text-sm font-medium">Teamwork strategy</span>
-                <Select value={strategyId} onValueChange={(v) => typeof v === 'string' && setStrategyId(v)}>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-medium">Teamwork strategy</span>
+                  <Button size="xs" variant="outline" onClick={suggestStrategy} disabled={suggesting}>
+                    {suggesting ? <Spinner /> : <Sparkles />}
+                    Suggest with AI
+                  </Button>
+                </div>
+                <Select value={strategyId} onValueChange={(v) => typeof v === 'string' && applyStrategy(v)}>
                   <SelectTrigger className="w-full" aria-label="Teamwork strategy">
                     <SelectValue>
                       {(templates.data ?? []).find((t) => t.id === strategyId)?.name ?? 'None'}
@@ -395,7 +513,47 @@ export function StartWorkPage() {
                     ))}
                   </SelectPopup>
                 </Select>
+                {suggestedDifficulty && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    AI classified this task as <span className="font-medium">{suggestedDifficulty}</span> difficulty.
+                  </p>
+                )}
+                <Textarea
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  placeholder="Cooperation instructions for the agent team (editable — prefilled by the strategy pick or AI suggestion)."
+                  rows={4}
+                  className="mt-2 font-mono text-xs"
+                />
               </div>
+
+              <div>
+                <span className="mb-1.5 block text-sm font-medium">Resumption commands</span>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Written into the workspace context so assistants know how to verify changes and spin up mocks.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2">
+                    <span className="w-24 shrink-0 text-xs">Test</span>
+                    <Input value={testCommand} onChange={(e) => setTestCommand(e.target.value)} className="h-7 font-mono text-xs" />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="w-24 shrink-0 text-xs">Mocks/setup</span>
+                    <Input value={mockCommand} onChange={(e) => setMockCommand(e.target.value)} placeholder="optional" className="h-7 font-mono text-xs" />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <span className="w-24 shrink-0 text-xs">Start/run</span>
+                    <Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="optional" className="h-7 font-mono text-xs" />
+                  </label>
+                </div>
+              </div>
+
+              {config?.localLlm && (
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={localLlmEnabled} onCheckedChange={() => setLocalLlmEnabled((v) => !v)} />
+                  Enable the local AI co-processor for this workspace
+                </label>
+              )}
             </div>
           )}
         </section>

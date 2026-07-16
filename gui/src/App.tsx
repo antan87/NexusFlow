@@ -25,7 +25,15 @@ const GettingStartedPage = lazy(() =>
   import('./features/guide/GettingStartedPage.js').then((m) => ({ default: m.GettingStartedPage })),
 );
 import { API_BASE } from './lib/apiBase.js';
-import { useWorkspaces, useWorkspacesStatus } from './lib/api/queries.js';
+import {
+  useAiDetect,
+  useEditorDetect,
+  useRepos,
+  useWorkflowTemplates,
+  useWorkspaces,
+  useWorkspacesStatus,
+  type WorkflowTemplate,
+} from './lib/api/queries.js';
 import { useQueryClient } from '@tanstack/react-query';
 // Types canonicalized in ./types.ts — never redeclare them here.
 import type {
@@ -77,17 +85,21 @@ function AppInner() {
   const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
 
-  // Repos & Tools
-  const [repos, setRepos] = useState<RepoInfo[]>([]);
-  const [aiAssistants, setAiAssistants] = useState<DetectedAI[]>([]);
-  const [editors, setEditors] = useState<DetectedEditor[]>([]);
+  // Repos & tool detection come from the shared react-query cache (same data
+  // the Projects/Start-work pages read) — one fetch, one source of truth.
+  const reposQuery = useRepos();
+  const aiDetectQuery = useAiDetect();
+  const editorsQuery = useEditorDetect();
+  const templatesQuery = useWorkflowTemplates();
+  const repos: RepoInfo[] = reposQuery.data ?? [];
+  const aiAssistants: DetectedAI[] = aiDetectQuery.data ?? [];
+  const editors: DetectedEditor[] = editorsQuery.data ?? [];
+  const workflowTemplates: WorkflowTemplate[] = templatesQuery.data ?? [];
 
   // App Autoupdate State
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
 
-  // Workflow Strategy State
-  const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
 
   // Workflow Strategy Management State
   const [selectedMgtTemplateId, setSelectedMgtTemplateId] = useState<string | null>(null);
@@ -99,6 +111,12 @@ function AppInner() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState(false);
   const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
+
+  // Default the inspect-assistant to the first launchable detected one.
+  useEffect(() => {
+    const firstHarness = (aiDetectQuery.data ?? []).find((ai) => ai.detected && ai.command);
+    if (firstHarness) setSelectedInspectAssistant(firstHarness.name);
+  }, [aiDetectQuery.data]);
   const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
   const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
 
@@ -107,9 +125,15 @@ function AppInner() {
   // Workspaces list + at-a-glance statuses live in the shared react-query
   // cache — the same one the StartWorkPage/ProjectsPage mutations invalidate,
   // so a created or deleted workspace shows up here without manual syncing.
+  // Status polling is expensive server-side (git status across every repo of
+  // every workspace), so it only runs on the routes that display statuses.
+  const onStatusRoute = location.pathname === '/' || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
-  const statusesQuery = useWorkspacesStatus();
+  const statusesQuery = useWorkspacesStatus({
+    enabled: configExists && !configLoading,
+    intervalMs: onStatusRoute ? 15_000 : false,
+  });
   const workspaces: Feature[] = workspacesQuery.data ?? [];
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
@@ -305,12 +329,8 @@ function AppInner() {
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
-      
-      fetchEditors();
-      
-      if (data.exists && data.config.devDir) {
-        fetchRepos();
-      } else {
+
+      if (!(data.exists && data.config.devDir)) {
         setDefaultPaths({
           devDir: data.config.devDir || '',
           workspacesDir: data.config.workspacesDir || '',
@@ -341,7 +361,7 @@ function AppInner() {
         setSaveStatus('success');
         setConfig(newConfig);
         setConfigExists(true);
-        fetchRepos();
+        queryClient.invalidateQueries({ queryKey: ['repos'] });
         fetchWorkspaces();
       } else {
         setSaveStatus('error');
@@ -352,40 +372,6 @@ function AppInner() {
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
-  const fetchRepos = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/repos`);
-      const data = await res.json();
-      setRepos(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchAIAssistants = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai-detect`);
-      const data = await res.json();
-      setAiAssistants(data);
-      const firstHarness = data.find((ai: any) => ai.detected && ai.command);
-      if (firstHarness) {
-        setSelectedInspectAssistant(firstHarness.name);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchEditors = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/editor-detect`);
-      const data = await res.json();
-      setEditors(data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   // Kept as the single "refresh workspaces" entry point for the handlers and
   // pages that call it — it now refreshes the shared react-query cache.
   const fetchWorkspaces = async () => {
@@ -393,18 +379,6 @@ function AppInner() {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] }),
       queryClient.invalidateQueries({ queryKey: ['workspaces-status'] }),
     ]);
-  };
-
-  const fetchWorkflowTemplates = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/workflows/templates`);
-      if (res.ok) {
-        const data = await res.json();
-        setWorkflowTemplates(data.templates || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch workflow templates:', e);
-    }
   };
 
   const handleSaveTemplate = async () => {
@@ -426,7 +400,7 @@ function AppInner() {
       if (res.ok) {
         const data = await res.json();
         showToast('Strategy template saved successfully!', 'success');
-        await fetchWorkflowTemplates();
+        await queryClient.invalidateQueries({ queryKey: ['workflow-templates'] });
         setSelectedMgtTemplateId(data.template.id);
         setIsEditingTemplate(false);
         setAnalysisResult(null);
@@ -452,7 +426,7 @@ function AppInner() {
       });
       if (res.ok) {
         showToast('Strategy template deleted successfully!', 'success');
-        await fetchWorkflowTemplates();
+        await queryClient.invalidateQueries({ queryKey: ['workflow-templates'] });
         setSelectedMgtTemplateId(null);
         setAnalysisResult(null);
       } else {
@@ -781,12 +755,10 @@ function AppInner() {
 
 
 
-  // Initial loads (workspaces/statuses load themselves via the query hooks)
+  // Initial loads (list/detection data loads itself via the query hooks)
   useEffect(() => {
     fetchConfig();
-    fetchAIAssistants();
     fetchUpdateStatus();
-    fetchWorkflowTemplates();
 
     // Support auto-loading workspace from VS Code or URL params
     const queryParams = new URLSearchParams(window.location.search);
@@ -955,7 +927,9 @@ Core Instructions:
       const data = await res.json();
       if (res.ok && data.success) {
         if (activeWsId === wsName) {
-          setActiveWsId(null);
+          // Leave the deleted workspace's URL too — otherwise a reload would
+          // re-select the dead id and poll its services endpoint forever.
+          navigate('/workspaces');
         }
         await fetchWorkspaces();
         showToast(`Workspace ${wsName} successfully deleted.`, 'success');
@@ -1061,7 +1035,6 @@ Core Instructions:
     <WorkspacesPage
       workspaces={workspaces}
       workspaceStatuses={workspaceStatuses}
-      statusesLoading={statusesLoading}
       workspacesLoading={workspacesLoading}
       fetchWorkspaces={fetchWorkspaces}
       selectedId={activeWsId}
@@ -1077,7 +1050,7 @@ Core Instructions:
       repos={repos}
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
-      sessionProps={{ sessions, sessionsLoading, activeSession, transcript, transcriptLoading, workspaces, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession }}
+      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession }}
       serviceProps={{ services, runningServices, selectedLogService, serviceLogs, logsEndRef, setSelectedLogService, handleStartServices, handleStopServices, orchTools, servicesLoading }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
       knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}

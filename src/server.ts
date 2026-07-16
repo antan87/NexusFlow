@@ -930,10 +930,27 @@ app.get('/api/workspace/create-stream/:jobId', async (c) => {
 
       job.listeners.add(listener);
 
-      // Guard against the job finishing between the initial state write and now.
+      // Guard against the job finishing between the initial state write and
+      // now: the client only saw a 'running' frame, so send the terminal
+      // state before closing — silently ending the stream here would leave
+      // the client believing the connection dropped mid-run.
       if (job.status === 'completed' || job.status === 'failed') {
         job.listeners.delete(listener);
-        resolve();
+        stream
+          .writeSSE({
+            event: 'progress',
+            data: JSON.stringify({
+              id: job.id,
+              status: job.status,
+              progress: job.progress,
+              error: job.error,
+              steps: job.steps,
+              workspacePath: job.workspacePath,
+              feature: job.feature,
+            }),
+          })
+          .catch(() => {})
+          .finally(() => resolve());
       }
     });
   });

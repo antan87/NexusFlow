@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 const demoProject = {
   id: 'demo',
@@ -14,87 +14,25 @@ const repos = [
   { name: 'nexus-backend', path: 'C:\\Users\\patro\\dev\\nexus-backend', defaultBranch: 'main' },
 ];
 
-async function mockAppShell(page: Page) {
-  await page.route('**/api/adapters', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ adapters: [] }) });
-  });
-
-  await page.route('**/api/config', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        exists: true,
-        config: {
-          version: '0.2.7',
-          devDir: 'C:\\Users\\patro\\dev',
-          workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
-          defaultAssistant: 'ANTIGRAVITY',
-          scanDepth: 2,
-          localLlm: {
-            enabled: false,
-            provider: 'ollama',
-            endpoint: 'http://localhost:11434',
-            model: 'qwen2.5-coder:1.5b',
-          },
-        },
-      }),
-    });
-  });
-
-  await page.route('**/api/repos', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(repos) });
-  });
-
-  await page.route('**/api/ai-detect', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-
-  await page.route('**/api/editor-detect', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-  });
-
-  await page.route('**/api/workflows/templates', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
-  });
-
-  await page.route('**/api/update-status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ currentVersion: '0.2.7', latestVersion: '0.2.7', updateAvailable: false }),
-    });
-  });
-
-  await page.route('**/api/workspaces/status', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-  });
-
-  await page.route('**/api/workspaces', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([
-        {
-          id: 'demo-workspace',
-          mode: 'in-place',
-          projectId: 'demo',
-          branchName: 'demo-workspace',
-          description: 'Demo workspace',
-          repos: ['C:\\Users\\patro\\dev\\nexus-frontend'],
-          assistants: [],
-          workspacePath: 'C:\\Users\\patro\\dev\\nexus-frontend',
-          createdAt: '2026-07-15T00:00:00.000Z',
-        },
-      ]),
-    });
-  });
-}
-
 test.describe('Projects page', () => {
-  test('should list, create, and delete projects', async ({ page }) => {
-    await mockAppShell(page);
+  test.use({
+    reposData: { data: repos },
+    workspacesData: [
+      {
+        id: 'demo-workspace',
+        mode: 'in-place',
+        projectId: 'demo',
+        branchName: 'demo-workspace',
+        description: 'Demo workspace',
+        repos: ['C:\\Users\\patro\\dev\\nexus-frontend'],
+        assistants: [],
+        workspacePath: 'C:\\Users\\patro\\dev\\nexus-frontend',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
+  });
 
+  test('should list, create, and delete projects', async ({ page }) => {
     let projects = [demoProject];
     let createBody: any = null;
     let deletedId: string | null = null;

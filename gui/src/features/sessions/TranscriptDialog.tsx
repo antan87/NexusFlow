@@ -11,6 +11,7 @@ import {
 } from '../../components/ui/dialog.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
+import { findWorkspaceForSession } from '../../lib/status.js';
 import type { Feature } from '../../types.js';
 
 interface TranscriptDialogProps {
@@ -114,8 +115,14 @@ export function TranscriptDialog({
             <Button
               size="sm"
               onClick={() => {
-                const ws = workspaces.find(w => w.branchName === activeSession.workspacePath.split(/[\\/]/).pop());
-                handleResumeSession(ws || workspaces[0], activeSession.id, activeSession.assistant);
+                // Never fall back to an arbitrary workspace — resuming a
+                // session against the wrong cwd silently loses its context.
+                const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
+                if (!ws) {
+                  showToast('Could not match this session to a workspace — it may have been removed.', 'error');
+                  return;
+                }
+                handleResumeSession(ws, activeSession.id, activeSession.assistant);
                 setActiveSession(null);
               }}
             >

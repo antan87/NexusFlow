@@ -36,7 +36,6 @@ type Filter = (typeof FILTERS)[number];
 interface WorkspacesPageProps {
   workspaces: Feature[];
   workspaceStatuses: Record<string, WorkspaceStatus>;
-  statusesLoading: boolean;
   workspacesLoading: boolean;
   fetchWorkspaces: () => Promise<void>;
   selectedId: string | null;

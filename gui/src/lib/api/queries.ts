@@ -20,10 +20,16 @@ import type {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+/** Shape of GET /api/config — the config is wrapped, not top-level. */
+export interface ConfigResponse {
+  exists: boolean;
+  config: NexusFlowConfig;
+}
+
 export function useConfig() {
   return useQuery({
     queryKey: ['config'],
-    queryFn: () => apiFetch<NexusFlowConfig>('/api/config'),
+    queryFn: () => apiFetch<ConfigResponse>('/api/config'),
   });
 }
 
@@ -36,12 +42,17 @@ export function useWorkspaces() {
   });
 }
 
-/** At-a-glance status per workspace, refreshed on an interval. */
-export function useWorkspacesStatus(intervalMs = 15_000) {
+/**
+ * At-a-glance status per workspace. The endpoint runs `git status` across
+ * every repo of every workspace, so callers must gate polling to the routes
+ * that actually display statuses (`intervalMs: false` disables polling).
+ */
+export function useWorkspacesStatus(options: { enabled?: boolean; intervalMs?: number | false } = {}) {
   return useQuery({
     queryKey: ['workspaces-status'],
     queryFn: () => apiFetch<Record<string, WorkspaceStatus>>('/api/workspaces/status'),
-    refetchInterval: intervalMs,
+    enabled: options.enabled ?? true,
+    refetchInterval: options.intervalMs ?? false,
   });
 }
 
@@ -66,20 +77,6 @@ export function useCreateWorkspace() {
       apiFetch<{ success: boolean; jobId: string }>('/api/workspace', {
         method: 'POST',
         body: JSON.stringify(payload),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
-      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
-    },
-  });
-}
-
-export function useDeleteWorkspace() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ success: boolean }>(`/api/workspace/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] });

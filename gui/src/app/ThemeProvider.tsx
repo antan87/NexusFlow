@@ -4,12 +4,6 @@ export type Theme = 'light' | 'dark';
 
 const STORAGE_KEY = 'nexusflow-theme';
 
-/**
- * Dark was forced while legacy screens were pinned to fixed dark values;
- * every screen now renders on the semantic tokens, so both themes are live.
- */
-const FORCE_DARK = false;
-
 interface ThemeContextValue {
   theme: Theme;
   setTheme: (theme: Theme) => void;
@@ -17,8 +11,11 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue>({ theme: 'dark', setTheme: () => {} });
 
+/**
+ * Must agree with the pre-paint boot script in index.html, which applies the
+ * .dark class before the bundle loads to avoid a theme flash.
+ */
 function resolveInitialTheme(): Theme {
-  if (FORCE_DARK) return 'dark';
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark') return stored;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -36,7 +33,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const setTheme = useCallback((next: Theme) => {
-    if (FORCE_DARK) return;
     localStorage.setItem(STORAGE_KEY, next);
     setThemeState(next);
   }, []);
