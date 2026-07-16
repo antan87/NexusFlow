@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { FolderGit2, GitBranch, Play, AlertTriangle, Plus, ArrowRight, RefreshCw } from 'lucide-react';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { Button } from '../components/ui/button.js';
-import { Card } from '../components/ui/card.js';
+import { Card, CardRow } from '../components/ui/card.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
 import { Skeleton } from '../components/ui/skeleton.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
@@ -19,13 +19,13 @@ interface DashboardPageProps {
 
 function StatTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: ReactNode; tone: string }) {
   return (
-    <Card className="flex-row items-center gap-3.5 p-4">
+    <CardRow className="gap-3.5 p-4">
       <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${tone}`}>{icon}</div>
       <div className="min-w-0">
         <div className="text-xl font-bold leading-none text-foreground">{value}</div>
         <div className="mt-1 text-xs text-muted-foreground">{label}</div>
       </div>
-    </Card>
+    </CardRow>
   );
 }
 
@@ -89,9 +89,9 @@ export function DashboardPage({
             const st = workspaceStatuses[ws.branchName];
             const sync = st ? syncMeta(st.syncStatus) : null;
             return (
-              <Card
+              <CardRow
                 key={ws.id}
-                className="group cursor-pointer flex-row items-center gap-4 p-4 transition-colors hover:border-foreground/15 hover:bg-accent/50"
+                className="group cursor-pointer gap-4 p-4 transition-colors hover:border-foreground/15 hover:bg-accent/50"
                 onClick={() => onOpenWorkspace(ws.branchName)}
               >
                 <div className="min-w-0 flex-1">
@@ -130,7 +130,7 @@ export function DashboardPage({
                   ) : null}
                   <ArrowRight size={16} className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
                 </div>
-              </Card>
+              </CardRow>
             );
           })}
         </div>

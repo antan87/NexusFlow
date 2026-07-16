@@ -23,8 +23,6 @@ export * from "./skeleton";
 export * from "./spinner";
 export * from "./switch";
 export * from "./textarea";
-export * from "./toast";
-export * from "./toast.logic";
 export * from "./status-badge";
 export * from "./tabs";
 export * from "./tooltip";

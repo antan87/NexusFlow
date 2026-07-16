@@ -1,4 +1,5 @@
 import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, Sun, Moon, type LucideIcon } from 'lucide-react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { useTheme } from './ThemeProvider.js';
 
@@ -17,17 +18,8 @@ const ITEMS: NavItem[] = [
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
 ];
 
-export function AppSidebar({
-  pathname,
-  appVersion,
-  onNavigate,
-  onNewWorkspace,
-}: {
-  pathname: string;
-  appVersion: string;
-  onNavigate: (to: string) => void;
-  onNewWorkspace: () => void;
-}) {
+export function AppSidebar({ appVersion }: { appVersion: string }) {
+  const { pathname } = useLocation();
   const { theme, setTheme } = useTheme();
   const linkClass = (active: boolean) =>
     cn(
@@ -42,27 +34,27 @@ export function AppSidebar({
         <span className="text-sm font-semibold text-foreground">NexusFlow</span>
       </div>
 
-      <button
-        onClick={onNewWorkspace}
+      <Link
+        to="/new"
         className="mb-5 inline-flex cursor-pointer items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >
         <Plus size={16} /> Start work
-      </button>
+      </Link>
 
       <nav className="flex flex-1 flex-col gap-1">
         {ITEMS.map((it) => {
           const Icon = it.icon;
           return (
-            <button key={it.to} onClick={() => onNavigate(it.to)} className={linkClass(it.match(pathname))}>
+            <NavLink key={it.to} to={it.to} className={linkClass(it.match(pathname))}>
               <Icon size={16} /> {it.label}
-            </button>
+            </NavLink>
           );
         })}
       </nav>
 
-      <button onClick={() => onNavigate('/guide')} className={linkClass(pathname.startsWith('/guide'))}>
+      <NavLink to="/guide" className={linkClass(pathname.startsWith('/guide'))}>
         <BookOpen size={16} /> Getting started
-      </button>
+      </NavLink>
 
       <button
         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}

@@ -362,7 +362,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
 
     await page.goto('/');
-    await page.locator('aside button:has-text("Settings")').click();
+    await page.locator('aside a:has-text("Settings")').click();
 
     await expect(page.locator('h1')).toContainText('Global Settings');
 

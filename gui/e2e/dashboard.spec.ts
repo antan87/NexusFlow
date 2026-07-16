@@ -48,7 +48,7 @@ test.describe('Redesigned NexusFlow shell', () => {
 
     // Sidebar navigation updates the route.
     await page.goto('/');
-    await page.getByRole('button', { name: 'Workspaces' }).click();
+    await page.getByRole('link', { name: 'Workspaces' }).click();
     await expect(page).toHaveURL(/#\/workspaces/);
     await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
 

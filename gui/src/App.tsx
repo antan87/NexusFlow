@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import {
   AlertTriangle,
   RefreshCw,
@@ -8,119 +8,39 @@ import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-route
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
-import { GettingStartedPage } from './features/guide/GettingStartedPage.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
-import { DashboardPage } from './pages/DashboardPage.js';
-import { ProjectsPage } from './pages/ProjectsPage.js';
-import { SettingsPage } from './pages/SettingsPage.js';
-import { StartWorkPage } from './pages/StartWorkPage.js';
-import { StrategiesPage } from './pages/StrategiesPage.js';
-import { WorkspacesPage } from './pages/WorkspacesPage.js';
+import { Spinner } from './components/ui/spinner.js';
+
+// Route-level code splitting: each page (and its dependency subtree, e.g. the
+// markdown pipeline under WorkspacesPage) loads on first navigation instead of
+// inflating the initial bundle.
+const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then((m) => ({ default: m.DashboardPage })));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage.js').then((m) => ({ default: m.ProjectsPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then((m) => ({ default: m.SettingsPage })));
+const StartWorkPage = lazy(() => import('./pages/StartWorkPage.js').then((m) => ({ default: m.StartWorkPage })));
+const StrategiesPage = lazy(() => import('./pages/StrategiesPage.js').then((m) => ({ default: m.StrategiesPage })));
+const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage.js').then((m) => ({ default: m.WorkspacesPage })));
+const GettingStartedPage = lazy(() =>
+  import('./features/guide/GettingStartedPage.js').then((m) => ({ default: m.GettingStartedPage })),
+);
 import { API_BASE } from './lib/apiBase.js';
+import { useWorkspaces, useWorkspacesStatus } from './lib/api/queries.js';
+import { useQueryClient } from '@tanstack/react-query';
+// Types canonicalized in ./types.ts — never redeclare them here.
+import type {
+  DetectedAI,
+  DetectedEditor,
+  Feature,
+  NexusFlowConfig,
+  OrchestrationDetection,
+  RepoInfo,
+  RunningService,
+  ServiceConfig,
+  StorageAdapterMeta,
+  WorkspaceStatus,
+} from './types.js';
 
-
-// Types matched with src/types.ts
-interface LocalLlmConfig {
-  enabled: boolean;
-  provider: 'ollama' | 'openai-compatible';
-  endpoint: string;
-  model: string;
-  apiKey?: string;
-}
-
-interface NexusFlowConfig {
-  version: string;
-  devDir: string;
-  workspacesDir: string;
-  defaultAssistant: string | null;
-  defaultEditor?: string | null;
-  scanDepth: number;
-  localLlm?: LocalLlmConfig;
-  storageProvider?: string;
-  adapterConfig?: Record<string, Record<string, any>>;
-  plugins?: string[];
-}
-
-interface AdapterConfigField {
-  key: string;
-  label: string;
-  type: 'string' | 'boolean' | 'number' | 'path';
-  required?: boolean;
-  default?: any;
-  description?: string;
-}
-
-interface StorageAdapterMeta {
-  name: string;
-  displayName: string;
-  description: string;
-  configFields: AdapterConfigField[];
-}
-
-interface DetectedAI {
-  name: string;
-  displayName: string;
-  detected: boolean;
-  command?: string;
-}
-
-interface DetectedEditor {
-  name: string;
-  command: string;
-  detected: boolean;
-}
-
-interface RepoInfo {
-  name: string;
-  path: string;
-  defaultBranch: string;
-}
-
-interface Feature {
-  id: string;
-  branchName: string;
-  description: string;
-  repos: string[];
-  assistants: string[];
-  workspacePath: string;
-  createdAt: string;
-}
-
-interface ServiceConfig {
-  name: string;
-  cwd: string;
-  command: string;
-  args: string[];
-  port?: number;
-  source: string;
-}
-
-interface OrchestrationDetection {
-  tool: string;
-  configPath: string;
-  startCommand: string;
-  stopCommand: string;
-}
-
-interface RunningService {
-  name: string;
-  pid: number;
-  config: ServiceConfig;
-  startedAt: string;
-}
-
-type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';
-
-interface WorkspaceStatus {
-  id: string;
-  branchName: string;
-  changedFiles: number;
-  dirtyRepos: number;
-  runningServices: number;
-  syncStatus: SyncStatus | 'unknown';
-  pendingValidation: boolean;
-}
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
@@ -184,12 +104,16 @@ function AppInner() {
 
   const [resumingWs, setResumingWs] = useState<string | null>(null);
 
-  // Workspaces List
-  const [workspaces, setWorkspaces] = useState<Feature[]>([]);
-  const [workspacesLoading, setWorkspacesLoading] = useState(false);
-  // At-a-glance status per workspace (keyed by branchName), for the listing overview.
-  const [workspaceStatuses, setWorkspaceStatuses] = useState<Record<string, WorkspaceStatus>>({});
-  const [statusesLoading, setStatusesLoading] = useState(false);
+  // Workspaces list + at-a-glance statuses live in the shared react-query
+  // cache — the same one the StartWorkPage/ProjectsPage mutations invalidate,
+  // so a created or deleted workspace shows up here without manual syncing.
+  const queryClient = useQueryClient();
+  const workspacesQuery = useWorkspaces();
+  const statusesQuery = useWorkspacesStatus();
+  const workspaces: Feature[] = workspacesQuery.data ?? [];
+  const workspacesLoading = workspacesQuery.isLoading;
+  const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
+  const statusesLoading = statusesQuery.isLoading;
 
   // Active Workspace Services / Orchestration Details
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
@@ -462,32 +386,13 @@ function AppInner() {
     }
   };
 
+  // Kept as the single "refresh workspaces" entry point for the handlers and
+  // pages that call it — it now refreshes the shared react-query cache.
   const fetchWorkspaces = async () => {
-    setWorkspacesLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/workspaces`);
-      const data = await res.json();
-      setWorkspaces(Array.isArray(data) ? data : []);
-      // Refresh at-a-glance status alongside the list (independent endpoint).
-      void fetchWorkspaceStatuses();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setWorkspacesLoading(false);
-    }
-  };
-
-  const fetchWorkspaceStatuses = async () => {
-    setStatusesLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/workspaces/status`);
-      const data = await res.json();
-      setWorkspaceStatuses(data && typeof data === 'object' && !Array.isArray(data) ? data : {});
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setStatusesLoading(false);
-    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] }),
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] }),
+    ]);
   };
 
   const fetchWorkflowTemplates = async () => {
@@ -876,11 +781,10 @@ function AppInner() {
 
 
 
-  // Initial loads
+  // Initial loads (workspaces/statuses load themselves via the query hooks)
   useEffect(() => {
     fetchConfig();
     fetchAIAssistants();
-    fetchWorkspaces();
     fetchUpdateStatus();
     fetchWorkflowTemplates();
 
@@ -892,7 +796,10 @@ function AppInner() {
     }
   }, []);
 
-  // Keep workspace selection (and its data-loading effects) in sync with the route.
+  // Keep workspace selection (and its data-loading effects) in sync with the
+  // route. Clearing the selection off-route matters: the services/log polling
+  // intervals below are keyed on activeWsId and would otherwise keep firing
+  // forever while the user sits on Settings or the Dashboard.
   useEffect(() => {
     const p = location.pathname;
     if (p.startsWith('/workspaces')) {
@@ -901,6 +808,8 @@ function AppInner() {
       const tab = parts[2];
       const valid = ['overview', 'sessions', 'services', 'changes', 'knowledge', 'plan'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
+    } else {
+      setActiveWsId(null);
     }
   }, [location.pathname]);
 
@@ -992,10 +901,11 @@ function AppInner() {
     }
   }, [activeWsId, subTab]);
 
-  // Poll logs for active service logs
+  // Poll logs for active service logs — only while the Services tab is
+  // actually visible; the full log body is re-fetched each tick.
   useEffect(() => {
     let interval: any = null;
-    if (activeWsId && serviceWorkspaceId === activeWsId && selectedLogService) {
+    if (activeWsId && serviceWorkspaceId === activeWsId && selectedLogService && subTab === 'services') {
       fetchLogs(activeWsId, selectedLogService);
       interval = setInterval(() => {
         fetchLogs(activeWsId, selectedLogService);
@@ -1004,7 +914,7 @@ function AppInner() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [activeWsId, serviceWorkspaceId, selectedLogService]);
+  }, [activeWsId, serviceWorkspaceId, selectedLogService, subTab]);
 
   // Scroll to bottom of logs when log content changes
   useEffect(() => {
@@ -1200,12 +1110,7 @@ Core Instructions:
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <AppSidebar
-        pathname={location.pathname}
-        appVersion={appVersion}
-        onNavigate={navigate}
-        onNewWorkspace={() => navigate('/new')}
-      />
+      <AppSidebar appVersion={appVersion} />
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto p-6 sm:p-8">
@@ -1289,20 +1194,28 @@ Core Instructions:
               </div>
             )}
 
-            <Routes>
-              <Route path="/" element={dashboardPage} />
-              <Route path="/guide" element={guidePage} />
-              <Route path="/create" element={startWorkPage} />
-              <Route path="/new" element={startWorkPage} />
-              <Route path="/projects" element={projectsPage} />
-              <Route path="/workspaces" element={workspacesPage} />
-              <Route path="/workspaces/:workspaceId" element={workspacesPage} />
-              <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
-              <Route path="/settings" element={settingsPage} />
-              <Route path="/workflows" element={workflowsPage} />
-              <Route path="/strategies" element={workflowsPage} />
-              <Route path="*" element={dashboardPage} />
-            </Routes>
+            <Suspense
+              fallback={
+                <div className="flex justify-center py-20">
+                  <Spinner className="size-6" />
+                </div>
+              }
+            >
+              <Routes>
+                <Route path="/" element={dashboardPage} />
+                <Route path="/guide" element={guidePage} />
+                <Route path="/create" element={startWorkPage} />
+                <Route path="/new" element={startWorkPage} />
+                <Route path="/projects" element={projectsPage} />
+                <Route path="/workspaces" element={workspacesPage} />
+                <Route path="/workspaces/:workspaceId" element={workspacesPage} />
+                <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
+                <Route path="/settings" element={settingsPage} />
+                <Route path="/workflows" element={workflowsPage} />
+                <Route path="/strategies" element={workflowsPage} />
+                <Route path="*" element={dashboardPage} />
+              </Routes>
+            </Suspense>
           </>
         )}
       </main>

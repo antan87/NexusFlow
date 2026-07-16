@@ -19,6 +19,14 @@ function Card({ className, render, ...props }: useRender.ComponentProps<"div">) 
   });
 }
 
+/**
+ * Horizontal Card: the base Card is a column; every "icon beside text" row
+ * card should use this instead of re-overriding flex-col at the call site.
+ */
+function CardRow({ className, ...props }: useRender.ComponentProps<"div">) {
+  return <Card className={cn("flex-row items-center", className)} {...props} />;
+}
+
 function CardFrame({ className, render, ...props }: useRender.ComponentProps<"div">) {
   const defaultProps = {
     className: cn(
@@ -179,6 +187,7 @@ function CardFooter({ className, render, ...props }: useRender.ComponentProps<"d
 
 export {
   Card,
+  CardRow,
   CardFrame,
   CardFrameHeader,
   CardFrameTitle,

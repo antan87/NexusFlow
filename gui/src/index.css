@@ -1,5 +1,5 @@
 @import "@fontsource-variable/inter";
-@import "@fontsource/jetbrains-mono";
+@import "@fontsource/jetbrains-mono/latin.css";
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
