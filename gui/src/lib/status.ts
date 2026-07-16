@@ -38,9 +38,11 @@ export function findWorkspaceForSession<T extends { branchName: string; workspac
   sessionWorkspacePath: string,
 ): T | undefined {
   const base = repoName(sessionWorkspacePath);
-  return (
-    workspaces.find((w) => w.branchName === base) ??
-    // In-place sessions may record a source-repo cwd instead.
-    workspaces.find((w) => w.repos.some((r) => repoName(r) === base))
-  );
+  const byName = workspaces.find((w) => w.branchName === base);
+  if (byName) return byName;
+  // In-place sessions may record a source-repo cwd instead. Several in-place
+  // workspaces can share a repo — an ambiguous match is treated as no match,
+  // because resuming against an arbitrary workspace loses the session context.
+  const byRepo = workspaces.filter((w) => w.repos.some((r) => repoName(r) === base));
+  return byRepo.length === 1 ? byRepo[0] : undefined;
 }

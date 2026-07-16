@@ -46,7 +46,11 @@ export function useCreationStream() {
       );
       sourceRef.current = source;
 
+      let errorCount = 0;
       source.addEventListener('progress', (event) => {
+        // Any successful frame proves the connection healed — reset the
+        // failure budget so long jobs survive repeated idle-timeout drops.
+        errorCount = 0;
         try {
           const data = JSON.parse((event as MessageEvent).data);
           setProgress({
@@ -66,14 +70,15 @@ export function useCreationStream() {
         }
       });
 
-      let errorCount = 0;
       source.onerror = () => {
         // EventSource reconnects automatically, and on reconnect the server
         // replays the job's CURRENT state as the initial frame — so transient
-        // drops (or the server closing after completion) self-heal. Only give
-        // up after repeated failures.
+        // drops self-heal (errorCount resets on every received frame). Give up
+        // when the browser has permanently closed the connection (e.g. the
+        // finished job was evicted server-side and the endpoint now 404s), or
+        // after repeated failures with no successful frame in between.
         errorCount += 1;
-        if (errorCount < 5) return;
+        if (source.readyState !== EventSource.CLOSED && errorCount < 5) return;
         setProgress((prev) =>
           prev.status === 'running'
             ? { ...prev, status: 'failed', error: prev.error ?? 'Lost connection to the creation stream.' }

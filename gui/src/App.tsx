@@ -112,10 +112,16 @@ function AppInner() {
   const [deletingTemplate, setDeletingTemplate] = useState(false);
   const [selectedInspectAssistant, setSelectedInspectAssistant] = useState<string>('antigravity');
 
-  // Default the inspect-assistant to the first launchable detected one.
+  // Default the inspect-assistant to the first launchable detected one —
+  // exactly ONCE. A background refetch must never clobber a manual selection.
+  const inspectAssistantSeededRef = useRef(false);
   useEffect(() => {
-    const firstHarness = (aiDetectQuery.data ?? []).find((ai) => ai.detected && ai.command);
-    if (firstHarness) setSelectedInspectAssistant(firstHarness.name);
+    if (inspectAssistantSeededRef.current || !aiDetectQuery.data) return;
+    const firstHarness = aiDetectQuery.data.find((ai) => ai.detected && ai.command);
+    if (firstHarness) {
+      inspectAssistantSeededRef.current = true;
+      setSelectedInspectAssistant(firstHarness.name);
+    }
   }, [aiDetectQuery.data]);
   const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
   const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
@@ -1158,7 +1164,13 @@ Core Instructions:
                     The NexusFlow GUI could not connect to the local server. Make sure you started the GUI correctly via <code>nexusflow ui</code> or that the backend is running.
                   </p>
                   <button
-                    onClick={() => { setConfigLoading(true); fetchConfig(); }}
+                    onClick={() => {
+                      setConfigLoading(true);
+                      fetchConfig();
+                      // The list/detection queries exhausted their retries
+                      // while the backend was down — refetch them all now.
+                      queryClient.invalidateQueries();
+                    }}
                     className="px-4 py-2 bg-primary hover:bg-primary/90 text-white font-medium text-sm rounded-md transition-colors cursor-pointer inline-flex items-center gap-2"
                   >
                     <RefreshCw size={16} /> Try Again

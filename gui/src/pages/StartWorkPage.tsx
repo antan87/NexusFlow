@@ -211,18 +211,21 @@ export function StartWorkPage() {
     }
   };
 
+  // 'none' is a legacy persisted sentinel meaning "no editor configured".
+  const defaultEditor = config?.defaultEditor && config.defaultEditor !== 'none' ? config.defaultEditor : null;
+
   const openInEditor = async () => {
     if (!progress.workspacePath) return;
     if (isVsCode) {
       window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: progress.workspacePath }, '*');
       return;
     }
-    if (!config?.defaultEditor) return;
+    if (!defaultEditor) return;
     setOpeningEditor(true);
     try {
       await apiFetch('/api/open-editor', {
         method: 'POST',
-        body: JSON.stringify({ workspacePath: progress.workspacePath, command: config.defaultEditor }),
+        body: JSON.stringify({ workspacePath: progress.workspacePath, command: defaultEditor }),
       });
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
@@ -234,7 +237,7 @@ export function StartWorkPage() {
   // ── Creation progress / result panel ─────────────────────────────────────
   if (progress.status !== 'idle') {
     const failedStep = progress.steps.find((s) => s.status === 'failed');
-    const canOpenEditor = isVsCode || Boolean(config?.defaultEditor);
+    const canOpenEditor = isVsCode || Boolean(defaultEditor);
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
