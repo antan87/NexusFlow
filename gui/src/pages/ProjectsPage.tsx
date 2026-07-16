@@ -26,6 +26,7 @@ import { Input } from '../components/ui/input.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { RepoChecklist } from '../components/RepoChecklist.js';
+import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
 import {
   useCreateProject,
   useDeleteProject,
@@ -253,6 +254,11 @@ export function ProjectsPage() {
                 onToggle={toggleRepo}
                 loading={repos.isLoading}
                 emptyHint="No repositories found in your dev directory."
+              />
+              <ScaffoldRepoInline
+                onCreated={(repo) =>
+                  setForm((prev) => (prev ? { ...prev, repoPaths: [...prev.repoPaths, repo.path] } : prev))
+                }
               />
             </div>
             {formError && <p className="text-sm text-destructive-foreground">{formError}</p>}

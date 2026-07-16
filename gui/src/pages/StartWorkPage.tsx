@@ -23,10 +23,12 @@ import {
   useConfig,
   useCreateWorkspace,
   useProjects,
+  useRepoBranches,
   useRepos,
   useWorkflowTemplates,
   type CreateWorkspacePayload,
 } from '../lib/api/queries.js';
+import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
 import type { RepoInfo, WorkspaceMode } from '../types.js';
 
@@ -49,6 +51,47 @@ const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: strin
     body: 'A feature branch and worktree per repo. Your source checkouts stay untouched.',
   },
 ];
+
+/**
+ * One per-repo existing-branch override input, with the repo's real branches
+ * offered as datalist suggestions (fetched lazily once the section opens —
+ * the server still enforces existence, this just prevents typos up front).
+ */
+function BranchOverrideRow({
+  repo,
+  value,
+  onChange,
+  enabled,
+}: {
+  repo: RepoInfo;
+  value: string;
+  onChange: (v: string) => void;
+  enabled: boolean;
+}) {
+  const branches = useRepoBranches(repo.path, enabled);
+  const options = useMemo(
+    () => [...new Set([...(branches.data?.local ?? []), ...(branches.data?.remote ?? [])])],
+    [branches.data],
+  );
+  const listId = `branches-${repo.path.replace(/[^a-zA-Z0-9]/g, '-')}`;
+  return (
+    <label className="flex items-center gap-2">
+      <span className="w-40 shrink-0 truncate text-xs">{repo.name}</span>
+      <Input
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="existing branch (must exist)"
+        className="h-7 font-mono text-xs"
+      />
+      <datalist id={listId}>
+        {options.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+    </label>
+  );
+}
 
 function StepRow({ step }: { step: CreationStep }) {
   return (
@@ -110,6 +153,7 @@ export function StartWorkPage() {
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
   /** Optional per-repo existing branch (keyed by repo PATH — names can repeat). */
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
+  const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [openingEditor, setOpeningEditor] = useState(false);
 
@@ -337,6 +381,7 @@ export function StartWorkPage() {
                 }
                 loading={repos.isLoading}
               />
+              <ScaffoldRepoInline onCreated={(repo) => setAdHocPaths((prev) => [...prev, repo.path])} />
             </div>
           )}
           {(projects.data ?? []).length === 0 && !projects.isLoading && (
@@ -415,23 +460,22 @@ export function StartWorkPage() {
                 />
               </label>
               {selectedRepos.length > 0 && (
-                <details className="rounded-lg border border-border px-3 py-2">
+                <details
+                  className="rounded-lg border border-border px-3 py-2"
+                  onToggle={(e) => setOverridesOpen((e.target as HTMLDetailsElement).open)}
+                >
                   <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
                     Use an existing branch for specific repos (optional)
                   </summary>
                   <div className="mt-2 flex flex-col gap-2">
                     {selectedRepos.map((repo) => (
-                      <label key={repo.path} className="flex items-center gap-2">
-                        <span className="w-40 shrink-0 truncate text-xs">{repo.name}</span>
-                        <Input
-                          value={branchOverrides[repo.path] ?? ''}
-                          onChange={(e) =>
-                            setBranchOverrides((prev) => ({ ...prev, [repo.path]: e.target.value }))
-                          }
-                          placeholder="existing branch (must exist)"
-                          className="h-7 font-mono text-xs"
-                        />
-                      </label>
+                      <BranchOverrideRow
+                        key={repo.path}
+                        repo={repo}
+                        enabled={overridesOpen}
+                        value={branchOverrides[repo.path] ?? ''}
+                        onChange={(v) => setBranchOverrides((prev) => ({ ...prev, [repo.path]: v }))}
+                      />
                     ))}
                   </div>
                 </details>

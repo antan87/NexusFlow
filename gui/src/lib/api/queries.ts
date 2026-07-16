@@ -135,6 +135,35 @@ export function useRepos() {
   });
 }
 
+/** Local and origin branches of a repository (mirrors utils/git.ts). */
+export interface RepoBranches {
+  local: string[];
+  remote: string[];
+}
+
+/** Branches of one repo, for existing-branch suggestions. Lazy via `enabled`. */
+export function useRepoBranches(repoPath: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['repo-branches', repoPath],
+    queryFn: () => apiFetch<RepoBranches>(`/api/repos/branches?path=${encodeURIComponent(repoPath)}`),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Scaffolds a brand-new local git repository in the dev directory. */
+export function useCreateRepo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<{ success: boolean; repo: RepoInfo }>('/api/repos/new', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['repos'] }),
+  });
+}
+
 export function useAiDetect() {
   return useQuery({
     queryKey: ['ai-detect'],
