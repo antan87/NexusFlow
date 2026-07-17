@@ -9,8 +9,8 @@ test.describe('Theme toggle', () => {
       exists: true,
       config: {
         version: '0.2.7',
-        devDir: 'C:\\Users\\patro\\dev',
-        workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
+        devDir: 'C:\\mock-dev',
+        workspacesDir: 'C:\\mock-dev\\workspaces',
         defaultAssistant: null,
         scanDepth: 2,
       },

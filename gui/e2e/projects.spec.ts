@@ -4,14 +4,14 @@ const demoProject = {
   id: 'demo',
   name: 'Demo',
   description: 'Demo project',
-  repos: [{ path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' }],
+  repos: [{ path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' }],
   createdAt: '2026-07-15T00:00:00.000Z',
   updatedAt: '2026-07-15T00:00:00.000Z',
 };
 
 const repos = [
-  { name: 'nexus-frontend', path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' },
-  { name: 'nexus-backend', path: 'C:\\Users\\patro\\dev\\nexus-backend', defaultBranch: 'main' },
+  { name: 'nexus-frontend', path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' },
+  { name: 'nexus-backend', path: 'C:\\mock-dev\\nexus-backend', defaultBranch: 'main' },
 ];
 
 test.describe('Projects page', () => {
@@ -24,9 +24,9 @@ test.describe('Projects page', () => {
         projectId: 'demo',
         branchName: 'demo-workspace',
         description: 'Demo workspace',
-        repos: ['C:\\Users\\patro\\dev\\nexus-frontend'],
+        repos: ['C:\\mock-dev\\nexus-frontend'],
         assistants: [],
-        workspacePath: 'C:\\Users\\patro\\dev\\nexus-frontend',
+        workspacePath: 'C:\\mock-dev\\nexus-frontend',
         createdAt: '2026-07-15T00:00:00.000Z',
       },
     ],
@@ -51,7 +51,7 @@ test.describe('Projects page', () => {
         expect(createBody).toEqual({
           name: 'Billing',
           description: 'Billing repos',
-          repos: ['C:\\Users\\patro\\dev\\nexus-backend'],
+          repos: ['C:\\mock-dev\\nexus-backend'],
         });
         projects = [
           ...projects,
@@ -87,7 +87,7 @@ test.describe('Projects page', () => {
 
     await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Demo' })).toBeVisible();
-    await expect(page.getByText('C:\\Users\\patro\\dev\\nexus-frontend')).toBeVisible();
+    await expect(page.getByText('C:\\mock-dev\\nexus-frontend')).toBeVisible();
 
     await page.getByRole('button', { name: 'New project' }).click();
     await page.getByLabel('Name').fill('Billing');

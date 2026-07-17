@@ -14,7 +14,7 @@ async function mockCompletedCreationStream(page: Page) {
           const eventPayload = {
             status: 'completed',
             progress: 100,
-            workspacePath: `C:\\Users\\patro\\dev\\workspaces\\${jobId}`,
+            workspacePath: `C:\\mock-dev\\workspaces\\${jobId}`,
             feature: { id: jobId },
             steps: [
               { id: 'workspace', name: 'Create workspace', status: 'completed', message: 'Done' },
@@ -42,7 +42,7 @@ async function mockCompletedCreationStream(page: Page) {
 test.describe('NexusFlow E2E GUI Tests', () => {
   test.use({
     reposData: [
-      { name: 'nexus-frontend', path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' },
+      { name: 'nexus-frontend', path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' },
     ],
     aiDetectData: [{ name: 'claude', displayName: 'Claude CLI', detected: true }],
     workflowsTemplatesData: {
@@ -77,8 +77,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
         });
       } else if (request.method() === 'POST') {
         const body = request.postDataJSON();
-        expect(body.devDir).toBe('C:\\Users\\patro\\dev');
-        expect(body.workspacesDir).toBe('C:\\Users\\patro\\dev\\workspaces');
+        expect(body.devDir).toBe('C:\\mock-dev');
+        expect(body.workspacesDir).toBe('C:\\mock-dev\\workspaces');
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -104,10 +104,10 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page.locator('h1')).toContainText('Welcome to NexusFlow');
     await expect(page.locator('h2')).toContainText('Initialize Config');
 
-    await page.getByPlaceholder('e.g. C:\\Users\\username\\dev', { exact: true }).fill('C:\\Users\\patro\\dev');
+    await page.getByPlaceholder('e.g. C:\\Users\\username\\dev', { exact: true }).fill('C:\\mock-dev');
     await page
       .getByPlaceholder('e.g. C:\\Users\\username\\dev\\workspaces', { exact: true })
-      .fill('C:\\Users\\patro\\dev\\workspaces');
+      .fill('C:\\mock-dev\\workspaces');
 
     await page.locator('button:has-text("Save & Get Started")').click();
   });
@@ -123,7 +123,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
             id: 'demo',
             name: 'Demo',
             description: 'Demo project',
-            repos: [{ path: 'C:\\Users\\patro\\dev\\nexus-frontend', defaultBranch: 'main' }],
+            repos: [{ path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' }],
             createdAt: '2026-07-15T00:00:00.000Z',
             updatedAt: '2026-07-15T00:00:00.000Z',
           },
@@ -198,8 +198,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
             exists: true,
             config: {
               version: '0.2.7',
-              devDir: 'C:\\Users\\patro\\dev',
-              workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
+              devDir: 'C:\\mock-dev',
+              workspacesDir: 'C:\\mock-dev\\workspaces',
               defaultAssistant: 'ANTIGRAVITY',
               scanDepth: 2,
             },
@@ -224,13 +224,13 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await expect(page.locator('h1')).toContainText('Global Settings');
 
-    const devDirInput = page.locator('label:has-text("Development Directory") + input, input[value="C:\\\\Users\\\\patro\\\\dev"]').first();
-    await devDirInput.fill('C:\\Users\\patro\\code');
+    const devDirInput = page.locator('label:has-text("Development Directory") + input, input[value="C:\\\\mock-dev"]').first();
+    await devDirInput.fill('C:\\mock-code');
 
     const saveButton = page.locator('button:has-text("Save Configuration")');
     await expect(saveButton).toBeEnabled();
     await saveButton.click();
 
-    await expect.poll(() => savedConfig?.devDir).toBe('C:\\Users\\patro\\code');
+    await expect.poll(() => savedConfig?.devDir).toBe('C:\\mock-code');
   });
 });

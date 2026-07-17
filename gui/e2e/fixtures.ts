@@ -18,8 +18,8 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     exists: true,
     config: {
       version: '0.2.7',
-      devDir: 'C:\\Users\\patro\\dev',
-      workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
+      devDir: 'C:\\mock-dev',
+      workspacesDir: 'C:\\mock-dev\\workspaces',
       defaultAssistant: 'ANTIGRAVITY',
       scanDepth: 2,
       localLlm: {
