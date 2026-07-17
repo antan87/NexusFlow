@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Cpu, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
 
 import { Alert } from '../components/ui/alert.js';
 import { Badge } from '../components/ui/badge.js';
@@ -12,7 +12,7 @@ import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
 import type { DetectedEditor, NexusFlowConfig, StorageAdapterMeta } from '../types.js';
 
-type LocalLlmProvider = NonNullable<NexusFlowConfig['localLlm']>['provider'];
+
 
 interface ToolStatus {
   id: string;
@@ -32,10 +32,7 @@ interface SettingsPageProps {
   adapters: StorageAdapterMeta[];
   saveAppConfig: (config: NexusFlowConfig) => void;
   isSettingsFormValid: boolean;
-  recommendation?: any;
-  testingLlm: boolean;
-  testStatus: { success: boolean; message: string } | null;
-  testLlmConnection: () => void;
+
   toolsStatus: ToolStatus[];
   toolsLoading: boolean;
   updatingToolId: string | null;
@@ -51,10 +48,7 @@ export function SettingsPage({
   adapters,
   saveAppConfig,
   isSettingsFormValid,
-  recommendation,
-  testingLlm,
-  testStatus,
-  testLlmConnection,
+
   toolsStatus,
   toolsLoading,
   updatingToolId,
@@ -65,11 +59,7 @@ export function SettingsPage({
 
   const selectedEditor = editors.find((ed) => ed.command === config.defaultEditor);
   const selectedAdapter = adapters.find((a) => a.name === (config.storageProvider || 'local'));
-  const endpointInvalid = Boolean(
-    config.localLlm?.endpoint &&
-      !config.localLlm.endpoint.trim().startsWith('http://') &&
-      !config.localLlm.endpoint.trim().startsWith('https://'),
-  );
+
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-in">
@@ -313,167 +303,6 @@ export function SettingsPage({
         </div>
       </Card>
 
-      <Card className="mb-6 rounded-xl p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-foreground">Local AI Co-Processor Settings</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Enable a local LLM to handle simple tasks like log analysis, git diff summaries, and boilerplate code
-          generation without using remote tokens.
-        </p>
-
-        {recommendation && (
-          <div className="mt-6 flex flex-col gap-1.5 rounded-xl border border-border bg-muted/40 p-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2 font-semibold text-foreground">
-              <Cpu size={14} /> Local System Scan Results
-            </div>
-            <div>
-              Detected Memory: <strong className="text-foreground">{recommendation.totalRamGb} GB RAM</strong>
-            </div>
-            <div>
-              Detected GPU: <strong className="text-foreground">{recommendation.gpuName}</strong>
-            </div>
-            <div>
-              Recommended Model:{' '}
-              <Badge variant="info" className="font-mono">
-                {recommendation.recommendedModel}
-              </Badge>
-            </div>
-          </div>
-        )}
-
-        <Label id="localLlmEnabled" className="mt-6 flex cursor-pointer items-center gap-3">
-          <Switch
-            checked={config.localLlm?.enabled || false}
-            onCheckedChange={(checked) => {
-              const defaultLlm = {
-                enabled: checked,
-                provider: 'ollama' as const,
-                endpoint: 'http://localhost:11434',
-                model: recommendation?.recommendedModel || 'qwen2.5-coder:1.5b',
-              };
-              setConfig({
-                ...config,
-                localLlm: config.localLlm ? { ...config.localLlm, enabled: checked } : defaultLlm,
-              });
-            }}
-          />
-          Enable Local AI Delegation Tool
-        </Label>
-
-        {config.localLlm?.enabled && (
-          <div className="mt-6 space-y-6 border-t border-border pt-6">
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Local Provider</Label>
-                <Select
-                  value={config.localLlm.provider}
-                  onValueChange={(value) =>
-                    typeof value === 'string' &&
-                    setConfig({
-                      ...config,
-                      localLlm: { ...config.localLlm!, provider: value as LocalLlmProvider },
-                    })
-                  }
-                >
-                  <SelectTrigger aria-label="Local Provider">
-                    <SelectValue>
-                      {config.localLlm.provider === 'openai-compatible'
-                        ? 'OpenAI-Compatible (e.g. LM Studio)'
-                        : 'Ollama'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    <SelectItem value="ollama">Ollama</SelectItem>
-                    <SelectItem value="openai-compatible">OpenAI-Compatible (e.g. LM Studio)</SelectItem>
-                  </SelectPopup>
-                </Select>
-                <span className="text-xs text-muted-foreground">Provider protocol to connect to.</span>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-foreground">Endpoint URL</label>
-                <input
-                  type="text"
-                  className={`h-9 w-full rounded-lg border bg-background px-3 text-sm text-foreground outline-none transition-shadow placeholder:text-muted-foreground/72 focus-visible:ring-[3px] ${
-                    endpointInvalid
-                      ? 'border-destructive/64 focus-visible:border-destructive focus-visible:ring-destructive/16'
-                      : 'border-input focus-visible:border-ring focus-visible:ring-ring/24'
-                  }`}
-                  value={config.localLlm.endpoint}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      localLlm: { ...config.localLlm!, endpoint: e.target.value },
-                    })
-                  }
-                />
-                {endpointInvalid && (
-                  <span className="text-xs text-destructive-foreground">
-                    Endpoint must start with http:// or https://
-                  </span>
-                )}
-                <span className="text-xs text-muted-foreground">API base address of the local runner.</span>
-              </div>
-
-              <div className="flex flex-col gap-1.5 md:col-span-2">
-                <Label className="text-sm">Model Name</Label>
-                <Input
-                  type="text"
-                  value={config.localLlm.model}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      localLlm: { ...config.localLlm!, model: e.target.value },
-                    })
-                  }
-                />
-                <span className="text-xs text-muted-foreground">
-                  Exact name of the model registered on the server (e.g.,{' '}
-                  <code className="font-mono text-foreground">qwen2.5-coder:1.5b</code>).
-                </span>
-              </div>
-
-              {config.localLlm.provider === 'openai-compatible' && (
-                <div className="flex flex-col gap-1.5 md:col-span-2">
-                  <Label className="text-sm">API Key (Optional)</Label>
-                  <Input
-                    type="password"
-                    value={config.localLlm.apiKey || ''}
-                    placeholder="sk-..."
-                    onChange={(e) =>
-                      setConfig({
-                        ...config,
-                        localLlm: { ...config.localLlm!, apiKey: e.target.value },
-                      })
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    Optional key for authenticating with cloud LLM providers (e.g. OpenAI, DeepSeek, OpenRouter).
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <Button type="button" variant="outline" size="sm" disabled={testingLlm} onClick={testLlmConnection}>
-                {testingLlm && <Spinner className="size-3" />}
-                {testingLlm ? 'Testing...' : 'Test Connection'}
-              </Button>
-
-              {testStatus && (
-                <div
-                  className={`rounded-lg border px-3 py-1.5 text-xs ${
-                    testStatus.success
-                      ? 'border-success/32 bg-success/8 text-success-foreground'
-                      : 'border-destructive/32 bg-destructive/8 text-destructive-foreground'
-                  }`}
-                >
-                  {testStatus.message}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </Card>
 
       <Card className="mt-6 rounded-xl p-6 shadow-sm">
         <div className="mb-6 flex items-start justify-between gap-4">

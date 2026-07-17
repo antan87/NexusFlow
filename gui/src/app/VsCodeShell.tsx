@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import { Play, X } from 'lucide-react';
-import type { Feature, NexusFlowConfig, RunningService, ServiceConfig } from '../types.js';
+import type { Feature, RunningService, ServiceConfig } from '../types.js';
 
 interface VsCodeShellProps {
   activeWsId: string | null;
@@ -11,7 +11,7 @@ interface VsCodeShellProps {
   appVersion: string;
   workspaces: Feature[];
   fetchWorkspaceServices: (wsId: string, silent?: boolean) => Promise<void>;
-  config: NexusFlowConfig | null;
+
   services: ServiceConfig[];
   runningServices: RunningService[];
   handleStartServices: (wsId: string) => Promise<void>;
@@ -31,7 +31,7 @@ export function VsCodeShell({
   appVersion,
   workspaces,
   fetchWorkspaceServices,
-  config,
+
   services,
   runningServices,
   handleStartServices,
@@ -166,12 +166,7 @@ export function VsCodeShell({
                   <span>• get_service_logs</span>
                   <span className="text-primary font-bold">READY</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>• delegate_to_local_agent</span>
-                  <span className={config?.localLlm?.enabled ? "text-primary font-bold" : "text-muted-foreground/50 font-bold"}>
-                    {config?.localLlm?.enabled ? 'READY' : 'DISABLED'}
-                  </span>
-                </div>
+
               </div>
             </div>
 

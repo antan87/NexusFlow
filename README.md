@@ -223,7 +223,7 @@ NexusFlow is built around a single loop:
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
 | `get_service_logs` | Tail a running service's logs |
-| `delegate_to_local_agent` | Offload cheap/high-volume subtasks to a local SLM (when enabled) |
+
 
 Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `NEXUSFLOW_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 

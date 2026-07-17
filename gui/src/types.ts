@@ -17,13 +17,6 @@ export interface NexusFlowConfig {
   storageProvider?: string;
   adapterConfig?: Record<string, Record<string, any>>;
   plugins?: string[];
-  localLlm?: {
-    enabled: boolean;
-    provider: 'ollama' | 'openai-compatible';
-    endpoint: string;
-    model: string;
-    apiKey?: string;
-  };
 }
 
 export interface DetectedAI {

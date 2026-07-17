@@ -186,7 +186,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect.poll(() => workspaceBody?.mode).toBe('in-place');
   });
 
-  test('should validate Local LLM configuration in settings', async ({ page }) => {
+  test('should save settings changes', async ({ page }) => {
     let savedConfig: any = null;
 
     await page.route('**/api/config', async (route, request) => {
@@ -202,12 +202,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
               workspacesDir: 'C:\\Users\\patro\\dev\\workspaces',
               defaultAssistant: 'ANTIGRAVITY',
               scanDepth: 2,
-              localLlm: {
-                enabled: false,
-                provider: 'ollama',
-                endpoint: 'http://localhost:11434',
-                model: 'qwen2.5-coder:1.5b',
-              },
             },
           }),
         });
@@ -225,33 +219,18 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
     });
 
-    await page.route('**/api/local-llm/recommend', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ totalRamGb: 16, gpuName: 'NVIDIA RTX 4070', recommendedModel: 'qwen2.5-coder:7b' }),
-      });
-    });
-
     await page.goto('/');
     await page.locator('aside a:has-text("Settings")').click();
 
     await expect(page.locator('h1')).toContainText('Global Settings');
 
-    await page.locator('#localLlmEnabled').click();
-
-    const endpointInput = page.locator('label:has-text("Endpoint URL") + input');
-    await endpointInput.fill('invalid-url-format');
+    const devDirInput = page.locator('label:has-text("Development Directory") + input, input[value="C:\\\\Users\\\\patro\\\\dev"]').first();
+    await devDirInput.fill('C:\\Users\\patro\\code');
 
     const saveButton = page.locator('button:has-text("Save Configuration")');
-    await expect(saveButton).toBeDisabled();
-
-    await endpointInput.fill('http://localhost:11434');
     await expect(saveButton).toBeEnabled();
-
     await saveButton.click();
 
-    expect(savedConfig.localLlm.enabled).toBe(true);
-    expect(savedConfig.localLlm.endpoint).toBe('http://localhost:11434');
+    await expect.poll(() => savedConfig?.devDir).toBe('C:\\Users\\patro\\code');
   });
 });

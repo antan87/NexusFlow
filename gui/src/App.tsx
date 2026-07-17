@@ -187,20 +187,10 @@ function AppInner() {
   const [toolsLoading, setToolsLoading] = useState(false);
   const [updatingToolId, setUpdatingToolId] = useState<string | null>(null);
 
-  // Local LLM states
-  const [recommendation, setRecommendation] = useState<{ totalRamGb: number; gpuName: string; recommendedModel: string } | null>(null);
-  const [testStatus, setTestStatus] = useState<{ success: boolean; message: string } | null>(null);
-  const [testingLlm, setTestingLlm] = useState(false);
 
   const isSettingsFormValid = (() => {
     if (!config) return false;
     if (!config.devDir || config.devDir.trim() === '' || !config.workspacesDir || config.workspacesDir.trim() === '') return false;
-    if (config.localLlm?.enabled) {
-      const endpoint = config.localLlm.endpoint?.trim() || '';
-      if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
-        return false;
-      }
-    }
     return true;
   })();
 
@@ -281,40 +271,6 @@ function AppInner() {
     }
   };
 
-  const fetchLlmRecommendation = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/local-llm/recommend`);
-      if (res.ok) {
-        const data = await res.json();
-        setRecommendation(data);
-      }
-    } catch (e) {
-      console.error('Error fetching LLM recommendation:', e);
-    }
-  };
-
-  const testLlmConnection = async () => {
-    if (!config?.localLlm) return;
-    setTestingLlm(true);
-    setTestStatus(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/local-llm/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config.localLlm),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setTestStatus({ success: true, message: data.message });
-      } else {
-        setTestStatus({ success: false, message: data.error || 'Connection failed.' });
-      }
-    } catch (e: any) {
-      setTestStatus({ success: false, message: e.message || 'Network error.' });
-    } finally {
-      setTestingLlm(false);
-    }
-  };
 
   const fetchAdapters = async () => {
     try {
@@ -833,7 +789,6 @@ function AppInner() {
   useEffect(() => {
     if (location.pathname.startsWith('/settings')) {
       fetchToolsStatus();
-      fetchLlmRecommendation();
     }
   }, [location.pathname]);
 
@@ -1002,7 +957,7 @@ Core Instructions:
         appVersion={appVersion}
         workspaces={workspaces}
         fetchWorkspaceServices={fetchWorkspaceServices}
-        config={config}
+
         services={services}
         runningServices={runningServices}
         handleStartServices={handleStartServices}
@@ -1080,8 +1035,7 @@ Core Instructions:
   const settingsPage = config ? (
     <SettingsPage
       config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
-      saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid} recommendation={recommendation}
-      testingLlm={testingLlm} testStatus={testStatus} testLlmConnection={testLlmConnection}
+      saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
       fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}
     />

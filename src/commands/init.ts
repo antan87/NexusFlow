@@ -9,7 +9,6 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { loadConfig, saveConfig, ensureConfigDir } from '../core/config.js';
-import { scanSystemSpecs } from '../utils/system-scanner.js';
 
 /**
  * Initializes NexusFlow configuration interactively.
@@ -42,84 +41,13 @@ export async function initCommand(): Promise<void> {
     },
   });
 
-  // ── 2. Local AI Scanner & Config ──────────────────────────────────────
-  console.log(chalk.cyan('\nProbing system hardware for local AI capabilities...'));
-  let specs;
-  try {
-    specs = await scanSystemSpecs();
-  } catch (error) {
-    specs = {
-      totalRamGb: 8,
-      gpuName: 'Unknown/Integrated',
-      hasHardwareAcceleration: false,
-      recommendedModel: 'qwen2.5-coder:1.5b',
-    };
-  }
-  console.log(chalk.dim(`  RAM Detected: ${specs.totalRamGb} GB`));
-  console.log(chalk.dim(`  GPU Detected: ${specs.gpuName}`));
-  console.log(chalk.dim(`  Recommended model: ${chalk.bold(specs.recommendedModel)}`));
 
-  const enableLlm = await confirm({
-    message: 'Enable Local AI Co-processor (Ollama/LM Studio)?',
-    default: existing.localLlm?.enabled ?? false,
-  });
-
-  let localLlmConfig = existing.localLlm || {
-    enabled: false,
-    provider: 'ollama',
-    endpoint: 'http://localhost:11434',
-    model: specs.recommendedModel,
-  };
-
-  if (enableLlm) {
-    const provider = await select({
-      message: 'Local AI Provider:',
-      choices: [
-        { name: 'Ollama', value: 'ollama' as const },
-        { name: 'OpenAI-Compatible (e.g. LM Studio, Llama.cpp)', value: 'openai-compatible' as const },
-      ],
-      default: existing.localLlm?.provider || 'ollama',
-    });
-
-    const defaultEndpoint = provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234';
-    const endpoint = await input({
-      message: 'Local AI Endpoint URL:',
-      default: existing.localLlm?.endpoint || defaultEndpoint,
-      validate: (value: string) => {
-        const trimmed = value.trim();
-        if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-          return 'Endpoint must start with http:// or https://';
-        }
-        try {
-          new URL(trimmed);
-          return true;
-        } catch {
-          return 'Please enter a valid URL';
-        }
-      },
-    });
-
-    const model = await input({
-      message: `Local LLM Model Name (Recommended: ${specs.recommendedModel}):`,
-      default: existing.localLlm?.model || specs.recommendedModel,
-    });
-
-    localLlmConfig = {
-      enabled: true,
-      provider,
-      endpoint: endpoint.trim(),
-      model: model.trim(),
-    };
-  } else {
-    localLlmConfig.enabled = false;
-  }
 
   const config = {
     ...existing,
     devDir: devDir.trim(),
     workspacesDir: workspacesDir.trim(),
     scanDepth: parseInt(scanDepth, 10),
-    localLlm: localLlmConfig,
   };
 
   await saveConfig(config);
@@ -129,6 +57,5 @@ export async function initCommand(): Promise<void> {
   console.log(chalk.dim(`  Dev dir:     ${config.devDir}`));
   console.log(chalk.dim(`  Workspaces:  ${config.workspacesDir}`));
   console.log(chalk.dim(`  Scan depth:  ${config.scanDepth}`));
-  console.log(chalk.dim(`  Local AI:    ${config.localLlm.enabled ? `Enabled (${config.localLlm.provider}, model: ${config.localLlm.model})` : 'Disabled'}`));
   console.log(chalk.dim('\n  Run "nexusflow create" to create your first workspace.\n'));
 }

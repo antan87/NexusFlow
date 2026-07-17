@@ -6,14 +6,6 @@
 /** Supported AI assistant identifiers. */
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
 
-export interface LocalLlmConfig {
-  enabled: boolean;
-  provider: 'ollama' | 'openai-compatible';
-  endpoint: string;
-  model: string;
-  apiKey?: string;
-}
-
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */
 export interface NexusFlowConfig {
   /** Semantic version of the NexusFlow config schema. */
@@ -54,8 +46,6 @@ export interface NexusFlowConfig {
   latestDownloadUrl?: string | null;
   latestReleaseNotes?: string;
 
-  /** Local LLM settings for delegating simple tasks. */
-  localLlm?: LocalLlmConfig;
 }
 
 /** Result of probing for an AI assistant on the system. */
@@ -215,9 +205,6 @@ export interface Feature {
   /** Resumption configuration. */
   resumption?: ResumptionConfig;
 
-  /** Whether the Local LLM Co-processor is active for this workspace. */
-  localLlmEnabled?: boolean;
-
   /** Custom teamwork coordination instructions for the agent team. */
   teamworkInstructions?: string;
 }
@@ -233,8 +220,6 @@ export interface WorkspaceContext {
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
 
-  /** The global local LLM config, to provide model context. */
-  localLlm?: LocalLlmConfig;
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────

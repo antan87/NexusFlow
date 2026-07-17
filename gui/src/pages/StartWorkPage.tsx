@@ -150,7 +150,7 @@ export function StartWorkPage() {
   const [testCommand, setTestCommand] = useState('npm run test');
   const [mockCommand, setMockCommand] = useState('');
   const [startCommand, setStartCommand] = useState('');
-  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
+
   /** Optional per-repo existing branch (keyed by repo PATH — names can repeat). */
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
@@ -167,10 +167,7 @@ export function StartWorkPage() {
     }
   }, [aiDetect.data]);
 
-  // Default the local-LLM toggle from the global config, once known.
-  useEffect(() => {
-    if (config?.localLlm?.enabled) setLocalLlmEnabled(true);
-  }, [config?.localLlm?.enabled]);
+
 
   const selectedProject = useMemo(
     () => (projects.data ?? []).find((p) => p.id === projectId) ?? null,
@@ -239,7 +236,7 @@ export function StartWorkPage() {
           !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
       assistants,
-      localLlmEnabled,
+
       teamworkInstructions: customInstructions.trim() || undefined,
       resumption: {
         testCommand: testCommand.trim() || undefined,
@@ -595,12 +592,7 @@ export function StartWorkPage() {
                 </div>
               </div>
 
-              {config?.localLlm && (
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={localLlmEnabled} onCheckedChange={() => setLocalLlmEnabled((v) => !v)} />
-                  Enable the local AI co-processor for this workspace
-                </label>
-              )}
+
             </div>
           )}
         </section>

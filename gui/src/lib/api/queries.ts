@@ -65,7 +65,7 @@ export interface CreateWorkspacePayload {
   description: string;
   repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
   assistants: string[];
-  localLlmEnabled?: boolean;
+
   teamworkInstructions?: string;
   resumption?: { testCommand?: string; mockCommand?: string; startCommand?: string };
 }

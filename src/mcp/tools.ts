@@ -27,7 +27,6 @@ import {
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
-import { callLocalLlm } from '../utils/local-ai.js';
 
 /** Context passed to every tool handler. `workspacePath` is already resolved and validated. */
 export interface ToolContext {
@@ -389,69 +388,7 @@ export const tools: NexusFlowTool[] = [
         return errorResult(`Error reading logs: ${error.message}`);
       }
     },
-  },
-  {
-    name: 'delegate_to_local_agent',
-    description:
-      "Delegate simple, high-volume, or repetitive tasks (like searching code, parsing raw service logs, or generating boilerplate) to the local Small Language Model (SLM) running on the user's machine to save remote tokens.",
-    enabled: (config) => Boolean(config.localLlm?.enabled),
-    annotations: { readOnlyHint: true },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        instruction: { type: 'string', description: 'The specific instruction for the local agent.' },
-        filesToRead: { type: 'array', items: { type: 'string' }, description: 'Optional workspace-relative file paths the local agent should read as context.' },
-      },
-      required: ['instruction'],
-    },
-    handler: async (args, ctx) => {
-      const instruction = args.instruction as string;
-      const filesToRead = (args.filesToRead as string[]) || [];
-      try {
-        if (!ctx.config.localLlm || !ctx.config.localLlm.enabled) {
-          throw new Error('Local AI agent delegation is disabled. Enable it in ~/.nexusflow/config.json or settings.');
-        }
-        const contextFiles: { path: string; content: string }[] = [];
-        const normalizedWorkspace = ctx.workspacePath.endsWith(path.sep) ? ctx.workspacePath : ctx.workspacePath + path.sep;
-
-        for (const relativePath of filesToRead) {
-          const filePath = path.resolve(ctx.workspacePath, relativePath);
-          if (!filePath.startsWith(normalizedWorkspace)) {
-            contextFiles.push({ path: relativePath, content: '[Access denied: path is outside workspace boundary]' });
-            continue;
-          }
-          try {
-            const content = await fs.readFile(filePath, 'utf-8');
-            const truncatedContent = content.length > 50000
-              ? content.substring(0, 50000) + '\n\n[Content truncated by NexusFlow to save local context size...]'
-              : content;
-            contextFiles.push({ path: relativePath, content: truncatedContent });
-          } catch (e: any) {
-            contextFiles.push({ path: relativePath, content: `[Error reading file: ${e.message || 'unknown error'}]` });
-          }
-        }
-
-        const messages: import('../utils/local-ai.js').LocalLlmMessage[] = [];
-        let systemPrompt = 'You are the NexusFlow local assistant. You are running locally on the user\'s machine to help the remote supervisor agent solve a specific sub-task in a multi-repo workspace.\n';
-        systemPrompt += 'Your goal is to be extremely precise, concise, and return only the distilled findings/code to save remote network tokens. Keep your response short, focused, and directly address the instruction.';
-        messages.push({ role: 'system', content: systemPrompt });
-
-        let userPrompt = '';
-        if (contextFiles.length > 0) {
-          userPrompt += 'Here is the local file/log context:\n\n';
-          for (const file of contextFiles) {
-            userPrompt += `--- FILE: ${file.path} ---\n${file.content}\n\n`;
-          }
-        }
-        userPrompt += `Instruction: ${instruction}`;
-        messages.push({ role: 'user', content: userPrompt });
-
-        return text(await callLocalLlm(ctx.config.localLlm, messages));
-      } catch (error: any) {
-        return errorResult(`Error delegating to local agent: ${error.message}`);
-      }
-    },
-  },
+  }
 ];
 
 /** Returns the tools enabled for the given config. */

@@ -41,7 +41,7 @@ export async function refreshCommand(
       const { resolveRepoInfos } = await import('../core/workspace.js');
       const repos = await resolveRepoInfos(feature.repos);
       try {
-        const suggestion = await suggestWorkflow(feature.description, repos, config.localLlm);
+        const suggestion = await suggestWorkflow(feature.description, repos);
         feature.teamworkInstructions = suggestion.customInstructions;
         console.log(chalk.green(`  ✔ Auto-updated strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`));
       } catch (err) {

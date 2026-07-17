@@ -29,7 +29,7 @@ import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, ad
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
-import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './utils/local-ai.js';
+
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
@@ -308,35 +308,13 @@ app.get('/api/adapters', async (c) => {
   }
 });
 
-function isSafeLocalEndpoint(urlStr: string): boolean {
-  try {
-    const url = new URL(urlStr);
-    const hostname = url.hostname.toLowerCase();
-    if (url.protocol === 'https:') {
-      return true;
-    }
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-      return true;
-    }
-    const ipv4Pattern = /^(?:10|127|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))\.\d+\.\d+\.\d+$/;
-    if (ipv4Pattern.test(hostname)) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
+
 
 // 2. Save configuration
 app.post('/api/config', async (c) => {
   try {
     const newConfig = await c.req.json();
-    if (newConfig?.localLlm?.enabled && newConfig.localLlm.endpoint) {
-      if (!isSafeLocalEndpoint(newConfig.localLlm.endpoint)) {
-        return c.json({ error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
-      }
-    }
+
     await saveConfig(newConfig);
     return c.json({ success: true, config: newConfig });
   } catch (error) {
@@ -573,64 +551,6 @@ app.get('/api/editor-detect', async (c) => {
   }
 });
 
-// 6.5. Local LLM test & recommendation
-app.post('/api/local-llm/test', async (c) => {
-  try {
-    const { provider, endpoint, model, apiKey, shoot } = await c.req.json();
-    if (!endpoint || !isSafeLocalEndpoint(endpoint)) {
-      return c.json({ success: false, error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
-    }
-    const cleanEndpoint = endpoint.replace(/\/$/, '');
-    
-    if (shoot) {
-      const responseText = await callLocalLlm(
-        { enabled: true, provider, endpoint, model, apiKey },
-        [{ role: 'user', content: 'Respond with the exact word "OK" and nothing else.' }]
-      );
-      const cleanResponse = responseText.trim();
-      return c.json({
-        success: true,
-        modelReady: true,
-        message: `Inference test succeeded! Response from model: "${cleanResponse}"`
-      });
-    }
-
-    if (provider === 'ollama') {
-      const res = await fetch(`${cleanEndpoint}/api/tags`);
-      if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
-      const data: any = await res.json();
-      const models = data?.models || [];
-      const isModelLoaded = isOllamaModelAvailable(models, model);
-      return c.json({ 
-        success: true, 
-        modelReady: isModelLoaded,
-        message: isModelLoaded ? 'Connected successfully! Model is ready.' : `Connected successfully, but model "${model}" is not pulled. Run "ollama pull ${model}" to install it.`
-      });
-    } else {
-      const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
-      const res = await fetch(testUrl);
-      if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
-      return c.json({ success: true, modelReady: true, message: 'Connected successfully to OpenAI-compatible server!' });
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ success: false, error: msg }, 400);
-  }
-});
-
-app.get('/api/local-llm/recommend', async (c) => {
-  try {
-    const specs = await scanSystemSpecs();
-    return c.json(specs);
-  } catch (error) {
-    return c.json({
-      totalRamGb: 8,
-      gpuName: 'Unknown/Integrated',
-      hasHardwareAcceleration: false,
-      recommendedModel: 'qwen2.5-coder:1.5b',
-    });
-  }
-});
 
 
 interface JobStep {
@@ -754,7 +674,6 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       workspacePath,
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
-      localLlmEnabled: body.localLlmEnabled,
       teamworkInstructions: body.teamworkInstructions,
     };
     if (job) {
@@ -789,7 +708,6 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       feature,
       repos: workspaceRepos,
       analysis,
-      localLlm: config.localLlm,
     };
     await generateContextFiles(ctx, body.assistants, workspacePath);
     updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');
@@ -819,7 +737,7 @@ app.post('/api/workspace', async (c) => {
       description: string;
       repos: RepoSelection[];
       assistants: any[];
-      localLlmEnabled?: boolean;
+
       teamworkInstructions?: string;
       resumption?: {
         testCommand?: string;
@@ -994,7 +912,7 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
     };
 
     const config = await loadConfig();
-    const suggestion = await suggestWorkflow(description, repos, config.localLlm);
+    const suggestion = await suggestWorkflow(description, repos);
 
     return c.json({
       success: true,

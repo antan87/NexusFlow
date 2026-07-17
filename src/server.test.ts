@@ -5,7 +5,7 @@ import { app, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
-import * as localAi from './utils/local-ai.js';
+
 import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
@@ -19,7 +19,6 @@ vi.mock('execa');
 vi.mock('./core/workspace.js');
 vi.mock('./core/config.js');
 vi.mock('./utils/system-scanner.js');
-vi.mock('./utils/local-ai.js');
 vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
@@ -280,101 +279,7 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
-  describe('POST /api/config', () => {
-    it('should validate endpoint domain safety', async () => {
-      const response = await app.request('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localLlm: {
-            enabled: true,
-            endpoint: 'http://malicious-external-domain.com'
-          }
-        })
-      });
 
-      expect(response.status).toBe(400);
-      const data = await response.json();
-      expect(data.error).toContain('Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.');
-    });
-
-    it('should save safe endpoint and config', async () => {
-      vi.spyOn(config, 'saveConfig').mockResolvedValue();
-
-      const response = await app.request('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localLlm: {
-            enabled: true,
-            endpoint: 'http://127.0.0.1:11434'
-          }
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-    });
-  });
-
-  describe('POST /api/local-llm/test', () => {
-    it('should reject unsafe endpoints', async () => {
-      const response = await app.request('/api/local-llm/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'http://unsafe-domain.com',
-          provider: 'ollama',
-          model: 'qwen2.5-coder:1.5b'
-        })
-      });
-
-      expect(response.status).toBe(400);
-      const data = await response.json();
-      expect(data.success).toBe(false);
-      expect(data.error).toContain('Local AI endpoint must be');
-    });
-
-    it('should perform inference shoot test if shoot = true', async () => {
-      vi.spyOn(localAi, 'callLocalLlm').mockResolvedValue('OK\n');
-
-      const response = await app.request('/api/local-llm/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'http://localhost:11434',
-          provider: 'ollama',
-          model: 'qwen2.5-coder:1.5b',
-          shoot: true
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-      expect(data.modelReady).toBe(true);
-      expect(data.message).toContain('Inference test succeeded');
-    });
-  });
-
-  describe('GET /api/local-llm/recommend', () => {
-    it('should fetch system specs and return them', async () => {
-      vi.spyOn(systemScanner, 'scanSystemSpecs').mockResolvedValue({
-        totalRamGb: 16,
-        gpuName: 'Nvidia RTX 4080',
-        hasHardwareAcceleration: true,
-        recommendedModel: 'qwen2.5-coder:7b'
-      });
-
-      const response = await app.request('/api/local-llm/recommend');
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.totalRamGb).toBe(16);
-      expect(data.gpuName).toBe('Nvidia RTX 4080');
-      expect(data.recommendedModel).toBe('qwen2.5-coder:7b');
-    });
-  });
 
   describe('GET and PUT /api/workspace/:id/knowledge', () => {
     it('should get workspace knowledge content', async () => {
@@ -665,8 +570,7 @@ describe('Server API Endpoints Unit Tests', () => {
           devDir: '/dev',
           workspacesDir: '/dev/workspaces',
           defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+          scanDepth: 2
         });
 
         const response = await app.request('/api/workspace/suggest-workflow', {
@@ -692,8 +596,7 @@ describe('Server API Endpoints Unit Tests', () => {
           devDir: '/dev',
           workspacesDir: '/dev/workspaces',
           defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+          scanDepth: 2
         });
 
         const response = await app.request('/api/workspace/suggest-workflow', {
@@ -713,41 +616,7 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(data.customInstructions).toContain('Plan, Implement, Review');
       });
 
-      it('should call local LLM and return suggested workflow when LLM is enabled', async () => {
-        vi.spyOn(config, 'loadConfig').mockResolvedValue({
-          version: '1.0',
-          devDir: '/dev',
-          workspacesDir: '/dev/workspaces',
-          defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: true, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
-        });
 
-        vi.spyOn(localAi, 'callLocalLlm').mockResolvedValue(JSON.stringify({
-          difficulty: 'moderate',
-          rationale: 'LLM selected moderate strategy.',
-          suggestedWorkflowId: 'research-verify',
-          customInstructions: '# LLM Custom Instructions'
-        }));
-
-        const response = await app.request('/api/workspace/suggest-workflow', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            description: 'Implement new UI component',
-            repos: [{ name: 'my-project', path: '/dev/my-project', defaultBranch: 'main' }]
-          })
-        });
-
-        expect(response.status).toBe(200);
-        const data = await response.json();
-        expect(data.success).toBe(true);
-        expect(data.difficulty).toBe('moderate');
-        expect(data.rationale).toBe('LLM selected moderate strategy.');
-        expect(data.suggestedWorkflowId).toBe('research-verify');
-        expect(data.customInstructions).toBe('# LLM Custom Instructions');
-        expect(localAi.callLocalLlm).toHaveBeenCalled();
-      });
     });
   });
 

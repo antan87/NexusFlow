@@ -78,7 +78,6 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
 export function buildContextContent(ctx: WorkspaceContext): string {
   const { feature, repos, analysis } = ctx;
   const workspacePath = feature.workspacePath;
-  const localLlmEnabled = feature.localLlmEnabled ?? false;
 
   // Build project sections — rich if analysis is available, simple if not
   let projectSections: string;
@@ -247,18 +246,9 @@ ${teamworkSection}
 ## Guidelines
 
 ${structureGuideline}
-- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
-${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
-  ctx.localLlm ? `\n  - **Model Capacity**: The local agent is running \`${ctx.localLlm.model}\`. ${
-    ctx.localLlm.model.match(/70b|72b|32b|14b/i)
-      ? 'This is a highly capable model; you can delegate complex reasoning and larger code generation tasks.'
-      : 'This is a smaller model; it is best suited for targeted search, log parsing, summarization, and simple boilerplate.'
-  }` : ''
-}
-  - **Usage rule**: Whenever you need to perform high-token tasks (like searching large chunks of code, analyzing raw service logs to debug, or generating repetitive boilerplate), **always use \`delegate_to_local_agent\`** first.
-  - The local model is free and fast. Pass the instruction and any logs/source files in \`filesToRead\` (relative paths). Use the distilled summary returned to formulate your final output, saving up to 90% in remote context tokens.
-` : ''}- Read each project's existing \`README.md\` and any doc files before proposing changes.
+- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
+- Read each project's existing \`README.md\` and any doc files before proposing changes.
 - When modifying a shared library, check every downstream consumer for breakage.
 - Prefer small, focused commits that touch one repo at a time when possible.
 - If a change must span repos, describe the ordering and any migration steps.

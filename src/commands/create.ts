@@ -188,10 +188,6 @@ export async function createCommand(): Promise<void> {
   const detectedAI = await detectAIAssistants();
   const selectedAI = await promptSelectAI(detectedAI);
 
-  const localLlmEnabled = config.localLlm?.enabled
-    ? await confirm({ message: 'Enable Local AI Co-processor in this workspace context?', default: true })
-    : false;
-
   // ── 5.5. Suggest workflow strategy ───────────────────────────────
   const templates = await getWorkflowTemplates();
   const selectedStrategyId = await promptSelectStrategy(templates);
@@ -201,7 +197,7 @@ export async function createCommand(): Promise<void> {
   if (selectedStrategyId === 'auto') {
     const workflowSpinner = ora('Suggesting teamwork collaboration strategy...').start();
     try {
-      const suggestion = await suggestWorkflow(description, selectedRepos, config.localLlm);
+      const suggestion = await suggestWorkflow(description, selectedRepos);
       teamworkInstructions = suggestion.customInstructions;
       workflowSpinner.succeed(`Auto-selected strategy for ${chalk.bold(suggestion.difficulty)} difficulty task`);
     } catch (err) {
@@ -243,7 +239,6 @@ export async function createCommand(): Promise<void> {
     assistants: selectedAI,
     workspacePath,
     createdAt: new Date().toISOString(),
-    localLlmEnabled,
     teamworkInstructions,
   };
 
@@ -278,7 +273,7 @@ export async function createCommand(): Promise<void> {
     console.log(chalk.cyan('\nAnalyzing projects...'));
     const analysis = await analyzeAllRepos(workspaceRepos);
 
-    const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis, localLlm: config.localLlm };
+    const ctx: WorkspaceContext = { feature, repos: workspaceRepos, analysis };
     console.log(chalk.cyan('\nGenerating AI context files...'));
     await generateContextFiles(ctx, selectedAI, workspacePath);
   } catch (error) {
@@ -319,7 +314,7 @@ export async function createCommand(): Promise<void> {
   );
   console.log(`  ${chalk.dim('Repos:')}  ${selectedRepos.map((r) => r.name).join(', ')}`);
   console.log(`  ${chalk.dim('AI:')}     ${selectedAI.join(', ')}`);
-  console.log(`  ${chalk.dim('Local AI:')} ${localLlmEnabled ? 'Enabled' : 'Disabled'}`);
+
   console.log(
     `\n  ${chalk.dim('To navigate:')} cd "${workspacePath}"`,
   );
