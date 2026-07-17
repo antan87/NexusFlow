@@ -65,9 +65,7 @@ export interface CreateWorkspacePayload {
   description: string;
   repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
   assistants: string[];
-
   teamworkInstructions?: string;
-  resumption?: { testCommand?: string; mockCommand?: string; startCommand?: string };
 }
 
 export function useCreateWorkspace() {

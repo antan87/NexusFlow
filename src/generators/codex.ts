@@ -21,7 +21,7 @@ export async function generateCodexConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const baseContent = buildContextContent(ctx);
+  const baseContent = await buildContextContent(ctx);
 
   const codexExtra = `
 ---

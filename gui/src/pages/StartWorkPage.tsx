@@ -146,10 +146,6 @@ export function StartWorkPage() {
   const [customInstructions, setCustomInstructions] = useState('');
   const [suggesting, setSuggesting] = useState(false);
   const [suggestedDifficulty, setSuggestedDifficulty] = useState<string | null>(null);
-  /** Resumption commands written into the manifest for context generation. */
-  const [testCommand, setTestCommand] = useState('npm run test');
-  const [mockCommand, setMockCommand] = useState('');
-  const [startCommand, setStartCommand] = useState('');
 
   /** Optional per-repo existing branch (keyed by repo PATH — names can repeat). */
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
@@ -236,13 +232,7 @@ export function StartWorkPage() {
           !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
       assistants,
-
       teamworkInstructions: customInstructions.trim() || undefined,
-      resumption: {
-        testCommand: testCommand.trim() || undefined,
-        mockCommand: mockCommand.trim() || undefined,
-        startCommand: startCommand.trim() || undefined,
-      },
     };
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
@@ -570,28 +560,6 @@ export function StartWorkPage() {
                   className="mt-2 font-mono text-xs"
                 />
               </div>
-
-              <div>
-                <span className="mb-1.5 block text-sm font-medium">Resumption commands</span>
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Written into the workspace context so assistants know how to verify changes and spin up mocks.
-                </p>
-                <div className="flex flex-col gap-2">
-                  <label className="flex items-center gap-2">
-                    <span className="w-24 shrink-0 text-xs">Test</span>
-                    <Input value={testCommand} onChange={(e) => setTestCommand(e.target.value)} className="h-7 font-mono text-xs" />
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <span className="w-24 shrink-0 text-xs">Mocks/setup</span>
-                    <Input value={mockCommand} onChange={(e) => setMockCommand(e.target.value)} placeholder="optional" className="h-7 font-mono text-xs" />
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <span className="w-24 shrink-0 text-xs">Start/run</span>
-                    <Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="optional" className="h-7 font-mono text-xs" />
-                  </label>
-                </div>
-              </div>
-
 
             </div>
           )}

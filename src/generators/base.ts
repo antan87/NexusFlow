@@ -10,6 +10,8 @@ import * as os from 'node:os';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
 import { resolveBaseFileUrl, resolveWorkspaceFileUrl } from '../core/storage.js';
 import { isInPlace } from '../utils/feature.js';
+import { getConventionalTestCommand } from '../utils/test-command.js';
+import { detectServiceConfig } from '../orchestration/detect.js';
 
 /**
  * Formats a ProjectAnalysis into a readable markdown section.
@@ -75,7 +77,69 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
  * @param ctx - The workspace context containing feature metadata, repo list, and optional analysis.
  * @returns A markdown string with feature details, repo listing, and task instructions.
  */
-export function buildContextContent(ctx: WorkspaceContext): string {
+/**
+ * Builds the "Verification & Services" section: per repo, the conventional
+ * test command derived from the detected tech stack, and the detected service
+ * run command. Old manifests that still carry hand-entered `resumption`
+ * commands get those appended (custom commands beat conventions); the
+ * standard-command filter applies to that legacy path only.
+ */
+async function buildVerificationSection(ctx: WorkspaceContext): Promise<string> {
+  const { feature, repos, analysis } = ctx;
+
+  const rows: string[] = [];
+  for (const repo of repos) {
+    const repoAnalysis = analysis?.get(repo.path);
+    const testCommand = repoAnalysis ? getConventionalTestCommand(repoAnalysis) : 'npm test';
+    let runCommand = '';
+    try {
+      const service = await detectServiceConfig(repo.path, repo.name);
+      if (service) runCommand = [service.command, ...service.args].join(' ').trim();
+    } catch {
+      // Detection is best-effort; a repo without a runnable service gets '—'.
+    }
+    rows.push(`| ${repo.name} | \`${testCommand}\` | ${runCommand ? `\`${runCommand}\`` : '—'} |`);
+  }
+
+  // Legacy: custom commands stored by the old wizard.
+  const legacy: string[] = [];
+  if (feature.resumption) {
+    const { testCommand, mockCommand, startCommand } = feature.resumption;
+    if (mockCommand) legacy.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
+    if (startCommand) legacy.push(`- **Start/Run Command**: \`${startCommand}\``);
+
+    const standardCommands = [
+      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
+      'dotnet test',
+      'pytest', 'python -m unittest', 'python -m pytest',
+      'go test', 'go test ./...',
+      'cargo test',
+    ];
+    if (testCommand) {
+      const normalized = testCommand.trim().toLowerCase();
+      const isStandard = standardCommands.some((cmd) => normalized === cmd || normalized.startsWith(cmd + ' '));
+      if (!isStandard) {
+        legacy.push(`- **Verification/Test Command**: \`${testCommand}\``);
+      }
+    }
+  }
+
+  if (rows.length === 0 && legacy.length === 0) return '';
+
+  return `
+---
+
+## Verification & Services
+
+Verify changes and run services with these commands (derived from each repo's tech stack and detected service configuration):
+
+| Repo | Test | Run |
+|---|---|---|
+${rows.join('\n')}
+${legacy.length > 0 ? `\nCustom workspace commands:\n\n${legacy.join('\n')}\n` : ''}`;
+}
+
+export async function buildContextContent(ctx: WorkspaceContext): Promise<string> {
   const { feature, repos, analysis } = ctx;
   const workspacePath = feature.workspacePath;
 
@@ -118,42 +182,9 @@ ${allConfigs.join('\n')}
     }
   }
 
-  // Resumption commands section
-  let resumptionSection = '';
-  if (feature.resumption) {
-    let { testCommand, mockCommand, startCommand } = feature.resumption;
-    const parts: string[] = [];
-    if (mockCommand) parts.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
-    if (startCommand) parts.push(`- **Start/Run Command**: \`${startCommand}\``);
-    
-    const standardCommands = [
-      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
-      'dotnet test',
-      'pytest', 'python -m unittest', 'python -m pytest',
-      'go test', 'go test ./...',
-      'cargo test',
-    ];
-
-    if (testCommand) {
-      const normalizedCmd = testCommand.trim().toLowerCase();
-      const isStandard = standardCommands.some(cmd => normalizedCmd === cmd || normalizedCmd.startsWith(cmd + ' '));
-      if (!isStandard) {
-        parts.push(`- **Verification/Test Command**: \`${testCommand}\``);
-      }
-    }
-
-    if (parts.length > 0) {
-      resumptionSection = `
----
-
-## Workspace Resumption & Verification Commands
-
-Use these pre-configured commands to spin up mocks, run background services, and verify your changes:
-
-${parts.join('\n')}
-`;
-    }
-  }
+  // Verification & services section — auto-derived; legacy manifests may
+  // contribute stored custom commands on top.
+  const verificationSection = await buildVerificationSection(ctx);
 
   const knowledgePath = resolveWorkspaceFileUrl(workspacePath, feature.id, 'nexusflow-knowledge.md').replace(/\\/g, '/');
 
@@ -236,7 +267,7 @@ ${projectsIntro}
 
 ${projectSections}
 ${existingConfigsSection}
-${resumptionSection}
+${verificationSection}
 ---
 
 ${taskSection}

@@ -22,7 +22,7 @@ export async function generateCursorConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const baseContent = buildContextContent(ctx);
+  const baseContent = await buildContextContent(ctx);
 
   const content = `---
 description: "NexusFlow workspace context for multi-repo feature development"

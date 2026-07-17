@@ -1,9 +1,7 @@
 /**
  * @module core/doctor
  * Headless workspace diagnostics. Produces a structured {@link DoctorReport}
- * shared by the CLI `doctor` renderer and the MCP `run_doctor` tool. The local
- * AI connectivity probe uses fetch + AbortController, so this is safe to run
- * outside a TTY.
+ * shared by the CLI `doctor` renderer and the MCP `run_doctor` tool.
  */
 
 import * as path from 'node:path';
@@ -14,6 +12,7 @@ import { globby } from 'globby';
 import { loadConfig } from './config.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { isInPlace } from '../utils/feature.js';
+import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -42,14 +41,6 @@ export interface DoctorReport {
   aborted: boolean;
 }
 
-/** Resolves the conventional test command for a repo's tech stack. */
-function getTestCommand(analysis: ProjectAnalysis): string {
-  if (analysis.techStack.languages.includes('csharp')) return 'dotnet test';
-  if (analysis.techStack.languages.includes('typescript') || analysis.techStack.languages.includes('javascript')) return 'npm test';
-  if (analysis.techStack.languages.includes('python')) return 'pytest';
-  if (analysis.techStack.languages.includes('go')) return 'go test ./...';
-  return 'npm test';
-}
 
 /**
  * Runs all workspace diagnostics and returns a structured report.
@@ -207,7 +198,7 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     const a = analysis.get(repo.path);
     if (!a) continue;
 
-    const testCommand = getTestCommand(a);
+    const testCommand = getConventionalTestCommand(a);
     if (testCommand === 'npm test' && !a.techStack.languages.includes('typescript') && !a.techStack.languages.includes('javascript')) {
       warnings.push(`Repository "${repo.name}" fell back to default test command "npm test".`);
       checks.push({ category: 'Test Commands', name: repo.name, status: 'warn', message: 'Using default fallback test command "npm test"' });
