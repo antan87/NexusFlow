@@ -11,6 +11,7 @@ export type MockDataOptions = {
   reposData: { data: any[] };
   aiDetectData: any;
   workflowsTemplatesData: any;
+  servicesData: any;
 };
 
 export const test = base.extend<MockDataOptions & { setupMocks: void }>({
@@ -22,12 +23,6 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
       workspacesDir: 'C:\\mock-dev\\workspaces',
       defaultAssistant: 'ANTIGRAVITY',
       scanDepth: 2,
-      localLlm: {
-        enabled: false,
-        provider: 'ollama',
-        endpoint: 'http://localhost:11434',
-        model: 'qwen2.5-coder:1.5b',
-      },
     },
   }, { option: true }],
   adaptersData: [{ adapters: [] }, { option: true }],
@@ -39,6 +34,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
   reposData: [{ data: [] }, { option: true }],
   aiDetectData: [[], { option: true }],
   workflowsTemplatesData: [{ templates: [] }, { option: true }],
+  servicesData: [{ services: [], orchestrationTools: [], runningState: [], runningOrchestrators: [] }, { option: true }],
 
   setupMocks: [async ({
     page,
@@ -52,6 +48,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     reposData,
     aiDetectData,
     workflowsTemplatesData,
+    servicesData,
   }, use) => {
     const json = (body: unknown) => async (route: Route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -67,8 +64,17 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/ai-detect', json(aiDetectData));
     await page.route('**/api/workflows/templates', json(workflowsTemplatesData));
 
-    // Dashboard extra common routes
-    await page.route('**/api/workspace/*/services', json({ services: [], orchestrationTools: [], runningState: [] }));
+    // Service log routes — register the more specific /stream matcher first so
+    // it wins over the backfill route.
+    await page.route('**/api/workspace/*/services/logs/*/stream**', async (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: 'event: init\ndata: {"offset":0}\n\nevent: log\ndata: {"chunk":"hello from sse\\n"}\n\n',
+      }),
+    );
+    await page.route('**/api/workspace/*/services/logs/*', json({ logs: 'backfill line\n', size: 14 }));
+    await page.route('**/api/workspace/*/services', json(servicesData));
     await page.route('**/api/workspace/*/changes', json({ changes: [] }));
 
     await use();

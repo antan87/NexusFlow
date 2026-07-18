@@ -101,15 +101,27 @@ export interface ServiceConfig {
 }
 
 export interface OrchestrationDetection {
+  /** Stable id: `${tool}:${relative config path}`. */
+  id: string;
   tool: string;
   configPath: string;
   startCommand: string;
   stopCommand: string;
+  mode: 'oneshot' | 'pm2';
 }
 
 export interface RunningService {
   name: string;
   pid: number;
   config: ServiceConfig;
+  startedAt: string;
+}
+
+export interface RunningOrchestrator {
+  id: string;
+  tool: string;
+  configPath: string;
+  mode: 'oneshot' | 'pm2';
+  pm2Name?: string;
   startedAt: string;
 }

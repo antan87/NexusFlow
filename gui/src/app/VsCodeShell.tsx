@@ -1,46 +1,49 @@
-import type { RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Play, X } from 'lucide-react';
-import type { Feature, RunningService, ServiceConfig } from '../types.js';
+import type { Feature } from '../types.js';
+import { useServiceAction, useWorkspaceServices } from '../lib/api/queries.js';
+import { useServiceLogStream } from '../features/services/useServiceLogStream.js';
 
 interface VsCodeShellProps {
   activeWsId: string | null;
   setActiveWsId: (workspaceId: string | null) => void;
-  selectedLogService: string | null;
-  setSelectedLogService: (serviceName: string | null) => void;
-  setServiceLogs: (logs: string) => void;
   appVersion: string;
   workspaces: Feature[];
-  fetchWorkspaceServices: (wsId: string, silent?: boolean) => Promise<void>;
-
-  services: ServiceConfig[];
-  runningServices: RunningService[];
-  handleStartServices: (wsId: string) => Promise<void>;
-  handleStopServices: (wsId: string) => Promise<void>;
   executeTerminal: (command: string) => void;
-  fetchLogs: (wsId: string, serviceName: string) => Promise<void>;
-  serviceLogs: string;
-  logsEndRef: RefObject<HTMLDivElement | null>;
 }
 
 export function VsCodeShell({
   activeWsId,
   setActiveWsId,
-  selectedLogService,
-  setSelectedLogService,
-  setServiceLogs,
   appVersion,
   workspaces,
-  fetchWorkspaceServices,
-
-  services,
-  runningServices,
-  handleStartServices,
-  handleStopServices,
   executeTerminal,
-  fetchLogs,
-  serviceLogs,
-  logsEndRef,
 }: VsCodeShellProps) {
+  const [selectedLogService, setSelectedLogService] = useState<string | null>(null);
+
+  const servicesQuery = useWorkspaceServices(activeWsId);
+  const services = servicesQuery.data?.services ?? [];
+  const runningServices = servicesQuery.data?.runningState ?? [];
+  const serviceAction = useServiceAction(activeWsId ?? '');
+  const { logs } = useServiceLogStream(activeWsId, selectedLogService, !!activeWsId);
+
+  // Keep a valid log selection as the detected set changes.
+  useEffect(() => {
+    if (services.length === 0) {
+      if (selectedLogService !== null) setSelectedLogService(null);
+    } else if (!selectedLogService || !services.some((s) => s.name === selectedLogService)) {
+      setSelectedLogService(services[0].name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [services]);
+
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  const runningCount = runningServices.filter((rs) => rs.pid > 0).length;
+
   return (
     <div className="flex flex-col h-screen w-full bg-background text-foreground font-mono text-[11px] overflow-hidden select-none border-t border-border">
       {/* Terminal Header */}
@@ -56,7 +59,6 @@ export function VsCodeShell({
               onClick={() => {
                 setActiveWsId(null);
                 setSelectedLogService(null);
-                setServiceLogs('');
               }}
               className="text-primary hover:text-primary/90 hover:underline transition-colors cursor-pointer bg-transparent border-none p-0 outline-none"
             >
@@ -77,10 +79,7 @@ export function VsCodeShell({
             {workspaces.map((ws) => (
               <button
                 key={ws.branchName}
-                onClick={() => {
-                  setActiveWsId(ws.branchName);
-                  fetchWorkspaceServices(ws.branchName);
-                }}
+                onClick={() => setActiveWsId(ws.branchName)}
                 className="w-full text-left p-2.5 bg-muted border border-border hover:border-primary rounded hover:bg-primary/10 text-muted-foreground hover:text-foreground transition-all text-[11px] cursor-pointer"
               >
                 &gt; {ws.branchName}
@@ -99,14 +98,16 @@ export function VsCodeShell({
             {/* Service Control Buttons */}
             <div className="flex gap-2 mb-3">
               <button
-                onClick={() => handleStartServices(activeWsId)}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-success/20 bg-success/10 hover:bg-success/20 text-success font-bold transition-all cursor-pointer text-[10px]"
+                onClick={() => serviceAction.mutate({ action: 'start' })}
+                disabled={serviceAction.isPending}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-success/20 bg-success/10 hover:bg-success/20 text-success font-bold transition-all cursor-pointer text-[10px] disabled:opacity-50"
               >
                 <Play size={10} /> [START SERVICES]
               </button>
               <button
-                onClick={() => handleStopServices(activeWsId)}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-destructive/20 bg-destructive/10 hover:bg-destructive/20 text-destructive font-bold transition-all cursor-pointer text-[10px]"
+                onClick={() => serviceAction.mutate({ action: 'stop' })}
+                disabled={serviceAction.isPending}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-destructive/20 bg-destructive/10 hover:bg-destructive/20 text-destructive font-bold transition-all cursor-pointer text-[10px] disabled:opacity-50"
               >
                 <X size={10} /> [STOP SERVICES]
               </button>
@@ -115,7 +116,7 @@ export function VsCodeShell({
             {/* Service List */}
             <div className="mb-3">
               <div className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1 px-1">
-                Background Services ({runningServices.filter(rs => rs.pid > 0).length}/{services.length})
+                Background Services ({runningCount}/{services.length})
               </div>
               {services.length === 0 ? (
                 <div className="text-muted-foreground/50 italic px-1 text-[10px]">No services detected in workspace.</div>
@@ -166,7 +167,6 @@ export function VsCodeShell({
                   <span>• get_service_logs</span>
                   <span className="text-primary font-bold">READY</span>
                 </div>
-
               </div>
             </div>
 
@@ -176,55 +176,30 @@ export function VsCodeShell({
                 Terminal Commands (Click to Run)
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  onClick={() => executeTerminal('nexusflow sync')}
-                  className="px-2 py-1.5 text-left border border-border hover:border-primary bg-muted/40 rounded text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all font-mono text-[9px] cursor-pointer"
-                >
-                  $ nexusflow sync
-                </button>
-                <button
-                  onClick={() => executeTerminal('nexusflow diff')}
-                  className="px-2 py-1.5 text-left border border-border hover:border-primary bg-muted/40 rounded text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all font-mono text-[9px] cursor-pointer"
-                >
-                  $ nexusflow diff
-                </button>
-                <button
-                  onClick={() => executeTerminal('nexusflow handoff')}
-                  className="px-2 py-1.5 text-left border border-border hover:border-primary bg-muted/40 rounded text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all font-mono text-[9px] cursor-pointer"
-                >
-                  $ nexusflow handoff
-                </button>
-                <button
-                  onClick={() => executeTerminal('nexusflow status')}
-                  className="px-2 py-1.5 text-left border border-border hover:border-primary bg-muted/40 rounded text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all font-mono text-[9px] cursor-pointer"
-                >
-                  $ nexusflow status
-                </button>
+                {['nexusflow sync', 'nexusflow diff', 'nexusflow handoff', 'nexusflow status'].map((cmd) => (
+                  <button
+                    key={cmd}
+                    onClick={() => executeTerminal(cmd)}
+                    className="px-2 py-1.5 text-left border border-border hover:border-primary bg-muted/40 rounded text-muted-foreground hover:text-foreground hover:bg-primary/10 transition-all font-mono text-[9px] cursor-pointer"
+                  >
+                    $ {cmd}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Bottom Log Pane */}
+          {/* Bottom Log Pane — live SSE stream */}
           <div className="flex-1 flex flex-col min-h-0 bg-background">
             <div className="flex items-center justify-between px-3 py-1.5 bg-card border-b border-border shrink-0 text-[9px] text-muted-foreground uppercase tracking-wider font-bold">
               <div className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-primary"></span>
                 <span>log_stream: {selectedLogService || 'none'}</span>
               </div>
-              <button
-                onClick={() => {
-                  if (activeWsId && selectedLogService) {
-                    fetchLogs(activeWsId, selectedLogService);
-                  }
-                }}
-                className="text-muted-foreground hover:text-foreground font-mono hover:underline cursor-pointer bg-transparent border-none p-0 outline-none"
-              >
-                [refresh]
-              </button>
             </div>
             <div className="flex-1 p-3 overflow-y-auto font-mono text-[10px] leading-relaxed whitespace-pre-wrap select-text selection:bg-primary/30 text-foreground">
-              {serviceLogs.trim() ? (
-                serviceLogs
+              {logs.trim() ? (
+                logs
               ) : (
                 <span className="text-muted-foreground/50 italic font-mono">(no logs recorded yet)</span>
               )}

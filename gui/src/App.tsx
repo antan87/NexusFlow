@@ -41,10 +41,7 @@ import type {
   DetectedEditor,
   Feature,
   NexusFlowConfig,
-  OrchestrationDetection,
   RepoInfo,
-  RunningService,
-  ServiceConfig,
   StorageAdapterMeta,
   WorkspaceStatus,
 } from './types.js';
@@ -145,13 +142,9 @@ function AppInner() {
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
   const statusesLoading = statusesQuery.isLoading;
 
-  // Active Workspace Services / Orchestration Details
+  // Active workspace / detail sub-tab. Service state lives in the Services tab
+  // (ServiceConsole) via react-query — App no longer owns it.
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [services, setServices] = useState<ServiceConfig[]>([]);
-  const [orchTools, setOrchTools] = useState<OrchestrationDetection[]>([]);
-  const [runningServices, setRunningServices] = useState<RunningService[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
-  const [serviceWorkspaceId, setServiceWorkspaceId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan'>('overview');
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -175,12 +168,6 @@ function AppInner() {
   const [commitResults, setCommitResults] = useState<any[] | null>(null);
   const [deleteWsLoading, setDeleteWsLoading] = useState<string | null>(null);
   const [addRepoLoading, setAddRepoLoading] = useState<boolean>(false);
-
-
-  // Log Viewer
-  const [selectedLogService, setSelectedLogService] = useState<string | null>(null);
-  const [serviceLogs, setServiceLogs] = useState<string>('');
-  const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   // AI toolchain update states
   const [toolsStatus, setToolsStatus] = useState<any[]>([]);
@@ -428,47 +415,6 @@ function AppInner() {
     }
   };
 
-  const fetchWorkspaceServices = async (wsId: string, silent = false) => {
-    if (!silent) setServicesLoading(true);
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/services`);
-      const data = await res.json();
-      const nextServices = data.services || [];
-      setServiceWorkspaceId(wsId);
-      setServices(nextServices);
-      setOrchTools(data.orchestrationTools || []);
-      setRunningServices(data.runningState || []);
-      const hasSelectedService = selectedLogService
-        ? nextServices.some((service: ServiceConfig) => service.name === selectedLogService)
-        : false;
-      if (!silent || !hasSelectedService) setServiceLogs('');
-      
-      setSelectedLogService((current) => {
-        if (nextServices.length === 0) return null;
-        if (current && nextServices.some((service: ServiceConfig) => service.name === current)) {
-          return current;
-        }
-        return nextServices[0].name;
-      });
-    } catch (e) {
-      console.error(e);
-    } finally {
-      if (!silent) setServicesLoading(false);
-    }
-  };
-
-  const fetchLogs = async (wsId: string, serviceName: string) => {
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/services/logs/${serviceName}`);
-      const data = await res.json();
-      setServiceLogs(data.logs || '');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const fetchGitChanges = async (wsId: string) => {
     setGitChangesLoading(true);
     try {
@@ -602,33 +548,6 @@ function AppInner() {
 
 
   // ─── Actions ────────────────────────────────────────────────────────────
-
-  const handleStartServices = async (wsId: string) => {
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      await fetch(`${API_BASE}/api/workspace/${encodedId}/services/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ services }),
-      });
-      fetchWorkspaceServices(wsId, true);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleStopServices = async (wsId: string) => {
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      await fetch(`${API_BASE}/api/workspace/${encodedId}/services/stop`, {
-        method: 'POST',
-      });
-      fetchWorkspaceServices(wsId, true);
-      setServiceLogs('Services stopped.');
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   const handleResumeSession = async (ws: Feature, sessionId?: string, assistant?: string) => {
     setResumingWs(ws.branchName);
@@ -792,20 +711,6 @@ function AppInner() {
     }
   }, [location.pathname]);
 
-  // Poll logs and services status when active workspace is open
-  useEffect(() => {
-    let interval: any = null;
-    if (activeWsId) {
-      fetchWorkspaceServices(activeWsId);
-      interval = setInterval(() => {
-        fetchWorkspaceServices(activeWsId, true);
-      }, 3000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeWsId]);
-
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
   useEffect(() => {
     if (activeWsId && (subTab === 'changes' || subTab === 'overview')) {
@@ -833,28 +738,6 @@ function AppInner() {
       fetchPlan(activeWsId);
     }
   }, [activeWsId, subTab]);
-
-  // Poll logs for active service logs — only while the Services tab is
-  // actually visible; the full log body is re-fetched each tick.
-  useEffect(() => {
-    let interval: any = null;
-    if (activeWsId && serviceWorkspaceId === activeWsId && selectedLogService && subTab === 'services') {
-      fetchLogs(activeWsId, selectedLogService);
-      interval = setInterval(() => {
-        fetchLogs(activeWsId, selectedLogService);
-      }, 2000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeWsId, serviceWorkspaceId, selectedLogService, subTab]);
-
-  // Scroll to bottom of logs when log content changes
-  useEffect(() => {
-    if (logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [serviceLogs]);
 
   const handleCopyPrompt = (ws: Feature) => {
     const repoNames = ws.repos.map((r) => r.split(/[\\/]/).pop()).join(', ');
@@ -917,8 +800,10 @@ Core Instructions:
       const data = await res.json();
       if (res.ok && data.success) {
         await fetchWorkspaces();
+        // The Services tab (react-query) refreshes itself; nudge the caches the
+        // added repo affects.
+        queryClient.invalidateQueries({ queryKey: ['workspace-services', wsName] });
         if (activeWsId === wsName) {
-          fetchWorkspaceServices(wsName, true);
           fetchGitChanges(wsName);
           fetchWorkspaceSessions(wsName);
         }
@@ -951,21 +836,9 @@ Core Instructions:
       <VsCodeShell
         activeWsId={activeWsId}
         setActiveWsId={setActiveWsId}
-        selectedLogService={selectedLogService}
-        setSelectedLogService={setSelectedLogService}
-        setServiceLogs={setServiceLogs}
         appVersion={appVersion}
         workspaces={workspaces}
-        fetchWorkspaceServices={fetchWorkspaceServices}
-
-        services={services}
-        runningServices={runningServices}
-        handleStartServices={handleStartServices}
-        handleStopServices={handleStopServices}
         executeTerminal={executeTerminal}
-        fetchLogs={fetchLogs}
-        serviceLogs={serviceLogs}
-        logsEndRef={logsEndRef}
       />
     );
   }
@@ -1012,7 +885,6 @@ Core Instructions:
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession }}
-      serviceProps={{ services, runningServices, selectedLogService, serviceLogs, logsEndRef, setSelectedLogService, handleStartServices, handleStopServices, orchTools, servicesLoading }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
       knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
       planProps={{ planContent, planLoading }}

@@ -12,8 +12,12 @@ import type {
   DetectedEditor,
   Feature,
   NexusFlowConfig,
+  OrchestrationDetection,
   Project,
   RepoInfo,
+  RunningOrchestrator,
+  RunningService,
+  ServiceConfig,
   WorkspaceMode,
   WorkspaceStatus,
 } from '../../types.js';
@@ -194,6 +198,64 @@ export function useWorkflowTemplates() {
     queryFn: async () => {
       const data = await apiFetch<{ templates: WorkflowTemplate[] }>('/api/workflows/templates');
       return data.templates;
+    },
+  });
+}
+
+// ─── Services & orchestration ─────────────────────────────────────────────────
+
+export interface WorkspaceServicesResponse {
+  services: ServiceConfig[];
+  orchestrationTools: OrchestrationDetection[];
+  runningState: RunningService[];
+  runningOrchestrators: RunningOrchestrator[];
+}
+
+/** Detected services + running state for a workspace, polled while displayed. */
+export function useWorkspaceServices(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-services', wsId],
+    queryFn: () => apiFetch<WorkspaceServicesResponse>(`/api/workspace/${encodeURIComponent(wsId!)}/services`),
+    enabled: !!wsId,
+    refetchInterval: 3000,
+  });
+}
+
+type ServiceAction = 'start' | 'stop' | 'restart';
+
+/**
+ * Start/stop/restart a single service, or (with no `service`) all services.
+ * The server re-detects configs — no command is ever sent from the client.
+ */
+export function useServiceAction(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, service }: { action: ServiceAction; service?: string }) => {
+      const base = `/api/workspace/${encodeURIComponent(wsId)}/services`;
+      const path = service
+        ? `${base}/${encodeURIComponent(service)}/${action}`
+        : `${base}/${action}`; // bulk start/stop only
+      return apiFetch<{ success: boolean }>(path, { method: 'POST' });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-services', wsId] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
+    },
+  });
+}
+
+/** Start/stop a detected orchestration tool by its detection id. */
+export function useOrchestratorAction(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, id }: { action: 'start' | 'stop'; id: string }) =>
+      apiFetch<{ success: boolean }>(`/api/workspace/${encodeURIComponent(wsId)}/orchestrators/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-services', wsId] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
     },
   });
 }

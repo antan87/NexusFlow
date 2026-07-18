@@ -10,6 +10,7 @@ import { Skeleton } from '../components/ui/skeleton.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
+import { useWorkspaceServices } from '../lib/api/queries.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
@@ -52,7 +53,6 @@ interface WorkspacesPageProps {
   addRepoLoading: boolean;
   handleAddRepo: (wsName: string, repoPath: string) => Promise<void>;
   sessionProps: Omit<ComponentProps<typeof SessionHistory>, 'ws'>;
-  serviceProps: Omit<ComponentProps<typeof ServiceConsole>, 'ws'>;
   changesProps: Omit<ComponentProps<typeof ChangesViewer>, 'ws'>;
   knowledgeProps: Omit<ComponentProps<typeof KnowledgeBase>, 'ws'>;
   planProps: ComponentProps<typeof ImplementationPlan>;
@@ -78,7 +78,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     addRepoLoading,
     handleAddRepo,
     sessionProps,
-    serviceProps,
     changesProps,
     knowledgeProps,
     planProps,
@@ -89,6 +88,10 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
   const selectedMode = selected?.mode ?? 'worktree';
+
+  // Detected services for the overview topology panel (shares the react-query
+  // cache with the Services tab's ServiceConsole — one fetch, not two).
+  const detectedServices = useWorkspaceServices(selected?.branchName ?? null).data?.services ?? [];
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -106,7 +109,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         const name = repoName(rp);
         const change = changesProps.gitChanges?.find((c: { repoName: string; files?: unknown[] }) => c.repoName === name);
         const changedCount: number | null = change ? change.files?.length ?? 0 : null;
-        const svcs = (serviceProps.services ?? []).filter((s) => (s.cwd ?? '').split(/[\\/]/).includes(name));
+        const svcs = detectedServices.filter((s) => (s.cwd ?? '').split(/[\\/]/).includes(name));
         const ports = Array.from(new Set(svcs.map((s) => s.port).filter((p): p is number => typeof p === 'number')));
         return { name, changedCount, ports, serviceCount: svcs.length };
       })
@@ -378,7 +381,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </div>
                 )}
                 {subTab === 'sessions' && <SessionHistory ws={selected} {...sessionProps} />}
-                {subTab === 'services' && <ServiceConsole ws={selected} {...serviceProps} />}
+                {subTab === 'services' && <ServiceConsole ws={selected} />}
                 {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
                 {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
                 {subTab === 'plan' && <ImplementationPlan {...planProps} />}
