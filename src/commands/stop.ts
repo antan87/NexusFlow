@@ -8,10 +8,15 @@ import { select } from '@inquirer/prompts';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { stopServices } from '../orchestration/index.js';
+import {
+  detectOrchestrationTools,
+  loadRunningState,
+  stopOrchestrator,
+  stopServices,
+} from '../orchestration/index.js';
 
 /**
- * Stop all services for a workspace.
+ * Stop all services — and any started orchestration tools — for a workspace.
  *
  * @param workspaceArg - Optional workspace path from CLI.
  */
@@ -22,6 +27,22 @@ export async function stopCommand(workspaceArg?: string): Promise<void> {
   if (!workspacePath) return;
 
   await stopServices(workspacePath);
+
+  // Stop any recorded orchestrators (re-detect to get their stop invocation).
+  const state = await loadRunningState(workspacePath);
+  const orchestrators = state?.orchestrators ?? [];
+  if (orchestrators.length > 0) {
+    const tools = await detectOrchestrationTools(workspacePath);
+    for (const running of orchestrators) {
+      const detection = tools.find((t) => t.id === running.id);
+      if (!detection) {
+        console.log(chalk.yellow(`  ⚠ ${running.tool} (${running.id}) is recorded as running but no longer detected — skipping.`));
+        continue;
+      }
+      console.log(chalk.dim(`  Stopping ${running.tool}...`));
+      await stopOrchestrator(detection, workspacePath);
+    }
+  }
 
   console.log(chalk.bold.green('\n✅ All services stopped.\n'));
 }

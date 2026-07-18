@@ -409,15 +409,34 @@ export interface ServiceConfig {
 }
 
 /** Detected orchestration tool in a workspace. */
+/** A structured, directly-executable command (never a shell string). */
+export interface OrchestrationRun {
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
 export interface OrchestrationDetection {
+  /** Stable identity: `${tool}:${config path relative to the scanned dir}`. */
+  id: string;
   /** Which tool was found. */
   tool: 'docker-compose' | 'aspire' | 'tilt' | 'procfile' | 'makefile';
   /** Path to the config file. */
   configPath: string;
-  /** Start command for this tool. */
+  /** Start command for this tool (display only — never executed). */
   startCommand: string;
-  /** Stop command for this tool. */
+  /** Stop command for this tool (display only — never executed). */
   stopCommand: string;
+  /** The structured start invocation — the only thing ever executed. */
+  run: OrchestrationRun;
+  /** Structured stop invocation (one-shot tools like compose `down`). */
+  stopRun?: OrchestrationRun;
+  /**
+   * How the tool runs: `oneshot` detaches by itself (compose up -d) and is
+   * stopped via `stopRun`; `pm2` is wrapped like a service and stopped by
+   * deleting its PM2 app.
+   */
+  mode: 'oneshot' | 'pm2';
 }
 
 /** A currently running service process. */
@@ -433,11 +452,28 @@ export interface RunningService {
 }
 
 /** State file saved to track running services. */
+/** A started orchestration tool recorded in the running state. */
+export interface RunningOrchestrator {
+  /** Matches {@link OrchestrationDetection.id}. */
+  id: string;
+  tool: OrchestrationDetection['tool'];
+  configPath: string;
+  mode: 'oneshot' | 'pm2';
+  /** PM2 app name — set only for mode 'pm2'. */
+  pm2Name?: string;
+  startedAt: string;
+}
+
 export interface RunningState {
   /** Workspace path this state belongs to. */
   workspacePath: string;
   /** List of running services. */
   services: RunningService[];
+  /**
+   * Started orchestration tools. Kept separate from services: one-shot tools
+   * (docker compose up -d) have no PID for the services filter to verify.
+   */
+  orchestrators?: RunningOrchestrator[];
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }

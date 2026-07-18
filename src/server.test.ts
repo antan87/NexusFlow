@@ -12,6 +12,7 @@ import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
+import * as orchestration from './orchestration/index.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -27,6 +28,7 @@ vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
 vi.mock('./core/new-repo.js');
+vi.mock('./orchestration/index.js');
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -827,6 +829,56 @@ describe('Server API Endpoints Unit Tests', () => {
 
         expect(response.status).toBe(400);
       });
+    });
+  });
+
+  describe('Services & orchestration endpoints', () => {
+    beforeEach(() => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+    });
+
+    it('POST /services/start re-detects server-side and ignores the request body', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' },
+      ] as any);
+      vi.mocked(orchestration.startServices).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/ws/services/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ services: [{ name: 'evil', command: 'rm', args: ['-rf', '/'], cwd: '/', source: 'x' }] }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(orchestration.detectAllServices).toHaveBeenCalled();
+      // The started services are the DETECTED ones, not the client's payload.
+      const started = vi.mocked(orchestration.startServices).mock.calls[0]?.[0];
+      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' }]);
+    });
+
+    it('POST /services/:name/start 404s for an unknown service', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([]);
+
+      const response = await app.request('/api/workspace/ws/services/ghost/start', { method: 'POST' });
+      expect(response.status).toBe(404);
+    });
+
+    it('POST /orchestrators/start rejects an unknown detection id', async () => {
+      vi.mocked(orchestration.detectOrchestrationTools).mockResolvedValue([]);
+
+      const response = await app.request('/api/workspace/ws/orchestrators/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'docker-compose:nope.yml' }),
+      });
+      expect(response.status).toBe(404);
+    });
+
+    it('GET /services/logs/:name rejects a traversal service name without reading outside the log dir', async () => {
+      const response = await app.request(
+        `/api/workspace/ws/services/logs/${encodeURIComponent('../../secret')}`,
+      );
+      expect(response.status).toBe(400);
     });
   });
 });

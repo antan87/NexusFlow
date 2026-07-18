@@ -63,6 +63,12 @@ import {
   detectOrchestrationTools,
   startServices,
   stopServices,
+  startService,
+  stopService,
+  restartService,
+  startOrchestrator,
+  stopOrchestrator,
+  tailLogFile,
   loadRunningState,
   getPm2List,
 } from './orchestration/index.js';
@@ -506,7 +512,8 @@ app.get('/api/workspaces/status', async (c) => {
           // Running services (cached running-state, PM2-verified — same source as
           // the Services tab; only workspaces that ever started services touch PM2).
           const runningState = await loadRunningState(workspacePath, pm2List);
-          status.runningServices = runningState?.services?.length ?? 0;
+          status.runningServices =
+            (runningState?.services?.length ?? 0) + (runningState?.orchestrators?.length ?? 0);
 
           // Sync state: worst-case classification + any repo pending validation.
           const wsState = await loadWorkspaceState(workspacePath);
@@ -982,21 +989,23 @@ app.get('/api/workspace/:id/services', async (c) => {
       services,
       orchestrationTools: tools,
       runningState: runningState?.services || [],
+      runningOrchestrators: runningState?.orchestrators || [],
     });
   } catch (error) {
     return errorResponse(c, error);
   }
 });
 
-// 10. Start services in workspace
+// 10. Start services in workspace. Configs are re-detected server-side —
+// the client only says "start", never what to execute.
 app.post('/api/workspace/:id/services/start', async (c) => {
   try {
     const id = c.req.param('id');
-    const { services } = await c.req.json() as { services: any[] };
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = path.join(workspacePath, '.nexusflow-logs');
 
+    const services = await detectAllServices(workspacePath);
     await startServices(services, workspacePath, logDir);
     return c.json({ success: true });
   } catch (error) {
@@ -1018,20 +1027,57 @@ app.post('/api/workspace/:id/services/stop', async (c) => {
   }
 });
 
-// 12. Get service logs
+// 11b. Per-service start / stop / restart. The service config is re-detected
+// by name server-side; the client never supplies a command.
+app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
+    const action = c.req.param('action') as 'start' | 'stop' | 'restart';
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const logDir = path.join(workspacePath, '.nexusflow-logs');
+
+    if (action === 'stop') {
+      const stopped = await stopService(workspacePath, serviceName);
+      return c.json({ success: true, stopped });
+    }
+
+    const services = await detectAllServices(workspacePath);
+    const service = services.find((s) => s.name === serviceName);
+    if (!service) {
+      return c.json({ error: `Unknown service "${serviceName}" in this workspace.` }, 404);
+    }
+    const running = action === 'restart'
+      ? await restartService(service, workspacePath, logDir)
+      : await startService(service, workspacePath, logDir);
+    return c.json({ success: running !== null, service: running });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+/** Resolve + contain a service log path; names may contain '/' (repo/sub). */
+function resolveServiceLogFile(workspacePath: string, serviceName: string): string {
+  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  return assertWithin(logDir, path.join(logDir, `${serviceName}.log`));
+}
+
+// 12. Get service logs (backfill). Returns the trailing 50KB and the byte
+// offset the read ended at, so the SSE stream can resume exactly there.
 app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
   try {
     const id = c.req.param('id');
-    const serviceName = c.req.param('serviceName');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logFile = path.join(workspacePath, '.nexusflow-logs', `${serviceName}.log`);
+    const logFile = resolveServiceLogFile(workspacePath, serviceName);
 
     let content = '';
+    let size = 0;
     try {
-      // Read last 200 lines or 50KB
       const stats = await fs.stat(logFile);
-      const size = stats.size;
+      size = stats.size;
       const start = Math.max(0, size - 50000);
       const fd = await fs.open(logFile, 'r');
       const buffer = Buffer.alloc(size - start);
@@ -1042,7 +1088,85 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
       content = 'No logs available yet.';
     }
 
-    return c.json({ logs: content });
+    return c.json({ logs: content, size });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 12b. Live log stream (SSE): tails the log file from ?offset onward,
+// emitting 'log' events with JSON-encoded chunks (raw SSE frames would mangle
+// embedded newlines). A 15s ping keeps idle streams alive.
+app.get('/api/workspace/:id/services/logs/:serviceName/stream', async (c) => {
+  const id = c.req.param('id');
+  const serviceName = decodeURIComponent(c.req.param('serviceName'));
+  const config = await loadConfig();
+  const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+  const logFile = resolveServiceLogFile(workspacePath, serviceName);
+
+  const offsetParam = Number.parseInt(c.req.query('offset') ?? '', 10);
+  const startOffset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : undefined;
+
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  return streamSSE(c, async (stream) => {
+    await stream.writeSSE({ event: 'init', data: JSON.stringify({ offset: startOffset ?? null }) });
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        tail.stop();
+        clearInterval(heartbeat);
+        resolve();
+      };
+
+      const tail = tailLogFile(
+        logFile,
+        (chunk) => {
+          stream.writeSSE({ event: 'log', data: JSON.stringify({ chunk }) }).catch(cleanup);
+        },
+        { startOffset },
+      );
+
+      const heartbeat = setInterval(() => {
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(cleanup);
+      }, 15_000);
+
+      stream.onAbort(cleanup);
+    });
+  });
+});
+
+// 12c. Orchestration tools: start/stop by detection id only — the tool is
+// re-detected server-side and the client can never supply a command.
+app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const action = c.req.param('action') as 'start' | 'stop';
+    const body = await c.req.json() as { id?: string };
+    if (!body.id || typeof body.id !== 'string') {
+      return c.json({ error: 'Missing orchestrator "id" in request body' }, 400);
+    }
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const logDir = path.join(workspacePath, '.nexusflow-logs');
+
+    const tools = await detectOrchestrationTools(workspacePath);
+    const detection = tools.find((t) => t.id === body.id);
+    if (!detection) {
+      return c.json({ error: `Unknown orchestration tool "${body.id}" in this workspace.` }, 404);
+    }
+
+    if (action === 'start') {
+      const running = await startOrchestrator(detection, workspacePath, logDir);
+      return c.json({ success: true, orchestrator: running });
+    }
+    await stopOrchestrator(detection, workspacePath);
+    return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
   }

@@ -21,18 +21,26 @@ export async function detectOrchestrationTools(
 ): Promise<OrchestrationDetection[]> {
   const results: OrchestrationDetection[] = [];
 
+  /** Stable id from the config path, POSIX-style so it survives platforms. */
+  const idFor = (tool: OrchestrationDetection['tool'], configPath: string) =>
+    `${tool}:${path.relative(dir, configPath).split(path.sep).join('/')}`;
+
   async function scan(folder: string, prefix = '') {
-    // Docker Compose
+    // Docker Compose — one-shot: `up -d` detaches by itself, `down` stops.
     const composeFiles = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yaml', 'compose.yml'];
     for (const file of composeFiles) {
       const filePath = path.join(folder, file);
       try {
         await fs.access(filePath);
         results.push({
+          id: idFor('docker-compose', filePath),
           tool: 'docker-compose',
           configPath: filePath,
           startCommand: `docker compose -f "${prefix ? path.join(prefix, file) : file}" up -d`,
           stopCommand: `docker compose -f "${prefix ? path.join(prefix, file) : file}" down`,
+          run: { command: 'docker', args: ['compose', '-f', filePath, 'up', '-d'], cwd: folder },
+          stopRun: { command: 'docker', args: ['compose', '-f', filePath, 'down'], cwd: folder },
+          mode: 'oneshot',
         });
         break; // Only use the first found
       } catch { /* not found */ }
@@ -50,12 +58,16 @@ export async function detectOrchestrationTools(
             const subEntries = await fs.readdir(entryPath);
             const csproj = subEntries.find((e) => e.endsWith('.csproj'));
             if (csproj) {
+              const csprojPath = path.join(entryPath, csproj);
               const projectPath = prefix ? path.join(prefix, entry, csproj) : path.join(entry, csproj);
               results.push({
+                id: idFor('aspire', csprojPath),
                 tool: 'aspire',
-                configPath: path.join(entryPath, csproj),
+                configPath: csprojPath,
                 startCommand: `dotnet run --project "${projectPath}"`,
-                stopCommand: 'Ctrl+C (Aspire runs in foreground)',
+                stopCommand: 'Stopped via NexusFlow',
+                run: { command: 'dotnet', args: ['run', '--project', csprojPath], cwd: folder },
+                mode: 'pm2',
               });
             }
           }
@@ -68,10 +80,14 @@ export async function detectOrchestrationTools(
       const tiltPath = path.join(folder, 'Tiltfile');
       await fs.access(tiltPath);
       results.push({
+        id: idFor('tilt', tiltPath),
         tool: 'tilt',
         configPath: tiltPath,
         startCommand: prefix ? `tilt up --file ${path.join(prefix, 'Tiltfile')}` : 'tilt up',
         stopCommand: prefix ? `tilt down --file ${path.join(prefix, 'Tiltfile')}` : 'tilt down',
+        run: { command: 'tilt', args: ['up', '--file', tiltPath], cwd: folder },
+        stopRun: { command: 'tilt', args: ['down', '--file', tiltPath], cwd: folder },
+        mode: 'pm2',
       });
     } catch { /* not found */ }
 
@@ -80,10 +96,13 @@ export async function detectOrchestrationTools(
       const procPath = path.join(folder, 'Procfile');
       await fs.access(procPath);
       results.push({
+        id: idFor('procfile', procPath),
         tool: 'procfile',
         configPath: procPath,
         startCommand: prefix ? `honcho start -f ${path.join(prefix, 'Procfile')}` : 'honcho start',
-        stopCommand: 'Ctrl+C',
+        stopCommand: 'Stopped via NexusFlow',
+        run: { command: 'honcho', args: ['start', '-f', procPath], cwd: folder },
+        mode: 'pm2',
       });
     } catch { /* not found */ }
 
@@ -94,10 +113,13 @@ export async function detectOrchestrationTools(
       if (content.includes('start:') || content.includes('dev:') || content.includes('run:')) {
         const makeCmd = prefix ? `make -C "${prefix}" dev` : 'make dev';
         results.push({
+          id: idFor('makefile', makePath),
           tool: 'makefile',
           configPath: makePath,
           startCommand: makeCmd,
-          stopCommand: 'Ctrl+C',
+          stopCommand: 'Stopped via NexusFlow',
+          run: { command: 'make', args: ['-C', folder, 'dev'], cwd: folder },
+          mode: 'pm2',
         });
       }
     } catch { /* not found */ }
