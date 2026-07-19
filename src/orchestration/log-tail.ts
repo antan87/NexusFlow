@@ -37,7 +37,7 @@ export function tailLogFile(
   let offset = options.startOffset ?? -1; // -1 → initialize to current size on first tick
   let stopped = false;
   let polling = false;
-  const decoder = new TextDecoder('utf-8');
+  let decoder = new TextDecoder('utf-8');
 
   const tick = async () => {
     if (polling || stopped) return;
@@ -46,9 +46,13 @@ export function tailLogFile(
       let size: number;
       try {
         size = (await fs.stat(filePath)).size;
-      } catch {
-        // File missing — when it (re)appears, stream it from the top.
-        offset = 0;
+      } catch (err) {
+        // ENOENT: the file isn't created yet or was removed — when it
+        // (re)appears, stream it from the top. Any OTHER (transient) stat
+        // failure (e.g. a Windows lock while PM2 appends) must leave the
+        // offset intact and retry next tick; resetting to 0 would re-read and
+        // re-emit the whole file as duplicate output.
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') offset = 0;
         return;
       }
 
@@ -59,8 +63,10 @@ export function tailLogFile(
       }
 
       if (size < offset) {
-        // Truncated or rotated — restart from the top of the new content.
+        // Truncated or rotated — restart from the top of the new content, and
+        // drop any half-decoded multibyte bytes carried from the old file.
         offset = 0;
+        decoder = new TextDecoder('utf-8');
       }
       if (size === offset) return;
 

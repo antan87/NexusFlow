@@ -68,8 +68,8 @@ describe('orchestrator runner', () => {
 
     expect(running.pm2Name).toBe(orchestratorPm2Name(WS, 'tilt'));
     // pm2 delete (idempotent) then pm2 start with the orch app name.
-    const startCall = vi.mocked(execa).mock.calls.find((c) => c[1]?.includes('start'));
-    expect(startCall?.[1]).toContain(orchestratorPm2Name(WS, 'tilt'));
+    const startCall = vi.mocked(execa).mock.calls.find((c) => (c[1] as string[] | undefined)?.includes('start'));
+    expect(startCall?.[1] as string[]).toContain(orchestratorPm2Name(WS, 'tilt'));
   });
 
   it('stops a one-shot tool by running stopRun and clearing state', async () => {

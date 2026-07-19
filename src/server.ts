@@ -1098,14 +1098,22 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
 // emitting 'log' events with JSON-encoded chunks (raw SSE frames would mangle
 // embedded newlines). A 15s ping keeps idle streams alive.
 app.get('/api/workspace/:id/services/logs/:serviceName/stream', async (c) => {
-  const id = c.req.param('id');
-  const serviceName = decodeURIComponent(c.req.param('serviceName'));
-  const config = await loadConfig();
-  const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-  const logFile = resolveServiceLogFile(workspacePath, serviceName);
-
-  const offsetParam = Number.parseInt(c.req.query('offset') ?? '', 10);
-  const startOffset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : undefined;
+  // Resolve + validate the log path BEFORE opening the stream so a bad name
+  // (e.g. a traversal attempt) returns a clean error, mirroring the backfill
+  // route, rather than a raw 500 from an uncaught throw.
+  let logFile: string;
+  let startOffset: number | undefined;
+  try {
+    const id = c.req.param('id');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    logFile = resolveServiceLogFile(workspacePath, serviceName);
+    const offsetParam = Number.parseInt(c.req.query('offset') ?? '', 10);
+    startOffset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : undefined;
+  } catch (error) {
+    return errorResponse(c, error);
+  }
 
   c.header('Content-Type', 'text/event-stream');
   c.header('Cache-Control', 'no-cache');

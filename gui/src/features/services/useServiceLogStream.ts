@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { API_BASE } from '../../lib/apiBase.js';
 
+/** Trailing scrollback kept in the browser buffer (~500KB of log text). */
+const MAX_LOG_CHARS = 512_000;
+
 interface LogStreamState {
   logs: string;
   connected: boolean;
@@ -63,7 +66,12 @@ export function useServiceLogStream(
         try {
           const { chunk } = JSON.parse((event as MessageEvent).data);
           if (typeof chunk === 'string' && !cancelledRef.current) {
-            setState((s) => ({ ...s, logs: s.logs + chunk }));
+            setState((s) => {
+              const next = s.logs + chunk;
+              // Cap the client-side scrollback so a long, chatty stream can't
+              // grow the buffer without bound; keep the trailing window.
+              return { ...s, logs: next.length > MAX_LOG_CHARS ? next.slice(-MAX_LOG_CHARS) : next };
+            });
           }
         } catch {
           // Ignore malformed frames.
