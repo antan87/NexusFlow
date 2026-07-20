@@ -245,7 +245,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'run_doctor',
     description:
-      'Run workspace health diagnostics: worktree paths, branch alignment, uncommitted changes, local package setup, test commands, core artifacts, and local-AI connectivity. Returns a structured report. Read-only.',
+      'Run workspace health diagnostics: worktree paths, branch alignment, uncommitted changes, local package setup, test commands, and core artifacts. Returns a structured report. Read-only.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
     handler: async (_args, ctx) => {

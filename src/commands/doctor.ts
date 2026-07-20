@@ -16,7 +16,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   'Local Package Setup': '📦 Local Package Setup & Reference Versioning:',
   'Test Commands': '🧪 Test Commands:',
   'Core Artifacts': '📄 Core Artifacts:',
-  'Local AI Agent': '🤖 Local AI Agent:',
 };
 
 const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);
