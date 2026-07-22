@@ -19,6 +19,12 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
   const runningServices = useMemo(() => data?.runningState ?? [], [data]);
   const orchTools = data?.orchestrationTools ?? [];
   const runningOrchestrators = useMemo(() => data?.runningOrchestrators ?? [], [data]);
+  // pm2-mode orchestrators expose a tailable log source (the server-assigned
+  // `logName`); one-shot tools (compose up -d) have no streamable log.
+  const orchLogs = useMemo(
+    () => runningOrchestrators.filter((o) => o.mode === 'pm2' && o.logName),
+    [runningOrchestrators],
+  );
 
   const [termTheme, setTermTheme] = useState<'classic' | 'matrix' | 'dracula'>('classic');
   const [isExpanded, setIsExpanded] = useState(false);
@@ -28,7 +34,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
   useEffect(() => {
     const logSources = [
       ...services.map((s) => s.name),
-      ...runningOrchestrators.filter((o) => o.mode === 'pm2').map((o) => `orch-${o.tool}`),
+      ...orchLogs.map((o) => o.logName as string),
     ];
     if (logSources.length === 0) {
       if (selectedLogService !== null) setSelectedLogService(null);
@@ -36,7 +42,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
       setSelectedLogService(logSources[0]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [services, runningOrchestrators]);
+  }, [services, orchLogs]);
 
   const { logs, connected, clear } = useServiceLogStream(wsId, selectedLogService, true);
 
@@ -136,7 +142,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
       </div>
 
       {/* Split-pane console. */}
-      {services.length > 0 && (
+      {(services.length > 0 || orchLogs.length > 0) && (
         <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm lg:grid-cols-12">
           {/* Service list with per-row controls. */}
           <div className="border-b border-border bg-muted/30 p-5 lg:col-span-4 lg:border-b-0 lg:border-r">
@@ -209,6 +215,34 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                   </div>
                 );
               })}
+
+              {orchLogs.length > 0 && (
+                <>
+                  <div className="mt-2 border-t border-border pt-3 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Orchestrators
+                  </div>
+                  {orchLogs.map((orch) => {
+                    const logName = orch.logName as string;
+                    const isSelected = selectedLogService === logName;
+                    return (
+                      <div
+                        key={orch.id}
+                        className={cn(
+                          'flex cursor-pointer items-center gap-2 rounded-xl border p-3 transition-colors',
+                          isSelected
+                            ? 'border-primary/40 bg-primary/10 text-foreground'
+                            : 'border-border bg-card text-muted-foreground hover:border-foreground/15 hover:bg-accent/50 hover:text-foreground',
+                        )}
+                        onClick={() => setSelectedLogService(logName)}
+                      >
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-success" />
+                        <span className="truncate text-xs font-bold">{orch.tool}</span>
+                        <StatusBadge tone="idle" dot={false}>{orch.mode}</StatusBadge>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           </div>
 

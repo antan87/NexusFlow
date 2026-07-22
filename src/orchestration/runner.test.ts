@@ -11,6 +11,7 @@ import {
   serviceLogFile,
   startService,
   stopService,
+  stopServices,
 } from './runner.js';
 import type { RunningState, ServiceConfig } from '../types.js';
 
@@ -90,7 +91,7 @@ describe('orchestration runner PM2 state handling', () => {
     expect(execa).not.toHaveBeenCalled();
   });
 
-  it('loadRunningState preserves orchestrator entries (no PM2 filter)', async () => {
+  it('loadRunningState keeps one-shot orchestrators (no PM2 app to verify)', async () => {
     const workspacePath = path.join(process.cwd(), 'feature-b');
     const state: RunningState = {
       workspacePath,
@@ -105,6 +106,28 @@ describe('orchestration runner PM2 state handling', () => {
     const running = await loadRunningState(workspacePath, []);
     expect(running?.orchestrators).toHaveLength(1);
     expect(running?.orchestrators?.[0]?.tool).toBe('docker-compose');
+  });
+
+  it('loadRunningState drops pm2-mode orchestrators whose PM2 app is offline, keeps online ones', async () => {
+    const workspacePath = path.join(process.cwd(), 'feature-c');
+    const state: RunningState = {
+      workspacePath,
+      services: [],
+      orchestrators: [
+        { id: 'tilt:a/Tiltfile', tool: 'tilt', configPath: 'a/Tiltfile', mode: 'pm2', pm2Name: 'nexusflow-feature-c-orch-tilt-a-tiltfile', logName: 'orch-tilt-a-tiltfile', startedAt: 'x' },
+        { id: 'makefile:b/Makefile', tool: 'makefile', configPath: 'b/Makefile', mode: 'pm2', pm2Name: 'nexusflow-feature-c-orch-makefile-b-makefile', logName: 'orch-makefile-b-makefile', startedAt: 'x' },
+      ],
+      updatedAt: 'x',
+    };
+    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+
+    const running = await loadRunningState(workspacePath, [
+      { name: 'nexusflow-feature-c-orch-tilt-a-tiltfile', pm2_env: { status: 'online' } },
+      { name: 'nexusflow-feature-c-orch-makefile-b-makefile', pm2_env: { status: 'errored' } },
+    ]);
+
+    // The errored makefile orchestrator is dropped; the online tilt one stays.
+    expect(running?.orchestrators?.map((o) => o.tool)).toEqual(['tilt']);
   });
 
   describe('per-service lifecycle', () => {
@@ -165,6 +188,46 @@ describe('orchestration runner PM2 state handling', () => {
       expect(vi.mocked(execa).mock.calls[1]).toEqual(['npx', ['pm2', 'delete', 'nexusflow-my-ws-api'], { reject: false }]);
       // Services now empty → state file removed.
       expect(fs.unlink).toHaveBeenCalled();
+    });
+  });
+
+  describe('stop-all carve-out', () => {
+    it('stops orch-* named services but excludes recorded orchestrator apps', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      const state: RunningState = {
+        workspacePath: ws,
+        services: [],
+        orchestrators: [
+          { id: 'tilt:Tiltfile', tool: 'tilt', configPath: 'Tiltfile', mode: 'pm2', pm2Name: 'nexusflow-my-ws-orch-tilt-tiltfile', logName: 'orch-tilt-tiltfile', startedAt: 'x' },
+        ],
+        updatedAt: 'x',
+      };
+      // readRawRunningState + mutateRunningState both read the state file.
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+      vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
+      vi.mocked(execa)
+        // getPm2List (jlist): the real orchestrator, a SERVICE literally named
+        // orch-worker, and a plain service.
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([
+            { name: 'nexusflow-my-ws-orch-tilt-tiltfile' },
+            { name: 'nexusflow-my-ws-orch-worker' },
+            { name: 'nexusflow-my-ws-api' },
+          ]),
+        } as any)
+        .mockResolvedValue({ stdout: '' } as any); // subsequent pm2 delete calls
+
+      await stopServices(ws);
+
+      const deleted = vi.mocked(execa).mock.calls
+        .filter((c) => (c[1] as string[] | undefined)?.[1] === 'delete')
+        .map((c) => (c[1] as string[])[2]);
+      // The orch-* SERVICE and the plain service are stopped...
+      expect(deleted).toContain('nexusflow-my-ws-orch-worker');
+      expect(deleted).toContain('nexusflow-my-ws-api');
+      // ...but the recorded orchestrator app is left running.
+      expect(deleted).not.toContain('nexusflow-my-ws-orch-tilt-tiltfile');
     });
   });
 });

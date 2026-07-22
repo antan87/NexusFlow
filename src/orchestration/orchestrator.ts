@@ -10,16 +10,30 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 
 import type { OrchestrationDetection, RunningOrchestrator } from '../types.js';
-import { getPm2List, mutateRunningState, serviceLogFile } from './runner.js';
+import { getPm2List, mutateRunningState, pm2Start, serviceLogFile } from './runner.js';
 
-/** PM2 app name for a pm2-mode orchestrator: `nexusflow-<ws>-orch-<tool>`. */
-export function orchestratorPm2Name(workspacePath: string, tool: string): string {
-  return `nexusflow-${path.basename(workspacePath)}-orch-${tool}`;
+/**
+ * Slugifies a detection id into a PM2/filesystem-safe token. Keyed on the id
+ * (`<tool>:<relative config path>`), NOT the tool alone, so two same-tool
+ * detections in different sub-repos (e.g. a Makefile in each) get distinct PM2
+ * apps and log files instead of colliding onto one — where starting the second
+ * would `pm2 delete` the first and both would stream into a shared log.
+ */
+function orchSlug(detection: OrchestrationDetection): string {
+  return detection.id
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+/** PM2 app name for a pm2-mode orchestrator: `nexusflow-<ws>-orch-<slug>`. */
+export function orchestratorPm2Name(workspacePath: string, detection: OrchestrationDetection): string {
+  return `nexusflow-${path.basename(workspacePath)}-orch-${orchSlug(detection)}`;
 }
 
 /** Log source name for a pm2-mode orchestrator (tailable like a service). */
-export function orchestratorLogName(tool: string): string {
-  return `orch-${tool}`;
+export function orchestratorLogName(detection: OrchestrationDetection): string {
+  return `orch-${orchSlug(detection)}`;
 }
 
 /**
@@ -48,31 +62,22 @@ export async function startOrchestrator(
       shell: false,
     });
   } else {
-    const pm2Name = orchestratorPm2Name(workspacePath, detection.tool);
-    const logFile = serviceLogFile(logDir, orchestratorLogName(detection.tool));
+    const pm2Name = orchestratorPm2Name(workspacePath, detection);
+    const logName = orchestratorLogName(detection);
+    const logFile = serviceLogFile(logDir, logName);
     await fs.mkdir(path.dirname(logFile), { recursive: true });
 
-    // Same invocation shape as service starts, so the log is tailable by the
-    // shared SSE endpoint and the app shows up under the workspace prefix.
-    await execa('npx', ['pm2', 'delete', pm2Name], { reject: false });
-    await execa('npx', [
-      'pm2',
-      'start',
-      detection.run.command,
-      '--name',
-      pm2Name,
-      '--cwd',
-      detection.run.cwd,
-      '-o',
+    // Same launch shape as service starts, so the log is tailable by the shared
+    // SSE endpoint and the app shows up under the workspace prefix.
+    await pm2Start({
+      name: pm2Name,
+      command: detection.run.command,
+      args: detection.run.args,
+      cwd: detection.run.cwd,
       logFile,
-      '-e',
-      logFile,
-      '--interpreter',
-      'none',
-      '--',
-      ...detection.run.args,
-    ]);
+    });
     running.pm2Name = pm2Name;
+    running.logName = logName;
   }
 
   await mutateRunningState(workspacePath, (state) => ({
@@ -92,7 +97,7 @@ export async function stopOrchestrator(
   workspacePath: string,
 ): Promise<void> {
   if (detection.mode === 'pm2') {
-    const pm2Name = orchestratorPm2Name(workspacePath, detection.tool);
+    const pm2Name = orchestratorPm2Name(workspacePath, detection);
     const pm2List = await getPm2List();
     if (pm2List.some((app: any) => app.name === pm2Name)) {
       await execa('npx', ['pm2', 'delete', pm2Name], { reject: false });

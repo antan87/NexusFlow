@@ -10,7 +10,7 @@ import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import {
   detectOrchestrationTools,
-  loadRunningState,
+  readRawRunningState,
   stopOrchestrator,
   stopServices,
 } from '../orchestration/index.js';
@@ -29,7 +29,9 @@ export async function stopCommand(workspaceArg?: string): Promise<void> {
   await stopServices(workspacePath);
 
   // Stop any recorded orchestrators (re-detect to get their stop invocation).
-  const state = await loadRunningState(workspacePath);
+  // Read the RAW state, not the PM2-reconciled view, so a crashed pm2-mode
+  // orchestrator (which loadRunningState hides) is still torn down and cleared.
+  const state = await readRawRunningState(workspacePath);
   const orchestrators = state?.orchestrators ?? [];
   if (orchestrators.length > 0) {
     const tools = await detectOrchestrationTools(workspacePath);

@@ -35,6 +35,40 @@ export function serviceLogFile(logDir: string, serviceName: string): string {
 }
 
 /**
+ * Launches a command under PM2 using the shared NexusFlow launch shape: delete
+ * any same-named app first (idempotent restart), then start it with stdout and
+ * stderr wired to a single log file and no interpreter (run the binary
+ * directly). Shared by service and orchestrator starts so their logging and
+ * restart behavior can never drift apart.
+ */
+export async function pm2Start(opts: {
+  name: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  logFile: string;
+}): Promise<void> {
+  await execa('npx', ['pm2', 'delete', opts.name], { reject: false });
+  await execa('npx', [
+    'pm2',
+    'start',
+    opts.command,
+    '--name',
+    opts.name,
+    '--cwd',
+    opts.cwd,
+    '-o',
+    opts.logFile,
+    '-e',
+    opts.logFile,
+    '--interpreter',
+    'none',
+    '--',
+    ...opts.args,
+  ]);
+}
+
+/**
  * Parses `pm2 jlist` output defensively. npx/pm2 can emit preamble lines before
  * the JSON array, which would make a bare JSON.parse throw and silently drop us
  * to stale cached state.
@@ -68,43 +102,67 @@ export async function getPm2List(): Promise<any[]> {
 }
 
 /**
- * Loads the running state from disk, syncing active service status with PM2.
- * Orchestrator entries are passed through untouched — one-shot tools (docker
- * compose) have no PM2 app or PID to verify; they are cleared on stop.
+ * Reads the raw on-disk running state without reconciling it against PM2.
+ * Callers that need the full recorded set — e.g. the stop path, which must
+ * still tear down a crashed orchestrator that {@link loadRunningState} hides —
+ * use this instead of the reconciled view.
+ *
+ * @param workspacePath - Workspace root path.
+ */
+export async function readRawRunningState(workspacePath: string): Promise<RunningState | null> {
+  try {
+    return JSON.parse(await fs.readFile(getStatePath(workspacePath), 'utf-8')) as RunningState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Loads the running state from disk, syncing active status with PM2. Services
+ * and pm2-mode orchestrators are verified against the live PM2 process list and
+ * dropped when no longer online (crashed or stopped outside NexusFlow), so the
+ * Services tab and dashboard count never show a phantom-running process.
+ * One-shot tools (docker compose up -d) have no PM2 app or PID to verify; they
+ * are passed through and cleared on explicit stop.
  *
  * @param workspacePath - Workspace root path.
  * @param pm2List - Optional pre-fetched `pm2 jlist` output (see {@link getPm2List}).
  */
 export async function loadRunningState(workspacePath: string, pm2List?: any[]): Promise<RunningState | null> {
+  const state = await readRawRunningState(workspacePath);
+  if (!state) return null;
+
   try {
-    const raw = await fs.readFile(getStatePath(workspacePath), 'utf-8');
-    const state = JSON.parse(raw) as RunningState;
+    // Query current PM2 process list to verify actual running status.
+    const list = pm2List ?? await getPm2List();
+    const isOnline = (name: string): boolean => {
+      const app = list.find((a: any) => a.name === name);
+      return !!app && app.pm2_env?.status === 'online';
+    };
 
-    try {
-      // Query current PM2 process list to verify actual running status
-      const list = pm2List ?? await getPm2List();
-
-      const activeServices = state.services.map((service) => {
-        const uniqueName = pm2AppName(workspacePath, service.name);
-        const pm2App = list.find((app: any) => app.name === uniqueName);
-        const running = pm2App && pm2App.pm2_env?.status === 'online';
-        return {
-          ...service,
-          pid: running ? (pm2App.pid || service.pid) : 0,
-        };
-      }).filter((service) => service.pid > 0);
-
+    const activeServices = state.services.map((service) => {
+      const uniqueName = pm2AppName(workspacePath, service.name);
+      const pm2App = list.find((app: any) => app.name === uniqueName);
+      const running = pm2App && pm2App.pm2_env?.status === 'online';
       return {
-        ...state,
-        services: activeServices,
-        updatedAt: new Date().toISOString(),
+        ...service,
+        pid: running ? (pm2App.pid || service.pid) : 0,
       };
-    } catch {
-      // Fallback to cached state on disk if PM2 query fails
-      return state;
-    }
+    }).filter((service) => service.pid > 0);
+
+    const orchestrators = state.orchestrators?.filter(
+      (o) => o.mode !== 'pm2' || !o.pm2Name || isOnline(o.pm2Name),
+    );
+
+    return {
+      ...state,
+      services: activeServices,
+      orchestrators,
+      updatedAt: new Date().toISOString(),
+    };
   } catch {
-    return null;
+    // Fallback to cached state on disk if PM2 query fails.
+    return state;
   }
 }
 
@@ -168,27 +226,15 @@ export async function startService(
   try {
     await fs.mkdir(path.dirname(logFile), { recursive: true });
 
-    // Delete any existing PM2 configuration with the same name to avoid duplicate starts
-    await execa('npx', ['pm2', 'delete', uniqueName], { reject: false });
-
-    // Start the service using PM2 as a direct process execution
-    await execa('npx', [
-      'pm2',
-      'start',
-      service.command,
-      '--name',
-      uniqueName,
-      '--cwd',
-      service.cwd,
-      '-o',
+    // Start under PM2 (pre-deletes any same-named app), wiring stdout+stderr to
+    // the service log via the shared launch shape.
+    await pm2Start({
+      name: uniqueName,
+      command: service.command,
+      args: service.args,
+      cwd: service.cwd,
       logFile,
-      '-e',
-      logFile,
-      '--interpreter',
-      'none',
-      '--',
-      ...service.args,
-    ]);
+    });
 
     // Retrieve the real PID from PM2
     const pm2List = await getPm2List();
@@ -280,14 +326,24 @@ export async function startServices(
 export async function stopServices(workspacePath: string): Promise<void> {
   const workspaceId = path.basename(workspacePath);
   const prefix = `nexusflow-${workspaceId}-`;
-  const orchPrefix = `${prefix}orch-`;
 
   console.log(chalk.cyan(`  Stopping all services under PM2 for workspace: ${workspaceId}...`));
+
+  // Never tear down a recorded orchestrator as part of a service stop-all —
+  // they are stopped separately. Exclude their PM2 app names by exact match
+  // (not by an `orch-` name prefix) so a service literally named `orch-*` is
+  // still stopped.
+  const raw = await readRawRunningState(workspacePath);
+  const orchNames = new Set(
+    (raw?.orchestrators ?? [])
+      .map((o) => o.pm2Name)
+      .filter((n): n is string => typeof n === 'string'),
+  );
 
   try {
     const pm2List = await getPm2List();
     const targetApps = pm2List.filter(
-      (app: any) => app.name && app.name.startsWith(prefix) && !app.name.startsWith(orchPrefix),
+      (app: any) => app.name && app.name.startsWith(prefix) && !orchNames.has(app.name),
     );
 
     if (targetApps.length === 0) {

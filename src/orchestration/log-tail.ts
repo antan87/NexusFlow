@@ -48,11 +48,17 @@ export function tailLogFile(
         size = (await fs.stat(filePath)).size;
       } catch (err) {
         // ENOENT: the file isn't created yet or was removed — when it
-        // (re)appears, stream it from the top. Any OTHER (transient) stat
-        // failure (e.g. a Windows lock while PM2 appends) must leave the
-        // offset intact and retry next tick; resetting to 0 would re-read and
-        // re-emit the whole file as duplicate output.
-        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') offset = 0;
+        // (re)appears, stream it from the top and drop any half-decoded
+        // multibyte bytes carried from the old file (as the truncation branch
+        // does), else a split UTF-8 sequence corrupts the first char emitted
+        // from the re-created file. Any OTHER (transient) stat failure (e.g. a
+        // Windows lock while PM2 appends) must leave the offset intact and
+        // retry next tick; resetting to 0 would re-read and re-emit the whole
+        // file as duplicate output.
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          offset = 0;
+          decoder = new TextDecoder('utf-8');
+        }
         return;
       }
 

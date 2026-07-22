@@ -61,15 +61,20 @@ describe('orchestrator runner', () => {
     expect(written.orchestrators[0].id).toBe('docker-compose:docker-compose.yml');
   });
 
-  it('wraps a pm2-mode tool under a PM2 app named orch-<tool>', async () => {
+  it('wraps a pm2-mode tool under a PM2 app named orch-<id-slug>', async () => {
     vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
 
-    const running = await startOrchestrator(tilt(), WS, '/logs');
+    const detection = tilt();
+    const running = await startOrchestrator(detection, WS, '/logs');
 
-    expect(running.pm2Name).toBe(orchestratorPm2Name(WS, 'tilt'));
+    // Name/log are keyed on the detection id (not the tool) so same-tool tools
+    // in different sub-repos never collide.
+    expect(running.pm2Name).toBe(orchestratorPm2Name(WS, detection));
+    expect(running.pm2Name).toBe('nexusflow-feature-a-orch-tilt-tiltfile');
+    expect(running.logName).toBe('orch-tilt-tiltfile');
     // pm2 delete (idempotent) then pm2 start with the orch app name.
     const startCall = vi.mocked(execa).mock.calls.find((c) => (c[1] as string[] | undefined)?.includes('start'));
-    expect(startCall?.[1] as string[]).toContain(orchestratorPm2Name(WS, 'tilt'));
+    expect(startCall?.[1] as string[]).toContain(orchestratorPm2Name(WS, detection));
   });
 
   it('stops a one-shot tool by running stopRun and clearing state', async () => {

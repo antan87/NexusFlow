@@ -123,5 +123,7 @@ export interface RunningOrchestrator {
   configPath: string;
   mode: 'oneshot' | 'pm2';
   pm2Name?: string;
+  /** Tailable log source name (e.g. `orch-<slug>`) — set only for mode 'pm2'. */
+  logName?: string;
   startedAt: string;
 }

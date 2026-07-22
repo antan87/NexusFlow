@@ -36,7 +36,6 @@ import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import { AgentHarness } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
-import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';

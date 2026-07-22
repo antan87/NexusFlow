@@ -461,6 +461,8 @@ export interface RunningOrchestrator {
   mode: 'oneshot' | 'pm2';
   /** PM2 app name — set only for mode 'pm2'. */
   pm2Name?: string;
+  /** Tailable log source name (e.g. `orch-<slug>`) — set only for mode 'pm2'. */
+  logName?: string;
   startedAt: string;
 }
 
