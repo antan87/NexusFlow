@@ -137,22 +137,29 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
 }
 
 /**
- * Simple semver comparison (checks major.minor.patch).
+ * Semver comparison over major.minor.patch. Compares only the numeric core so
+ * a prerelease/build suffix (e.g. `1.8.0-rc.1`) can't poison a segment into
+ * NaN — the previous `.map(Number)` produced NaN for such a part, and every
+ * NaN comparison is false, so a real update was silently reported as "up to
+ * date". A stable release supersedes a prerelease of the same numeric core.
  */
-function isNewerVersion(current: string, latest: string): boolean {
+export function isNewerVersion(current: string, latest: string): boolean {
   if (current === latest) return false;
 
-  const currentParts = current.split('.').map(Number);
-  const latestParts = latest.split('.').map(Number);
+  const core = (v: string): number[] =>
+    v.trim().replace(/^v/, '').split('-')[0].split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const currentParts = core(current);
+  const latestParts = core(latest);
 
   for (let i = 0; i < 3; i++) {
-    const curr = currentParts[i] || 0;
-    const lat = latestParts[i] || 0;
+    const curr = currentParts[i] ?? 0;
+    const lat = latestParts[i] ?? 0;
     if (lat > curr) return true;
     if (curr > lat) return false;
   }
 
-  return false;
+  // Equal numeric core: a stable `latest` supersedes a prerelease `current`.
+  return current.includes('-') && !latest.includes('-');
 }
 
 /**

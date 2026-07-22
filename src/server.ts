@@ -1684,9 +1684,14 @@ app.post('/api/updates/apply', async (c) => {
   try {
     const isWin = process.platform === 'win32';
     if (isWin) {
-      // Inno Setup silent install flags
+      // The desktop app ships an electron-builder NSIS installer (build target
+      // 'nsis'), whose silent-install switch is `/S` — NOT Inno Setup's
+      // /VERYSILENT. With the wrong flags the one-click installer waits for UI
+      // that a detached (stdio: 'ignore') process can never provide, so the
+      // update silently fails to apply. `/S` runs it unattended and relaunches
+      // the app on finish (electron-builder default).
       console.log(`Applying update: Spawning detached installer at: ${downloadedInstallerPath}`);
-      const child = spawn(downloadedInstallerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], {
+      const child = spawn(downloadedInstallerPath, ['/S'], {
         detached: true,
         stdio: 'ignore',
       });

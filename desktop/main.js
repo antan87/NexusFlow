@@ -26,6 +26,10 @@ let mainWindow;
 let backendProcess;
 let assignedPort = 0;
 let readyTimer = null;
+// True once we are deliberately tearing the app down (window closed / before-quit),
+// so the backend 'exit' handler can tell our own kill apart from the backend
+// exiting on its own (e.g. the update hand-off, below).
+let appQuitting = false;
 
 function showBackendError(detail) {
   if (!mainWindow) return;
@@ -99,6 +103,22 @@ function createWindow() {
 
   backendProcess.on('exit', (code, signal) => {
     diag(`backend exited code=${code} signal=${signal} (port ${assignedPort || 'not yet detected'})`);
+    // We killed it ourselves during shutdown — nothing to do.
+    if (appQuitting) return;
+    if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
+    if (code === 0) {
+      // The backend only exits(0) on its own to hand off to the update
+      // installer (POST /api/updates/apply). That installer must overwrite the
+      // running NexusFlow.exe, so the app has to fully quit to release the file
+      // lock — otherwise the silent (/S) install stalls against the locked
+      // binary and the update never applies. electron-builder relaunches the
+      // app after install.
+      diag('backend exited cleanly — quitting app so the update installer can replace the exe');
+      app.quit();
+    } else {
+      // Unexpected death: surface it instead of leaving a dead, disconnected window.
+      showBackendError(`The backend process stopped unexpectedly (code ${code ?? 'null'}, signal ${signal ?? 'none'}).`);
+    }
   });
 
   // If the backend never reports a port, tell the user rather than hang.
@@ -141,6 +161,7 @@ function createWindow() {
 // won't die from a plain kill on Windows, which otherwise keeps the app (and
 // CI teardown) hanging. Synchronous so it completes before the app exits.
 function stopBackend() {
+  appQuitting = true;
   if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
   const child = backendProcess;
   backendProcess = null;
