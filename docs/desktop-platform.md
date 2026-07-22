@@ -27,7 +27,7 @@ Any non-Electron shell still has to run that Node backend somehow.
 | Extra toolchain | None (npm only) | Rust + platform build deps | None | Go |
 | Webview consistency | Identical Chromium everywhere | WebView2 on Windows is fine; WebKit on macOS/Linux differs (CSS/JS quirks) | Same webview caveats + small ecosystem | Same webview caveats |
 | Process spawning (claude/agy CLIs) | Backend does it today, unchanged | Allowed via sidecar/shell API, more permission plumbing | Limited APIs (a reason the old shell stayed thin) | Fine from Go, but our spawning code is TS |
-| Packaging/auto-update maturity | electron-builder / Squirrel — very mature (we use Inno Setup) | Good and improving | Weak | Decent |
+| Packaging/auto-update maturity | electron-builder (NSIS) — very mature | Good and improving | Weak | Decent |
 | Migration effort from today | — | Rewrite shell in Rust config + build Node sidecar pipeline; GUI/backend unchanged | Already migrated away | Shell rewrite + sidecar pipeline |
 
 ## Packaging

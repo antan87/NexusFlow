@@ -21,7 +21,7 @@ export async function generateCopilotConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const baseContent = buildContextContent(ctx);
+  const baseContent = await buildContextContent(ctx);
 
   const copilotExtra = `
 ---

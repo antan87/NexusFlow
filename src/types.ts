@@ -6,14 +6,6 @@
 /** Supported AI assistant identifiers. */
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
 
-export interface LocalLlmConfig {
-  enabled: boolean;
-  provider: 'ollama' | 'openai-compatible';
-  endpoint: string;
-  model: string;
-  apiKey?: string;
-}
-
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */
 export interface NexusFlowConfig {
   /** Semantic version of the NexusFlow config schema. */
@@ -54,8 +46,6 @@ export interface NexusFlowConfig {
   latestDownloadUrl?: string | null;
   latestReleaseNotes?: string;
 
-  /** Local LLM settings for delegating simple tasks. */
-  localLlm?: LocalLlmConfig;
 }
 
 /** Result of probing for an AI assistant on the system. */
@@ -135,10 +125,55 @@ export interface ResumptionConfig {
   startCommand?: string;
 }
 
+/** A repository belonging to a {@link Project}. */
+export interface ProjectRepo {
+  /** Absolute path to the source repository. */
+  path: string;
+  /** Default branch of the repo (e.g. 'main' or 'master'). */
+  defaultBranch: string;
+}
+
+/**
+ * A named, persistent group of source repositories that features are started
+ * from. Projects live in a central registry (~/.nexusflow/projects.json) and
+ * never own worktrees or branches themselves — they are the durable "what do
+ * I work on" grouping that outlives any individual feature workspace.
+ */
+export interface Project {
+  /** Unique identifier — slugified from the name. */
+  id: string;
+  /** Human-readable project name. */
+  name: string;
+  /** Optional short description. */
+  description?: string;
+  /** Repositories in this project. */
+  repos: ProjectRepo[];
+  /** ISO-8601 timestamp of when the project was registered. */
+  createdAt: string;
+  /** ISO-8601 timestamp of the last registry update. */
+  updatedAt: string;
+}
+
+/**
+ * How a feature attaches to its repos:
+ * - `worktree` — each repo is checked out as an isolated git worktree inside
+ *   the workspace directory (the classic flow).
+ * - `in-place` — the feature points at the source repositories directly; no
+ *   branches or worktrees are created and the workspace directory only holds
+ *   the manifest and generated context files.
+ */
+export type WorkspaceMode = 'worktree' | 'in-place';
+
 /** A feature workspace that spans one or more repos. */
 export interface Feature {
-  /** Unique identifier — the git branch name. */
+  /** Unique identifier — the git branch name (worktree mode) or slugified workspace name (in-place mode). */
   id: string;
+
+  /** Repo attachment mode. Absent in manifests written before modes existed — treat as 'worktree'. */
+  mode?: WorkspaceMode;
+
+  /** Id of the {@link Project} this feature was created from, if any. */
+  projectId?: string;
 
   /** Git branch name created for this feature. */
   branchName: string;
@@ -170,9 +205,6 @@ export interface Feature {
   /** Resumption configuration. */
   resumption?: ResumptionConfig;
 
-  /** Whether the Local LLM Co-processor is active for this workspace. */
-  localLlmEnabled?: boolean;
-
   /** Custom teamwork coordination instructions for the agent team. */
   teamworkInstructions?: string;
 }
@@ -188,8 +220,6 @@ export interface WorkspaceContext {
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
 
-  /** The global local LLM config, to provide model context. */
-  localLlm?: LocalLlmConfig;
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────
@@ -379,15 +409,34 @@ export interface ServiceConfig {
 }
 
 /** Detected orchestration tool in a workspace. */
+/** A structured, directly-executable command (never a shell string). */
+export interface OrchestrationRun {
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
 export interface OrchestrationDetection {
+  /** Stable identity: `${tool}:${config path relative to the scanned dir}`. */
+  id: string;
   /** Which tool was found. */
   tool: 'docker-compose' | 'aspire' | 'tilt' | 'procfile' | 'makefile';
   /** Path to the config file. */
   configPath: string;
-  /** Start command for this tool. */
+  /** Start command for this tool (display only — never executed). */
   startCommand: string;
-  /** Stop command for this tool. */
+  /** Stop command for this tool (display only — never executed). */
   stopCommand: string;
+  /** The structured start invocation — the only thing ever executed. */
+  run: OrchestrationRun;
+  /** Structured stop invocation (one-shot tools like compose `down`). */
+  stopRun?: OrchestrationRun;
+  /**
+   * How the tool runs: `oneshot` detaches by itself (compose up -d) and is
+   * stopped via `stopRun`; `pm2` is wrapped like a service and stopped by
+   * deleting its PM2 app.
+   */
+  mode: 'oneshot' | 'pm2';
 }
 
 /** A currently running service process. */
@@ -403,11 +452,30 @@ export interface RunningService {
 }
 
 /** State file saved to track running services. */
+/** A started orchestration tool recorded in the running state. */
+export interface RunningOrchestrator {
+  /** Matches {@link OrchestrationDetection.id}. */
+  id: string;
+  tool: OrchestrationDetection['tool'];
+  configPath: string;
+  mode: 'oneshot' | 'pm2';
+  /** PM2 app name — set only for mode 'pm2'. */
+  pm2Name?: string;
+  /** Tailable log source name (e.g. `orch-<slug>`) — set only for mode 'pm2'. */
+  logName?: string;
+  startedAt: string;
+}
+
 export interface RunningState {
   /** Workspace path this state belongs to. */
   workspacePath: string;
   /** List of running services. */
   services: RunningService[];
+  /**
+   * Started orchestration tools. Kept separate from services: one-shot tools
+   * (docker compose up -d) have no PID for the services filter to verify.
+   */
+  orchestrators?: RunningOrchestrator[];
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }

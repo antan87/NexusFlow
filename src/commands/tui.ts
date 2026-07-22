@@ -165,7 +165,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     rightLines.push('   Registered tools:');
     rightLines.push(`     ⚙  ${chalk.cyan('search_workspace')}      Search workspace files fast`);
     rightLines.push(`     ⚙  ${chalk.cyan('get_service_logs')}      Tail running logs`);
-    rightLines.push(`     ⚙  ${chalk.cyan('delegate_to_local_agent')} Run local LLM diagnostics`);
+
     rightLines.push(' '.repeat(rightWidth));
     rightLines.push(chalk.cyan.bold(' 🧩 Custom Agent Skills '));
     rightLines.push(`   • ${chalk.bold('dotnet-local-pack')}  - Local Nuget compiler helper`);

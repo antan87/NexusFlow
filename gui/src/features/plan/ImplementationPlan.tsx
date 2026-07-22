@@ -11,19 +11,19 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   planLoading,
 }) => {
   return (
-    <div className="bg-[#090d1a]/20 border border-gray-800/60 rounded-xl p-4">
+    <div className="rounded-xl border border-border bg-card p-4">
       <header className="flex justify-between items-center mb-4">
-        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-          <ListOrdered size={16} className="text-cyan-400" /> Inter-Repo Implementation Plan (nexusflow-plan.md)
+        <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
+          <ListOrdered size={16} className="text-info" /> Inter-Repo Implementation Plan (nexusflow-plan.md)
         </h4>
       </header>
 
       {planLoading ? (
         <div className="flex justify-center py-10">
-          <RefreshCw className="animate-spin text-indigo-400" size={20} />
+          <RefreshCw className="animate-spin text-primary" size={20} />
         </div>
       ) : (
-        <div className="bg-gray-950/40 border border-gray-800/30 rounded-xl p-4 text-gray-350 text-xs leading-relaxed overflow-auto font-mono whitespace-pre-wrap max-h-96">
+        <div className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {planContent || "No implementation plan generated yet."}
         </div>
       )}

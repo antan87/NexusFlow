@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import { execa } from 'execa';
 
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext } from '../types.js';
+import { isInPlace, normalizeFeature } from '../utils/feature.js';
 import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
@@ -86,29 +87,18 @@ async function rollbackWorkspace(
 }
 
 /**
- * Creates a full workspace for a feature:
- * 1. Creates the workspace directory.
- * 2. Creates a git worktree for every repo in the feature.
- * 3. Saves the feature manifest (`nexusflow.json`).
- *
- * If any worktree fails, the partially-created workspace is rolled back
- * automatically (worktrees removed, run-created branches deleted, directory
- * removed) and the original error is rethrown, so a failed `create` never
- * leaves debris behind.
- *
- * @param feature    - The feature definition.
- * @param repos      - Resolved repo metadata for every repo in the feature. A
- *                     repo with `existingBranch` set checks out that branch
- *                     (which must exist) instead of the feature branch.
- * @param onProgress - Optional per-repo progress callback (repo name, index, total).
- * @returns The absolute path to the newly created workspace.
+ * Prepares the workspace directory itself: guard against clobbering, mkdir,
+ * git init at the root (prevents AI assistants climbing to parent repos),
+ * `.gitignore` (worktree mode only — it lists the repo subdirs), the
+ * `.code-workspace` file, `.vscode/settings.json` and `.cursor/mcp.json`.
+ * No git worktrees are touched here.
  */
-export async function createWorkspace(
+async function scaffoldWorkspaceDir(
   feature: Feature,
   repos: RepoSelection[],
-  onProgress?: (repoName: string, index: number, total: number) => void,
-): Promise<string> {
+): Promise<void> {
   const workspacePath = feature.workspacePath;
+  const inPlace = isInPlace(feature);
 
   // Fail fast if the target already exists and is non-empty, rather than
   // silently merging into (and later half-rolling-back) an existing directory.
@@ -117,7 +107,7 @@ export async function createWorkspace(
     if (existing.length > 0) {
       throw new Error(
         `Workspace directory already exists and is not empty: ${workspacePath}. ` +
-          `Remove it first (e.g. 'nexusflow remove ${feature.id}') or choose another branch name.`,
+          `Remove it first (e.g. 'nexusflow remove ${feature.id}') or choose another name.`,
       );
     }
   } catch (error) {
@@ -135,9 +125,12 @@ export async function createWorkspace(
   try {
     await execa('git', ['init'], { cwd: workspacePath });
 
-    // Write a .gitignore to ignore the sub-repositories
-    const gitignoreContent = repos.map((repo) => `/${repo.name}/`).join('\n') + '\n';
-    await fs.writeFile(path.join(workspacePath, '.gitignore'), gitignoreContent, 'utf-8');
+    // Write a .gitignore to ignore the sub-repositories. In-place workspaces
+    // have no repo subdirectories, so there is nothing to ignore.
+    if (!inPlace) {
+      const gitignoreContent = repos.map((repo) => `/${repo.name}/`).join('\n') + '\n';
+      await fs.writeFile(path.join(workspacePath, '.gitignore'), gitignoreContent, 'utf-8');
+    }
   } catch (error) {
     // Silently ignore or log warning if git init fails
     console.warn('Warning: Failed to initialize git repository at workspace root:', error);
@@ -146,12 +139,13 @@ export async function createWorkspace(
   // Generate a .code-workspace file so VS Code opens each repo as a top-level workspace
   // folder with its own SCM provider. Without this, VS Code's git scanner respects the
   // root .gitignore (which lists every repo dir) and never discovers the worktrees.
+  // In-place repos live outside the workspace, so their folders use absolute paths.
   try {
     const workspaceName = path.basename(workspacePath);
     const codeWorkspace = {
       folders: [
         { path: '.', name: `${workspaceName} (workspace)` },
-        ...repos.map((repo) => ({ path: repo.name, name: repo.name })),
+        ...repos.map((repo) => ({ path: inPlace ? repo.path : repo.name, name: repo.name })),
       ],
       settings: {
         'search.useIgnoreFiles': false,
@@ -202,34 +196,88 @@ export async function createWorkspace(
   } catch (error) {
     console.warn('Warning: Failed to create .cursor/mcp.json:', error);
   }
+}
 
-  // Create a worktree for each repo inside the workspace. On any failure, roll
-  // back everything created so far and rethrow the original error.
+/**
+ * Creates a git worktree inside the workspace for every repo, recording a
+ * rollback action per worktree into `rollbackActions` as it goes (so the
+ * caller can roll back exactly what was created when a later step fails).
+ */
+async function materializeWorktrees(
+  feature: Feature,
+  repos: RepoSelection[],
+  rollbackActions: WorktreeRollbackAction[],
+  onProgress?: (repoName: string, index: number, total: number) => void,
+): Promise<void> {
+  const workspacePath = feature.workspacePath;
+  for (let i = 0; i < repos.length; i++) {
+    const repo = repos[i]!;
+    onProgress?.(repo.name, i, repos.length);
+    const worktreeTarget = path.join(workspacePath, repo.name);
+    const branchName = repo.existingBranch ?? feature.branchName;
+    const { createdBranch } = await createWorktree(
+      repo.path,
+      worktreeTarget,
+      branchName,
+      repo.defaultBranch,
+      // An explicitly chosen branch must exist — silently creating a fresh
+      // one would defeat the point of picking it.
+      { mustExist: repo.existingBranch !== undefined },
+    );
+    rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
+  }
+}
+
+/**
+ * Final bookkeeping: persists the feature manifest and, for worktree mode,
+ * excludes NexusFlow-generated files from each checkout's git status.
+ * In-place features skip the exclusion — the generated files live only in the
+ * workspace dir, and mutating the user's source repos' .git/info/exclude
+ * would silently hide any CLAUDE.md/.vscode files they later author there.
+ */
+async function finalizeWorkspace(feature: Feature): Promise<void> {
+  await saveFeatureConfig(feature.workspacePath, feature);
+  if (!isInPlace(feature)) {
+    await excludeNexusFlowFiles(feature.workspacePath, feature);
+  }
+}
+
+/**
+ * Creates a full workspace for a feature:
+ * 1. Scaffolds the workspace directory (git init, editor/MCP config files).
+ * 2. Worktree mode: creates a git worktree for every repo in the feature.
+ *    In-place mode: skips this — the feature points at the source repos.
+ * 3. Saves the feature manifest (`nexusflow.json`).
+ *
+ * If any step fails, the partially-created workspace is rolled back
+ * automatically (worktrees removed, run-created branches deleted, directory
+ * removed) and the original error is rethrown, so a failed `create` never
+ * leaves debris behind.
+ *
+ * @param feature    - The feature definition.
+ * @param repos      - Resolved repo metadata for every repo in the feature. A
+ *                     repo with `existingBranch` set checks out that branch
+ *                     (which must exist) instead of the feature branch.
+ * @param onProgress - Optional per-repo progress callback (repo name, index, total).
+ * @returns The absolute path to the newly created workspace.
+ */
+export async function createWorkspace(
+  feature: Feature,
+  repos: RepoSelection[],
+  onProgress?: (repoName: string, index: number, total: number) => void,
+): Promise<string> {
+  const workspacePath = feature.workspacePath;
+
+  await scaffoldWorkspaceDir(feature, repos);
+
   const rollbackActions: WorktreeRollbackAction[] = [];
   try {
-    for (let i = 0; i < repos.length; i++) {
-      const repo = repos[i]!;
-      onProgress?.(repo.name, i, repos.length);
-      const worktreeTarget = path.join(workspacePath, repo.name);
-      const branchName = repo.existingBranch ?? feature.branchName;
-      const { createdBranch } = await createWorktree(
-        repo.path,
-        worktreeTarget,
-        branchName,
-        repo.defaultBranch,
-        // An explicitly chosen branch must exist — silently creating a fresh
-        // one would defeat the point of picking it.
-        { mustExist: repo.existingBranch !== undefined },
-      );
-      rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
+    if (!isInPlace(feature)) {
+      await materializeWorktrees(feature, repos, rollbackActions, onProgress);
     }
-
-    // Persist the feature manifest.
-    await saveFeatureConfig(workspacePath, feature);
-
-    // Exclude NexusFlow files from git
-    await excludeNexusFlowFiles(workspacePath, feature);
+    await finalizeWorkspace(feature);
   } catch (error) {
+    // In-place mode has no worktrees to roll back; this just removes the dir.
     await rollbackWorkspace(workspacePath, rollbackActions);
     throw error;
   }
@@ -321,7 +369,7 @@ export async function loadFeatureConfig(
   const manifestPath = path.join(workspacePath, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(manifestPath, 'utf-8');
-    return JSON.parse(raw) as Feature;
+    return normalizeFeature(JSON.parse(raw) as Feature);
   } catch {}
 
   // 2. Legacy fallback: manifests written into the central vault before the
@@ -329,7 +377,7 @@ export async function loadFeatureConfig(
   const vaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(vaultManifest, 'utf-8');
-    return JSON.parse(raw) as Feature;
+    return normalizeFeature(JSON.parse(raw) as Feature);
   } catch {}
 
   // 3. Traverse parent directories
@@ -415,7 +463,12 @@ export async function deleteWorkspace(
     } catch (error) {
       console.warn(`Warning: failed to delete workspace context files from storage:`, error);
     }
+  }
 
+  // In-place: feature.repos are the user's source repositories — they must
+  // never be touched. Deleting the workspace only removes the lightweight
+  // directory (manifest + context files) at the end of this function.
+  if (feature && !isInPlace(feature)) {
     const origRepos = feature.originalRepos || [];
     for (let i = 0; i < feature.repos.length; i++) {
       const worktreePath = feature.repos[i]!;
@@ -432,7 +485,7 @@ export async function deleteWorkspace(
         }
       }
     }
-  } else {
+  } else if (!feature) {
     // Manifest is missing. Try to detect worktrees by scanning subdirectories
     try {
       const entries = await fs.readdir(workspacePath, { withFileTypes: true });
@@ -482,51 +535,78 @@ export async function addRepoToWorkspace(
   }
 
   const newRepoInfo = await resolveRepoInfo(repoPath);
-  const worktreeTarget = path.join(workspacePath, newRepoInfo.name);
+  const inPlace = isInPlace(feature);
+  // In-place workspaces reference the source repo directly; worktree
+  // workspaces get a checkout inside the workspace dir.
+  const repoEntry = inPlace ? newRepoInfo.path : path.join(workspacePath, newRepoInfo.name);
 
-  if (feature.repos.includes(worktreeTarget)) {
-    throw new Error(`Repository ${repoPath} is already in the workspace`);
+  // Identity is the directory name in both modes: worktrees are checked out
+  // as sibling subdirectories, and the changes/diff views address repos by
+  // name — a second "api" from a different parent dir would collide.
+  if (feature.repos.some((r) => path.basename(r) === newRepoInfo.name)) {
+    throw new Error(`A repository named "${newRepoInfo.name}" is already in the workspace`);
   }
 
-  // 1. Create the worktree
-  await createWorktree(
-    newRepoInfo.path,
-    worktreeTarget,
-    feature.branchName,
-    newRepoInfo.defaultBranch,
-  );
+  // 1. Create the worktree (worktree mode only)
+  if (!inPlace) {
+    await createWorktree(
+      newRepoInfo.path,
+      repoEntry,
+      feature.branchName,
+      newRepoInfo.defaultBranch,
+    );
+  }
 
   // 2. Update manifest
-  feature.repos.push(worktreeTarget);
+  feature.repos.push(repoEntry);
   if (!feature.originalRepos) {
     feature.originalRepos = [];
   }
   feature.originalRepos.push(repoPath);
   await saveFeatureConfig(workspacePath, feature);
 
-  // 3. Update .gitignore at workspace root
-  try {
-    const gitignorePath = path.join(workspacePath, '.gitignore');
-    let gitignoreContent = '';
+  // 3. Keep editor config in step: worktree mode ignores the new subdir in the
+  // root .gitignore; in-place mode adds the absolute path to the
+  // .code-workspace (otherwise the repo is invisible in the editor).
+  if (!inPlace) {
     try {
-      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    } catch {}
+      const gitignorePath = path.join(workspacePath, '.gitignore');
+      let gitignoreContent = '';
+      try {
+        gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+      } catch {}
 
-    const entry = `/${newRepoInfo.name}/`;
-    if (!gitignoreContent.includes(entry)) {
-      gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
-      await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+      const entry = `/${newRepoInfo.name}/`;
+      if (!gitignoreContent.includes(entry)) {
+        gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
+        await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+      }
+    } catch (error) {
+      console.warn('Warning: Failed to update .gitignore:', error);
     }
-  } catch (error) {
-    console.warn('Warning: Failed to update .gitignore:', error);
+  } else {
+    try {
+      const workspaceName = path.basename(workspacePath);
+      const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+      const codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
+      codeWorkspace.folders = [
+        ...(codeWorkspace.folders ?? []),
+        { path: newRepoInfo.path, name: newRepoInfo.name },
+      ];
+      await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
+    } catch (error) {
+      console.warn('Warning: Failed to update .code-workspace file:', error);
+    }
   }
 
   // 4. Re-run analysis, update configs, and repack workspace
   const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
-  const workspaceRepos = allRepos.map((repo) => ({
-    ...repo,
-    path: path.join(workspacePath, repo.name),
-  }));
+  const workspaceRepos = inPlace
+    ? allRepos
+    : allRepos.map((repo) => ({
+        ...repo,
+        path: path.join(workspacePath, repo.name),
+      }));
   const analysis = await analyzeAllRepos(workspaceRepos);
   const ctx: WorkspaceContext = {
     feature,
@@ -535,7 +615,9 @@ export async function addRepoToWorkspace(
   };
 
   await generateContextFiles(ctx, feature.assistants, workspacePath);
-  await excludeNexusFlowFiles(workspacePath, feature);
+  if (!inPlace) {
+    await excludeNexusFlowFiles(workspacePath, feature);
+  }
 }
 
 /**

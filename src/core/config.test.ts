@@ -30,7 +30,6 @@ describe('config core module', () => {
       const config = getDefaultConfig();
       expect(config.version).toBe('1.0.0');
       expect(config.scanDepth).toBe(2);
-      expect(config.localLlm?.enabled).toBe(false);
     });
   });
 
@@ -48,10 +47,6 @@ describe('config core module', () => {
     it('should load config if file exists', async () => {
       const savedConfig = {
         devDir: '/custom/dev',
-        localLlm: {
-          enabled: true,
-          model: 'custom-model'
-        }
       };
 
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(savedConfig));
@@ -59,8 +54,7 @@ describe('config core module', () => {
       const config = await loadConfig();
 
       expect(config.devDir).toBe('/custom/dev');
-      expect(config.localLlm?.enabled).toBe(true);
-      expect(config.localLlm?.model).toBe('custom-model');
+
       // Should merge with defaults
       expect(config.scanDepth).toBe(2);
     });
@@ -71,7 +65,6 @@ describe('config core module', () => {
       const config = await loadConfig();
 
       expect(config.version).toBe('1.0.0');
-      expect(config.localLlm?.enabled).toBe(false);
     });
 
     it('warns and falls back to local on an unknown storage provider', async () => {
@@ -103,7 +96,6 @@ describe('config core module', () => {
 
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('invalid JSON'));
       expect(config.version).toBe('1.0.0');
-      expect(config.localLlm?.enabled).toBe(false);
       warn.mockRestore();
     });
   });

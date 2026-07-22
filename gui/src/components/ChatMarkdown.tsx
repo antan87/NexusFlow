@@ -10,7 +10,7 @@ interface ChatMarkdownProps {
 
 export const ChatMarkdown: React.FC<ChatMarkdownProps> = ({ content }) => {
   return (
-    <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-800 prose-a:text-indigo-400">
+    <div className="prose prose-sm max-w-none text-foreground prose-a:text-primary prose-code:text-foreground prose-headings:text-foreground prose-pre:border prose-pre:border-border prose-pre:bg-muted/50 prose-strong:text-foreground prose-li:marker:text-muted-foreground">
       <ReactMarkdown remarkPlugins={remarkPlugins}>
         {content}
       </ReactMarkdown>

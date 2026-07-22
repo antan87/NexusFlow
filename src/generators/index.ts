@@ -164,7 +164,7 @@ export async function generateContextFiles(
   // Always generate a universal WORKSPACE.md at the workspace root
   if (!onlyBase) {
     try {
-      const content = buildContextContent(ctx);
+      const content = await buildContextContent(ctx);
       await writeWorkspaceFile(workspacePath, ctx.feature.id, 'WORKSPACE.md', content);
       console.log(
         chalk.green('  ✔'),

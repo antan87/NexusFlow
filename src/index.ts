@@ -37,6 +37,7 @@ import { refreshCommand } from './commands/refresh.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
+import { projectListCommand, projectAddCommand, projectShowCommand, projectRemoveCommand } from './commands/project.js';
 import { finishCommand } from './commands/finish.js';
 import { desktopCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
@@ -474,6 +475,60 @@ knowledgeCmd
       process.exit(1);
     }
   });
+
+/**
+ * Wraps a command action: clean exit on prompt cancellation (Ctrl+C inside an
+ * inquirer prompt), exit code 1 with the error otherwise. New command
+ * registrations should use this instead of copy-pasting the try/catch.
+ */
+function runAction<A extends unknown[]>(fn: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  };
+}
+
+// Project command group
+const projectCmd = program
+  .command('project')
+  .alias('proj')
+  .description('Manage the project registry — named groups of repos features start from');
+
+projectCmd
+  .command('list')
+  .alias('ls')
+  .description('List all registered projects')
+  .action(runAction(projectListCommand));
+
+projectCmd
+  .command('add')
+  .description('Register a new project')
+  .option('-n, --name <name>', 'Project name')
+  .option('-r, --repos <paths...>', 'Absolute paths to the repos to include')
+  .option('-d, --description <text>', 'Short description')
+  .action(runAction(projectAddCommand));
+
+projectCmd
+  .command('show')
+  .description('Show the details of a project')
+  .argument('[id]', 'Project id (prompts when omitted)')
+  .action(runAction(projectShowCommand));
+
+projectCmd
+  .command('remove')
+  .alias('rm')
+  .description('Remove a project from the registry (repos on disk are not touched)')
+  .argument('[id]', 'Project id (prompts when omitted)')
+  .option('-y, --yes', 'Skip the confirmation prompt')
+  .action(runAction(projectRemoveCommand));
 
 // Strategy command group
 const strategyCmd = program

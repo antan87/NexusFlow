@@ -51,6 +51,24 @@ describe('syncWorkspace', () => {
     await expect(syncWorkspace('/ws')).rejects.toThrow(/Failed to load workspace configuration/);
   });
 
+  it('is a no-op for in-place workspaces (never rebases the source repos)', async () => {
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+      ...feature,
+      mode: 'in-place',
+      repos: ['/src/a', '/src/b'],
+    });
+
+    const report = await syncWorkspace('/ws');
+
+    expect(multiGit.rebaseRepo).not.toHaveBeenCalled();
+    expect(workspaceState.recordRepoSync).not.toHaveBeenCalled();
+    expect(report.syncedCount).toBe(0);
+    expect(report.conflictCount).toBe(0);
+    expect(report.errorCount).toBe(0);
+    expect(report.repos.map((r) => r.status)).toEqual(['up-to-date', 'up-to-date']);
+    expect(report.repos[0].message).toContain('In-place workspace');
+  });
+
   it('classifies per-repo outcomes into counts', async () => {
     vi.mocked(multiGit.rebaseRepo)
       .mockResolvedValueOnce(rebase('conflict'))

@@ -9,6 +9,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
 import { resolveBaseFileUrl, resolveWorkspaceFileUrl } from '../core/storage.js';
+import { isInPlace } from '../utils/feature.js';
+import { getConventionalTestCommand } from '../utils/test-command.js';
+import { detectServiceConfig } from '../orchestration/detect.js';
 
 /**
  * Formats a ProjectAnalysis into a readable markdown section.
@@ -74,10 +77,71 @@ function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string):
  * @param ctx - The workspace context containing feature metadata, repo list, and optional analysis.
  * @returns A markdown string with feature details, repo listing, and task instructions.
  */
-export function buildContextContent(ctx: WorkspaceContext): string {
+/**
+ * Builds the "Verification & Services" section: per repo, the conventional
+ * test command derived from the detected tech stack, and the detected service
+ * run command. Old manifests that still carry hand-entered `resumption`
+ * commands get those appended (custom commands beat conventions); the
+ * standard-command filter applies to that legacy path only.
+ */
+async function buildVerificationSection(ctx: WorkspaceContext): Promise<string> {
+  const { feature, repos, analysis } = ctx;
+
+  const rows: string[] = [];
+  for (const repo of repos) {
+    const repoAnalysis = analysis?.get(repo.path);
+    const testCommand = repoAnalysis ? getConventionalTestCommand(repoAnalysis) : 'npm test';
+    let runCommand = '';
+    try {
+      const service = await detectServiceConfig(repo.path, repo.name);
+      if (service) runCommand = [service.command, ...service.args].join(' ').trim();
+    } catch {
+      // Detection is best-effort; a repo without a runnable service gets '—'.
+    }
+    rows.push(`| ${repo.name} | \`${testCommand}\` | ${runCommand ? `\`${runCommand}\`` : '—'} |`);
+  }
+
+  // Legacy: custom commands stored by the old wizard.
+  const legacy: string[] = [];
+  if (feature.resumption) {
+    const { testCommand, mockCommand, startCommand } = feature.resumption;
+    if (mockCommand) legacy.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
+    if (startCommand) legacy.push(`- **Start/Run Command**: \`${startCommand}\``);
+
+    const standardCommands = [
+      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
+      'dotnet test',
+      'pytest', 'python -m unittest', 'python -m pytest',
+      'go test', 'go test ./...',
+      'cargo test',
+    ];
+    if (testCommand) {
+      const normalized = testCommand.trim().toLowerCase();
+      const isStandard = standardCommands.some((cmd) => normalized === cmd || normalized.startsWith(cmd + ' '));
+      if (!isStandard) {
+        legacy.push(`- **Verification/Test Command**: \`${testCommand}\``);
+      }
+    }
+  }
+
+  if (rows.length === 0 && legacy.length === 0) return '';
+
+  return `
+---
+
+## Verification & Services
+
+Verify changes and run services with these commands (derived from each repo's tech stack and detected service configuration):
+
+| Repo | Test | Run |
+|---|---|---|
+${rows.join('\n')}
+${legacy.length > 0 ? `\nCustom workspace commands:\n\n${legacy.join('\n')}\n` : ''}`;
+}
+
+export async function buildContextContent(ctx: WorkspaceContext): Promise<string> {
   const { feature, repos, analysis } = ctx;
   const workspacePath = feature.workspacePath;
-  const localLlmEnabled = feature.localLlmEnabled ?? false;
 
   // Build project sections — rich if analysis is available, simple if not
   let projectSections: string;
@@ -118,42 +182,9 @@ ${allConfigs.join('\n')}
     }
   }
 
-  // Resumption commands section
-  let resumptionSection = '';
-  if (feature.resumption) {
-    let { testCommand, mockCommand, startCommand } = feature.resumption;
-    const parts: string[] = [];
-    if (mockCommand) parts.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
-    if (startCommand) parts.push(`- **Start/Run Command**: \`${startCommand}\``);
-    
-    const standardCommands = [
-      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
-      'dotnet test',
-      'pytest', 'python -m unittest', 'python -m pytest',
-      'go test', 'go test ./...',
-      'cargo test',
-    ];
-
-    if (testCommand) {
-      const normalizedCmd = testCommand.trim().toLowerCase();
-      const isStandard = standardCommands.some(cmd => normalizedCmd === cmd || normalizedCmd.startsWith(cmd + ' '));
-      if (!isStandard) {
-        parts.push(`- **Verification/Test Command**: \`${testCommand}\``);
-      }
-    }
-
-    if (parts.length > 0) {
-      resumptionSection = `
----
-
-## Workspace Resumption & Verification Commands
-
-Use these pre-configured commands to spin up mocks, run background services, and verify your changes:
-
-${parts.join('\n')}
-`;
-    }
-  }
+  // Verification & services section — auto-derived; legacy manifests may
+  // contribute stored custom commands on top.
+  const verificationSection = await buildVerificationSection(ctx);
 
   const knowledgePath = resolveWorkspaceFileUrl(workspacePath, feature.id, 'nexusflow-knowledge.md').replace(/\\/g, '/');
 
@@ -179,6 +210,43 @@ ${feature.teamworkInstructions}
 `;
   }
 
+  // The structural rules differ fundamentally by mode: worktree workspaces
+  // isolate agents inside checked-out subdirectories, while in-place
+  // workspaces point at the original source repositories — telling an agent
+  // "never touch the original repos" there would forbid the only correct
+  // behavior.
+  const inPlace = isInPlace(feature);
+
+  const projectsIntro = inPlace
+    ? `This workspace references the following projects at their original
+source locations (in-place mode — no worktrees, no feature branch):`
+    : `This workspace contains the following projects, each checked out as a
+git worktree on the feature branch:`;
+
+  const structureGuideline = inPlace
+    ? `- **In-Place Workspace Structure**: This workspace references one or more Git repositories at their original locations on disk (absolute paths listed above). There are no worktrees and no dedicated feature branch — you work directly in the source repositories on whatever branch each repo currently has checked out.
+  - **All code changes** are made directly in the source repository directories listed above.
+  - **Branch awareness**: Check which branch a repo is on before committing (\`git branch --show-current\`); NexusFlow does not manage branches for in-place workspaces.
+  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific repository directories, NOT in this workspace folder (it only holds the manifest and generated context files).
+  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must also be run inside the repository directories.
+  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
+    - \`nexusflow diff\` — view changes across all repositories.
+    - \`nexusflow commit\` — commit and push changes across modified repositories.
+    - \`nexusflow refresh\` — regenerate maps, context files and plans.
+    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
+    - (\`nexusflow sync\` is intentionally a no-op for in-place workspaces — branches are yours to manage.)`
+    : `- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
+  - **All code changes** must be made within the appropriate project subdirectories.
+  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
+  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
+  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
+  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
+    - \`nexusflow diff\` — view changes across all sub-repositories.
+    - \`nexusflow commit\` — commit and push changes across modified repositories.
+    - \`nexusflow sync\` — rebase all repositories with their default base branches.
+    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
+    - \`nexusflow doctor\` — run diagnostics to verify workspace health.`;
+
   const taskSection = setupDone
     ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
     : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
@@ -195,12 +263,11 @@ ${feature.teamworkInstructions}
 
 ## Projects
 
-This workspace contains the following projects, each checked out as a
-git worktree on the feature branch:
+${projectsIntro}
 
 ${projectSections}
 ${existingConfigsSection}
-${resumptionSection}
+${verificationSection}
 ---
 
 ${taskSection}
@@ -209,29 +276,10 @@ ${teamworkSection}
 
 ## Guidelines
 
-- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
-  - **All code changes** must be made within the appropriate project subdirectories.
-  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
-  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
-  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
-  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
-    - \`nexusflow diff\` — view changes across all sub-repositories.
-    - \`nexusflow commit\` — commit and push changes across modified repositories.
-    - \`nexusflow sync\` — rebase all repositories with their default base branches.
-    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
-    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
-- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
+${structureGuideline}
 - **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
-${localLlmEnabled ? `- **Local AI Agent Delegation (Token Optimizer)**: You have access to a local Small Language Model (SLM) on the developer's machine via the MCP tool \`delegate_to_local_agent\`.${
-  ctx.localLlm ? `\n  - **Model Capacity**: The local agent is running \`${ctx.localLlm.model}\`. ${
-    ctx.localLlm.model.match(/70b|72b|32b|14b/i)
-      ? 'This is a highly capable model; you can delegate complex reasoning and larger code generation tasks.'
-      : 'This is a smaller model; it is best suited for targeted search, log parsing, summarization, and simple boilerplate.'
-  }` : ''
-}
-  - **Usage rule**: Whenever you need to perform high-token tasks (like searching large chunks of code, analyzing raw service logs to debug, or generating repetitive boilerplate), **always use \`delegate_to_local_agent\`** first.
-  - The local model is free and fast. Pass the instruction and any logs/source files in \`filesToRead\` (relative paths). Use the distilled summary returned to formulate your final output, saving up to 90% in remote context tokens.
-` : ''}- Read each project's existing \`README.md\` and any doc files before proposing changes.
+- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
+- Read each project's existing \`README.md\` and any doc files before proposing changes.
 - When modifying a shared library, check every downstream consumer for breakage.
 - Prefer small, focused commits that touch one repo at a time when possible.
 - If a change must span repos, describe the ordering and any migration steps.

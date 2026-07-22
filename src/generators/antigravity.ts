@@ -20,7 +20,7 @@ export async function generateAntigravityConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const content = buildContextContent(ctx);
+  const content = await buildContextContent(ctx);
   const filePath = path.join(workspacePath, 'AGENTS.md');
 
   try {

@@ -13,6 +13,7 @@ import {
   detectAllServices,
   detectOrchestrationTools,
   startServices,
+  startOrchestrator,
 } from '../orchestration/index.js';
 
 /**
@@ -43,7 +44,23 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
     });
 
     if (useExisting) {
-      console.log(chalk.dim(`\n  Run manually: ${tools[0]!.startCommand}\n`));
+      const tool = tools.length === 1
+        ? tools[0]!
+        : await select({
+            message: 'Which orchestration tool?',
+            choices: tools.map((t) => ({ name: `${t.tool} — ${t.configPath}`, value: t })),
+          });
+
+      const logDir = path.join(workspacePath, '.nexusflow-logs');
+      try {
+        await startOrchestrator(tool, workspacePath, logDir);
+        console.log(chalk.bold.green(`\n✅ ${tool.tool} started.`));
+        console.log(chalk.dim(`  Stop with:  nexusflow stop\n`));
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red(`  ✖ Failed to start ${tool.tool}: ${msg}`));
+        process.exitCode = 1;
+      }
       return;
     }
   }

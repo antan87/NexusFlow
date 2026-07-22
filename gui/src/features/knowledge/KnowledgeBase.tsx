@@ -1,6 +1,9 @@
 import React from 'react';
 import { BookOpen, RefreshCw, Save, Edit } from 'lucide-react';
 import type { Feature } from '../../types.js';
+import { Button } from '../../components/ui/button.js';
+import { Textarea } from '../../components/ui/textarea.js';
+import { Spinner } from '../../components/ui/spinner.js';
 
 interface KnowledgeBaseProps {
   ws: Feature;
@@ -26,16 +29,17 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   handleSaveKnowledge,
 }) => {
   return (
-    <div className="bg-[#090d1a]/20 border border-gray-800/60 rounded-xl p-4">
+    <div className="rounded-xl border border-border bg-card p-4">
       <header className="flex justify-between items-center mb-4">
-        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-          <BookOpen size={16} className="text-cyan-400" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
+        <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
+          <BookOpen size={16} className="text-info" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
         </h4>
         <div className="flex gap-2">
           {isEditingKnowledge ? (
             <>
-              <button
-                className="px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-850 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-400"
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={() => {
                   setEditedKnowledge(knowledgeContent);
                   setIsEditingKnowledge(false);
@@ -43,39 +47,40 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
                 disabled={saveKnowledgeLoading}
               >
                 Cancel
-              </button>
-              <button
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-650 hover:bg-indigo-600 text-white rounded-lg text-[10px] font-semibold transition-all cursor-pointer"
+              </Button>
+              <Button
+                size="xs"
                 onClick={() => handleSaveKnowledge(ws.branchName)}
                 disabled={saveKnowledgeLoading}
               >
-                {saveKnowledgeLoading ? <RefreshCw className="animate-spin" size={10} /> : <Save size={10} />} Save
-              </button>
+                {saveKnowledgeLoading ? <Spinner className="size-3" /> : <Save size={10} />} Save
+              </Button>
             </>
           ) : (
-            <button
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-900 border border-gray-800 hover:bg-gray-800 hover:border-gray-700 rounded-lg text-[10px] font-semibold transition-all cursor-pointer text-gray-350"
+            <Button
+              variant="outline"
+              size="xs"
               onClick={() => setIsEditingKnowledge(true)}
               disabled={knowledgeLoading}
             >
               <Edit size={10} /> Edit Knowledge
-            </button>
+            </Button>
           )}
         </div>
       </header>
 
       {knowledgeLoading ? (
         <div className="flex justify-center py-10">
-          <RefreshCw className="animate-spin text-indigo-400" size={20} />
+          <RefreshCw className="animate-spin text-primary" size={20} />
         </div>
       ) : isEditingKnowledge ? (
-        <textarea
-          className="w-full h-96 bg-gray-950/60 border border-gray-800/80 rounded-xl p-4 text-xs font-mono text-gray-305 focus:outline-none focus:border-indigo-500/80 resize-y"
+        <Textarea
+          className="[&_[data-slot=textarea]]:h-96 [&_[data-slot=textarea]]:resize-y [&_[data-slot=textarea]]:font-mono [&_[data-slot=textarea]]:text-xs"
           value={editedKnowledge}
           onChange={(e) => setEditedKnowledge(e.target.value)}
         />
       ) : (
-        <div className="bg-gray-950/40 border border-gray-800/30 rounded-xl p-4 text-gray-350 text-xs leading-relaxed overflow-auto font-mono whitespace-pre-wrap max-h-96">
+        <div className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {knowledgeContent || "No knowledge file generated yet."}
         </div>
       )}

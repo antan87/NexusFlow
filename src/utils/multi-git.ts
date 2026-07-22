@@ -12,6 +12,7 @@ import { execa } from 'execa';
 
 import type { Feature, SyncStatus } from '../types.js';
 import { detectDefaultBranch } from './git.js';
+import { isInPlace, normalizeFeature, resolveFeatureRepoPath } from './feature.js';
 
 export type { SyncStatus };
 
@@ -142,17 +143,25 @@ export async function getWorkspaceRepos(
 ): Promise<WorkspaceRepo[]> {
   const manifestPath = path.join(workspacePath, 'nexusflow.json');
   const raw = await fs.readFile(manifestPath, 'utf-8');
-  const feature = JSON.parse(raw) as Feature;
+  const feature = normalizeFeature(JSON.parse(raw) as Feature);
 
   return Promise.all(
     feature.repos.map(async (repoPath) => {
       const name = path.basename(repoPath);
-      const absolutePath = path.resolve(workspacePath, name);
-      const defaultBranch = await detectDefaultBranch(absolutePath);
+      const absolutePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
+      // In-place features have no feature branch — the repo's current branch
+      // is whatever the user is working on right now ('HEAD' when detached).
+      const [defaultBranch, currentBranch] = await Promise.all([
+        detectDefaultBranch(absolutePath),
+        isInPlace(feature) ? getRepoBranch(absolutePath) : Promise.resolve(null),
+      ]);
+      const branchName = isInPlace(feature)
+        ? currentBranch ?? 'HEAD'
+        : feature.branchName;
       return {
         name,
         path: absolutePath,
-        branchName: feature.branchName,
+        branchName,
         defaultBranch,
       };
     })
@@ -213,6 +222,9 @@ export async function getUnpushedCount(
   repoPath: string,
   branchName: string,
 ): Promise<number | null> {
+  // Detached HEAD ('HEAD' sentinel from in-place features): origin/HEAD is a
+  // symref to origin's default branch, so the count would be meaningless.
+  if (branchName === 'HEAD') return null;
   try {
     const { stdout } = await execa(
       'git',
@@ -258,6 +270,9 @@ export async function getAheadBehind(
   repoPath: string,
   branchName: string,
 ): Promise<{ ahead: number | null; behind: number | null }> {
+  // Detached HEAD ('HEAD' sentinel from in-place features): origin/HEAD is a
+  // symref to origin's default branch — counts against it would be bogus.
+  if (branchName === 'HEAD') return { ahead: null, behind: null };
   try {
     const { stdout } = await execa(
       'git',
@@ -495,12 +510,18 @@ export async function commitAndPush(
     const fileMatch = commitOutput.match(/(\d+)\s+file/);
     const filesChanged = fileMatch ? parseInt(fileMatch[1], 10) : 0;
 
-    // Push unless opted out.
-    if (!options?.noPush) {
+    // Push unless opted out. A detached HEAD ('HEAD' sentinel from in-place
+    // features) has no branch to push — the commit still counts as success.
+    const canPush = branchName !== 'HEAD';
+    if (!options?.noPush && canPush) {
       await execa('git', ['push', 'origin', branchName], { cwd: repoPath });
     }
 
-    const action = options?.noPush ? 'Committed' : 'Committed and pushed';
+    const action = options?.noPush
+      ? 'Committed'
+      : canPush
+        ? 'Committed and pushed'
+        : 'Committed (detached HEAD — push skipped)';
     return { success: true, commitHash, filesChanged, message: action };
   } catch (error) {
     return {

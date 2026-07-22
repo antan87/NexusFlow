@@ -5,13 +5,14 @@ import { app, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
-import * as localAi from './utils/local-ai.js';
+
 import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
+import * as orchestration from './orchestration/index.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -19,7 +20,6 @@ vi.mock('execa');
 vi.mock('./core/workspace.js');
 vi.mock('./core/config.js');
 vi.mock('./utils/system-scanner.js');
-vi.mock('./utils/local-ai.js');
 vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
@@ -28,6 +28,7 @@ vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
 vi.mock('./core/new-repo.js');
+vi.mock('./orchestration/index.js');
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -280,101 +281,7 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
-  describe('POST /api/config', () => {
-    it('should validate endpoint domain safety', async () => {
-      const response = await app.request('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localLlm: {
-            enabled: true,
-            endpoint: 'http://malicious-external-domain.com'
-          }
-        })
-      });
 
-      expect(response.status).toBe(400);
-      const data = await response.json();
-      expect(data.error).toContain('Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.');
-    });
-
-    it('should save safe endpoint and config', async () => {
-      vi.spyOn(config, 'saveConfig').mockResolvedValue();
-
-      const response = await app.request('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localLlm: {
-            enabled: true,
-            endpoint: 'http://127.0.0.1:11434'
-          }
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-    });
-  });
-
-  describe('POST /api/local-llm/test', () => {
-    it('should reject unsafe endpoints', async () => {
-      const response = await app.request('/api/local-llm/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'http://unsafe-domain.com',
-          provider: 'ollama',
-          model: 'qwen2.5-coder:1.5b'
-        })
-      });
-
-      expect(response.status).toBe(400);
-      const data = await response.json();
-      expect(data.success).toBe(false);
-      expect(data.error).toContain('Local AI endpoint must be');
-    });
-
-    it('should perform inference shoot test if shoot = true', async () => {
-      vi.spyOn(localAi, 'callLocalLlm').mockResolvedValue('OK\n');
-
-      const response = await app.request('/api/local-llm/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: 'http://localhost:11434',
-          provider: 'ollama',
-          model: 'qwen2.5-coder:1.5b',
-          shoot: true
-        })
-      });
-
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.success).toBe(true);
-      expect(data.modelReady).toBe(true);
-      expect(data.message).toContain('Inference test succeeded');
-    });
-  });
-
-  describe('GET /api/local-llm/recommend', () => {
-    it('should fetch system specs and return them', async () => {
-      vi.spyOn(systemScanner, 'scanSystemSpecs').mockResolvedValue({
-        totalRamGb: 16,
-        gpuName: 'Nvidia RTX 4080',
-        hasHardwareAcceleration: true,
-        recommendedModel: 'qwen2.5-coder:7b'
-      });
-
-      const response = await app.request('/api/local-llm/recommend');
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.totalRamGb).toBe(16);
-      expect(data.gpuName).toBe('Nvidia RTX 4080');
-      expect(data.recommendedModel).toBe('qwen2.5-coder:7b');
-    });
-  });
 
   describe('GET and PUT /api/workspace/:id/knowledge', () => {
     it('should get workspace knowledge content', async () => {
@@ -494,6 +401,84 @@ describe('Server API Endpoints Unit Tests', () => {
     });
 
     // XML context packing tests removed.
+
+    it('rejects in-place creation without a name', async () => {
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'in-place',
+          description: 'nameless',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('name');
+    });
+
+    it('rejects worktree creation without a branch name', async () => {
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: 'branchless',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain('branchName');
+    });
+
+    it('creates an in-place workspace against the source repos (no worktree remap)', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+        storageProvider: 'local'
+      } as any);
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/my-quick-fix');
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'in-place',
+          name: 'My Quick Fix',
+          projectId: 'billing',
+          description: 'in-place workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1', defaultBranch: 'main' }],
+          assistants: ['claude']
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      // The name is slugified into the job/workspace id.
+      expect(data.jobId).toBe('my-quick-fix');
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const feature = vi.mocked(workspace.createWorkspace).mock.calls[0][0];
+      expect(feature.mode).toBe('in-place');
+      expect(feature.id).toBe('my-quick-fix');
+      expect(feature.projectId).toBe('billing');
+      // Repos stay at their source paths — no join(workspacePath, name) remap.
+      expect(feature.repos).toEqual(['/mock/repo-1']);
+      // Analysis also runs against the source repos.
+      const analyzed = vi.mocked(analyzers.analyzeAllRepos).mock.calls[0][0];
+      expect(analyzed[0].path).toBe('/mock/repo-1');
+
+      // The SSE stream reports the in-place step set.
+      const streamResponse = await app.request('/api/workspace/create-stream/my-quick-fix');
+      const text = await streamResponse.text();
+      expect(text).toContain('"status":"completed"');
+      expect(text).toContain('Register Workspace');
+      expect(text).not.toContain('Create Git Worktrees');
+    });
   });
 
   describe('Workflows Templates API', () => {
@@ -587,8 +572,7 @@ describe('Server API Endpoints Unit Tests', () => {
           devDir: '/dev',
           workspacesDir: '/dev/workspaces',
           defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+          scanDepth: 2
         });
 
         const response = await app.request('/api/workspace/suggest-workflow', {
@@ -614,8 +598,7 @@ describe('Server API Endpoints Unit Tests', () => {
           devDir: '/dev',
           workspacesDir: '/dev/workspaces',
           defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
+          scanDepth: 2
         });
 
         const response = await app.request('/api/workspace/suggest-workflow', {
@@ -635,41 +618,7 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(data.customInstructions).toContain('Plan, Implement, Review');
       });
 
-      it('should call local LLM and return suggested workflow when LLM is enabled', async () => {
-        vi.spyOn(config, 'loadConfig').mockResolvedValue({
-          version: '1.0',
-          devDir: '/dev',
-          workspacesDir: '/dev/workspaces',
-          defaultAssistant: null,
-          scanDepth: 2,
-          localLlm: { enabled: true, provider: 'ollama', endpoint: 'http://localhost:11434', model: 'qwen' }
-        });
 
-        vi.spyOn(localAi, 'callLocalLlm').mockResolvedValue(JSON.stringify({
-          difficulty: 'moderate',
-          rationale: 'LLM selected moderate strategy.',
-          suggestedWorkflowId: 'research-verify',
-          customInstructions: '# LLM Custom Instructions'
-        }));
-
-        const response = await app.request('/api/workspace/suggest-workflow', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            description: 'Implement new UI component',
-            repos: [{ name: 'my-project', path: '/dev/my-project', defaultBranch: 'main' }]
-          })
-        });
-
-        expect(response.status).toBe(200);
-        const data = await response.json();
-        expect(data.success).toBe(true);
-        expect(data.difficulty).toBe('moderate');
-        expect(data.rationale).toBe('LLM selected moderate strategy.');
-        expect(data.suggestedWorkflowId).toBe('research-verify');
-        expect(data.customInstructions).toBe('# LLM Custom Instructions');
-        expect(localAi.callLocalLlm).toHaveBeenCalled();
-      });
     });
   });
 
@@ -880,6 +829,56 @@ describe('Server API Endpoints Unit Tests', () => {
 
         expect(response.status).toBe(400);
       });
+    });
+  });
+
+  describe('Services & orchestration endpoints', () => {
+    beforeEach(() => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+    });
+
+    it('POST /services/start re-detects server-side and ignores the request body', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' },
+      ] as any);
+      vi.mocked(orchestration.startServices).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/ws/services/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ services: [{ name: 'evil', command: 'rm', args: ['-rf', '/'], cwd: '/', source: 'x' }] }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(orchestration.detectAllServices).toHaveBeenCalled();
+      // The started services are the DETECTED ones, not the client's payload.
+      const started = vi.mocked(orchestration.startServices).mock.calls[0]?.[0];
+      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' }]);
+    });
+
+    it('POST /services/:name/start 404s for an unknown service', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([]);
+
+      const response = await app.request('/api/workspace/ws/services/ghost/start', { method: 'POST' });
+      expect(response.status).toBe(404);
+    });
+
+    it('POST /orchestrators/start rejects an unknown detection id', async () => {
+      vi.mocked(orchestration.detectOrchestrationTools).mockResolvedValue([]);
+
+      const response = await app.request('/api/workspace/ws/orchestrators/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'docker-compose:nope.yml' }),
+      });
+      expect(response.status).toBe(404);
+    });
+
+    it('GET /services/logs/:name rejects a traversal service name without reading outside the log dir', async () => {
+      const response = await app.request(
+        `/api/workspace/ws/services/logs/${encodeURIComponent('../../secret')}`,
+      );
+      expect(response.status).toBe(400);
     });
   });
 });

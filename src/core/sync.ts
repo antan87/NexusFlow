@@ -9,6 +9,7 @@
 import * as path from 'node:path';
 
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
+import { isInPlace } from '../utils/feature.js';
 import { recordRepoSync } from './workspace-state.js';
 import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -68,6 +69,26 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
     throw new Error(
       `Failed to load workspace configuration. Ensure nexusflow.json exists at ${workspacePath}.`,
     );
+  }
+
+  // In-place workspaces work directly in the source repos on whatever branch
+  // the user has checked out — rebasing those from under them would be a
+  // destructive surprise. Sync is a deliberate no-op.
+  if (isInPlace(feature)) {
+    return {
+      workspacePath,
+      branchName: feature.branchName,
+      repos: feature.repos.map((repoPath) => ({
+        name: path.basename(repoPath),
+        baseBranch: '',
+        status: 'up-to-date' as SyncStatus,
+        message: 'In-place workspace — branches are managed by you; sync skipped.',
+      })),
+      syncedCount: 0,
+      conflictCount: 0,
+      errorCount: 0,
+      contextRefreshed: false,
+    };
   }
 
   const repos = await getWorkspaceRepos(workspacePath);

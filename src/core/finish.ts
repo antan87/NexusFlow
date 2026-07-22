@@ -128,6 +128,10 @@ export async function finishWorkspace(
   for (const repo of actionable) {
     const rep = reports.get(repo.name)!;
     if (!repo.remoteUrl || rep.error) continue;
+    // Nothing to compare when the work happened directly on the default
+    // branch (typical for in-place workspaces) — a default...default PR link
+    // would be meaningless.
+    if (repo.expectedBranch === repo.defaultBranch) continue;
 
     const remote = parseRemoteUrl(repo.remoteUrl);
     if (remote) {

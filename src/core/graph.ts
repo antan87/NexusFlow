@@ -153,7 +153,8 @@ export async function buildWorkspaceGraph(
     for (const repo of repos) {
       if (repo.name === ep.repoName) continue; // Skip self
 
-      const worktreePath = path.join(workspacePath, repo.name);
+      // RepoInfo.path is already mode-correct (worktree or in-place source repo).
+      const worktreePath = repo.path;
       try {
         await fs.access(worktreePath);
         // Use git grep to find references to this endpoint path in other worktrees

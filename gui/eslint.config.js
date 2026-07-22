@@ -23,4 +23,15 @@ export default defineConfig([
       'react-hooks/set-state-in-effect': 'off',
     },
   },
+  {
+    // Ported shadcn-style primitives (see components/ui): they intentionally
+    // export cva variants beside components (breaks the fast-refresh rule) and
+    // include upstream patterns like the memoized random skeleton width.
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/purity': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
 ])

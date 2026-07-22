@@ -9,7 +9,7 @@ Welcome to **NexusFlow**! This guide will walk you through the system, explain i
 When developing complex features in modern systems, you often need to touch multiple repositories simultaneously (e.g., modifying a shared package, updating a backend REST API, and updating a frontend application). 
 
 Traditional AI assistant setups only give the assistant context of a single repository. NexusFlow solves this by:
-1. **Grouping Repositories**: Creating a dedicated workspace using **git worktrees** on a unified feature branch name.
+1. **Grouping Repositories**: Creating a dedicated workspace from ad-hoc repos or a registered project, using isolated **git worktrees** or in-place source repositories.
 2. **Generating AI Context**: Writing specialized configurations (`CLAUDE.md`, `AGENTS.md`, Copilot guidelines, and Cursor rules) that outline the workspace architecture.
 3. **Smart Codebase Analysis**: Scanning tech stacks, ports, and API endpoints so the AI instantly understands the codebase boundaries.
 4. **Service Orchestration**: Running, stopping, and logging all projects simultaneously from a single place.
@@ -23,7 +23,7 @@ Here is how to get started with your first feature workspace.
 ```mermaid
 flowchart TD
     A["1. Run Web GUI or CLI"] --> B["2. Fill Feature Details & Pick Repos"]
-    B --> C["3. Workspace Created\n(Git Worktrees + Context generated)"]
+    B --> C["3. Workspace Created\n(Context generated + optional worktrees)"]
     C --> D["4. AI Agent Initializes\n(Fills nexusflow-overview.md + questions)"]
     D --> E["5. Confirm Assumptions & Spin up services"]
 ```
@@ -35,7 +35,7 @@ nexusflow init
 ```
 This sets up `~/.nexusflow/config.json` with default settings:
 * **Development Directory**: Where your git repositories are located (defaults to `~/dev`).
-* **Workspaces Directory**: Where your worktrees will be created (defaults to `~/dev/workspaces`).
+* **Workspaces Directory**: Where worktree workspaces are created; in-place workspace directories hold only the manifest and generated AI context files (defaults to `~/dev/workspaces`).
 
 ---
 
@@ -49,12 +49,37 @@ This starts the local backend server on port `3000` and automatically opens the 
 ---
 
 ### 3. Create a Feature Workspace
-On the dashboard (or via the `nexusflow create` CLI command):
-1. **Branch name**: Enter your branch name (e.g. `feature/user-profiles`). Slashes are supported!
-2. **Description**: Describe the feature you are building. The AI assistant will read this to compile the plan.
-3. **Pick Repositories**: Choose which repositories you need to modify or reference.
-4. **Assistant Selection**: Select which AI coding assistants you plan to use (Claude Code, Antigravity, Cursor, etc.).
-5. **Click Build Workspace**: NexusFlow will fetch origin updates, create local branches, spin up git worktrees under `workspaces/feature/user-profiles`, run tech analyses, and write context configurations.
+Via the `nexusflow create` CLI command:
+1. **Repo Source**: Choose a registered project or continue with ad-hoc repo scanning.
+2. **Work Mode**: Pick **Isolated worktrees** or **In-place**.
+3. **Branch or Workspace Name**: Enter a feature branch for worktree mode (e.g. `feature/user-profiles`) or a workspace name for in-place mode.
+4. **Description**: Describe the feature you are building. The AI assistant will read this to compile the plan.
+5. **Assistant Selection**: Select which AI coding assistants you plan to use (Claude Code, Antigravity, Cursor, etc.).
+6. **Finish the Wizard**: NexusFlow runs tech analyses and writes context configurations. In isolated worktree mode it also fetches origin updates, creates local branches, and spins up git worktrees under `workspaces/feature/user-profiles`.
+
+#### Projects
+
+A project is a named, persistent group of source repositories stored centrally in `~/.nexusflow/projects.json`. Project ids are slugified from the name (`Hogia Billing` becomes `hogia-billing`), and the command group also has the `proj` alias.
+
+```bash
+nexusflow project add -n "Hogia Billing" -r ../api ../frontend -d "Billing repos"
+nexusflow project list      # alias: ls
+nexusflow project show hogia-billing
+nexusflow project remove hogia-billing -y  # alias: rm
+```
+
+The add flags are `-n/--name`, `-r/--repos <paths...>`, and `-d/--description`; omit `--repos` to use the interactive repo picker. Removing a project only edits the registry — it never deletes repositories or workspaces on disk, and `remove` accepts `-y/--yes`. The HTTP API exposes the same registry at `GET/POST /api/projects` and `PUT/DELETE /api/projects/:id`.
+
+#### Work modes
+
+| Mode | What happens |
+| :--- | :--- |
+| **Isolated worktrees** | The classic flow: a feature branch and git worktree per repo inside the workspace directory. |
+| **In-place** | NexusFlow works directly in the source repositories. No branches or worktrees are created; the workspace directory holds only `nexusflow.json` and generated AI context files. |
+
+In-place workspaces expect you to manage branches yourself: `nexusflow sync` is a deliberate no-op, `nexusflow finish` commits and pushes each repo's current branch, and PR/compare links are only offered when that branch differs from the default branch. `nexusflow list` tags them with `[in-place]`, deleting one never touches the source repositories, and agent sessions for single-repo in-place workspaces run in the repo root.
+
+For API users, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
 ---
 
@@ -104,7 +129,7 @@ When the work is done, close the loop in one command:
 nexusflow finish --dry-run          # preview: what will be committed / pushed
 nexusflow finish -m "Ship feature"  # commit + push every repo, print PR links
 ```
-`finish` shows a per-repo status table, commits and pushes each repo (skipping any on the wrong branch), and prints a ready-to-open PR/compare link for each remote. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
+`finish` shows a per-repo status table, commits and pushes each repo, and prints ready-to-open PR/compare links for each remote. In isolated worktree workspaces it uses the feature branches NexusFlow created; in-place workspaces use each repo's current branch and only offer PR/compare links when that branch differs from the default branch. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
 
 ---
 
@@ -115,17 +140,18 @@ Here is a summary of the command-line interface:
 | Command | Usage | Description |
 | :--- | :--- | :--- |
 | **`nexusflow ui`** | `nexusflow ui [-p <port>]` | Starts the backend Hono API server and opens the GUI Dashboard. |
-| **`nexusflow create`** | `nexusflow create` | Launches the interactive step-by-step terminal wizard to build a workspace. |
-| **`nexusflow list`** | `nexusflow list` / `nexusflow ls` | Lists all active feature workspaces discovered on your machine. |
+| **`nexusflow create`** | `nexusflow create` | Launches the interactive wizard to build a worktree or in-place workspace. |
+| **`nexusflow list`** | `nexusflow list` / `nexusflow ls` | Lists all active feature workspaces, tagging in-place ones with `[in-place]`. |
 | **`nexusflow open`** | `nexusflow open` | Prompts you to pick an active workspace and opens it in your editor. |
 | **`nexusflow start`** | `nexusflow start [path]` | Starts background processes for all projects in the workspace. |
 | **`nexusflow stop`** | `nexusflow stop [path]` | Kills all running processes for the workspace. |
 | **`nexusflow logs`** | `nexusflow logs [path] [-n <lines>]` | Tails output log files for all service processes in the workspace. |
 | **`nexusflow status`** | `nexusflow status [path]` | Displays running/stopped statuses and PIDs for each service. |
 | **`nexusflow init`** | `nexusflow init` | Creates or edits the global config file. |
+| **`nexusflow project`** | `nexusflow project add` / `list` / `show` / `remove` | Manages registered repo groups (alias: `proj`). |
 | **`nexusflow diff`** | `nexusflow diff` | Displays pending code changes across all active workspace repositories. |
 | **`nexusflow commit`** | `nexusflow commit` | Automates cross-repository git commit and branch pushes in the workspace. |
-| **`nexusflow sync`** | `nexusflow sync` | Syncs and rebases all workspace worktrees with default base branches. |
+| **`nexusflow sync`** | `nexusflow sync` | Syncs and rebases worktree-mode workspaces; deliberate no-op for in-place workspaces. |
 | **`nexusflow finish`** | `nexusflow finish [-m <msg>] [--cleanup] [--dry-run]` | Closes out a feature: commits & pushes all repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
 | **`nexusflow knowledge`** | `nexusflow knowledge add -t <type> -m <msg>` / `show` / `promote` | Captures workspace learnings and promotes reusable ones into per-repo base knowledge. |
 | **`nexusflow refresh`**| `nexusflow refresh` | Regenerates architecture maps, task plans, and AI context files. |

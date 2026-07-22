@@ -7,7 +7,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type { ServiceConfig, OrchestrationDetection } from '../types.js';
+import type { Feature, ServiceConfig, OrchestrationDetection } from '../types.js';
+import { normalizeFeature, resolveFeatureRepoPath } from '../utils/feature.js';
 
 /**
  * Detects existing orchestration tool configs in a directory.
@@ -20,18 +21,26 @@ export async function detectOrchestrationTools(
 ): Promise<OrchestrationDetection[]> {
   const results: OrchestrationDetection[] = [];
 
+  /** Stable id from the config path, POSIX-style so it survives platforms. */
+  const idFor = (tool: OrchestrationDetection['tool'], configPath: string) =>
+    `${tool}:${path.relative(dir, configPath).split(path.sep).join('/')}`;
+
   async function scan(folder: string, prefix = '') {
-    // Docker Compose
+    // Docker Compose — one-shot: `up -d` detaches by itself, `down` stops.
     const composeFiles = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yaml', 'compose.yml'];
     for (const file of composeFiles) {
       const filePath = path.join(folder, file);
       try {
         await fs.access(filePath);
         results.push({
+          id: idFor('docker-compose', filePath),
           tool: 'docker-compose',
           configPath: filePath,
           startCommand: `docker compose -f "${prefix ? path.join(prefix, file) : file}" up -d`,
           stopCommand: `docker compose -f "${prefix ? path.join(prefix, file) : file}" down`,
+          run: { command: 'docker', args: ['compose', '-f', filePath, 'up', '-d'], cwd: folder },
+          stopRun: { command: 'docker', args: ['compose', '-f', filePath, 'down'], cwd: folder },
+          mode: 'oneshot',
         });
         break; // Only use the first found
       } catch { /* not found */ }
@@ -49,12 +58,16 @@ export async function detectOrchestrationTools(
             const subEntries = await fs.readdir(entryPath);
             const csproj = subEntries.find((e) => e.endsWith('.csproj'));
             if (csproj) {
+              const csprojPath = path.join(entryPath, csproj);
               const projectPath = prefix ? path.join(prefix, entry, csproj) : path.join(entry, csproj);
               results.push({
+                id: idFor('aspire', csprojPath),
                 tool: 'aspire',
-                configPath: path.join(entryPath, csproj),
+                configPath: csprojPath,
                 startCommand: `dotnet run --project "${projectPath}"`,
-                stopCommand: 'Ctrl+C (Aspire runs in foreground)',
+                stopCommand: 'Stopped via NexusFlow',
+                run: { command: 'dotnet', args: ['run', '--project', csprojPath], cwd: folder },
+                mode: 'pm2',
               });
             }
           }
@@ -67,10 +80,14 @@ export async function detectOrchestrationTools(
       const tiltPath = path.join(folder, 'Tiltfile');
       await fs.access(tiltPath);
       results.push({
+        id: idFor('tilt', tiltPath),
         tool: 'tilt',
         configPath: tiltPath,
         startCommand: prefix ? `tilt up --file ${path.join(prefix, 'Tiltfile')}` : 'tilt up',
         stopCommand: prefix ? `tilt down --file ${path.join(prefix, 'Tiltfile')}` : 'tilt down',
+        run: { command: 'tilt', args: ['up', '--file', tiltPath], cwd: folder },
+        stopRun: { command: 'tilt', args: ['down', '--file', tiltPath], cwd: folder },
+        mode: 'pm2',
       });
     } catch { /* not found */ }
 
@@ -79,10 +96,13 @@ export async function detectOrchestrationTools(
       const procPath = path.join(folder, 'Procfile');
       await fs.access(procPath);
       results.push({
+        id: idFor('procfile', procPath),
         tool: 'procfile',
         configPath: procPath,
         startCommand: prefix ? `honcho start -f ${path.join(prefix, 'Procfile')}` : 'honcho start',
-        stopCommand: 'Ctrl+C',
+        stopCommand: 'Stopped via NexusFlow',
+        run: { command: 'honcho', args: ['start', '-f', procPath], cwd: folder },
+        mode: 'pm2',
       });
     } catch { /* not found */ }
 
@@ -93,10 +113,13 @@ export async function detectOrchestrationTools(
       if (content.includes('start:') || content.includes('dev:') || content.includes('run:')) {
         const makeCmd = prefix ? `make -C "${prefix}" dev` : 'make dev';
         results.push({
+          id: idFor('makefile', makePath),
           tool: 'makefile',
           configPath: makePath,
           startCommand: makeCmd,
-          stopCommand: 'Ctrl+C',
+          stopCommand: 'Stopped via NexusFlow',
+          run: { command: 'make', args: ['-C', folder, 'dev'], cwd: folder },
+          mode: 'pm2',
         });
       }
     } catch { /* not found */ }
@@ -274,6 +297,27 @@ export async function detectAllServices(
 ): Promise<ServiceConfig[]> {
   const services: ServiceConfig[] = [];
 
+  // Prefer the manifest: it knows where the repos actually live (worktree
+  // subdirectories, or the source repositories for in-place features, which
+  // have no subdirectories to scan). Parsed directly — not via
+  // core/workspace.js — to keep this module free of import cycles.
+  let feature: Feature | null = null;
+  try {
+    const raw = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    feature = normalizeFeature(JSON.parse(raw) as Feature);
+  } catch {
+    // No/invalid manifest — fall back to scanning subdirectories below.
+  }
+
+  if (feature) {
+    for (const repoPath of feature.repos) {
+      const name = path.basename(repoPath);
+      const projectPath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
+      await detectProjectServices(projectPath, name, services);
+    }
+    return services;
+  }
+
   let entries: import('node:fs').Dirent[];
   try {
     entries = await fs.readdir(workspacePath, { withFileTypes: true });
@@ -286,28 +330,38 @@ export async function detectAllServices(
     // Skip hidden dirs and known non-project dirs
     if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
-    const projectPath = path.join(workspacePath, entry.name);
-    const config = await detectServiceConfig(projectPath, entry.name);
-    if (config) {
-      services.push(config);
-      continue;
-    }
-
-    // If no config at the root, check first-level subdirectories of this project (e.g. nested packages)
-    try {
-      const subEntries = await fs.readdir(projectPath, { withFileTypes: true });
-      for (const subEntry of subEntries) {
-        if (!subEntry.isDirectory()) continue;
-        if (subEntry.name.startsWith('.') || subEntry.name === 'node_modules') continue;
-
-        const subProjectPath = path.join(projectPath, subEntry.name);
-        const subConfig = await detectServiceConfig(subProjectPath, `${entry.name}/${subEntry.name}`);
-        if (subConfig) {
-          services.push(subConfig);
-        }
-      }
-    } catch { /* ignore read errors */ }
+    await detectProjectServices(path.join(workspacePath, entry.name), entry.name, services);
   }
 
   return services;
+}
+
+/**
+ * Detects a project's service config at its root, falling back to first-level
+ * subdirectories (e.g. nested packages), appending results to `services`.
+ */
+async function detectProjectServices(
+  projectPath: string,
+  projectName: string,
+  services: ServiceConfig[],
+): Promise<void> {
+  const config = await detectServiceConfig(projectPath, projectName);
+  if (config) {
+    services.push(config);
+    return;
+  }
+
+  try {
+    const subEntries = await fs.readdir(projectPath, { withFileTypes: true });
+    for (const subEntry of subEntries) {
+      if (!subEntry.isDirectory()) continue;
+      if (subEntry.name.startsWith('.') || subEntry.name === 'node_modules') continue;
+
+      const subProjectPath = path.join(projectPath, subEntry.name);
+      const subConfig = await detectServiceConfig(subProjectPath, `${projectName}/${subEntry.name}`);
+      if (subConfig) {
+        services.push(subConfig);
+      }
+    }
+  } catch { /* ignore read errors */ }
 }

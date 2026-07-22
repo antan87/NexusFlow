@@ -18,10 +18,9 @@ version-bearing file:
 - `extension/package.json`
 - `desktop/package.json`
 - `gui/package.json`
-- `desktop/neutralino.config.json` (top-level `version` only — the Neutralino
-  `binaryVersion`/`clientVersion` are the framework versions and are left alone)
-- the installer's `AppVersion` is injected at build time via an ISCC `/DAppVersion`
-  define, so `desktop/installer/nexusflow.iss` never carries a hardcoded version.
+
+The desktop installer has no separate version target: electron-builder reads it
+from `desktop/package.json` (already synced above).
 
 CI runs `node scripts/sync-version.mjs --check` and **fails on any drift**.
 
@@ -77,6 +76,6 @@ Use these to rehearse the pipeline end-to-end before a real release.
 node scripts/sync-version.mjs --check   # all channels agree with root
 npm run build && npm pack --dry-run     # tarball contains only dist/ (+ README, LICENSE)
 cd extension && npx vsce package        # produces a .vsix at the synced version
-# Windows only:
-npm run build && npm run build --prefix desktop && npm run build:installer --prefix desktop
+# Windows only — electron-builder produces desktop/dist/NexusFlowSetup.exe:
+npm run build --prefix desktop
 ```

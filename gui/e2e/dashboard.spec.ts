@@ -1,39 +1,28 @@
-import { test, expect, type Route } from '@playwright/test';
+import { test, expect } from './fixtures';
 
-/** Minimal API mocks so the redesigned shell can render without a backend. */
-async function mockApi(page: import('@playwright/test').Page) {
-  const feature = {
-    id: 'feature-x',
-    branchName: 'feature-x',
-    description: 'Test feature workspace',
-    repos: ['C:/dev/api-gateway'],
-    assistants: [],
-    workspacePath: 'C:/ws/feature-x',
-    createdAt: '2026-06-01T00:00:00.000Z',
-  };
-  const json = (body: unknown) => (route: Route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-
-  await page.route('**/api/config', json({
-    exists: true,
-    config: { version: '0.2.19', devDir: 'C:/dev', workspacesDir: 'C:/ws', defaultAssistant: 'claude', scanDepth: 2 },
-  }));
-  await page.route('**/api/workspaces', json([feature]));
-  await page.route('**/api/workspaces/status', json({
-    'feature-x': { id: 'feature-x', branchName: 'feature-x', changedFiles: 3, dirtyRepos: 1, runningServices: 0, syncStatus: 'up-to-date', pendingValidation: false },
-  }));
-  await page.route('**/api/ai-detect', json([]));
-  await page.route('**/api/editor-detect', json([]));
-  await page.route('**/api/update-status', json({ updateAvailable: false, currentVersion: '0.2.19', latestVersion: '0.2.19' }));
-  await page.route('**/api/workflows/templates', json({ templates: [] }));
-  await page.route('**/api/repos', json([]));
-  await page.route('**/api/workspace/*/services', json({ services: [], orchestrationTools: [], runningState: [] }));
-  await page.route('**/api/workspace/*/changes', json({ changes: [] }));
-}
+const feature = {
+  id: 'feature-x',
+  branchName: 'feature-x',
+  description: 'Test feature workspace',
+  repos: ['C:/dev/api-gateway'],
+  assistants: [],
+  workspacePath: 'C:/ws/feature-x',
+  createdAt: '2026-06-01T00:00:00.000Z',
+};
 
 test.describe('Redesigned NexusFlow shell', () => {
+  test.use({
+    configData: {
+      exists: true,
+      config: { version: '0.2.19', devDir: 'C:/dev', workspacesDir: 'C:/ws', defaultAssistant: 'claude', scanDepth: 2 },
+    },
+    workspacesData: [feature],
+    workspacesStatusData: {
+      'feature-x': { id: 'feature-x', branchName: 'feature-x', changedFiles: 3, dirtyRepos: 1, runningServices: 0, syncStatus: 'up-to-date', pendingValidation: false },
+    },
+  });
+
   test('shows the dashboard overview with environment stats', async ({ page }) => {
-    await mockApi(page);
     await page.goto('/');
 
     await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
@@ -44,11 +33,9 @@ test.describe('Redesigned NexusFlow shell', () => {
   });
 
   test('navigates to the workspaces master-detail and opens a workspace via deep link', async ({ page }) => {
-    await mockApi(page);
-
     // Sidebar navigation updates the route.
     await page.goto('/');
-    await page.getByRole('button', { name: 'Workspaces' }).click();
+    await page.getByRole('link', { name: 'Workspaces' }).click();
     await expect(page).toHaveURL(/#\/workspaces/);
     await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
 

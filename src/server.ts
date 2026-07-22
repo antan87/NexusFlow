@@ -22,19 +22,20 @@ import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo } from './core/new-repo.js';
+import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
+import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
-import { isOllamaModelAvailable, getOpenAiCompatibleUrl, callLocalLlm } from './utils/local-ai.js';
+
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import { AgentHarness } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
-import { scanSystemSpecs } from './utils/system-scanner.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';
@@ -61,6 +62,12 @@ import {
   detectOrchestrationTools,
   startServices,
   stopServices,
+  startService,
+  stopService,
+  restartService,
+  startOrchestrator,
+  stopOrchestrator,
+  tailLogFile,
   loadRunningState,
   getPm2List,
 } from './orchestration/index.js';
@@ -306,35 +313,13 @@ app.get('/api/adapters', async (c) => {
   }
 });
 
-function isSafeLocalEndpoint(urlStr: string): boolean {
-  try {
-    const url = new URL(urlStr);
-    const hostname = url.hostname.toLowerCase();
-    if (url.protocol === 'https:') {
-      return true;
-    }
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
-      return true;
-    }
-    const ipv4Pattern = /^(?:10|127|192\.168|172\.(?:1[6-9]|2[0-9]|3[01]))\.\d+\.\d+\.\d+$/;
-    if (ipv4Pattern.test(hostname)) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
+
 
 // 2. Save configuration
 app.post('/api/config', async (c) => {
   try {
     const newConfig = await c.req.json();
-    if (newConfig?.localLlm?.enabled && newConfig.localLlm.endpoint) {
-      if (!isSafeLocalEndpoint(newConfig.localLlm.endpoint)) {
-        return c.json({ error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
-      }
-    }
+
     await saveConfig(newConfig);
     return c.json({ success: true, config: newConfig });
   } catch (error) {
@@ -380,6 +365,72 @@ app.post('/api/repos/new', async (c) => {
     const config = await loadConfig();
     const repo = await createNewRepo(config.devDir, body.name);
     return c.json({ success: true, repo });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 3c. Project registry — named groups of source repos that features start from.
+app.get('/api/projects', async (c) => {
+  try {
+    return c.json(await loadProjects({ quiet: true }));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/projects', async (c) => {
+  try {
+    const body = await c.req.json() as { name?: string; repos?: string[]; description?: string };
+    if (!body.name || typeof body.name !== 'string') {
+      return c.json({ error: 'Missing "name" in request body' }, 400);
+    }
+    if (!Array.isArray(body.repos) || body.repos.length === 0) {
+      return c.json({ error: 'Missing "repos" in request body' }, 400);
+    }
+    const config = await loadConfig();
+    // Only repos under devDir are offered by the scanner; refuse anything else.
+    const repos = body.repos.map((r) => assertWithin(config.devDir, r));
+    const project = await createProject(body.name, repos, body.description);
+    return c.json(project, 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.put('/api/projects/:id', async (c) => {
+  try {
+    const body = await c.req.json() as { name?: string; repos?: string[]; description?: string };
+    let repoPaths: string[] | undefined;
+    if (body.repos !== undefined) {
+      if (!Array.isArray(body.repos) || body.repos.length === 0) {
+        return c.json({ error: '"repos" must be a non-empty array' }, 400);
+      }
+      const config = await loadConfig();
+      repoPaths = body.repos.map((r) => assertWithin(config.devDir, r));
+    }
+    const project = await updateProject(c.req.param('id'), {
+      name: body.name,
+      description: body.description,
+      repoPaths,
+    });
+    return c.json(project);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('No project')) {
+      return c.json({ error: error.message }, 404);
+    }
+    return errorResponse(c, error);
+  }
+});
+
+// Registry-only delete — never touches repos or workspaces on disk.
+app.delete('/api/projects/:id', async (c) => {
+  try {
+    const removed = await removeProject(c.req.param('id'));
+    if (!removed) {
+      return c.json({ error: `No project with id "${c.req.param('id')}"` }, 404);
+    }
+    return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -446,9 +497,10 @@ app.get('/api/workspaces/status', async (c) => {
         };
 
         try {
-          // Uncommitted changes across the workspace's repo worktrees.
+          // Uncommitted changes across the workspace's repos: worktrees inside
+          // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
-            const worktreePath = path.join(workspacePath, path.basename(repoPath));
+            const worktreePath = resolveFeatureRepoPath(ws, workspacePath, repoPath);
             const repoStatus = await getRepoStatus(worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
@@ -459,7 +511,8 @@ app.get('/api/workspaces/status', async (c) => {
           // Running services (cached running-state, PM2-verified — same source as
           // the Services tab; only workspaces that ever started services touch PM2).
           const runningState = await loadRunningState(workspacePath, pm2List);
-          status.runningServices = runningState?.services?.length ?? 0;
+          status.runningServices =
+            (runningState?.services?.length ?? 0) + (runningState?.orchestrators?.length ?? 0);
 
           // Sync state: worst-case classification + any repo pending validation.
           const wsState = await loadWorkspaceState(workspacePath);
@@ -504,64 +557,6 @@ app.get('/api/editor-detect', async (c) => {
   }
 });
 
-// 6.5. Local LLM test & recommendation
-app.post('/api/local-llm/test', async (c) => {
-  try {
-    const { provider, endpoint, model, apiKey, shoot } = await c.req.json();
-    if (!endpoint || !isSafeLocalEndpoint(endpoint)) {
-      return c.json({ success: false, error: 'Local AI endpoint must be HTTPS, localhost, 127.0.0.1, or a private LAN IP.' }, 400);
-    }
-    const cleanEndpoint = endpoint.replace(/\/$/, '');
-    
-    if (shoot) {
-      const responseText = await callLocalLlm(
-        { enabled: true, provider, endpoint, model, apiKey },
-        [{ role: 'user', content: 'Respond with the exact word "OK" and nothing else.' }]
-      );
-      const cleanResponse = responseText.trim();
-      return c.json({
-        success: true,
-        modelReady: true,
-        message: `Inference test succeeded! Response from model: "${cleanResponse}"`
-      });
-    }
-
-    if (provider === 'ollama') {
-      const res = await fetch(`${cleanEndpoint}/api/tags`);
-      if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
-      const data: any = await res.json();
-      const models = data?.models || [];
-      const isModelLoaded = isOllamaModelAvailable(models, model);
-      return c.json({ 
-        success: true, 
-        modelReady: isModelLoaded,
-        message: isModelLoaded ? 'Connected successfully! Model is ready.' : `Connected successfully, but model "${model}" is not pulled. Run "ollama pull ${model}" to install it.`
-      });
-    } else {
-      const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
-      const res = await fetch(testUrl);
-      if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
-      return c.json({ success: true, modelReady: true, message: 'Connected successfully to OpenAI-compatible server!' });
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ success: false, error: msg }, 400);
-  }
-});
-
-app.get('/api/local-llm/recommend', async (c) => {
-  try {
-    const specs = await scanSystemSpecs();
-    return c.json(specs);
-  } catch (error) {
-    return c.json({
-      totalRamGb: 8,
-      gpuName: 'Unknown/Integrated',
-      hasHardwareAcceleration: false,
-      recommendedModel: 'qwen2.5-coder:1.5b',
-    });
-  }
-});
 
 
 interface JobStep {
@@ -650,7 +645,11 @@ function updateJobStep(
 
 async function runCreationJob(jobId: string, body: any, config: any) {
   try {
-    const workspacePath = resolveWorkspacePath(config.workspacesDir, body.branchName);
+    const inPlace = body.mode === 'in-place';
+    // Workspace id doubles as the directory name: the branch for worktree
+    // mode, the (slugified) workspace name for in-place mode.
+    const workspaceId = inPlace ? jobId : body.branchName;
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, workspaceId);
     const job = creationJobs.get(jobId);
     if (job) {
       job.workspacePath = workspacePath;
@@ -665,34 +664,47 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     }
 
     const feature: Feature = {
-      id: body.branchName,
-      branchName: body.branchName,
+      id: workspaceId,
+      mode: inPlace ? 'in-place' : 'worktree',
+      projectId: body.projectId,
+      // In-place features never create a branch; keeping branchName populated
+      // (= id) avoids breaking every consumer of the non-optional field.
+      branchName: inPlace ? workspaceId : body.branchName,
       description: body.description,
-      repos: body.repos.map((r: any) => path.join(workspacePath, r.name)),
+      repos: inPlace
+        ? body.repos.map((r: any) => r.path)
+        : body.repos.map((r: any) => path.join(workspacePath, r.name)),
       originalRepos: body.repos.map((r: any) => r.path),
-      repoBranches: Object.keys(repoBranches).length > 0 ? repoBranches : undefined,
+      repoBranches: !inPlace && Object.keys(repoBranches).length > 0 ? repoBranches : undefined,
       assistants: body.assistants,
       workspacePath,
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
-      localLlmEnabled: body.localLlmEnabled,
       teamworkInstructions: body.teamworkInstructions,
     };
     if (job) {
       job.feature = feature;
     }
 
-    // Step 1: Create worktrees
-    updateJobStep(jobId, 'worktrees', 'running', 'Creating git worktrees...');
+    // Step 1: Materialize the workspace (worktrees, or just the lightweight
+    // dir). One stable step id for both modes — only the wording differs.
+    updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
     await createWorkspace(feature, body.repos);
-    updateJobStep(jobId, 'worktrees', 'completed', 'Git worktrees created successfully.');
+    updateJobStep(
+      jobId,
+      'workspace',
+      'completed',
+      inPlace ? 'Workspace registered — working in-place in the source repos.' : 'Git worktrees created successfully.',
+    );
 
-    // Step 2: Analyze repos
+    // Step 2: Analyze repos — against the worktrees, or the source repos in-place.
     updateJobStep(jobId, 'analysis', 'running', 'Analyzing projects and dependencies...');
-    const workspaceRepos = body.repos.map((repo: any) => ({
-      ...repo,
-      path: path.join(workspacePath, repo.name),
-    }));
+    const workspaceRepos = inPlace
+      ? body.repos
+      : body.repos.map((repo: any) => ({
+          ...repo,
+          path: path.join(workspacePath, repo.name),
+        }));
     const analysis = await analyzeAllRepos(workspaceRepos);
     updateJobStep(jobId, 'analysis', 'completed', 'Project analysis complete.');
 
@@ -702,7 +714,6 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       feature,
       repos: workspaceRepos,
       analysis,
-      localLlm: config.localLlm,
     };
     await generateContextFiles(ctx, body.assistants, workspacePath);
     updateJobStep(jobId, 'context', 'completed', 'AI context files generated.');
@@ -714,7 +725,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     const job = creationJobs.get(jobId);
     if (job) {
       const runningStep = job.steps.find((s) => s.status === 'running');
-      const failedStepId = runningStep ? runningStep.id : 'worktrees';
+      const failedStepId = runningStep ? runningStep.id : 'workspace';
       updateJobStep(jobId, failedStepId, 'failed', msg);
     }
   }
@@ -724,11 +735,15 @@ async function runCreationJob(jobId: string, body: any, config: any) {
 app.post('/api/workspace', async (c) => {
   try {
     const body = await c.req.json() as {
-      branchName: string;
+      mode?: 'worktree' | 'in-place';
+      projectId?: string;
+      /** Workspace name — required for in-place mode (there is no branch). */
+      name?: string;
+      branchName?: string;
       description: string;
       repos: RepoSelection[];
       assistants: any[];
-      localLlmEnabled?: boolean;
+
       teamworkInstructions?: string;
       resumption?: {
         testCommand?: string;
@@ -737,8 +752,20 @@ app.post('/api/workspace', async (c) => {
       };
     };
 
+    const inPlace = body.mode === 'in-place';
+    if (inPlace && !body.name?.trim()) {
+      return c.json({ error: 'In-place workspaces need a "name"' }, 400);
+    }
+    if (!inPlace && !body.branchName) {
+      return c.json({ error: 'Missing "branchName" in request body' }, 400);
+    }
+
     const config = await loadConfig();
-    const jobId = body.branchName;
+    // The job id doubles as the workspace directory name.
+    const jobId = inPlace ? slugifyProjectName(body.name!) : body.branchName!;
+    if (!jobId) {
+      return c.json({ error: `Workspace name "${body.name}" contains no usable characters` }, 400);
+    }
 
     if (creationJobs.has(jobId)) {
       const existing = creationJobs.get(jobId)!;
@@ -748,7 +775,9 @@ app.post('/api/workspace', async (c) => {
     }
 
     const steps: JobStep[] = [
-      { id: 'worktrees', name: 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
+      // Stable id 'workspace' in both modes so progress consumers never need
+      // to know the mode; only the display name differs.
+      { id: 'workspace', name: inPlace ? 'Register Workspace' : 'Create Git Worktrees', status: 'pending', message: 'Waiting...' },
       { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
       { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
     ];
@@ -825,10 +854,27 @@ app.get('/api/workspace/create-stream/:jobId', async (c) => {
 
       job.listeners.add(listener);
 
-      // Guard against the job finishing between the initial state write and now.
+      // Guard against the job finishing between the initial state write and
+      // now: the client only saw a 'running' frame, so send the terminal
+      // state before closing — silently ending the stream here would leave
+      // the client believing the connection dropped mid-run.
       if (job.status === 'completed' || job.status === 'failed') {
         job.listeners.delete(listener);
-        resolve();
+        stream
+          .writeSSE({
+            event: 'progress',
+            data: JSON.stringify({
+              id: job.id,
+              status: job.status,
+              progress: job.progress,
+              error: job.error,
+              steps: job.steps,
+              workspacePath: job.workspacePath,
+              feature: job.feature,
+            }),
+          })
+          .catch(() => {})
+          .finally(() => resolve());
       }
     });
   });
@@ -872,7 +918,7 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
     };
 
     const config = await loadConfig();
-    const suggestion = await suggestWorkflow(description, repos, config.localLlm);
+    const suggestion = await suggestWorkflow(description, repos);
 
     return c.json({
       success: true,
@@ -942,21 +988,23 @@ app.get('/api/workspace/:id/services', async (c) => {
       services,
       orchestrationTools: tools,
       runningState: runningState?.services || [],
+      runningOrchestrators: runningState?.orchestrators || [],
     });
   } catch (error) {
     return errorResponse(c, error);
   }
 });
 
-// 10. Start services in workspace
+// 10. Start services in workspace. Configs are re-detected server-side —
+// the client only says "start", never what to execute.
 app.post('/api/workspace/:id/services/start', async (c) => {
   try {
     const id = c.req.param('id');
-    const { services } = await c.req.json() as { services: any[] };
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = path.join(workspacePath, '.nexusflow-logs');
 
+    const services = await detectAllServices(workspacePath);
     await startServices(services, workspacePath, logDir);
     return c.json({ success: true });
   } catch (error) {
@@ -978,20 +1026,57 @@ app.post('/api/workspace/:id/services/stop', async (c) => {
   }
 });
 
-// 12. Get service logs
+// 11b. Per-service start / stop / restart. The service config is re-detected
+// by name server-side; the client never supplies a command.
+app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
+    const action = c.req.param('action') as 'start' | 'stop' | 'restart';
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const logDir = path.join(workspacePath, '.nexusflow-logs');
+
+    if (action === 'stop') {
+      const stopped = await stopService(workspacePath, serviceName);
+      return c.json({ success: true, stopped });
+    }
+
+    const services = await detectAllServices(workspacePath);
+    const service = services.find((s) => s.name === serviceName);
+    if (!service) {
+      return c.json({ error: `Unknown service "${serviceName}" in this workspace.` }, 404);
+    }
+    const running = action === 'restart'
+      ? await restartService(service, workspacePath, logDir)
+      : await startService(service, workspacePath, logDir);
+    return c.json({ success: running !== null, service: running });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+/** Resolve + contain a service log path; names may contain '/' (repo/sub). */
+function resolveServiceLogFile(workspacePath: string, serviceName: string): string {
+  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  return assertWithin(logDir, path.join(logDir, `${serviceName}.log`));
+}
+
+// 12. Get service logs (backfill). Returns the trailing 50KB and the byte
+// offset the read ended at, so the SSE stream can resume exactly there.
 app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
   try {
     const id = c.req.param('id');
-    const serviceName = c.req.param('serviceName');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logFile = path.join(workspacePath, '.nexusflow-logs', `${serviceName}.log`);
+    const logFile = resolveServiceLogFile(workspacePath, serviceName);
 
     let content = '';
+    let size = 0;
     try {
-      // Read last 200 lines or 50KB
       const stats = await fs.stat(logFile);
-      const size = stats.size;
+      size = stats.size;
       const start = Math.max(0, size - 50000);
       const fd = await fs.open(logFile, 'r');
       const buffer = Buffer.alloc(size - start);
@@ -1002,7 +1087,93 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
       content = 'No logs available yet.';
     }
 
-    return c.json({ logs: content });
+    return c.json({ logs: content, size });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 12b. Live log stream (SSE): tails the log file from ?offset onward,
+// emitting 'log' events with JSON-encoded chunks (raw SSE frames would mangle
+// embedded newlines). A 15s ping keeps idle streams alive.
+app.get('/api/workspace/:id/services/logs/:serviceName/stream', async (c) => {
+  // Resolve + validate the log path BEFORE opening the stream so a bad name
+  // (e.g. a traversal attempt) returns a clean error, mirroring the backfill
+  // route, rather than a raw 500 from an uncaught throw.
+  let logFile: string;
+  let startOffset: number | undefined;
+  try {
+    const id = c.req.param('id');
+    const serviceName = decodeURIComponent(c.req.param('serviceName'));
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    logFile = resolveServiceLogFile(workspacePath, serviceName);
+    const offsetParam = Number.parseInt(c.req.query('offset') ?? '', 10);
+    startOffset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : undefined;
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  return streamSSE(c, async (stream) => {
+    await stream.writeSSE({ event: 'init', data: JSON.stringify({ offset: startOffset ?? null }) });
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        tail.stop();
+        clearInterval(heartbeat);
+        resolve();
+      };
+
+      const tail = tailLogFile(
+        logFile,
+        (chunk) => {
+          stream.writeSSE({ event: 'log', data: JSON.stringify({ chunk }) }).catch(cleanup);
+        },
+        { startOffset },
+      );
+
+      const heartbeat = setInterval(() => {
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(cleanup);
+      }, 15_000);
+
+      stream.onAbort(cleanup);
+    });
+  });
+});
+
+// 12c. Orchestration tools: start/stop by detection id only — the tool is
+// re-detected server-side and the client can never supply a command.
+app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const action = c.req.param('action') as 'start' | 'stop';
+    const body = await c.req.json() as { id?: string };
+    if (!body.id || typeof body.id !== 'string') {
+      return c.json({ error: 'Missing orchestrator "id" in request body' }, 400);
+    }
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const logDir = path.join(workspacePath, '.nexusflow-logs');
+
+    const tools = await detectOrchestrationTools(workspacePath);
+    const detection = tools.find((t) => t.id === body.id);
+    if (!detection) {
+      return c.json({ error: `Unknown orchestration tool "${body.id}" in this workspace.` }, 404);
+    }
+
+    if (action === 'start') {
+      const running = await startOrchestrator(detection, workspacePath, logDir);
+      return c.json({ success: true, orchestrator: running });
+    }
+    await stopOrchestrator(detection, workspacePath);
+    return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1023,10 +1194,10 @@ app.get('/api/workspace/:id/changes', async (c) => {
 
     const results: any[] = [];
 
-    // Check git status in each repo
+    // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
       const repoName = path.basename(repoPath);
-      const worktreePath = path.join(workspacePath, repoName);
+      const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
         const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
@@ -1106,8 +1277,24 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    // Contained within the workspace; rejects `..` and sibling-prefix escapes.
-    const worktreePath = resolveRepoPath(workspacePath, repoName);
+    // Resolve by mode, manifest first: an in-place repo name may only resolve
+    // to an exact manifest entry (its repos live outside the workspace), and
+    // must never be shadowed by a stray same-named subdirectory inside the
+    // workspace dir. Worktree mode keeps the path-containment guard.
+    const feature = await loadFeatureConfig(workspacePath);
+    let worktreePath: string;
+    if (feature && isInPlace(feature)) {
+      const matches = feature.repos.filter((r) => path.basename(r) === repoName);
+      if (matches.length === 0) {
+        return c.json({ error: `Unknown repo "${repoName}" in this workspace.` }, 404);
+      }
+      if (matches.length > 1) {
+        return c.json({ error: `Repo name "${repoName}" is ambiguous in this workspace.` }, 400);
+      }
+      worktreePath = matches[0]!;
+    } else {
+      worktreePath = resolveRepoPath(workspacePath, repoName);
+    }
 
     let diff = '';
     
@@ -1355,7 +1542,9 @@ app.post('/api/workspace/:id/resume', async (c) => {
       });
     }
 
-    return c.json({ success: true, resumeCommand, workspacePath });
+    // Where the resume command should be run: the workspace dir, or the repo
+    // root for single-repo in-place features.
+    return c.json({ success: true, resumeCommand, workspacePath, sessionCwd: getSessionCwd(feature) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1495,9 +1684,14 @@ app.post('/api/updates/apply', async (c) => {
   try {
     const isWin = process.platform === 'win32';
     if (isWin) {
-      // Inno Setup silent install flags
+      // The desktop app ships an electron-builder NSIS installer (build target
+      // 'nsis'), whose silent-install switch is `/S` — NOT Inno Setup's
+      // /VERYSILENT. With the wrong flags the one-click installer waits for UI
+      // that a detached (stdio: 'ignore') process can never provide, so the
+      // update silently fails to apply. `/S` runs it unattended and relaunches
+      // the app on finish (electron-builder default).
       console.log(`Applying update: Spawning detached installer at: ${downloadedInstallerPath}`);
-      const child = spawn(downloadedInstallerPath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], {
+      const child = spawn(downloadedInstallerPath, ['/S'], {
         detached: true,
         stdio: 'ignore',
       });

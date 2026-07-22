@@ -3,12 +3,15 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execa } from 'execa';
-import { createWorkspace } from './workspace.js';
+import { createWorkspace, deleteWorkspace } from './workspace.js';
 import * as worktree from './worktree.js';
 import type { Feature, RepoInfo, RepoSelection } from '../types.js';
 
 vi.mock('execa');
 vi.mock('./worktree.js');
+vi.mock('./storage.js', () => ({
+  deleteWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
+}));
 
 /** Unique temp workspace path per test (no Date.now/random needed). */
 let counter = 0;
@@ -137,6 +140,35 @@ describe('createWorkspace rollback', () => {
     expect(gitCalls()).not.toContainEqual(['branch', '-D', 'feat-branch']);
   });
 
+  it('in-place mode creates no worktrees and points the workspace at the source repos', async () => {
+    const repos = repoInfos('api', 'web');
+    const inPlaceFeature: Feature = {
+      ...feature(repos),
+      id: 'my-feature',
+      branchName: 'my-feature',
+      mode: 'in-place',
+      repos: repos.map((r) => r.path),
+    };
+
+    await createWorkspace(inPlaceFeature, repos);
+
+    // No git worktrees, no repo-subdir .gitignore.
+    expect(worktree.createWorktree).not.toHaveBeenCalled();
+    await expect(fs.access(path.join(workspacePath, '.gitignore'))).rejects.toBeTruthy();
+
+    // The manifest records the mode and the source repo paths.
+    const manifest = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8'));
+    expect(manifest.mode).toBe('in-place');
+    expect(manifest.repos).toEqual([path.join('/src', 'api'), path.join('/src', 'web')]);
+
+    // The .code-workspace references the source repos by absolute path.
+    const wsName = path.basename(workspacePath);
+    const codeWorkspace = JSON.parse(
+      await fs.readFile(path.join(workspacePath, `${wsName}.code-workspace`), 'utf-8'),
+    );
+    expect(codeWorkspace.folders).toContainEqual({ path: path.join('/src', 'api'), name: 'api' });
+  });
+
   it('completes rollback even when removeWorktree fails (prunes and removes the dir)', async () => {
     vi.mocked(worktree.createWorktree)
       .mockResolvedValueOnce({ createdBranch: true })
@@ -149,5 +181,52 @@ describe('createWorkspace rollback', () => {
     // Falls back to `git worktree prune` when removal fails.
     expect(gitCalls()).toContainEqual(['worktree', 'prune']);
     await expect(fs.access(workspacePath)).rejects.toBeTruthy();
+  });
+});
+
+describe('deleteWorkspace (in-place)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    counter += 1;
+    workspacePath = path.join(os.tmpdir(), `nexusflow-delete-test-${process.pid}-${counter}`);
+    vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
+  });
+
+  afterEach(async () => {
+    await fs.rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+  });
+
+  it('removes only the workspace dir and never touches the source repos', async () => {
+    // A stand-in source repo that must survive the delete.
+    const sourceRepo = path.join(os.tmpdir(), `nexusflow-delete-test-src-${process.pid}-${counter}`);
+    await fs.mkdir(sourceRepo, { recursive: true });
+    await fs.writeFile(path.join(sourceRepo, 'precious.txt'), 'keep me', 'utf-8');
+
+    try {
+      await fs.mkdir(workspacePath, { recursive: true });
+      const manifest: Feature = {
+        id: 'my-fix',
+        mode: 'in-place',
+        branchName: 'my-fix',
+        description: 'in-place delete test',
+        repos: [sourceRepo],
+        originalRepos: [sourceRepo],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-04T00:00:00.000Z',
+      };
+      await fs.writeFile(path.join(workspacePath, 'nexusflow.json'), JSON.stringify(manifest), 'utf-8');
+
+      await deleteWorkspace(workspacePath);
+
+      // No worktree removal was attempted against the source repo.
+      expect(worktree.removeWorktree).not.toHaveBeenCalled();
+      // The source repo and its content are intact.
+      expect(await fs.readFile(path.join(sourceRepo, 'precious.txt'), 'utf-8')).toBe('keep me');
+      // The workspace dir itself is gone.
+      await expect(fs.access(workspacePath)).rejects.toBeTruthy();
+    } finally {
+      await fs.rm(sourceRepo, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });

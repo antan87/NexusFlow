@@ -92,12 +92,7 @@ export function getDefaultConfig(): NexusFlowConfig {
       '**/.vscode/**',
       '**/.idea/**',
     ],
-    localLlm: {
-      enabled: false,
-      provider: 'ollama',
-      endpoint: 'http://localhost:11434',
-      model: 'qwen2.5-coder:1.5b',
-    },
+
   };
 }
 
@@ -134,9 +129,6 @@ export async function loadConfig(options: { quiet?: boolean } = {}): Promise<Nex
       const parsed = JSON.parse(raw) as Partial<NexusFlowConfig>;
       // Merge with defaults so newly-added keys are always present.
       merged = { ...getDefaultConfig(), ...parsed };
-      if (parsed.localLlm) {
-        merged.localLlm = { ...getDefaultConfig().localLlm, ...parsed.localLlm };
-      }
     } catch (error) {
       // A corrupted config is worth surfacing — silently reverting devDir /
       // workspacesDir / storageProvider to defaults is a nasty failure mode.

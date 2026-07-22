@@ -1,9 +1,7 @@
 /**
  * @module core/doctor
  * Headless workspace diagnostics. Produces a structured {@link DoctorReport}
- * shared by the CLI `doctor` renderer and the MCP `run_doctor` tool. The local
- * AI connectivity probe uses fetch + AbortController, so this is safe to run
- * outside a TTY.
+ * shared by the CLI `doctor` renderer and the MCP `run_doctor` tool.
  */
 
 import * as path from 'node:path';
@@ -13,10 +11,12 @@ import { globby } from 'globby';
 
 import { loadConfig } from './config.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
+import { isInPlace } from '../utils/feature.js';
+import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
-import { isOllamaModelAvailable, getOpenAiCompatibleUrl } from '../utils/local-ai.js';
+
 import type { ProjectAnalysis } from '../types.js';
 
 export type DoctorCheckStatus = 'pass' | 'warn' | 'fail' | 'info';
@@ -41,14 +41,6 @@ export interface DoctorReport {
   aborted: boolean;
 }
 
-/** Resolves the conventional test command for a repo's tech stack. */
-function getTestCommand(analysis: ProjectAnalysis): string {
-  if (analysis.techStack.languages.includes('csharp')) return 'dotnet test';
-  if (analysis.techStack.languages.includes('typescript') || analysis.techStack.languages.includes('javascript')) return 'npm test';
-  if (analysis.techStack.languages.includes('python')) return 'pytest';
-  if (analysis.techStack.languages.includes('go')) return 'go test ./...';
-  return 'npm test';
-}
 
 /**
  * Runs all workspace diagnostics and returns a structured report.
@@ -113,11 +105,20 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
       // Detached HEAD or git failure — leave as 'unknown'.
     }
 
-    if (branch !== feature.branchName) {
-      warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${feature.branchName}".`);
-      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${feature.branchName})` });
+    if (isInPlace(feature)) {
+      // In-place workspaces have no expected branch — the user manages
+      // branches; a mismatch warning here would fire for every repo forever.
+      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'info', message: `On branch "${branch}" (in-place workspace — branches managed by you)` });
     } else {
-      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}"` });
+      // Per-repo existing-branch overrides are expected to differ from the
+      // feature branch.
+      const expectedBranch = feature.repoBranches?.[repo.name] ?? feature.branchName;
+      if (branch !== expectedBranch) {
+        warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but workspace branch is "${expectedBranch}".`);
+        checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${expectedBranch})` });
+      } else {
+        checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}"` });
+      }
     }
 
     const status = await getRepoStatus(repo.path);
@@ -197,7 +198,7 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     const a = analysis.get(repo.path);
     if (!a) continue;
 
-    const testCommand = getTestCommand(a);
+    const testCommand = getConventionalTestCommand(a);
     if (testCommand === 'npm test' && !a.techStack.languages.includes('typescript') && !a.techStack.languages.includes('javascript')) {
       warnings.push(`Repository "${repo.name}" fell back to default test command "npm test".`);
       checks.push({ category: 'Test Commands', name: repo.name, status: 'warn', message: 'Using default fallback test command "npm test"' });
@@ -250,46 +251,6 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   } catch {
     warnings.push('Missing .vscode/settings.json. VS Code search might not work properly inside sub-repos.');
     checks.push({ category: 'Core Artifacts', name: '.vscode/settings.json', status: 'warn', message: 'is missing or invalid' });
-  }
-
-  // ── 7. Local AI Agent Connection ───────────────────────────────────────
-  const config = await loadConfig();
-  if (config.localLlm?.enabled) {
-    const { provider, endpoint, model } = config.localLlm;
-    try {
-      const cleanEndpoint = endpoint.replace(/\/$/, '');
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      try {
-        if (provider === 'ollama') {
-          const res = await fetch(`${cleanEndpoint}/api/tags`, { signal: controller.signal });
-          if (!res.ok) throw new Error(`Ollama responded with status ${res.status}`);
-          const data: any = await res.json();
-          const models = data?.models || [];
-          if (isOllamaModelAvailable(models, model)) {
-            checks.push({ category: 'Local AI Agent', name: provider, status: 'pass', message: `Ollama active and model "${model}" is ready` });
-          } else {
-            const availableList = models.map((m: any) => m.name).join(', ') || 'none';
-            warnings.push(`Local model "${model}" is not pulled in Ollama. Available: [${availableList}]. Run "ollama pull ${model}" to install it.`);
-            checks.push({ category: 'Local AI Agent', name: provider, status: 'warn', message: `Ollama active, but model "${model}" is not pulled` });
-          }
-        } else {
-          const testUrl = getOpenAiCompatibleUrl(cleanEndpoint, '/v1/models');
-          const res = await fetch(testUrl, { signal: controller.signal });
-          if (!res.ok) throw new Error(`OpenAI-compatible server responded with status ${res.status}`);
-          checks.push({ category: 'Local AI Agent', name: provider, status: 'pass', message: `OpenAI-compatible server at "${endpoint}" is active` });
-        }
-      } catch (e: any) {
-        throw new Error(e.name === 'AbortError' ? 'Request timed out after 5 seconds' : e.message);
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (e: any) {
-      warnings.push(`Local LLM server at "${endpoint}" is offline or unreachable: ${e.message}`);
-      checks.push({ category: 'Local AI Agent', name: 'connection', status: 'warn', message: `Local LLM server is offline or unreachable (${e.message})` });
-    }
-  } else {
-    checks.push({ category: 'Local AI Agent', name: 'status', status: 'info', message: 'Local AI agent is disabled in config.' });
   }
 
   return report();

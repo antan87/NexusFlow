@@ -16,13 +16,7 @@ export interface NexusFlowConfig {
   scanDepth: number;
   storageProvider?: string;
   adapterConfig?: Record<string, Record<string, any>>;
-  localLlm?: {
-    enabled: boolean;
-    provider: 'ollama' | 'openai-compatible';
-    endpoint: string;
-    model: string;
-    apiKey?: string;
-  };
+  plugins?: string[];
 }
 
 export interface DetectedAI {
@@ -44,8 +38,31 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
+/** A repository belonging to a {@link Project} (mirrors src/types.ts). */
+export interface ProjectRepo {
+  path: string;
+  defaultBranch: string;
+}
+
+/** A named, persistent group of source repositories (mirrors src/types.ts). */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  repos: ProjectRepo[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** How a feature attaches to its repos (mirrors src/types.ts). */
+export type WorkspaceMode = 'worktree' | 'in-place';
+
 export interface Feature {
   id: string;
+  /** Absent on manifests written before modes existed — treat as 'worktree'. */
+  mode?: WorkspaceMode;
+  /** Id of the project this feature was created from, if any. */
+  projectId?: string;
   branchName: string;
   description: string;
   repos: string[];
@@ -53,6 +70,7 @@ export interface Feature {
   workspacePath: string;
   createdAt: string;
 }
+
 
 /** Classified outcome of a sync/rebase attempt for a repo (mirrors src/types.ts). */
 export type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';
@@ -83,10 +101,13 @@ export interface ServiceConfig {
 }
 
 export interface OrchestrationDetection {
+  /** Stable id: `${tool}:${relative config path}`. */
+  id: string;
   tool: string;
   configPath: string;
   startCommand: string;
   stopCommand: string;
+  mode: 'oneshot' | 'pm2';
 }
 
 export interface RunningService {
@@ -96,9 +117,13 @@ export interface RunningService {
   startedAt: string;
 }
 
-export interface Toast {
+export interface RunningOrchestrator {
   id: string;
-  title: string;
-  message?: string;
-  type: 'success' | 'error' | 'info' | 'warning';
+  tool: string;
+  configPath: string;
+  mode: 'oneshot' | 'pm2';
+  pm2Name?: string;
+  /** Tailable log source name (e.g. `orch-<slug>`) — set only for mode 'pm2'. */
+  logName?: string;
+  startedAt: string;
 }
