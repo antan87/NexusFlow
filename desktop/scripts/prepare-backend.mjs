@@ -31,4 +31,15 @@ if (existsSync(lock)) copyFileSync(lock, path.join(backendDir, 'package-lock.jso
 console.log('[prepare-backend] installing production dependencies…');
 run(existsSync(path.join(backendDir, 'package-lock.json')) ? 'npm ci --omit=dev' : 'npm install --omit=dev', backendDir);
 
+// Guard: fail loudly if the production install didn't actually stage its deps.
+// A silently empty node_modules would package into an app whose backend can't
+// start (ERR_MODULE_NOT_FOUND at launch) — catch it here, at build time.
+const sentinel = path.join(backendDir, 'node_modules', 'hono', 'package.json');
+if (!existsSync(sentinel)) {
+  throw new Error(
+    `[prepare-backend] runtime dependencies missing after install (expected ${sentinel}). ` +
+      'The bundled backend would fail to start — aborting.',
+  );
+}
+
 console.log('[prepare-backend] done.');

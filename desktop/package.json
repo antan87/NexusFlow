@@ -21,6 +21,7 @@
   "build": {
     "appId": "se.hogia.nexusflow",
     "productName": "NexusFlow",
+    "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
       "preload.js",
