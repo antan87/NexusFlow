@@ -216,7 +216,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'refresh_context',
     description:
-      'Regenerate the workspace context files, architecture maps, and plan. Only re-analyzes repos whose content changed (unchanged maps stay byte-identical to preserve prompt caches). Run this after code changes so the AI context stays current.',
+      'Regenerate the workspace context files and plan. Only re-analyzes repos whose content changed, and after a NexusFlow upgrade. Run this after code changes so the AI context stays current.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     inputSchema: {
       type: 'object',

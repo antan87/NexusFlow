@@ -35,12 +35,13 @@ export interface RefreshReport {
 }
 
 /**
- * Refreshes a workspace's context files, maps, and plans. Throws if the
- * workspace configuration cannot be loaded.
+ * Refreshes a workspace's context files and plan. Throws if the workspace
+ * configuration cannot be loaded.
  *
- * Token-saving behavior: repos with an unchanged git fingerprint reuse their
- * cached analysis and keep their existing map files byte-identical, so AI
- * assistants' prompt caches stay valid across refreshes.
+ * Token-saving behavior: a repo whose git fingerprint is unchanged reuses its
+ * cached analysis instead of being re-scanned. The fingerprint also carries this
+ * package's version, so an upgrade re-analyzes everything once rather than
+ * regenerating from stale data.
  *
  * @param workspacePath - Absolute path to the workspace root.
  * @param options       - Refresh options.

@@ -277,13 +277,6 @@ export interface TechStack {
   projectType: ProjectType;
 }
 
-/** A detected API endpoint or route. */
-export interface ApiEndpoint {
-  method: string;
-  path: string;
-  source?: string;
-}
-
 /** An inter-repo dependency reference. */
 export interface RepoDependency {
   /** Name of the dependency (npm package, NuGet package, etc.). */
@@ -325,22 +318,10 @@ export interface ProjectAnalysis {
   runConfig?: RunConfig;
 }
 
-export interface MessagePublisher {
-  contractType: string;
-  topicOrQueue: string;
-  publisherFile: string;
-}
-
-export interface MessageSubscriber {
-  contractType: string;
-  handlerFile: string;
-  registrationFile: string;
-}
-
-export interface MessagingTopology {
-  publishers: MessagePublisher[];
-  subscribers: MessageSubscriber[];
-}
+// ApiEndpoint, MessagePublisher, MessageSubscriber and MessagingTopology are
+// gone with detect-apis and messaging-analyzer, which reported header reads as
+// HTTP routes and Set insertions as queue publishers. Nothing populated them
+// afterwards, so they only described a shape no analysis produced.
 
 export interface RunConfigEntryPoint {
   projectPath: string;

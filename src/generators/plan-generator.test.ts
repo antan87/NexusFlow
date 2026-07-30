@@ -114,13 +114,20 @@ describe('generateImplementationPlan', () => {
       expect(content).not.toContain('depended on by');
     });
 
-    it('counts the repos correctly for one and for several', async () => {
+    it('words itself for the repo count instead of counting into one sentence', async () => {
+      // "between the single repo" and "from one of these repos to another" both
+      // read as nonsense for a one-repo workspace.
       const [repos, analysis] = unrelated();
-      expect(await planFor(repos, analysis)).toContain('the 2 repos');
+      const several = await planFor(repos, analysis);
+      expect(several).toContain('between the 2 repos');
+      expect(several).toContain('add a dependency from one of these repos');
 
       const [single] = repos;
-      expect(await planFor([single!], new Map([[single!.path, analysis.get(single!.path)!]])))
-        .toContain('the single repo');
+      const one = await planFor([single!], new Map([[single!.path, analysis.get(single!.path)!]]));
+      expect(one).toContain('This workspace has one repo');
+      expect(one).toContain('nexusflow add-repo');
+      expect(one).not.toContain('the single repo');
+      expect(one).not.toContain('one of these repos to another');
     });
 
     it('stays short, since it has one fact to convey', async () => {
@@ -197,7 +204,7 @@ describe('generateImplementationPlan', () => {
 
       expect(content).not.toContain('@acme/lib');
       expect(content).not.toContain('Local Package Development Loop');
-      expect(content).toContain('No package dependencies were detected');
+      expect(content).toContain('This workspace has one repo');
     });
   });
 
@@ -261,7 +268,7 @@ describe('generateImplementationPlan', () => {
         new Map([[repo, analysis]]),
       );
 
-      expect(content).toContain('No package dependencies were detected');
+      expect(content).toContain('This workspace has one repo');
     });
   });
 });

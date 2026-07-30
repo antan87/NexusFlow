@@ -211,13 +211,18 @@ export async function generateImplementationPlan(
     md.push('');
 
     if (!hasEdges && contracts.length === 0) {
-      const subject = repos.length === 1 ? 'the single repo' : `the ${repos.length} repos`;
+      // Worded per repo count: "between the single repo" and "from one of these
+      // repos to another" both read as nonsense for a one-repo workspace.
       md.push(
-        `No package dependencies were detected between ${subject} in this workspace, so no build order is forced — work in whichever order suits the task.`,
+        repos.length === 1
+          ? 'This workspace has one repo, so there is no cross-repo build order to describe.'
+          : `No package dependencies were detected between the ${repos.length} repos in this workspace, so no build order is forced — work in whichever order suits the task.`,
       );
       md.push('');
       md.push(
-        'If you add a dependency from one of these repos to another, run `nexusflow refresh` and this plan will describe the resulting order.',
+        repos.length === 1
+          ? 'Add another repo with `nexusflow add-repo`, then run `nexusflow refresh`, and this plan will describe any order between them.'
+          : 'If you add a dependency from one of these repos to another, run `nexusflow refresh` and this plan will describe the resulting order.',
       );
       md.push('');
       await writeWorkspaceFile(workspacePath, feature.id, 'nexusflow-plan.md', md.join('\n'));

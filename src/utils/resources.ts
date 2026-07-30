@@ -44,11 +44,15 @@ export async function resolveResourcePath(
  */
 export function resourcePathCandidates(moduleDir: string, ...segments: string[]): string[] {
   return [
-    // Built output: dist/<subdir>/... -> dist/resources/...
+    // Two levels up. From src/utils or dist/utils that is the package root's
+    // `resources/`, which is what both the source tree and a published install
+    // have, since package.json ships `resources` alongside `dist`.
     path.resolve(moduleDir, '..', '..', 'resources', ...segments),
-    // Source tree under vitest: src/<a>/<b>/... -> <repo>/resources/...
+    // Three levels up, for a module one directory deeper, e.g. src/core/foo.
     path.resolve(moduleDir, '..', '..', '..', 'resources', ...segments),
-    // Modules one level down, e.g. src/utils -> <repo>/resources/...
+    // One level up. From dist/utils this is `dist/resources/`, the copy that
+    // `scripts/copy-resources.mjs` makes — reached only when the package root has
+    // no `resources/`, so it is a fallback rather than the primary path.
     path.resolve(moduleDir, '..', 'resources', ...segments),
   ];
 }

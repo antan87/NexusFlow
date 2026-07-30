@@ -156,8 +156,8 @@ export function buildBaseKnowledgeContent(repoName: string): string {
  * Generates AI context files for each of the selected assistants.
  *
  * Also generates:
- * - WORKSPACE.md — universal context file
- * - nexusflow-knowledge.md — persistent AI memory across sessions
+ * - WORKSPACE.md — a short index for people, not an assistant-facing file
+ * - nexusflow-knowledge.md — accumulated decisions and gotchas, if absent
  * - nexusflow-plan.md — implementation order based on dependency analysis
  *
  * Every file it writes describes the whole workspace, so there is no per-repo or
