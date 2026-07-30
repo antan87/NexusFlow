@@ -249,43 +249,16 @@ export async function generateContextFiles(
     }
   }
 
-  // Generate per-repo architecture maps
-  if (ctx.analysis) {
-    const allProduced = new Set<string>();
-    for (const [, a] of ctx.analysis) {
-      if (a.produces) {
-        for (const p of a.produces) {
-          allProduced.add(p.name.toLowerCase());
-        }
-      }
-      // Also treat the repository name as a produced package concept
-      allProduced.add(a.name.toLowerCase());
-    }
-
-    for (const repo of ctx.repos) {
-      if (onlyRepo && repo.name !== onlyRepo) {
-        continue;
-      }
-      const a = ctx.analysis.get(repo.path);
-      if (a) {
-        if (changedRepos && !changedRepos.includes(repo.name)) {
-          const mapExists = await baseFileExists(workspacePath, repo.name, `nexusflow-map-${repo.name}.md`);
-          if (mapExists) {
-            console.log(chalk.gray('  ○'), `Architecture Map for ${repo.name} unchanged — skipped (cache hit)`);
-            continue;
-          }
-        }
-        try {
-          const { generateRepoMap } = await import('./map-generator.js');
-          await generateRepoMap(repo, a, workspacePath, allProduced);
-          console.log(chalk.green('  ✔'), `Generated Architecture Map for ${chalk.bold(repo.name)}`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(chalk.red('  ✖'), `Failed to generate Architecture Map for ${repo.name}: ${message}`);
-        }
-      }
-    }
-  }
+  // No per-repo architecture map.
+  //
+  // Every line it emitted came from the repo's package.json — the manifest paths,
+  // the test frameworks, `npm test`, `npm run dev` — so an assistant that opens
+  // that file, which it does anyway, already knew all of it. Two independent
+  // evaluating agents said as much: the maps added nothing beyond the manifest.
+  // Worse, it was the first entry in the generated "Where to look" list, so the
+  // agent was sent to read derived facts before starting work.
+  //
+  // The rule this settles: generate only what an agent cannot grep.
 
   if (onlyBase) {
     return;

@@ -199,7 +199,6 @@ ${structureRule}${startHint}
 
 ## Where to look
 
-- \`.nexusflow/base/<repo>/nexusflow-map-<repo>.md\` — how to run each repo, and its recorded conventions
 - \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha -m "..."\`
 - \`nexusflow-plan.md\` — phase order when a change spans repos${diffPointer}
 ${ownInstructions}${teamwork}`;

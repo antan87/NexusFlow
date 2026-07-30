@@ -120,7 +120,15 @@ describe('buildContextContent', () => {
 
       expect(content).toContain('nexusflow-knowledge.md');
       expect(content).toContain('nexusflow-plan.md');
-      expect(content).toContain('nexusflow-map-<repo>.md');
+    });
+
+    it('does not send the agent to read a per-repo architecture map', async () => {
+      // Every fact that file held came from the repo's package.json, and it was
+      // the first thing the pointer list told the agent to go read.
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).not.toContain('nexusflow-map');
+      expect(content).not.toContain('.nexusflow/base');
     });
 
     it('tells the agent to search the knowledge file, not read it whole', async () => {

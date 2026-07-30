@@ -214,10 +214,8 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     { name: 'nexusflow-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-knowledge.md') },
     { name: 'nexusflow-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-plan.md') },
   ];
-  for (const repo of allRepos) {
-    const name = `nexusflow-map-${repo.name}.md`;
-    coreFiles.push({ name, exists: () => baseFileExists(workspacePath, repo.name, name) });
-  }
+  // Per-repo architecture maps are no longer generated — everything they held
+  // came from the repo's package.json — so their absence is not a fault.
 
   for (const file of coreFiles) {
     if (await file.exists()) {
