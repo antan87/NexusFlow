@@ -319,6 +319,36 @@ describe('buildContextContent', () => {
       expect(content).toContain('`my-tool`');
     });
 
+    it('says the workspace is empty rather than heading an empty table', async () => {
+      // A table header over no rows followed by "Each repo above is a separate
+      // git worktree" describes nothing at all.
+      const ctx = ctxFor({});
+      ctx.repos = [];
+      ctx.feature.repos = [];
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).toContain('no repositories yet');
+      expect(content).not.toContain('| Repo |');
+      expect(content).not.toContain('Each repo above');
+    });
+
+    it('names own-instruction repos only from this workspace', async () => {
+      // The list walked the analysis map, so an entry for a repo outside this
+      // workspace could put its name in the generated file.
+      const ctx = ctxFor({});
+      const stranger = path.join(dir, 'not-in-this-workspace');
+      const strayAnalysis = analysisFor('stranger', stranger, ['typescript']);
+      (strayAnalysis as { existingAIConfigs: unknown }).existingAIConfigs = [
+        { relativePath: 'CLAUDE.md', assistant: 'claude' },
+      ];
+      ctx.analysis!.set(stranger, strayAnalysis);
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).not.toContain('stranger');
+    });
+
     it('carries the teamwork strategy when one was chosen', async () => {
       const content = await buildContextContent(
         ctxFor({ teamworkInstructions: '# Plan then implement' }),

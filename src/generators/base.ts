@@ -170,12 +170,14 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
   // Repos that already ship their own assistant instructions; those override
-  // anything here for that repo, so it is worth naming them.
-  const existing = analysis
-    ? [...analysis.values()]
-      .filter((a) => a.existingAIConfigs.length > 0)
-      .map((a) => `\`${a.name}\` (${a.existingAIConfigs.map((c) => c.relativePath).join(', ')})`)
-    : [];
+  // anything here for that repo, so it is worth naming them. Walked via `repos`
+  // rather than the analysis map, so an analysis entry for a repo that is not in
+  // this workspace cannot put a name in the list — the same scoping the plan's
+  // contract table needed.
+  const existing = ordered
+    .map((repo) => analysis?.get(repo.path))
+    .filter((a): a is NonNullable<typeof a> => !!a && a.existingAIConfigs.length > 0)
+    .map((a) => `\`${a.name}\` (${a.existingAIConfigs.map((c) => c.relativePath).join(', ')})`);
 
   const teamwork = feature.teamworkInstructions
     ? `\n## How to work together\n\n${feature.teamworkInstructions}\n`
@@ -198,17 +200,24 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     ? `\n## Commands recorded for this workspace\n\nThese were entered by hand and are not derivable from any manifest.\n\n${custom.join('\n')}\n`
     : '';
 
-  return `# ${feature.id}
-
-${feature.description}
-
-## Repos
+  // A table header over no rows, followed by "Each repo above is a separate git
+  // worktree", describes nothing. `create` should never produce this, but the
+  // writer had no guard, so say the true thing instead.
+  const reposSection = rows.length > 0
+    ? `## Repos
 
 | Repo | ${inPlace ? 'Path' : 'Directory'} | Verify | Cross-repo |
 |---|---|---|---|
 ${rows.join('\n')}
 
-${structureRule}${startHint}
+${structureRule}${startHint}`
+    : `This workspace has no repositories yet — add one with \`nexusflow add-repo\`.`;
+
+  return `# ${feature.id}
+
+${feature.description}
+
+${reposSection}
 
 ## Where to look
 
