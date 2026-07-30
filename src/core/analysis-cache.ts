@@ -1,10 +1,10 @@
 /**
  * @module core/analysis-cache
- * Persists per-repo analysis results in `.nexusflow-analysis-cache.json` at
- * the workspace root, keyed by a git content fingerprint (HEAD SHA plus a
- * signature of dirty files). Lets refresh/sync re-analyze only repos whose
- * content actually changed, keeping unchanged maps byte-identical — which
- * avoids file churn and preserves AI assistants' prompt caches (token saving).
+ * Persists per-repo analysis results in `.nexusflow-analysis-cache.json` at the
+ * workspace root, keyed by this package's version plus a git content fingerprint
+ * (HEAD SHA plus a signature of dirty files). Lets refresh/sync re-analyze only
+ * repos whose content actually changed, while still re-running everything after
+ * an upgrade so the generators never read stale analysis.
  */
 
 import { createHash } from 'node:crypto';
@@ -153,12 +153,12 @@ function unquotePorcelainPath(p: string): string {
  * mtime per file) when the tree is not clean. Editing, adding, or deleting an
  * uncommitted file therefore changes the fingerprint too.
  *
- * The version is part of the key because the fingerprint gates map regeneration
- * as well as re-analysis. Keyed on repo content alone, an upgrade that improved
- * the generators reached no existing workspace — every map stayed as it was
- * until someone happened to run `refresh --force`. Including the version costs
- * one local re-analysis per upgrade, which is file IO and no tokens, and makes
- * stale context impossible to serve by default.
+ * The version is part of the key so that upgrading NexusFlow re-runs the
+ * analysis the generators read from. Keyed on repo content alone, an upgrade that
+ * improved them reached no existing workspace until someone happened to run
+ * `refresh --force`. Including the version costs one local re-analysis per
+ * upgrade — file IO, no tokens — and makes stale context impossible to serve by
+ * default.
  *
  * @param repoPath - Absolute path to the repo root.
  * @returns The fingerprint, or null when git fails (caller should re-analyze).

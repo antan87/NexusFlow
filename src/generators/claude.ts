@@ -15,12 +15,18 @@
  * rights or Developer Mode, so the import is the portable choice.
  */
 
-import path from 'node:path';
-import fse from 'fs-extra';
 import type { WorkspaceContext } from '../types.js';
+import { writeWorkspaceFile } from '../core/storage.js';
 
 /**
  * Writes a `CLAUDE.md` that imports `AGENTS.md`, plus anything Claude-specific.
+ *
+ * Written through the storage layer, like `AGENTS.md` — not with a raw path
+ * join. The two must land in the same place or the import resolves to nothing:
+ * under the `central-vault` adapter, `AGENTS.md` goes to
+ * `~/.nexusflow/vault/<featureId>/`, so a `CLAUDE.md` written to the workspace
+ * root would leave Claude Code with a dangling `@AGENTS.md` and no context at
+ * all — silently, since an unresolved import is not an error.
  *
  * @param ctx           - The workspace context (feature + repos + analysis).
  * @param workspacePath - Absolute path to the workspace root directory.
@@ -42,10 +48,8 @@ export async function generateClaudeConfig(
 - Record durable findings with \`nexusflow knowledge add\` rather than in chat, so the next session inherits them.
 `;
 
-  const filePath = path.join(workspacePath, 'CLAUDE.md');
-
   try {
-    await fse.writeFile(filePath, content, 'utf-8');
+    await writeWorkspaceFile(workspacePath, ctx.feature.id, 'CLAUDE.md', content);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to write CLAUDE.md: ${message}`);

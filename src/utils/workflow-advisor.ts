@@ -8,11 +8,6 @@
 import { getWorkflowTemplates } from './workflows.js';
 import type { RepoInfo } from '../types.js';
 
-// `WorkflowTier` and the `tier` field are gone with the workflow engine. They
-// restated `difficulty` in the graph designer's vocabulary and had no reader
-// outside this file once that designer was deleted, while their doc comments
-// still claimed a live consumer depended on them.
-
 export interface WorkflowSuggestion {
   difficulty: 'simple' | 'moderate' | 'complex';
   rationale: string;

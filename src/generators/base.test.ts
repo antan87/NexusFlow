@@ -101,11 +101,70 @@ describe('buildContextContent', () => {
       expect(content).toContain('needs `my-tool`');
     });
 
+    it('does not invent a dependency from a coincidental name fragment', async () => {
+      // `findInterRepoDependencies` had a substring fallback. Its only consumer
+      // was a graph nobody read; now it feeds the auto-loaded context file, where
+      // a repo called `my-tool` beside one declaring `@babel/my-tool-kit` would
+      // manufacture `needs`, `used by` and a start order out of nothing.
+      const ctx = ctxFor({});
+      (ctx.analysis!.get(pyRepo)! as { produces?: unknown }).produces = [
+        { name: 'my-tool', type: 'npm' },
+      ];
+      (ctx.analysis!.get(nodeRepo)! as { dependencies?: unknown }).dependencies = [
+        { name: '@babel/my-tool-kit', type: 'npm' },
+        { name: 'my-tooling', type: 'npm' },
+      ];
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).not.toContain('needs `');
+      expect(content).not.toContain('used by `');
+      expect(content).not.toContain('Start with');
+    });
+
     it('names where to start, and orders the rows to match', async () => {
       const content = await buildContextContent(relatedCtx());
 
       expect(content).toContain('Start with `my-tool`');
       expect(content.indexOf('| `my-tool` |')).toBeLessThan(content.indexOf('| `my-web` |'));
+    });
+
+    it('does not name a starting repo that nothing builds on', async () => {
+      // The old test was "does any repo anywhere have a dependency", so a
+      // workspace whose first repo is independent still got "Start with `x` —
+      // the others build on it" directly under x's own all-dashes row.
+      const ctx = relatedCtx();
+      const alpha = path.join(dir, 'alpha');
+      ctx.repos = [{ name: 'alpha', path: alpha, defaultBranch: 'main' }, ...ctx.repos];
+      ctx.analysis!.set(alpha, analysisFor('alpha', alpha, ['typescript']));
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).not.toContain('Start with `alpha`');
+      expect(content).toContain('Start with `my-tool`');
+    });
+
+    it('surfaces hand-entered commands, which no manifest states', async () => {
+      // The only reader of feature.resumption was deleted as dead code, while
+      // the create API still accepted and persisted these.
+      const ctx = ctxFor({});
+      ctx.feature.resumption = {
+        testCommand: 'npm run verify:all',
+        mockCommand: 'docker compose up -d',
+        startCommand: 'npm run dev:all',
+      };
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).toContain('npm run verify:all');
+      expect(content).toContain('docker compose up -d');
+      expect(content).toContain('npm run dev:all');
+    });
+
+    it('says nothing about custom commands when none were entered', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).not.toContain('Commands recorded for this workspace');
     });
 
     it('keeps the worktree rule, which is not inferable', async () => {

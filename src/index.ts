@@ -357,13 +357,11 @@ program
 
 program
   .command('refresh')
-  .description('Refresh workspace context, maps, plans and handoff files (re-analyzes only changed repos)')
+  .description('Refresh workspace context, plan and handoff files (re-analyzes only changed repos)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
-  .option('-b, --base', 'Only refresh base-layer maps and codebase knowledge from main')
   .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
   .option('-s, --strategy <id>', 'Update the teamwork strategy (use template ID, or "auto" for AI suggestion)')
-  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean; force?: boolean; strategy?: string }) => {
+  .action(async (workspace: string | undefined, options: { force?: boolean; strategy?: string }) => {
     try {
       await refreshCommand(options, workspace);
     } catch (error) {

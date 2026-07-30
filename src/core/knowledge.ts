@@ -327,11 +327,13 @@ export const MAX_ENTRY_CHARS = 300;
 /**
  * Validates an entry message and returns the exact string to store.
  *
- * Enforced here rather than in the CLI because every write path converges on
- * this function: `nexusflow knowledge add`, `knowledge promote`, the MCP
- * `knowledge` tool, and the HTTP endpoint. A cap that lived in the command
- * handler bound none of the others — including the MCP tool, which is how an
- * assistant records knowledge and so the very caller that produced the 44 KB.
+ * Enforced here rather than in the CLI because every path that writes a *new*
+ * entry converges on `addWorkspaceKnowledge`/`addBaseKnowledge`: the CLI, the MCP
+ * `add_knowledge` and `promote_knowledge` tools, and the HTTP endpoint. A cap in
+ * the command handler bound none of the others — including the MCP tools, which
+ * are how an assistant records knowledge and so the callers that produced the
+ * 44 KB. `promoteKnowledge` is the one exception, and deliberately so: it copies
+ * markdown already on disk, which was capped when it was written.
  *
  * Returns the normalised message so the string that was measured is the string
  * that gets written; validating the trimmed form and storing the raw one let
@@ -453,7 +455,13 @@ export async function promoteKnowledge(
 
   let baseLocation = resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE);
   for (const e of promotable) {
-    // Preserve the entry's original markdown rather than reformatting it.
+    // Preserve the entry's original markdown rather than reformatting it: `text`
+    // is a whole bullet line or `### ` block, so running it back through
+    // `formatEntry` would nest one entry inside another. Its length is not
+    // re-checked either — it was capped when it was written, and re-validating
+    // here would make promotion fail for entries that predate the limit, which
+    // is a worse outcome than a long line in base knowledge. Callers handing in
+    // free text rather than a parsed entry must cap it themselves.
     const res = await insertIntoBase(workspacePath, repoName, e.type!, e.text);
     baseLocation = res.location;
   }

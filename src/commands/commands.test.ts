@@ -107,17 +107,15 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       });
       vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
 
-      // Run refresh command with repo filter
-      await refreshCommand({ repo: 'repo-1' }, mockWorkspacePath);
+      await refreshCommand({}, mockWorkspacePath);
 
+      // Every generated file describes the whole workspace, so there is no
+      // per-repo or base-only subset to pass through any more.
       expect(analyzers.analyzeAllReposCached).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalledWith(
         expect.any(Object),
         expect.any(Array),
         mockWorkspacePath,
-        'repo-1',
-        undefined,
-        ['repo-1']
       );
     });
   });

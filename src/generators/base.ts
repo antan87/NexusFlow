@@ -128,7 +128,6 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     ? computeRepoRelations(ctx)
     : new Map<string, RepoRelations>();
   const ordered = orderReposByDependency(repos, relations);
-  const hasRelations = [...relations.values()].some((r) => r.dependsOn.length > 0);
 
   // One row per repo: where it is, how to check it, and who it is tied to.
   const rows = ordered.map((repo) => {
@@ -151,8 +150,17 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     return `| \`${repo.name}\` | \`${location}\` | ${verify ? '`' + verify + '`' : '—'} | ${ties.join('; ') || '—'} |`;
   });
 
-  const startHint = hasRelations && ordered.length > 1 && ordered[0]
-    ? `\n\nStart with \`${ordered[0].name}\` — the others build on it.`
+  // The earliest repo something actually builds on — and it names what. The
+  // previous test was "does any repo anywhere have a dependency", which pointed
+  // at `ordered[0]` regardless: a workspace of [alpha (independent), lib, web]
+  // where only web needs lib produced "Start with `alpha` — the others build on
+  // it" directly above alpha's own row showing no ties at all. Since `ordered` is
+  // already dependency-ordered, the first entry with consumers is the real
+  // starting point, and if nothing has consumers there is no order to give.
+  const startsWith = ordered.find((repo) => (relations.get(repo.name)?.consumedBy.length ?? 0) > 0);
+  const consumers = startsWith ? relations.get(startsWith.name)!.consumedBy : [];
+  const startHint = startsWith
+    ? `\n\nStart with \`${startsWith.name}\` — ${consumers.map((n) => '`' + n + '`').join(', ')} ${consumers.length === 1 ? 'builds' : 'build'} on it.`
     : '';
 
   // Only the rule an assistant cannot infer. Which directory to run a command
@@ -177,6 +185,19 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     ? `- These repos carry their own assistant instructions, which take precedence inside them: ${existing.join(', ')}\n`
     : '';
 
+  // Commands the person who created this workspace typed in by hand. Exactly the
+  // kind of thing an assistant cannot derive: a mock/seed step, a non-standard
+  // start command, a test command that differs from the convention. The API still
+  // accepts and persists these, and for a while nothing read them — deleting the
+  // only reader as "dead code" silently dropped them from every generated file.
+  const custom: string[] = [];
+  if (feature.resumption?.testCommand) custom.push(`- Verify with \`${feature.resumption.testCommand}\` — this overrides the per-repo commands above.`);
+  if (feature.resumption?.mockCommand) custom.push(`- Set up dependencies first with \`${feature.resumption.mockCommand}\`.`);
+  if (feature.resumption?.startCommand) custom.push(`- Start the services with \`${feature.resumption.startCommand}\`.`);
+  const customCommands = custom.length > 0
+    ? `\n## Commands recorded for this workspace\n\nThese were entered by hand and are not derivable from any manifest.\n\n${custom.join('\n')}\n`
+    : '';
+
   return `# ${feature.id}
 
 ${feature.description}
@@ -193,5 +214,5 @@ ${structureRule}${startHint}
 
 - \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha -m "..."\`, keeping each entry to a rule and its reason
 - \`nexusflow-plan.md\` — phase order when a change spans repos
-${ownInstructions}${teamwork}`;
+${ownInstructions}${customCommands}${teamwork}`;
 }

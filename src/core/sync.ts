@@ -137,7 +137,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
 
       const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };
-      await generateContextFiles(ctx, feature.assistants, workspacePath, undefined, undefined, analyzed);
+      await generateContextFiles(ctx, feature.assistants, workspacePath);
       contextRefreshed = true;
     } catch {
       // Best-effort regeneration; ignore failures.

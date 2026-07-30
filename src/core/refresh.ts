@@ -1,9 +1,11 @@
 /**
  * @module core/refresh
- * Headless workspace refresh — regenerates context files, maps, and plans for
- * a workspace using the analysis cache, so only repos whose content changed
- * are re-analyzed and only their maps are rewritten. Backs the CLI command,
- * the HTTP API, and the scheduler alike.
+ * Headless workspace refresh — regenerates the workspace context files using the
+ * analysis cache, so only repos whose content changed are re-analyzed. Backs the
+ * CLI command, the HTTP API, and the scheduler alike.
+ *
+ * Every generated file describes the whole workspace, so a refresh is all or
+ * nothing; there is no per-repo or base-only subset to ask for.
  */
 
 import * as fs from 'node:fs/promises';
@@ -16,10 +18,6 @@ import type { WorkspaceContext } from '../types.js';
 
 /** Options for a headless refresh run. */
 export interface RefreshOptions {
-  /** Restrict regeneration to a single repo (by directory name). */
-  onlyRepo?: string;
-  /** Only refresh base-layer maps and codebase knowledge. */
-  baseOnly?: boolean;
   /** Ignore the analysis cache and re-analyze every repo. */
   force?: boolean;
 }
@@ -69,20 +67,13 @@ export async function refreshWorkspace(
 
   const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };
 
-  await generateContextFiles(
-    ctx,
-    feature.assistants,
-    workspacePath,
-    options.onlyRepo,
-    options.baseOnly,
-    options.force ? undefined : analyzed,
-  );
+  await generateContextFiles(ctx, feature.assistants, workspacePath);
 
   // If a handoff bundle exists, refresh it too — it reuses the cached
   // analysis, so this no longer triggers a second full analysis pass.
   let refreshedHandoff = false;
   const handoffPath = path.join(workspacePath, 'nexusflow-handoff.md');
-  if (!options.baseOnly) {
+  {
     try {
       await fs.access(handoffPath);
       const { handoffCommand } = await import('../commands/handoff.js');

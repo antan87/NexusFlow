@@ -160,23 +160,21 @@ export function buildBaseKnowledgeContent(repoName: string): string {
  * - nexusflow-knowledge.md — persistent AI memory across sessions
  * - nexusflow-plan.md — implementation order based on dependency analysis
  *
+ * Every file it writes describes the whole workspace, so there is no per-repo or
+ * base-only subset to generate. The `onlyRepo` and `onlyBase` parameters are
+ * gone with the per-repo architecture maps that were the only thing they scoped:
+ * once the maps went, `onlyBase` made this function write nothing while its
+ * caller still reported success, and `onlyRepo` narrowed a logging loop while
+ * every generated file was rewritten in full.
+ *
  * @param ctx           - The workspace context (feature + repos).
  * @param assistants    - Which AI assistants to generate context files for.
  * @param workspacePath - Absolute path to the workspace root directory.
- * @param onlyRepo      - Restrict per-repo output to a single repo by name.
- * @param onlyBase      - Only generate base-layer maps/knowledge.
- * @param changedRepos  - When provided, per-repo architecture maps are only
- *                        rewritten for these repos (unchanged repos keep their
- *                        existing map byte-identical, preserving AI prompt
- *                        caches). A missing map file is generated regardless.
  */
 export async function generateContextFiles(
   ctx: WorkspaceContext,
   assistants: AIAssistant[],
   workspacePath: string,
-  onlyRepo?: string,
-  onlyBase?: boolean,
-  changedRepos?: string[],
 ): Promise<void> {
   // WORKSPACE.md is a human-facing index, not an auto-loaded context file: no
   // assistant reads it by convention, so it used to be a byte-for-byte third
@@ -184,43 +182,26 @@ export async function generateContextFiles(
   // files that had to be kept in sync. The assistant-specific filenames still
   // carry the full content, because those ARE auto-loaded — turning one of
   // those into a pointer would trade free context for a tool call.
-  if (!onlyBase) {
-    try {
-      await writeWorkspaceFile(workspacePath, ctx.feature.id, 'WORKSPACE.md', buildWorkspaceIndex(ctx));
-      console.log(
-        chalk.green('  ✔'),
-        `Generated ${chalk.bold('WORKSPACE.md')} (human index)`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(
-        chalk.red('  ✖'),
-        `Failed to generate WORKSPACE.md: ${message}`,
-      );
-    }
+  try {
+    await writeWorkspaceFile(workspacePath, ctx.feature.id, 'WORKSPACE.md', buildWorkspaceIndex(ctx));
+    console.log(
+      chalk.green('  ✔'),
+      `Generated ${chalk.bold('WORKSPACE.md')} (human index)`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      chalk.red('  ✖'),
+      `Failed to generate WORKSPACE.md: ${message}`,
+    );
   }
 
-  // Base knowledge is no longer pre-created empty.
-  //
-  // The starter was four headings over four `- None recorded yet.` lines — 883
-  // bytes per repo that said nothing, while the generated context pointed an
-  // assistant at it. `nexusflow knowledge add` bootstraps the file with this
-  // exact layout on first write (see `insertIntoBase` in core/knowledge.ts), so
-  // the file now appears when it has something in it. An existing file from an
-  // older workspace is left untouched.
-  for (const repo of ctx.repos) {
-    if (onlyRepo && repo.name !== onlyRepo) {
-      continue;
-    }
-    if (await baseFileExists(workspacePath, repo.name, 'nexusflow-knowledge.md')) {
-      console.log(
-        chalk.gray('  ○'),
-        `Base knowledge for ${repo.name} already exists — preserving`,
-      );
-    }
-  }
+  // Base knowledge is never pre-created: the starter was four headings over four
+  // `- None recorded yet.` lines. `nexusflow knowledge add` bootstraps the file
+  // with that layout on first write (see `insertIntoBase` in core/knowledge.ts),
+  // so it appears once it has content, and an existing one is left untouched.
 
-  if (!onlyBase) {
+  {
     try {
       // Generate nexusflow-knowledge.md if it does not exist
       const knowledgeExists = await workspaceFileExists(workspacePath, ctx.feature.id, 'nexusflow-knowledge.md');
@@ -255,10 +236,6 @@ export async function generateContextFiles(
   // agent was sent to read derived facts before starting work.
   //
   // The rule this settles: generate only what an agent cannot grep.
-
-  if (onlyBase) {
-    return;
-  }
 
   // Generate configuration for each selected assistant
   for (const assistant of assistants) {
