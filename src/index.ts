@@ -419,7 +419,7 @@ knowledgeCmd
   .description('Append a timestamped learning to the workspace knowledge file')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | progress | assumption | question')
-  .requiredOption('-m, --message <msg>', 'The learning to record')
+  .requiredOption('-m, --message <msg>', 'The learning to record, as a rule plus its reason (max 300 chars)')
   .option('--title <title>', 'Short title (used for decision headings)')
   .option('-r, --repo <repo>', "Write to this repo's persistent base knowledge instead")
   .action(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {

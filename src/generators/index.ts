@@ -11,7 +11,6 @@ import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
 import { writeWorkspaceFile, workspaceFileExists, baseFileExists } from '../core/storage.js';
-import { generateDiffContext } from './diff-context.js';
 
 /** Maps each assistant to its generator function and the file it produces. */
 const GENERATORS: Record<
@@ -55,9 +54,8 @@ ${repos || '_None._'}
 |---|---|
 | \`AGENTS.md\` | The context your assistant loads: projects, relationships, verification commands |
 | \`CLAUDE.md\` | A one-line \`@AGENTS.md\` import, plus anything Claude-specific |
-| \`nexusflow-knowledge.md\` | Accumulated decisions and gotchas for this feature. Skim the headings; read what is relevant |
+| \`nexusflow-knowledge.md\` | Accumulated decisions and gotchas, one per \`###\` heading. Search it; do not read it whole |
 | \`nexusflow-plan.md\` | Dependency-ordered implementation phases |
-| \`nexusflow-diff-context.md\` | What has changed on this branch so far |
 
 ## Useful commands
 
@@ -234,12 +232,10 @@ export async function generateContextFiles(
         console.log(chalk.gray('  ○'), `nexusflow-knowledge.md already exists — preserving existing content`);
       }
 
-      // Generate Git branch diff context file. Recording whether it found
-      // anything lets the assistant-facing context below skip pointing at a file
-      // whose entire content is "no changed files detected".
-      ctx.hasBranchDiff = await generateDiffContext(ctx, workspacePath);
-      console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-diff-context.md')} (incremental git diff)`);
-
+      // No branch-diff file. It was `git diff --name-only` rewritten as a
+      // bullet list, with every entry expanded to an absolute file:/// URL —
+      // which tripled its size for no added fact. An assistant gets the same
+      // answer, current rather than as-of-last-refresh, from one git call.
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(

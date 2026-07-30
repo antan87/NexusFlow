@@ -24,6 +24,20 @@ const VALID_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'progress', 'as
 /** Types that exist in the per-repo base knowledge file. */
 const PROMOTABLE_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption'];
 
+/**
+ * Longest a single entry may be.
+ *
+ * This file is read by an assistant, and it only grows. One workspace reached
+ * 44 KB — about 11,000 tokens, twenty times its own auto-loaded context — across
+ * 21 entries averaging 1,200 characters, because each was written as an essay
+ * rather than a rule. A cap is the only thing that holds: nothing else in the
+ * pipeline can tell a useful paragraph from a self-indulgent one.
+ *
+ * 300 characters fits a rule plus the reason it exists. Anything longer belongs
+ * in a document the entry links to.
+ */
+export const MAX_ENTRY_CHARS = 300;
+
 interface AddOptions {
   type: string;
   message: string;
@@ -51,6 +65,25 @@ function parseType(type: string): KnowledgeEntryType | null {
     return null;
   }
   return type as KnowledgeEntryType;
+}
+
+/**
+ * Rejects an over-long entry, explaining how to shorten it.
+ *
+ * @returns True when the message is within {@link MAX_ENTRY_CHARS}.
+ */
+export function checkEntryLength(message: string): boolean {
+  const length = message.trim().length;
+  if (length <= MAX_ENTRY_CHARS) return true;
+
+  console.error(
+    chalk.red(`✖ Entry is ${length} characters; the limit is ${MAX_ENTRY_CHARS}.`),
+  );
+  console.log(chalk.dim('  This file is read by an assistant and only grows, so an entry has to be a'));
+  console.log(chalk.dim('  rule, not a write-up. State what to do and why in one or two sentences.'));
+  console.log(chalk.dim('  Split genuinely separate findings into separate entries, and put long'));
+  console.log(chalk.dim('  material in a document the entry points to.'));
+  return false;
 }
 
 /** Collapses an entry's markdown to a single line for list display. */
@@ -91,6 +124,10 @@ export async function knowledgeAddCommand(workspaceArg: string | undefined, opti
     console.error(chalk.red('✖ A message is required (-m "...").'));
     return;
   }
+
+  // Checked before the workspace prompt, so an over-long entry fails immediately
+  // rather than after picking a workspace.
+  if (!checkEntryLength(options.message)) return;
 
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:');
   if (!workspacePath) return;

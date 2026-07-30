@@ -219,17 +219,6 @@ export interface WorkspaceContext {
 
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
-
-  /**
-   * Whether any repo has changes against its base branch, set once
-   * `nexusflow-diff-context.md` has been generated.
-   *
-   * Only `false` is a claim: it means that file says nothing but "no changed
-   * files detected", so the generated context omits the pointer to it.
-   * `undefined` means not yet determined, and the pointer is kept — an assistant
-   * missing context costs more than one it did not need.
-   */
-  hasBranchDiff?: boolean;
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────
