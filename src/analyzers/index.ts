@@ -14,12 +14,10 @@ import {
   getRepoFingerprint,
 } from '../core/analysis-cache.js';
 import { detectTechStack } from './tech-stack.js';
-import { detectApis } from './detect-apis.js';
 import { detectDependencies, detectProducedPackages, detectNuGetFeeds } from './detect-deps.js';
 import { detectPorts } from './detect-ports.js';
 import { detectExistingAIConfigs } from './detect-existing.js';
 import { extractReadmeSummary } from './readme-summarizer.js';
-import { analyzeMessaging } from './messaging-analyzer.js';
 import { analyzeRunConfig } from './run-analyzer.js';
 
 /**
@@ -30,17 +28,20 @@ import { analyzeRunConfig } from './run-analyzer.js';
  * @returns Full analysis result.
  */
 export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
-  const [techStack, endpoints, dependencies, produces, nugetFeeds, ports, existingAIConfigs, readmeSummary, messaging, runConfig] =
+  // No endpoint or messaging scanning: those two analyzers matched any
+  // `.get('literal')` and any `.add('literal')`, so they reported header reads
+  // and Set insertions as HTTP routes and queue publishers — including their own
+  // doc comments. An assistant reading the repo establishes both accurately, and
+  // 65% of the generated map was that noise.
+  const [techStack, dependencies, produces, nugetFeeds, ports, existingAIConfigs, readmeSummary, runConfig] =
     await Promise.all([
       detectTechStack(repo.path),
-      detectApis(repo.path),
       detectDependencies(repo.path),
       detectProducedPackages(repo.path),
       detectNuGetFeeds(repo.path),
       detectPorts(repo.path),
       detectExistingAIConfigs(repo.path),
       extractReadmeSummary(repo.path),
-      analyzeMessaging(repo.path),
       analyzeRunConfig(repo.path),
     ]);
 
@@ -48,14 +49,12 @@ export async function analyzeRepo(repo: RepoInfo): Promise<ProjectAnalysis> {
     name: repo.name,
     path: repo.path,
     techStack,
-    endpoints,
     dependencies,
     produces,
     nugetFeeds,
     ports,
     existingAIConfigs,
     readmeSummary,
-    messaging,
     runConfig,
   };
 }
@@ -175,10 +174,8 @@ export async function analyzeAllReposCached(
 
 // Re-export individual analyzers
 export { detectTechStack } from './tech-stack.js';
-export { detectApis } from './detect-apis.js';
 export { detectDependencies, findInterRepoDependencies, detectNuGetFeeds } from './detect-deps.js';
 export { detectPorts } from './detect-ports.js';
 export { detectExistingAIConfigs } from './detect-existing.js';
 export { extractReadmeSummary } from './readme-summarizer.js';
-export { analyzeMessaging } from './messaging-analyzer.js';
 export { analyzeRunConfig } from './run-analyzer.js';

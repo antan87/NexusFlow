@@ -12,14 +12,16 @@
     "nexusflow": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "resources"
   ],
   "publishConfig": {
     "access": "public",
     "provenance": true
   },
   "scripts": {
-    "build": "tsc && npm run build --prefix gui",
+    "build": "tsc && node scripts/copy-resources.mjs && npm run build --prefix gui",
+    "build:backend": "tsc && node scripts/copy-resources.mjs",
     "version": "node scripts/sync-version.mjs && git add -A",
     "dev": "tsc --watch",
     "start": "node dist/index.js",

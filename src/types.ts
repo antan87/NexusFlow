@@ -310,8 +310,6 @@ export interface ProjectAnalysis {
   path: string;
   /** Detected tech stack. */
   techStack: TechStack;
-  /** Detected API endpoints. */
-  endpoints: ApiEndpoint[];
   /** Detected dependencies. */
   dependencies: RepoDependency[];
   /** Detected ports/services. */
@@ -324,8 +322,6 @@ export interface ProjectAnalysis {
   produces?: { name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[];
   /** NuGet feeds detected in the repo's NuGet.config files. */
   nugetFeeds?: { name: string; url: string }[];
-  /** Detected messaging topology. */
-  messaging?: MessagingTopology;
   /** Detected run configurations. */
   runConfig?: RunConfig;
 }

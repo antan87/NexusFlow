@@ -187,42 +187,11 @@ export async function generateRepoMap(
     md.push('');
   }
 
-  // 1.5. Messaging Topology
-  md.push('## 📨 Messaging Topology');
-  md.push('');
-  if (analysis.messaging && (analysis.messaging.publishers.length > 0 || analysis.messaging.subscribers.length > 0)) {
-    if (analysis.messaging.publishers.length > 0) {
-      md.push('### Publishes');
-      md.push('| Message Contract | Topic/Queue/Channel | Publisher (file) |');
-      md.push('|---|---|---|');
-      for (const p of analysis.messaging.publishers) {
-        const fileLink = p.publisherFile
-          ? `[${path.basename(p.publisherFile)}](file:///${path.join(worktreePath, p.publisherFile)})`
-          : '—';
-        md.push(`| ${p.contractType} | ${p.topicOrQueue} | ${fileLink} |`);
-      }
-      md.push('');
-    }
-
-    if (analysis.messaging.subscribers.length > 0) {
-      md.push('### Subscribes');
-      md.push('| Message Contract | Handler (file) | Registered in |');
-      md.push('|---|---|---|');
-      for (const s of analysis.messaging.subscribers) {
-        const handlerLink = s.handlerFile
-          ? `[${path.basename(s.handlerFile)}](file:///${path.join(worktreePath, s.handlerFile)})`
-          : '—';
-        const regLink = s.registrationFile
-          ? `[${path.basename(s.registrationFile)}](file:///${path.join(worktreePath, s.registrationFile)})`
-          : '—';
-        md.push(`| ${s.contractType} | ${handlerLink} | ${regLink} |`);
-      }
-      md.push('');
-    }
-  } else {
-    md.push('_No pub/sub messaging patterns detected in this repository._');
-    md.push('');
-  }
+  // The Messaging Topology section used to live here. It was removed along with
+  // its analyzer: a `\badd\(['"]literal` regex reported every `Set.add('x')` as
+  // a queue publisher, so 82% of its rows were string literals from this repo's
+  // own source — including the analyzer's own doc comments. An assistant reading
+  // the code describes the real topology; a regex over call syntax cannot.
 
   // 2. Extensible Usage Pattern Scanning
   md.push('## 💡 Detected Architectural Patterns & Usages');
@@ -318,55 +287,12 @@ export async function generateRepoMap(
   }
   md.push('');
 
-  // 3. Endpoint Inventory
-  md.push('## 🔌 API Endpoints');
-  md.push('');
-  if (analysis.endpoints.length > 0) {
-    md.push('| Endpoint Group (Router/Module/File) | Route Prefix / Pattern | Verbs | Source File |');
-    md.push('|:---|:---|:---|:---|');
-
-    // Group endpoints by source file
-    const grouped = new Map<string, typeof analysis.endpoints>();
-    for (const ep of analysis.endpoints) {
-      const src = ep.source || 'Unknown';
-      if (!grouped.has(src)) {
-        grouped.set(src, []);
-      }
-      grouped.get(src)!.push(ep);
-    }
-
-    const findCommonPrefix = (paths: string[]): string => {
-      if (paths.length === 0) return '';
-      if (paths.length === 1) return paths[0]!;
-      const sorted = [...paths].sort();
-      const first = sorted[0]!.split('/');
-      const last = sorted[sorted.length - 1]!.split('/');
-      const common: string[] = [];
-      for (let i = 0; i < first.length; i++) {
-        if (first[i] === last[i]) {
-          common.push(first[i]!);
-        } else {
-          break;
-        }
-      }
-      const prefix = common.join('/');
-      return prefix || '/';
-    };
-
-    for (const [src, eps] of grouped) {
-      const groupName = src !== 'Unknown' ? path.basename(src, path.extname(src)) : 'Inferred';
-      const paths = eps.map(e => e.path);
-      const commonPrefix = findCommonPrefix(paths);
-      const verbs = Array.from(new Set(eps.map(e => e.method.toUpperCase()))).join(', ');
-      const sourceLink = src !== 'Unknown'
-        ? `[${path.basename(src)}](file:///${path.join(worktreePath, src).replace(/\\/g, '/')})`
-        : '—';
-      md.push(`| ${groupName} | \`${commonPrefix}\` | \`${verbs}\` | ${sourceLink} |`);
-    }
-  } else {
-    md.push('_No endpoints detected._');
-  }
-  md.push('');
+  // The API Endpoints section was removed along with its analyzer. Matching
+  // `.get('literal')` cannot distinguish a route from a Map lookup or a header
+  // read, so 6 of the 7 rows it produced for this repo were false positives —
+  // "content-type", "access-control-allow-origin", "local" — and the single real
+  // row collapsed 56 hono routes to "/" via a common-prefix walk, destroying the
+  // only information it had. An assistant reads the routes directly.
 
   // 4. Test Landscape
   md.push('## 🧪 Test Landscape & Command');
@@ -492,51 +418,144 @@ export async function generateRepoMap(
   }
   md.push('');
 
-  // 7. Project-Specific Conventions (Agent-Defined)
-  md.push('## 📝 Discovered Conventions');
-  md.push('');
-  
+  // 7. Project-Specific Conventions — pointed at, never inlined.
+  //
+  // This file is legacy: nothing has ever written to it, and the concept now
+  // belongs to the base knowledge file ("Coding Conventions & Invariants" and
+  // "Discovered Gotchas & Watch-outs"), which is where `nexusflow knowledge add`
+  // puts things. Older workspaces still carry a copy, so it is still surfaced —
+  // but as a link.
+  //
+  // Inlining it was a persistent source of bugs. Its own `## Coding Patterns`
+  // became a sibling of every map section and split this one in two; its
+  // `<!-- E.g. … -->` comments and prose preamble both read as facts, so a file
+  // of nothing but placeholders survived pruning; and the body went in as a
+  // single multi-line array element, which line-based pruning cannot inspect at
+  // all — that last one made a file with real content vanish instead. A link has
+  // none of those failure modes and costs one line.
+  // Linked only when it holds a fact. Every legacy copy is pure scaffolding, and
+  // pointing an assistant at a file of placeholders costs it a read to learn
+  // nothing — the specific complaint two evaluating agents made about this
+  // workspace. Deciding whether a file is worth linking is the right place for
+  // this check; trying to structurally prune its markdown after inlining was not.
   const conventionsFilename = `nexusflow-conventions-${repoName}.md`;
-  let customConventions = '';
-  
-  // Conventions are a per-repo base file; check the base namespace so an
-  // existing file is preserved instead of being clobbered with the starter.
-  const conventionsExist = await baseFileExists(workspacePath, repoName, conventionsFilename);
 
-  if (!conventionsExist) {
-    const starterContent = `# Repository Conventions — ${repoName}
-
-Use this file to record project-specific coding conventions, patterns, gotchas, and constraints learned during development.
-Future AI assistant sessions will read these conventions from the repository map.
-
-## Coding Patterns
-<!-- E.g., Use ErrorContent structure for errors instead of plain strings -->
-
-- None recorded yet.
-
-## Gotchas & Watch-outs
-<!-- E.g., Non-nullable enum required attributes gotchas -->
-
-- None recorded yet.
-`;
-    try {
-      await writeBaseFile(workspacePath, repoName, conventionsFilename, starterContent);
-      customConventions = starterContent.replace(/^#\s+.+\n?/, '').trim();
-    } catch {}
-  } else {
-    try {
-      customConventions = await readBaseFile(workspacePath, repoName, conventionsFilename);
-      customConventions = customConventions.replace(/^#\s+.+\n?/, '').trim();
-    } catch {}
-  }
-
-  if (customConventions) {
-    md.push(customConventions);
+  if (await hasRecordedConventions(workspacePath, repoName, conventionsFilename)) {
+    md.push('## 📝 Discovered Conventions');
     md.push('');
-  } else {
-    md.push('- None recorded yet.');
+    md.push(`- Recorded for this repo in \`${conventionsFilename}\`, beside this map.`);
     md.push('');
   }
 
-  await writeBaseFile(workspacePath, repoName, `nexusflow-map-${repoName}.md`, md.join('\n'));
+  await writeBaseFile(
+    workspacePath,
+    repoName,
+    `nexusflow-map-${repoName}.md`,
+    pruneEmptySections(md).join('\n'),
+  );
+}
+
+/**
+ * Whether a legacy conventions file actually records something.
+ *
+ * Conventions are written as list items, so that is what counts — anything that
+ * is not a bullet is a heading, a guidance comment, or the starter's prose
+ * preamble ("Use this file to record …"), all of which appear in a file nobody
+ * has touched. Testing for a non-placeholder bullet is what separates the two.
+ */
+async function hasRecordedConventions(
+  workspacePath: string,
+  repoName: string,
+  filename: string,
+): Promise<boolean> {
+  if (!(await baseFileExists(workspacePath, repoName, filename))) return false;
+  try {
+    const body = await readBaseFile(workspacePath, repoName, filename);
+    return body
+      .split(/\r?\n/)
+      .some((line) => {
+        const text = line.trim();
+        return /^([-*+]|\d+\.)\s/.test(text) && !isPlaceholderLine(text);
+      });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A line that carries no fact about the repository.
+ *
+ * Covers both "nothing was detected" markers and the `<!-- E.g. … -->` guidance
+ * comments that template files leave behind: those are instructions to a future
+ * author, so a section holding only comments is as empty as one holding only
+ * `_No … detected._`, and was being kept because a comment is not a placeholder.
+ */
+function isPlaceholderLine(line: string): boolean {
+  const text = line.trim();
+  return /^_No .*_$/.test(text)
+    || text === '- None recorded yet.'
+    || /^_No .*\._$/.test(text)
+    || /^<!--[\s\S]*-->$/.test(text)
+    || text.startsWith('<!--')
+    || text.endsWith('-->');
+}
+
+/**
+ * Drops every heading whose body states only the absence of something.
+ *
+ * Six of this map's nine sections were `_No … detected._` for a real repo, so
+ * most of the file said nothing — while the context file instructed the agent to
+ * read it before touching the repository. Pruning at assembly time handles every
+ * section uniformly, including ones added later, rather than making each emitter
+ * conditional.
+ *
+ * Deepest level first, because a `## ` section can be half-useful: "Detected
+ * Architectural Patterns" held an empty `### Static Analysis Findings` beside a
+ * `### Packages Present` that listed a real dependency, so pruning only at `## `
+ * granularity kept the placeholder. Removing subsections first also lets a
+ * parent become empty and be dropped in turn.
+ */
+export function pruneEmptySections(lines: string[]): string[] {
+  // Split any entry that is itself several lines. Emitters push whole blocks as
+  // one array element, and a block starting with a heading then read as a single
+  // heading line — which silently deleted sections that did have content.
+  const flat = lines.flatMap((line) => (line.includes('\n') ? line.split('\n') : [line]));
+  return pruneHeadingLevel(pruneHeadingLevel(flat, 3), 2);
+}
+
+/** Drops headings at exactly `depth` whose body carries no fact of its own. */
+function pruneHeadingLevel(lines: string[], depth: number): string[] {
+  const marker = `${'#'.repeat(depth)} `;
+  const headingDepth = (line: string): number => /^(#{1,6})\s/.exec(line.trim())?.[1]?.length ?? 0;
+
+  const out: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (!line.startsWith(marker)) {
+      out.push(line);
+      index += 1;
+      continue;
+    }
+
+    // The section runs until the next heading at this level or shallower.
+    let end = index + 1;
+    while (end < lines.length) {
+      const nextDepth = headingDepth(lines[end]!);
+      if (nextDepth > 0 && nextDepth <= depth) break;
+      end += 1;
+    }
+
+    // Nested headings are structure, not facts — a section of nothing but
+    // sub-headings says as little as an empty one.
+    const hasFacts = lines
+      .slice(index + 1, end)
+      .some((entry) => entry.trim() !== '' && !isPlaceholderLine(entry) && headingDepth(entry) === 0);
+
+    if (hasFacts) out.push(...lines.slice(index, end));
+    index = end;
+  }
+
+  return out;
 }

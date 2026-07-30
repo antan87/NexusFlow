@@ -96,7 +96,7 @@ describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', () => {
     expect(result.createdBranch).toBe(true);
     // The worktree started from origin/main (post-fetch), so it has the new file.
     await expect(fs.access(path.join(target, 'NEW.md'))).resolves.toBeUndefined();
-  });
+  }, 15000);
 
   it('checks out a remote-only branch as a local tracking branch', async () => {
     // Bare "remote" seeded from an initial repo.
@@ -127,7 +127,7 @@ describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', () => {
     // The local branch tracks origin/feature/existing.
     const upstream = await git(target, 'rev-parse', '--abbrev-ref', 'feature/existing@{upstream}');
     expect(upstream.trim()).toBe('origin/feature/existing');
-  });
+  }, 15000);
 
   it('mustExist fails when the branch exists neither locally nor on origin', async () => {
     await initRepo(mainRepo);

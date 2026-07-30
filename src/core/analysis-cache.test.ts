@@ -16,7 +16,6 @@ const mockAnalysis: ProjectAnalysis = {
   name: 'repo-1',
   path: '/ws/repo-1',
   techStack: { languages: ['typescript'], frameworks: [], buildTools: [], projectType: 'backend' },
-  endpoints: [],
   dependencies: [],
   ports: [],
   readmeSummary: null,

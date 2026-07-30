@@ -69,8 +69,8 @@ export async function createWorktree(
       for (const branch of branchesToUpdate) {
         try {
           if (currentBranch === branch) {
-            // Safe fast-forward pull for the currently checked-out branch
-            await execa('git', ['pull', '--ff-only'], { cwd: repoPath });
+            // Safe fast-forward merge from remote tracking branch for the currently checked-out branch
+            await execa('git', ['merge', '--ff-only', `origin/${branch}`], { cwd: repoPath });
           } else {
             // Fast-forward local ref from remote ref without checkout
             await execa('git', ['fetch', 'origin', `${branch}:${branch}`], { cwd: repoPath });

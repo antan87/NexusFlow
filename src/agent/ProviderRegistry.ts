@@ -8,11 +8,19 @@ export interface ProviderStatus {
   icon?: string;
 }
 
+export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle';
+
 export interface AgentHarness {
   start(cwd: string, session?: AgentSession): Promise<void>;
   send(data: string): Promise<void>;
   stop(): void;
-  on(event: 'data' | 'close' | 'error' | 'system' | 'idle', listener: (...args: any[]) => void): this;
+  on(event: AgentEvent, listener: (...args: any[]) => void): this;
+  /**
+   * Detaches a listener, so a caller driving discrete turns can clean up rather
+   * than leaking a listener set per turn onto a reused harness. Satisfied for
+   * free by EventEmitter, which every adapter extends.
+   */
+  off(event: AgentEvent, listener: (...args: any[]) => void): this;
 }
 
 export interface ProviderAdapter {

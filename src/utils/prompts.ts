@@ -320,7 +320,7 @@ export async function promptSelectStrategy(
   templates: WorkflowTemplate[]
 ): Promise<string> {
   const choices = [
-    { name: '✨ Auto-suggest using AI', value: 'auto', description: 'Dynamically analyzes the task to recommend a strategy' },
+    { name: '✨ Auto-suggest using AI', value: 'auto', description: 'Picks one of the strategies below based on the task description and repo count' },
     { name: '✏️  Create new custom strategy', value: 'create_new', description: 'Write a new strategy or load from a file' },
     ...templates.map((t) => ({
       name: `${t.name}${t.custom ? ' (Custom)' : ''}`,
@@ -335,7 +335,7 @@ export async function promptSelectStrategy(
       choices,
     });
 
-    // Auto and create_new don't need a preview
+    // Both of these have their own step later, so there is nothing to preview.
     if (selectedId === 'auto' || selectedId === 'create_new') {
       return selectedId;
     }

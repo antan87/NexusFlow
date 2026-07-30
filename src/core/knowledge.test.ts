@@ -82,9 +82,19 @@ describe('formatEntry', () => {
     expect(out).toBe('### 2026-07-04 — Worktrees\n**Decision:** use worktrees');
   });
 
-  it('formats a gotcha as a dated bullet', () => {
+  it('leads a gotcha with its title so the file stays skimmable', () => {
+    // The file only grows, so a reader must be able to judge relevance from the
+    // first few words instead of reading every entry.
+    const out = formatEntry(
+      { type: 'gotcha', title: 'EBUSY on Windows', message: 'fs.rm needs maxRetries', timestamp: ts },
+      'workspace',
+    );
+    expect(out).toBe('- **EBUSY on Windows** (2026-07-04) — fs.rm needs maxRetries');
+  });
+
+  it('falls back to a truncated message when a gotcha has no title', () => {
     const out = formatEntry({ type: 'gotcha', message: 'EBUSY on Windows', timestamp: ts }, 'workspace');
-    expect(out).toBe('- **2026-07-04:** EBUSY on Windows');
+    expect(out).toBe('- **EBUSY on Windows** (2026-07-04) — EBUSY on Windows');
   });
 
   it('formats progress as a checked item', () => {

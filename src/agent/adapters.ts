@@ -1,4 +1,5 @@
 import { ProviderRegistry } from './ProviderRegistry.js';
+import { detectAntigravityCliStatus, detectClaudeCliStatus } from './cliAvailability.js';
 import { NativeClaudeAgent } from './NativeClaudeAgent.js';
 import { NativeAgent } from './NativeAgent.js';
 import { NativeGoogleAgent } from './NativeGoogleAgent.js';
@@ -32,12 +33,16 @@ ProviderRegistry.register({
   createInstance: () => new NativeGoogleAgent()
 });
 
+// The CLI providers need no API key, but "installed" is not the same as "usable":
+// a CLI can be on PATH and still have no credentials a spawned process can use.
+// Reporting that up front beats letting the first turn fail with whatever the CLI
+// happened to print.
 ProviderRegistry.register({
   id: 'claude-cli',
   name: 'Claude Code (Local CLI)',
   icon: 'Terminal',
-  isConfigured: () => true, // Assume the CLI is installed for now
-  getStatusMessage: () => undefined, // No API key required!
+  isConfigured: () => detectClaudeCliStatus().usable,
+  getStatusMessage: () => detectClaudeCliStatus().message,
   createInstance: () => new ClaudeCliAdapter()
 });
 
@@ -45,8 +50,8 @@ ProviderRegistry.register({
   id: 'antigravity-cli',
   name: 'Antigravity (Local CLI)',
   icon: 'Terminal',
-  isConfigured: () => true, // Assume the CLI is installed for now
-  getStatusMessage: () => undefined, // No API key required!
+  isConfigured: () => detectAntigravityCliStatus().usable,
+  getStatusMessage: () => detectAntigravityCliStatus().message,
   createInstance: () => new AntigravityCliAdapter()
 });
 

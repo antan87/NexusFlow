@@ -157,8 +157,14 @@ export function formatEntry(entry: KnowledgeEntry, _target: 'workspace' | 'base'
     case 'gotcha':
     case 'assumption':
     case 'question':
-    default:
-      return `- **${date}:** ${msg}`;
+    default: {
+      // Lead with a title so the file stays skimmable. It only ever grows, and
+      // a reader must be able to judge relevance from the first few words rather
+      // than by reading every entry — otherwise the whole file gets pulled into
+      // context each session, which is the largest avoidable cost in a workspace.
+      const label = entry.title?.trim() ? entry.title.trim() : truncateHeading(msg);
+      return `- **${label}** (${date}) — ${msg}`;
+    }
   }
 }
 

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
+import { resolveResourcePath } from './resources.js';
 import { slugify } from './slug.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -92,7 +93,10 @@ async function loadTemplatesFromDir(dirPath: string, custom: boolean): Promise<W
 }
 
 export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
-  const builtInDir = path.resolve(__dirname, '../resources/workflows');
+  // `resources/` is copied into dist at build time, so its position relative to
+  // this module differs between a built run and a source-tree run; a single
+  // hard-coded relative path silently finds nothing in one of them.
+  const builtInDir = await resolveResourcePath(__dirname, 'workflows');
   const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
 
   // Ensure user custom workflows directory exists so they can find it easily
@@ -101,7 +105,7 @@ export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   } catch {}
 
   const [builtInTemplates, userTemplates] = await Promise.all([
-    loadTemplatesFromDir(builtInDir, false),
+    builtInDir ? loadTemplatesFromDir(builtInDir, false) : Promise.resolve([]),
     loadTemplatesFromDir(userDir, true)
   ]);
 

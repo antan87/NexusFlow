@@ -247,7 +247,11 @@ export function findInterRepoDependencies(
     const thisName = repoNames.get(repoPath) ?? a.name;
     const dependsOn: string[] = [];
 
-    for (const dep of a.dependencies) {
+    // Tolerate an analysis without a dependency list rather than throwing. This
+    // now feeds the assistant context file on every build, so an incomplete
+    // analysis must degrade to "no relations known" instead of failing context
+    // generation outright.
+    for (const dep of a.dependencies ?? []) {
       const depNameLower = dep.name.toLowerCase();
       
       // 1. Direct match with a produced package
