@@ -4,10 +4,10 @@
  * `knowledge` command, the dashboard server, and the MCP `add_knowledge` /
  * `promote_knowledge` tools.
  *
- * All file I/O routes through the active storage adapter (`core/storage.ts`)
- * so the local and central-vault backends keep working — the previous
- * direct-`fs` knowledge routes silently wrote to a file the generators never
- * read under vault adapters.
+ * All file I/O routes through the active storage adapter (`core/storage.ts`) so
+ * the GUI, the CLI and the generators always read and write the same file. The
+ * previous direct-`fs` knowledge routes bypassed it and could silently write
+ * somewhere the generators never looked.
  *
  * The markdown helpers (`insertUnderHeading`, `formatEntry`,
  * `parseKnowledgeEntries`) are pure and section-aware: they insert under the

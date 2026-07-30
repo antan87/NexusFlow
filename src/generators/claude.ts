@@ -21,12 +21,11 @@ import { writeWorkspaceFile } from '../core/storage.js';
 /**
  * Writes a `CLAUDE.md` that imports `AGENTS.md`, plus anything Claude-specific.
  *
- * Written through the storage layer, like `AGENTS.md` — not with a raw path
- * join. The two must land in the same place or the import resolves to nothing:
- * under the `central-vault` adapter, `AGENTS.md` goes to
- * `~/.nexusflow/vault/<featureId>/`, so a `CLAUDE.md` written to the workspace
- * root would leave Claude Code with a dangling `@AGENTS.md` and no context at
- * all — silently, since an unresolved import is not an error.
+ * Written through the storage layer, like `AGENTS.md` — not with a raw path join.
+ * The two must land in the same directory or the import resolves to nothing, and
+ * an unresolved `@`-import is silent: Claude Code would start with no workspace
+ * context and no error. Routing both through one writer is what keeps them
+ * together no matter which backend is active.
  *
  * @param ctx           - The workspace context (feature + repos + analysis).
  * @param workspacePath - Absolute path to the workspace root directory.

@@ -14,10 +14,11 @@ import { debugLog } from '../utils/debug.js';
 
 /**
  * Activates the configured storage provider, falling back to local storage on
- * failure. Unless `quiet`, a failure prints a visible warning (a silent
- * fallback from e.g. the central-vault adapter to local is a nasty surprise). The
- * quiet path exists for bootstrap, where plugin-provided adapters are not yet
- * registered and a warning would be a false alarm.
+ * failure. Unless `quiet`, a failure prints a visible warning — a silent fallback
+ * would hide a config naming a provider that is not registered, which is exactly
+ * what happened with a `storageProvider: "obsidian"` left behind by a removed
+ * adapter. The quiet path exists for bootstrap, where plugin-provided adapters
+ * are not yet registered and a warning would be a false alarm.
  */
 function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void {
   const providerName = config.storageProvider || 'local';

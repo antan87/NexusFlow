@@ -213,8 +213,7 @@ export function SettingsPage({
               >
                 <SelectTrigger id="storageProvider" aria-label="Storage Provider">
                   <SelectValue>
-                    {selectedAdapter?.displayName ??
-                      (config.storageProvider === 'central-vault' ? 'Obsidian Central Vault' : 'Local Workspace (Folders)')}
+                    {selectedAdapter?.displayName ?? 'Local Workspace (Folders)'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup alignItemWithTrigger={false}>
@@ -225,10 +224,7 @@ export function SettingsPage({
                       </SelectItem>
                     ))
                   ) : (
-                    <>
-                      <SelectItem value="local">Local Workspace (Folders)</SelectItem>
-                      <SelectItem value="central-vault">Obsidian Central Vault</SelectItem>
-                    </>
+                    <SelectItem value="local">Local Workspace (Folders)</SelectItem>
                   )}
                 </SelectPopup>
               </Select>
