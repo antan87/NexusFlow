@@ -8,32 +8,17 @@
 import { getWorkflowTemplates } from './workflows.js';
 import type { RepoInfo } from '../types.js';
 
-/**
- * How much structure a task warrants. Retained after the workflow engine was
- * retired because it is a clearer vocabulary for the same judgement as
- * `difficulty`, and both are part of this module's public shape.
- */
-export type WorkflowTier = 'prompt' | 'loop' | 'graph';
+// `WorkflowTier` and the `tier` field are gone with the workflow engine. They
+// restated `difficulty` in the graph designer's vocabulary and had no reader
+// outside this file once that designer was deleted, while their doc comments
+// still claimed a live consumer depended on them.
 
 export interface WorkflowSuggestion {
   difficulty: 'simple' | 'moderate' | 'complex';
-  /**
-   * The executable-graph shape this difficulty corresponds to. Same judgement as
-   * `difficulty`, expressed in the vocabulary the workflow engine uses, so the
-   * designer can fall back on this heuristic when no harness is available.
-   */
-  tier: WorkflowTier;
   rationale: string;
   suggestedWorkflowId: 'solo-developer' | 'research-verify' | 'plan-implement-review';
   customInstructions: string;
 }
-
-/** Difficulty and tier are the same call in two vocabularies. */
-const TIER_BY_DIFFICULTY: Record<WorkflowSuggestion['difficulty'], WorkflowTier> = {
-  simple: 'prompt',
-  moderate: 'loop',
-  complex: 'graph',
-};
 
 /**
  * Loads the content of a workflow template by ID. Falls back to a default
@@ -88,7 +73,6 @@ export async function suggestWorkflow(
     );
     return {
       difficulty: 'complex',
-      tier: TIER_BY_DIFFICULTY.complex,
       suggestedWorkflowId: 'plan-implement-review',
       rationale: `This task spans multiple repositories or involves architectural components (${repoNames.join(', ')}). A structured Plan-Implement-Review strategy is recommended to coordinate changes carefully.`,
       customInstructions: content,
@@ -103,7 +87,6 @@ export async function suggestWorkflow(
     );
     return {
       difficulty: 'simple',
-      tier: TIER_BY_DIFFICULTY.simple,
       suggestedWorkflowId: 'solo-developer',
       rationale: `This is a localized fix/tweak in ${where}. A Solo Developer pattern minimizes overhead and speeds up the modification.`,
       customInstructions: content,
@@ -115,7 +98,6 @@ export async function suggestWorkflow(
     );
     return {
       difficulty: 'moderate',
-      tier: TIER_BY_DIFFICULTY.moderate,
       suggestedWorkflowId: 'research-verify',
       rationale: `This is a feature of moderate scope affecting ${repoNames.join(', ')}. We recommend first researching the codebase and dependencies, followed by targeted implementation.`,
       customInstructions: content,

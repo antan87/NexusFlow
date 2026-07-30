@@ -7,6 +7,7 @@ import {
   addBaseKnowledge,
   promoteKnowledge,
   readWorkspaceKnowledge,
+  MAX_ENTRY_CHARS,
 } from './knowledge.js';
 import * as storage from './storage.js';
 import * as workspace from './workspace.js';
@@ -92,14 +93,81 @@ describe('formatEntry', () => {
     expect(out).toBe('- **EBUSY on Windows** (2026-07-04) — fs.rm needs maxRetries');
   });
 
-  it('falls back to a truncated message when a gotcha has no title', () => {
+  it('leads with the date when a gotcha has no title, rather than repeating it', () => {
+    // Deriving the label from the message printed its opening twice — once bold,
+    // once in the body — in the one file this project is trying to keep small.
     const out = formatEntry({ type: 'gotcha', message: 'EBUSY on Windows', timestamp: ts }, 'workspace');
-    expect(out).toBe('- **EBUSY on Windows** (2026-07-04) — EBUSY on Windows');
+    expect(out).toBe('- **2026-07-04:** EBUSY on Windows');
   });
 
   it('formats progress as a checked item', () => {
     const out = formatEntry({ type: 'progress', message: 'shipped rollback', timestamp: ts }, 'workspace');
     expect(out).toBe('- [x] 2026-07-04 — shipped rollback');
+  });
+});
+
+describe('entry length cap', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat' } as never);
+    vi.mocked(storage.workspaceFileExists).mockResolvedValue(false);
+    vi.mocked(storage.baseFileExists).mockResolvedValue(false);
+    vi.mocked(storage.writeWorkspaceFile).mockResolvedValue(undefined as never);
+    vi.mocked(storage.writeBaseFile).mockResolvedValue(undefined as never);
+    vi.mocked(generators.buildBaseKnowledgeContent).mockReturnValue('# Base\n');
+  });
+
+  const tooLong = 'x'.repeat(MAX_ENTRY_CHARS + 1);
+
+  // Enforced in core precisely because the MCP tool and the HTTP endpoint call
+  // these directly; a cap in the CLI handler bound neither.
+  it('rejects an over-long workspace entry and writes nothing', async () => {
+    await expect(
+      addWorkspaceKnowledge('/ws', { type: 'decision', message: tooLong }),
+    ).rejects.toThrow(/limit is 300/);
+
+    expect(storage.writeWorkspaceFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects an over-long base entry and writes nothing', async () => {
+    await expect(
+      addBaseKnowledge('/ws', 'repo-a', { type: 'gotcha', message: tooLong }),
+    ).rejects.toThrow(/limit is 300/);
+
+    expect(storage.writeBaseFile).not.toHaveBeenCalled();
+  });
+
+  it('explains how to shorten rather than only refusing', async () => {
+    await expect(
+      addWorkspaceKnowledge('/ws', { type: 'decision', message: tooLong }),
+    ).rejects.toThrow(/separate entries/);
+  });
+
+  it('accepts an entry at the limit', async () => {
+    await expect(
+      addWorkspaceKnowledge('/ws', { type: 'decision', message: 'x'.repeat(MAX_ENTRY_CHARS) }),
+    ).resolves.toBeTruthy();
+  });
+
+  it('stores the same collapsed string it measured', async () => {
+    // Validating the trimmed form and storing the raw one let embedded newlines
+    // past the limit and broke the one-entry-per-line shape.
+    await addWorkspaceKnowledge('/ws', {
+      type: 'gotcha',
+      title: 'Spacing',
+      message: '  keep   it\n\n  on one line  ',
+      timestamp: '2026-07-04T10:00:00.000Z',
+    });
+
+    const written = vi.mocked(storage.writeWorkspaceFile).mock.calls[0]![3] as string;
+    expect(written).toContain('- **Spacing** (2026-07-04) — keep it on one line');
+    expect(written).not.toMatch(/keep {2,}it/);
+  });
+
+  it('still rejects an empty message', async () => {
+    await expect(
+      addWorkspaceKnowledge('/ws', { type: 'decision', message: '   ' }),
+    ).rejects.toThrow(/cannot be empty/);
   });
 });
 

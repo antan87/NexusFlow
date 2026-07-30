@@ -16,6 +16,7 @@ import {
   readBaseKnowledge,
   parseKnowledgeEntries,
   promoteKnowledge,
+  MAX_ENTRY_CHARS,
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
@@ -23,20 +24,6 @@ import {
 const VALID_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'progress', 'assumption', 'question'];
 /** Types that exist in the per-repo base knowledge file. */
 const PROMOTABLE_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption'];
-
-/**
- * Longest a single entry may be.
- *
- * This file is read by an assistant, and it only grows. One workspace reached
- * 44 KB — about 11,000 tokens, twenty times its own auto-loaded context — across
- * 21 entries averaging 1,200 characters, because each was written as an essay
- * rather than a rule. A cap is the only thing that holds: nothing else in the
- * pipeline can tell a useful paragraph from a self-indulgent one.
- *
- * 300 characters fits a rule plus the reason it exists. Anything longer belongs
- * in a document the entry links to.
- */
-export const MAX_ENTRY_CHARS = 300;
 
 interface AddOptions {
   type: string;
@@ -70,10 +57,14 @@ function parseType(type: string): KnowledgeEntryType | null {
 /**
  * Rejects an over-long entry, explaining how to shorten it.
  *
+ * The rule itself lives in `core/knowledge.ts` so every write path shares it;
+ * this only front-runs it to fail before the workspace prompt and to print the
+ * advice across several dim lines instead of one long error.
+ *
  * @returns True when the message is within {@link MAX_ENTRY_CHARS}.
  */
 export function checkEntryLength(message: string): boolean {
-  const length = message.trim().length;
+  const length = (message ?? '').replace(/\s+/g, ' ').trim().length;
   if (length <= MAX_ENTRY_CHARS) return true;
 
   console.error(
@@ -232,6 +223,7 @@ export async function knowledgePromoteCommand(
       console.error(chalk.red(`✖ '${type}' entries cannot be promoted to base knowledge.`));
       return;
     }
+    if (!checkEntryLength(options.message)) return;
     const res = await addBaseKnowledge(workspacePath, options.repo, { type, message: options.message });
     console.log(chalk.green(`  ✔ Promoted to ${chalk.bold(options.repo)} base knowledge under "${res.section}"`));
     console.log(chalk.dim(`  ${res.location}`));

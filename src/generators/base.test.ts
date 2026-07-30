@@ -228,6 +228,24 @@ describe('buildContextContent', () => {
   });
 
   describe('robustness', () => {
+    it('keeps both repos when two share a basename', async () => {
+      // In-place workspaces can hold /org1/api and /org2/api. Ordering keyed by
+      // name collapsed them and one row vanished from the table with no error.
+      const ctx = ctxFor({ mode: 'in-place' });
+      const other = path.join(dir, 'org2', 'my-web');
+      ctx.repos = [
+        { name: 'my-web', path: nodeRepo, defaultBranch: 'main' },
+        { name: 'my-web', path: other, defaultBranch: 'main' },
+      ];
+      ctx.feature.repos = [nodeRepo, other];
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).toContain(nodeRepo);
+      expect(content).toContain(other);
+      expect(content.split('\n').filter((l) => l.startsWith('| `my-web`')).length).toBe(2);
+    });
+
     it('survives an analysis with no dependency list rather than throwing', async () => {
       await expect(buildContextContent(ctxFor({}))).resolves.toContain('## Repos');
     });

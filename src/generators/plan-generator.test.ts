@@ -201,6 +201,46 @@ describe('generateImplementationPlan', () => {
     });
   });
 
+  describe('a dependency cycle', () => {
+    /** `a` and `b` each publish a package the other consumes. */
+    function cyclic(): [RepoInfo[], Map<string, ProjectAnalysis>] {
+      const a = path.join(dir, 'a');
+      const b = path.join(dir, 'b');
+      return [
+        [
+          { name: 'a', path: a, defaultBranch: 'main' },
+          { name: 'b', path: b, defaultBranch: 'main' },
+        ],
+        new Map([
+          [a, analysisFor('a', a, {
+            produces: [{ name: '@acme/a', type: 'npm' }],
+            dependencies: [{ name: '@acme/b', type: 'npm', version: '^1.0.0' }],
+          })],
+          [b, analysisFor('b', b, {
+            produces: [{ name: '@acme/b', type: 'npm' }],
+            dependencies: [{ name: '@acme/a', type: 'npm', version: '^1.0.0' }],
+          })],
+        ]),
+      ];
+    }
+
+    it('never claims a cycle member has no dependencies', async () => {
+      // topologicalSort falls back to emitting every unresolved repo as one
+      // phase, which the phase-1 wording then described as dependency-free.
+      const content = await planFor(...cyclic());
+
+      expect(content).not.toContain('No dependencies on other workspace repos');
+    });
+
+    it('names the cycle so the reader knows the order is unresolved', async () => {
+      const content = await planFor(...cyclic());
+
+      expect(content).toContain('**Cycle:**');
+      expect(content).toContain('depend on each other');
+      expect(content).toContain('break the cycle');
+    });
+  });
+
   describe('robustness', () => {
     it('falls back to an alphabetical list when there is no analysis', async () => {
       const [repos] = unrelated();

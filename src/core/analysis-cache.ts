@@ -31,16 +31,13 @@ let generatorVersion: string | undefined;
 function getGeneratorVersion(): string {
   if (generatorVersion !== undefined) return generatorVersion;
 
-  // 'unknown' is a safe fallback: still stable, so cache hits stay correct
-  // within one installed copy — it just cannot detect an upgrade.
-  let resolved = 'unknown';
+  let resolved: string | undefined;
   try {
     let dir = path.dirname(fileURLToPath(import.meta.url));
     for (let i = 0; i < 5; i++) {
       const manifest = path.join(dir, 'package.json');
       if (existsSync(manifest)) {
-        const pkg = JSON.parse(readFileSync(manifest, 'utf-8')) as { version?: string };
-        if (pkg.version) resolved = pkg.version;
+        resolved = (JSON.parse(readFileSync(manifest, 'utf-8')) as { version?: string }).version;
         break;
       }
       const parent = path.dirname(dir);
@@ -48,7 +45,19 @@ function getGeneratorVersion(): string {
       dir = parent;
     }
   } catch {
-    // Fall through with 'unknown'.
+    // Fall through to the warning below.
+  }
+
+  if (!resolved) {
+    // Say so rather than degrade quietly. A constant prefix keeps cache hits
+    // correct within one installed copy, but it stops an upgrade from
+    // invalidating anything — which is the whole reason the version is in the
+    // key, so a silent fallback would restore the bug it was added to fix.
+    console.warn(
+      '  ⚠ Could not read NexusFlow\'s own version, so cached analysis will not be ' +
+      'invalidated by an upgrade. Run `nexusflow refresh --force` after upgrading.',
+    );
+    resolved = 'unknown';
   }
 
   generatorVersion = resolved;

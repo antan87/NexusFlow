@@ -212,7 +212,18 @@ export async function generateImplementationPlan(
     // a contracts table of packages nobody consumed, and a local-package loop
     // for packages with no consumers. One honest sentence replaces all of it.
     const hasEdges = [...graph.values()].some((n) => n.dependsOn.length > 0);
-    const contracts = findPackageRelations(analysis).filter((rel) => rel.consumers.length > 0);
+    // Restricted to the repos the graph was built from. Derived from the whole
+    // analysis map, a stray entry could produce contracts with no matching edge,
+    // so the file promised a phase order it then never printed.
+    const contracts = findPackageRelations(analysis, repos).filter((rel) => rel.consumers.length > 0);
+
+    /** Repos in this phase that depend on another repo in the same phase. */
+    const cycleMembers = (phase: string[]): string[] => {
+      const inPhase = new Set(phase);
+      return phase.filter((name) =>
+        (graph.get(name)?.dependsOn ?? []).some((dep) => inPhase.has(dep)),
+      );
+    };
 
     const md: string[] = [];
 
@@ -286,7 +297,16 @@ export async function generateImplementationPlan(
         md.push(`**Repos:** ${phase.join(', ')}`);
         md.push('');
 
-        if (i === 0) {
+        // A phase containing repos that depend on each other came from the cycle
+        // fallback in topologicalSort, not from a resolved ordering. Saying so
+        // beats the positional rationale, which asserted "no dependencies on
+        // other workspace repos" about repos that plainly had them.
+        const cyclic = cycleMembers(phase);
+        if (cyclic.length > 0) {
+          md.push(
+            `**Cycle:** ${cyclic.join(', ')} depend on each other, so no build order resolves this phase — break the cycle before relying on this plan.`,
+          );
+        } else if (i === 0) {
           // Only claim downstream consumers for the repos that actually have
           // them. The old wording asserted it for every phase-1 repo.
           const consumed = phase.filter((name) => (graph.get(name)?.dependedOnBy.length ?? 0) > 0);
@@ -423,16 +443,29 @@ interface PackageRelation {
 /**
  * Pairs every produced package with the workspace repos that depend on it.
  *
+ * Restricted to `repos` so this agrees with {@link buildDependencyGraph}, which
+ * also walks only those: derived from the whole analysis map, the two could
+ * disagree and the plan would claim a phase order it never printed.
+ *
  * Consumers may be empty — the caller decides whether a package with no
  * workspace consumer is worth reporting.
  */
-function findPackageRelations(analysis: Map<string, ProjectAnalysis>): PackageRelation[] {
+function findPackageRelations(
+  analysis: Map<string, ProjectAnalysis>,
+  repos: RepoInfo[],
+): PackageRelation[] {
+  const inScope: [string, ProjectAnalysis][] = [];
+  for (const repo of repos) {
+    const a = analysis.get(repo.path);
+    if (a) inScope.push([repo.path, a]);
+  }
+
   const relations: PackageRelation[] = [];
 
-  for (const [repoPath, a] of analysis) {
+  for (const [repoPath, a] of inScope) {
     for (const product of a.produces ?? []) {
       const consumers: { repoName: string; version?: string }[] = [];
-      for (const [otherPath, otherA] of analysis) {
+      for (const [otherPath, otherA] of inScope) {
         if (otherPath === repoPath) continue;
         for (const dep of otherA.dependencies ?? []) {
           if (dep.name.toLowerCase() === product.name.toLowerCase()) {

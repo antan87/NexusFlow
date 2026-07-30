@@ -158,12 +158,16 @@ export function formatEntry(entry: KnowledgeEntry, _target: 'workspace' | 'base'
     case 'assumption':
     case 'question':
     default: {
-      // Lead with a title so the file stays skimmable. It only ever grows, and
-      // a reader must be able to judge relevance from the first few words rather
-      // than by reading every entry — otherwise the whole file gets pulled into
-      // context each session, which is the largest avoidable cost in a workspace.
-      const label = entry.title?.trim() ? entry.title.trim() : truncateHeading(msg);
-      return `- **${label}** (${date}) — ${msg}`;
+      // Lead with the title when there is one, so the file stays skimmable: it
+      // only grows, and a reader must be able to judge relevance from the first
+      // few words rather than by reading every entry.
+      //
+      // Without a title, fall back to leading with the date. Deriving a label
+      // from the message instead printed its first 60 characters twice — once as
+      // the bold label and again in the body — which is pure waste in the one
+      // file this project is trying to keep small.
+      const title = entry.title?.trim();
+      return title ? `- **${title}** (${date}) — ${msg}` : `- **${date}:** ${msg}`;
     }
   }
 }
@@ -309,10 +313,47 @@ async function resolveFeatureId(workspacePath: string): Promise<string> {
   return feature?.id ?? path.basename(workspacePath);
 }
 
-function assertMessage(message: string): void {
-  if (!message || !message.trim()) {
+/**
+ * Longest a single entry may be.
+ *
+ * The knowledge file is read by an assistant and only grows. One workspace
+ * reached 44 KB — about 11,000 tokens, twenty times its own auto-loaded context
+ * — across 21 entries averaging 1,200 characters, because each was written as a
+ * write-up rather than a rule. 300 characters fits a rule plus the reason it
+ * exists; anything longer belongs in a document the entry links to.
+ */
+export const MAX_ENTRY_CHARS = 300;
+
+/**
+ * Validates an entry message and returns the exact string to store.
+ *
+ * Enforced here rather than in the CLI because every write path converges on
+ * this function: `nexusflow knowledge add`, `knowledge promote`, the MCP
+ * `knowledge` tool, and the HTTP endpoint. A cap that lived in the command
+ * handler bound none of the others — including the MCP tool, which is how an
+ * assistant records knowledge and so the very caller that produced the 44 KB.
+ *
+ * Returns the normalised message so the string that was measured is the string
+ * that gets written; validating the trimmed form and storing the raw one let
+ * surrounding whitespace and embedded newlines past the limit and broke the
+ * one-entry-per-line shape the file's own header promises.
+ */
+function normaliseMessage(message: string): string {
+  const normalised = (message ?? '').replace(/\s+/g, ' ').trim();
+
+  if (!normalised) {
     throw new Error('Knowledge entry message cannot be empty.');
   }
+  if (normalised.length > MAX_ENTRY_CHARS) {
+    throw new Error(
+      `Knowledge entry is ${normalised.length} characters; the limit is ${MAX_ENTRY_CHARS}. ` +
+      'An entry has to be a rule, not a write-up: state what to do and why in one or two ' +
+      'sentences, split separate findings into separate entries, and put long material in ' +
+      'a document the entry points to.',
+    );
+  }
+
+  return normalised;
 }
 
 /** Reads the workspace knowledge file, or `null` when it does not exist. */
@@ -340,15 +381,15 @@ export async function addWorkspaceKnowledge(
   workspacePath: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  assertMessage(entry.message);
+  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
   const featureId = await resolveFeatureId(workspacePath);
   const exists = await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE);
   const content = exists
     ? await readWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE)
     : `# Workspace Knowledge — ${featureId}\n`;
 
-  const aliases = SECTION_ALIASES[entry.type].workspace;
-  const updated = insertUnderHeading(content, aliases, formatEntry(entry, 'workspace'));
+  const aliases = SECTION_ALIASES[checked.type].workspace;
+  const updated = insertUnderHeading(content, aliases, formatEntry(checked, 'workspace'));
   await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, updated);
 
   return {
@@ -393,8 +434,8 @@ export async function addBaseKnowledge(
   repoName: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  assertMessage(entry.message);
-  return insertIntoBase(workspacePath, repoName, entry.type, formatEntry(entry, 'base'));
+  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
+  return insertIntoBase(workspacePath, repoName, checked.type, formatEntry(checked, 'base'));
 }
 
 /**

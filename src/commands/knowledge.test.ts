@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { checkEntryLength, MAX_ENTRY_CHARS, knowledgeAddCommand } from './knowledge.js';
+import { checkEntryLength, knowledgeAddCommand } from './knowledge.js';
 import * as knowledge from '../core/knowledge.js';
+import { MAX_ENTRY_CHARS } from '../core/knowledge.js';
 import * as resolve from '../utils/resolve-workspace.js';
 
-vi.mock('../core/knowledge.js');
+vi.mock('../core/knowledge.js', async (importOriginal) => {
+  // Keep MAX_ENTRY_CHARS real — the point is that the command and the core
+  // writers agree on one limit.
+  const actual = await importOriginal<typeof import('../core/knowledge.js')>();
+  return {
+    ...actual,
+    addWorkspaceKnowledge: vi.fn(),
+    addBaseKnowledge: vi.fn(),
+  };
+});
 vi.mock('../utils/resolve-workspace.js');
 
 /** A message of exactly `length` characters. */
@@ -32,10 +42,8 @@ describe('knowledge entry length cap', () => {
       expect(checkEntryLength(messageOf(MAX_ENTRY_CHARS + 1))).toBe(false);
     });
 
-    it('measures the trimmed length, so padding cannot smuggle length in', () => {
-      const padded = `   ${messageOf(MAX_ENTRY_CHARS)}   `;
-
-      expect(checkEntryLength(padded)).toBe(true);
+    it('measures the collapsed length, so padding cannot smuggle length in', () => {
+      expect(checkEntryLength(`   ${messageOf(MAX_ENTRY_CHARS)}   `)).toBe(true);
     });
 
     it('reports the actual length and the limit, so the fix is obvious', () => {
@@ -56,7 +64,6 @@ describe('knowledge entry length cap', () => {
 
   describe('knowledgeAddCommand', () => {
     it('writes nothing when the entry is too long', async () => {
-      // The essays this cap exists to stop averaged 1,200 characters each.
       await knowledgeAddCommand('/ws', { type: 'decision', message: messageOf(1200) });
 
       expect(knowledge.addWorkspaceKnowledge).not.toHaveBeenCalled();

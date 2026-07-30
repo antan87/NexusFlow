@@ -16,8 +16,6 @@ export interface RepoRelations {
   dependsOn: string[];
   /** Workspace repos that depend on this one. */
   consumedBy: string[];
-  /** Packages this repo publishes that a sibling consumes. */
-  producesForSiblings: string[];
   /** The branch this repo is on. */
   branch?: string;
 }
@@ -47,21 +45,10 @@ function computeRepoRelations(ctx: WorkspaceContext): Map<string, RepoRelations>
     }
   }
 
-  // Only packages a sibling actually consumes — a published package nobody in
-  // this workspace uses is noise here, whatever its value elsewhere.
-  const consumedNames = new Set<string>();
-  for (const [, a] of analysis) {
-    for (const dep of a.dependencies ?? []) consumedNames.add(dep.name.toLowerCase());
-  }
-
   for (const repo of repos) {
-    const a = analysis.get(repo.path);
     relations.set(repo.name, {
       dependsOn: dependsOn.get(repo.name) ?? [],
       consumedBy: consumedBy.get(repo.name) ?? [],
-      producesForSiblings: (a?.produces ?? [])
-        .filter((p) => consumedNames.has(p.name.toLowerCase()))
-        .map((p) => p.name),
       branch: feature.repoBranches?.[repo.name] ?? repo.defaultBranch,
     });
   }
@@ -73,30 +60,43 @@ function computeRepoRelations(ctx: WorkspaceContext): Map<string, RepoRelations>
  * Orders repos so anything depended upon comes before its consumers. Falls back
  * to the given order for anything a cycle makes unorderable, rather than
  * dropping it.
+ *
+ * Keyed on the repo objects, not their names. Two repos can share a basename —
+ * `/org1/api` and `/org2/api` in an in-place workspace — and keying the visited
+ * set by name collapsed them, so one was silently missing from the caller's
+ * output. Dependencies are still resolved by name, which is all a manifest
+ * gives, so an ambiguous name visits every repo bearing it.
  */
 function orderReposByDependency<T extends { name: string }>(
   repos: T[],
   relations: Map<string, RepoRelations>,
 ): T[] {
-  const placed = new Set<string>();
+  const placed = new Set<T>();
   const ordered: T[] = [];
-  const byName = new Map(repos.map((repo) => [repo.name, repo]));
 
-  const visit = (name: string, seen: Set<string>): void => {
-    if (placed.has(name) || seen.has(name)) return;
-    seen.add(name);
-    for (const dependency of relations.get(name)?.dependsOn ?? []) {
-      if (byName.has(dependency)) visit(dependency, seen);
+  const byName = new Map<string, T[]>();
+  for (const repo of repos) {
+    const sameName = byName.get(repo.name);
+    if (sameName) sameName.push(repo);
+    else byName.set(repo.name, [repo]);
+  }
+
+  const visit = (repo: T, seen: Set<T>): void => {
+    if (placed.has(repo) || seen.has(repo)) return;
+    seen.add(repo);
+    for (const dependency of relations.get(repo.name)?.dependsOn ?? []) {
+      for (const target of byName.get(dependency) ?? []) visit(target, seen);
     }
-    const repo = byName.get(name);
-    if (repo && !placed.has(name)) {
-      placed.add(name);
+    if (!placed.has(repo)) {
+      placed.add(repo);
       ordered.push(repo);
     }
   };
 
-  for (const repo of repos) visit(repo.name, new Set());
-  for (const repo of repos) if (!placed.has(repo.name)) ordered.push(repo);
+  for (const repo of repos) visit(repo, new Set());
+  // Every repo is placed by the loop above; this only guarantees the caller
+  // never receives fewer rows than it passed in.
+  for (const repo of repos) if (!placed.has(repo)) ordered.push(repo);
 
   return ordered;
 }
