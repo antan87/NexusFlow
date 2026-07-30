@@ -123,6 +123,30 @@ describe('buildContextContent', () => {
       expect(content).toContain('nexusflow-map-<repo>.md');
     });
 
+    it('tells the agent to search the knowledge file, not read it whole', async () => {
+      // It reached 38 KB on a real workspace — about 9,500 tokens — while the
+      // pointer said "skim the headings", which costs the entire file to do.
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).toContain('`###` heading');
+      expect(content).toContain('not the whole file');
+    });
+
+    it('points at the branch diff once the branch has one', async () => {
+      const ctx = ctxFor({});
+      ctx.hasBranchDiff = true;
+
+      expect(await buildContextContent(ctx)).toContain('nexusflow-diff-context.md');
+    });
+
+    it('keeps the diff pointer when the diff state is unknown', async () => {
+      // Undetermined is not the same as empty; a missing pointer costs more than
+      // a redundant one.
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).toContain('nexusflow-diff-context.md');
+    });
+
     it('names repos that carry their own instructions, which override these', async () => {
       const ctx = ctxFor({});
       (ctx.analysis!.get(nodeRepo)! as { existingAIConfigs: unknown }).existingAIConfigs = [
@@ -169,6 +193,15 @@ describe('buildContextContent', () => {
       expect(content).not.toContain('git status');
       expect(content).not.toContain('npm install');
       expect(content).not.toContain('**Instruction**');
+    });
+
+    it('omits the branch-diff pointer when the branch has no diff', async () => {
+      // The file exists but says only "no changed files detected", so following
+      // the pointer buys a read and no information.
+      const ctx = ctxFor({});
+      ctx.hasBranchDiff = false;
+
+      expect(await buildContextContent(ctx)).not.toContain('nexusflow-diff-context.md');
     });
 
     it('says nothing about relationships or ordering when there are none', async () => {

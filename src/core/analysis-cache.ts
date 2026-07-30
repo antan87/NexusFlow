@@ -8,14 +8,52 @@
  */
 
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 
 import type { ProjectAnalysis } from '../types.js';
 
 /** Name of the analysis cache file, written at the workspace root. */
 const CACHE_FILE = '.nexusflow-analysis-cache.json';
+
+/** Memoised own version; resolved once per process. */
+let generatorVersion: string | undefined;
+
+/**
+ * This package's version, used as part of every repo fingerprint.
+ *
+ * Read locally rather than via `utils/update-check`, which drags config loading
+ * and the network update check into `core/`.
+ */
+function getGeneratorVersion(): string {
+  if (generatorVersion !== undefined) return generatorVersion;
+
+  // 'unknown' is a safe fallback: still stable, so cache hits stay correct
+  // within one installed copy — it just cannot detect an upgrade.
+  let resolved = 'unknown';
+  try {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 5; i++) {
+      const manifest = path.join(dir, 'package.json');
+      if (existsSync(manifest)) {
+        const pkg = JSON.parse(readFileSync(manifest, 'utf-8')) as { version?: string };
+        if (pkg.version) resolved = pkg.version;
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // Fall through with 'unknown'.
+  }
+
+  generatorVersion = resolved;
+  return resolved;
+}
 
 /** A cached analysis result for a single repo. */
 export interface AnalysisCacheEntry {
@@ -101,10 +139,17 @@ function unquotePorcelainPath(p: string): string {
 }
 
 /**
- * Computes a content fingerprint for a repo: the HEAD commit SHA, extended
- * with a hash of the dirty working-tree files (status line + size + mtime per
- * file) when the tree is not clean. Editing, adding, or deleting an
+ * Computes a content fingerprint for a repo: this package's version, the HEAD
+ * commit SHA, and a hash of the dirty working-tree files (status line + size +
+ * mtime per file) when the tree is not clean. Editing, adding, or deleting an
  * uncommitted file therefore changes the fingerprint too.
+ *
+ * The version is part of the key because the fingerprint gates map regeneration
+ * as well as re-analysis. Keyed on repo content alone, an upgrade that improved
+ * the generators reached no existing workspace — every map stayed as it was
+ * until someone happened to run `refresh --force`. Including the version costs
+ * one local re-analysis per upgrade, which is file IO and no tokens, and makes
+ * stale context impossible to serve by default.
  *
  * @param repoPath - Absolute path to the repo root.
  * @returns The fingerprint, or null when git fails (caller should re-analyze).
@@ -113,6 +158,8 @@ export async function getRepoFingerprint(
   repoPath: string,
 ): Promise<string | null> {
   try {
+    const prefix = `nf${getGeneratorVersion()}:`;
+
     const { stdout: shaOut } = await execa('git', ['rev-parse', 'HEAD'], {
       cwd: repoPath,
     });
@@ -123,7 +170,7 @@ export async function getRepoFingerprint(
     });
     const lines = statusOut.split('\n').filter(Boolean);
     if (lines.length === 0) {
-      return sha;
+      return `${prefix}${sha}`;
     }
 
     let dirtySignature = '';
@@ -144,7 +191,7 @@ export async function getRepoFingerprint(
       .update(dirtySignature)
       .digest('hex')
       .slice(0, 12);
-    return `${sha}+${dirtyHash}`;
+    return `${prefix}${sha}+${dirtyHash}`;
   } catch {
     return null;
   }

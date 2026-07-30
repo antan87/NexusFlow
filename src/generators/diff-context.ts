@@ -6,11 +6,16 @@ import { getActiveStorageProvider } from '../core/adapters/registry.js';
 
 /**
  * Generates an incremental task context file listing only changed files on the branch.
+ *
+ * @returns Whether any repo had changes. The caller uses this to decide whether
+ *          the generated context should point at the file at all: on a fresh
+ *          branch it says only "no changed files detected", so a pointer buys the
+ *          assistant a read that teaches it nothing.
  */
 export async function generateDiffContext(
   ctx: WorkspaceContext,
   workspacePath: string
-): Promise<void> {
+): Promise<boolean> {
   let content = `# Incremental Task Context (Git Diff)\n\n`;
   content += `This file lists the files modified or added on this feature branch compared to the base branch. Use this to focus the AI's attention.\n\n`;
 
@@ -74,4 +79,6 @@ export async function generateDiffContext(
 
   const storage = getActiveStorageProvider();
   await storage.writeWorkspaceFile(workspacePath, ctx.feature.id, 'nexusflow-diff-context.md', content);
+
+  return hasDiff;
 }

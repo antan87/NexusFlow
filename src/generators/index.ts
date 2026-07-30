@@ -234,8 +234,10 @@ export async function generateContextFiles(
         console.log(chalk.gray('  ○'), `nexusflow-knowledge.md already exists — preserving existing content`);
       }
 
-      // Generate Git branch diff context file
-      await generateDiffContext(ctx, workspacePath);
+      // Generate Git branch diff context file. Recording whether it found
+      // anything lets the assistant-facing context below skip pointing at a file
+      // whose entire content is "no changed files detected".
+      ctx.hasBranchDiff = await generateDiffContext(ctx, workspacePath);
       console.log(chalk.green('  ✔'), `Generated ${chalk.bold('nexusflow-diff-context.md')} (incremental git diff)`);
 
     } catch (error) {

@@ -177,6 +177,14 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     ? `- These repos carry their own assistant instructions, which take precedence inside them: ${existing.join(', ')}\n`
     : '';
 
+  // Dropped on a branch with no commits yet, where the file says only "no
+  // changed files detected" — a pointer there costs a read and teaches nothing.
+  // Only an explicit false suppresses it; undefined means undetermined, and a
+  // pointer that turns out to be unnecessary is cheaper than a missing one.
+  const diffPointer = ctx.hasBranchDiff === false
+    ? ''
+    : '\n- `nexusflow-diff-context.md` — what this branch has changed so far';
+
   return `# ${feature.id}
 
 ${feature.description}
@@ -192,8 +200,7 @@ ${structureRule}${startHint}
 ## Where to look
 
 - \`.nexusflow/base/<repo>/nexusflow-map-<repo>.md\` — how to run each repo, and its recorded conventions
-- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions. Skim the headings and read what is relevant; it grows every session. Add to it with \`nexusflow knowledge add -t decision|gotcha -m "..."\`
-- \`nexusflow-plan.md\` — phase order when a change spans repos
-- \`nexusflow-diff-context.md\` — what this branch has changed so far
+- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha -m "..."\`
+- \`nexusflow-plan.md\` — phase order when a change spans repos${diffPointer}
 ${ownInstructions}${teamwork}`;
 }
