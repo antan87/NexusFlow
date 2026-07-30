@@ -48,22 +48,27 @@ describe('refreshWorkspace', () => {
     expect(report.reusedRepos).toEqual(['b']);
   });
 
-  it('limits map regeneration to changed repos by default', async () => {
-    await refreshWorkspace('/ws');
-    // 6th arg (changedRepos) is the analyzed list when not forcing.
+  it('still reuses cached analysis for unchanged repos when not forcing', async () => {
+    // The `changedRepos` argument is gone with the per-repo maps it gated — the
+    // remaining generated files all describe the whole workspace — but the
+    // analysis cache itself is what saves the work, and that still applies.
+    const report = await refreshWorkspace('/ws');
+
+    expect(report.reusedRepos).toEqual(['b']);
     expect(generators.generateContextFiles).toHaveBeenCalledWith(
-      expect.any(Object), feature.assistants, '/ws', undefined, undefined, ['a'],
+      expect.any(Object), feature.assistants, '/ws',
     );
   });
 
-  it('passes undefined changed-repos filter when force is set', async () => {
+  it('re-analyzes everything when force is set', async () => {
     await refreshWorkspace('/ws', { force: true });
-    expect(generators.generateContextFiles).toHaveBeenCalledWith(
-      expect.any(Object), feature.assistants, '/ws', undefined, undefined, undefined,
+
+    expect(analyzers.analyzeAllReposCached).toHaveBeenCalledWith(
+      expect.any(Array), '/ws', { force: true },
     );
   });
 
-  it('refreshes the handoff bundle when it exists and not baseOnly', async () => {
+  it('refreshes the handoff bundle when it exists', async () => {
     vi.mocked(fs.access).mockResolvedValue(undefined); // handoff file exists
 
     const report = await refreshWorkspace('/ws');
@@ -72,12 +77,19 @@ describe('refreshWorkspace', () => {
     expect(report.refreshedHandoff).toBe(true);
   });
 
-  it('does not touch the handoff bundle when baseOnly', async () => {
+  it('regenerates every context file, since none of them is per-repo', async () => {
+    // `baseOnly` and `onlyRepo` are gone: once the per-repo architecture maps
+    // went, `baseOnly` made the generator write nothing while refresh still
+    // reported success, and `onlyRepo` narrowed only a logging loop.
     vi.mocked(fs.access).mockResolvedValue(undefined);
 
-    const report = await refreshWorkspace('/ws', { baseOnly: true });
+    const report = await refreshWorkspace('/ws');
 
-    expect(handoff.handoffCommand).not.toHaveBeenCalled();
-    expect(report.refreshedHandoff).toBe(false);
+    expect(generators.generateContextFiles).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      '/ws',
+    );
+    expect(report.refreshedHandoff).toBe(true);
   });
 });

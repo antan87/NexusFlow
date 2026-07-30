@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { LocalStorageAdapter } from './local-storage.js';
-import { CentralVaultAdapter } from './vault-storage.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:os', async () => {
@@ -81,47 +80,10 @@ describe('Storage Adapters', () => {
     });
   });
 
-  describe('CentralVaultAdapter', () => {
-    const adapter = new CentralVaultAdapter();
-
-    it('should declare correct meta', () => {
-      expect(adapter.meta.name).toBe('central-vault');
-    });
-
-    it('should write workspace files to ~/.nexusflow/vault/<featureId>', async () => {
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-      await adapter.writeWorkspaceFile('/ws/path', 'feature-1', 'test.txt', 'hello');
-
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining(path.normalize('.nexusflow/vault/feature-1/test.txt')),
-        'hello',
-        'utf8'
-      );
-    });
-
-    it('should write base files to ~/.nexusflow/vault/_base/<repoName>', async () => {
-      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
-      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-      await adapter.writeBaseFile('/ws/path', 'RepoName', 'map.md', 'content');
-
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining(path.normalize('.nexusflow/vault/_base/RepoName/map.md')),
-        'content',
-        'utf8'
-      );
-    });
-
-    it('should delete workspace folder from ~/.nexusflow/vault', async () => {
-      vi.mocked(fs.rm).mockResolvedValue(undefined);
-      await adapter.deleteWorkspace('/ws/path', 'feature-1');
-      expect(fs.rm).toHaveBeenCalledWith(
-        expect.stringContaining(path.normalize('.nexusflow/vault/feature-1')),
-        { recursive: true, force: true }
-      );
-    });
-  });
+  // CentralVaultAdapter is gone. It relocated every workspace file to
+  // ~/.nexusflow/vault/<featureId>, but assistants read AGENTS.md and CLAUDE.md
+  // from the workspace root and nowhere else, so the files it wrote were where
+  // nothing would look for them. It also ignored the vaultPath users configured:
+  // no configure() method, empty configFields, and a hardcoded path.
 
 });

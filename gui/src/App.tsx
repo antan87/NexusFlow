@@ -750,9 +750,9 @@ Workspace Metadata:
 - Mapped Repositories: ${repoNames}
 
 Core Instructions:
-1. Always read and append to "nexusflow-knowledge.md" (persistent workspace memory & decisions) as you progress, and follow the phased order in "nexusflow-plan.md".
-2. Read "WORKSPACE.md" at the root for a detailed index of repository relationships, tech stacks, and listening ports.
-3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" in sub-repositories.
+1. Read "AGENTS.md" at the workspace root first — it names the repos, how they depend on each other, which to change first, and how to verify each.
+2. Search "nexusflow-knowledge.md" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`nexusflow knowledge add\`. "nexusflow-plan.md" carries the phase order when a change spans repos.
+3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" inside sub-repositories.
 `;
     navigator.clipboard.writeText(prompt);
     showToast('AI context prompt copied to clipboard!', 'success');

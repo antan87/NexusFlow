@@ -1,291 +1,227 @@
 /**
  * @module generators/base
- * Builds the shared markdown context content that all AI assistant generators
- * use as their foundation. Now includes rich project analysis data when available.
+ * Builds the small markdown context every AI assistant generator starts from:
+ * the task, the repos and how they relate, how to verify each one, and pointers
+ * to everything else.
  */
 
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import type { WorkspaceContext, ProjectAnalysis } from '../types.js';
-import { resolveBaseFileUrl, resolveWorkspaceFileUrl } from '../core/storage.js';
+import type { WorkspaceContext } from '../types.js';
+import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import { isInPlace } from '../utils/feature.js';
 import { getConventionalTestCommand } from '../utils/test-command.js';
-import { detectServiceConfig } from '../orchestration/detect.js';
 
-/**
- * Formats a ProjectAnalysis into a readable markdown section.
- */
-function formatProjectSection(analysis: ProjectAnalysis, workspacePath: string): string {
-  const lines: string[] = [];
-
-  lines.push(`### ${analysis.name}`);
-
-  const mapPath = resolveBaseFileUrl(workspacePath, analysis.name, `nexusflow-map-${analysis.name}.md`);
-  lines.push(`- **Architecture Map**: [nexusflow-map-${analysis.name}.md](file:///${mapPath}) — **Instruction**: Before modifying this repository, read its architecture map. For exploration, consult the map's section index on demand.`);
-
-  const baseKnowledgePath = resolveBaseFileUrl(workspacePath, analysis.name, 'nexusflow-knowledge.md');
-  lines.push(`- **Base Knowledge & Decisions**: [nexusflow-knowledge.md](file:///${baseKnowledgePath}) — **Instruction**: Read this for persistent codebase learnings, decisions, and conventions.`);
-
-  // Tech stack
-  const { techStack } = analysis;
-  if (techStack.languages.length > 0 && techStack.languages[0] !== 'other') {
-    const langStr = techStack.languages.join(', ');
-    const fwStr = techStack.frameworks.length > 0 ? techStack.frameworks.join(', ') : 'none detected';
-    const buildStr = techStack.buildTools.length > 0 ? techStack.buildTools.join(', ') : 'none detected';
-
-    lines.push(`- **Type**: ${techStack.projectType}`);
-    lines.push(`- **Languages**: ${langStr}`);
-    lines.push(`- **Frameworks**: ${fwStr}`);
-    lines.push(`- **Build tools**: ${buildStr}`);
-  }
-
-  // README summary
-  if (analysis.readmeSummary) {
-    // Take first 200 chars of README summary as purpose
-    const purpose = analysis.readmeSummary
-      .replace(/^#\s+.+\n?/, '') // Remove h1 title
-      .trim()
-      .slice(0, 200)
-      .trim();
-    if (purpose) {
-      lines.push(`- **Purpose**: ${purpose}`);
-    }
-  }
-
-  // API endpoints
-  if (analysis.endpoints.length > 0) {
-    lines.push(`- **API surface**: ${analysis.endpoints.length} endpoints — see architecture map for details`);
-  }
-
-  // Ports
-  if (analysis.ports.length > 0) {
-    const portStr = analysis.ports.map((p) => `${p.port} (${p.protocol}, from ${p.source})`).join(', ');
-    lines.push(`- **Ports**: ${portStr}`);
-  }
-
-  // Path
-  lines.push(`- **Path**: \`${analysis.path}\``);
-
-  return lines.join('\n');
+/** How a repo relates to its siblings in this workspace. */
+export interface RepoRelations {
+  /** Workspace repos this one depends on. */
+  dependsOn: string[];
+  /** Workspace repos that depend on this one. */
+  consumedBy: string[];
+  /** The branch this repo is on. */
+  branch?: string;
 }
 
 /**
- * Builds the shared markdown context content that all AI assistant generators
- * use as their foundation. Includes analysis data if available.
+ * Works out how each repo relates to its siblings.
  *
- * @param ctx - The workspace context containing feature metadata, repo list, and optional analysis.
- * @returns A markdown string with feature details, repo listing, and task instructions.
+ * The data was already being computed — `findInterRepoDependencies` has existed
+ * and been exported all along — it simply never reached the assistant-facing
+ * context, which is the one place it matters most.
  */
-/**
- * Builds the "Verification & Services" section: per repo, the conventional
- * test command derived from the detected tech stack, and the detected service
- * run command. Old manifests that still carry hand-entered `resumption`
- * commands get those appended (custom commands beat conventions); the
- * standard-command filter applies to that legacy path only.
- */
-async function buildVerificationSection(ctx: WorkspaceContext): Promise<string> {
-  const { feature, repos, analysis } = ctx;
+function computeRepoRelations(ctx: WorkspaceContext): Map<string, RepoRelations> {
+  const relations = new Map<string, RepoRelations>();
+  const { repos, analysis, feature } = ctx;
+  if (!analysis) return relations;
 
-  const rows: string[] = [];
+  const repoNames = new Map<string, string>();
+  for (const repo of repos) repoNames.set(repo.path, repo.name);
+
+  const dependsOn = findInterRepoDependencies(analysis, repoNames);
+
+  // Invert it, so each repo can also state who would break if it changed.
+  const consumedBy = new Map<string, string[]>();
+  for (const [consumer, providers] of dependsOn) {
+    for (const provider of providers) {
+      consumedBy.set(provider, [...(consumedBy.get(provider) ?? []), consumer]);
+    }
+  }
+
   for (const repo of repos) {
-    const repoAnalysis = analysis?.get(repo.path);
-    const testCommand = repoAnalysis ? getConventionalTestCommand(repoAnalysis) : 'npm test';
-    let runCommand = '';
-    try {
-      const service = await detectServiceConfig(repo.path, repo.name);
-      if (service) runCommand = [service.command, ...service.args].join(' ').trim();
-    } catch {
-      // Detection is best-effort; a repo without a runnable service gets '—'.
-    }
-    rows.push(`| ${repo.name} | \`${testCommand}\` | ${runCommand ? `\`${runCommand}\`` : '—'} |`);
+    relations.set(repo.name, {
+      dependsOn: dependsOn.get(repo.name) ?? [],
+      consumedBy: consumedBy.get(repo.name) ?? [],
+      branch: feature.repoBranches?.[repo.name] ?? repo.defaultBranch,
+    });
   }
 
-  // Legacy: custom commands stored by the old wizard.
-  const legacy: string[] = [];
-  if (feature.resumption) {
-    const { testCommand, mockCommand, startCommand } = feature.resumption;
-    if (mockCommand) legacy.push(`- **Setup/Mock Command**: \`${mockCommand}\``);
-    if (startCommand) legacy.push(`- **Start/Run Command**: \`${startCommand}\``);
-
-    const standardCommands = [
-      'npm run test', 'npm test', 'npm t', 'yarn test', 'yarn t', 'pnpm test', 'pnpm t', 'bun test',
-      'dotnet test',
-      'pytest', 'python -m unittest', 'python -m pytest',
-      'go test', 'go test ./...',
-      'cargo test',
-    ];
-    if (testCommand) {
-      const normalized = testCommand.trim().toLowerCase();
-      const isStandard = standardCommands.some((cmd) => normalized === cmd || normalized.startsWith(cmd + ' '));
-      if (!isStandard) {
-        legacy.push(`- **Verification/Test Command**: \`${testCommand}\``);
-      }
-    }
-  }
-
-  if (rows.length === 0 && legacy.length === 0) return '';
-
-  return `
----
-
-## Verification & Services
-
-Verify changes and run services with these commands (derived from each repo's tech stack and detected service configuration):
-
-| Repo | Test | Run |
-|---|---|---|
-${rows.join('\n')}
-${legacy.length > 0 ? `\nCustom workspace commands:\n\n${legacy.join('\n')}\n` : ''}`;
+  return relations;
 }
 
+/**
+ * Orders repos so anything depended upon comes before its consumers. Falls back
+ * to the given order for anything a cycle makes unorderable, rather than
+ * dropping it.
+ *
+ * Keyed on the repo objects, not their names. Two repos can share a basename —
+ * `/org1/api` and `/org2/api` in an in-place workspace — and keying the visited
+ * set by name collapsed them, so one was silently missing from the caller's
+ * output. Dependencies are still resolved by name, which is all a manifest
+ * gives, so an ambiguous name visits every repo bearing it.
+ */
+function orderReposByDependency<T extends { name: string }>(
+  repos: T[],
+  relations: Map<string, RepoRelations>,
+): T[] {
+  const placed = new Set<T>();
+  const ordered: T[] = [];
+
+  const byName = new Map<string, T[]>();
+  for (const repo of repos) {
+    const sameName = byName.get(repo.name);
+    if (sameName) sameName.push(repo);
+    else byName.set(repo.name, [repo]);
+  }
+
+  const visit = (repo: T, seen: Set<T>): void => {
+    if (placed.has(repo) || seen.has(repo)) return;
+    seen.add(repo);
+    for (const dependency of relations.get(repo.name)?.dependsOn ?? []) {
+      for (const target of byName.get(dependency) ?? []) visit(target, seen);
+    }
+    if (!placed.has(repo)) {
+      placed.add(repo);
+      ordered.push(repo);
+    }
+  };
+
+  for (const repo of repos) visit(repo, new Set());
+  // Every repo is placed by the loop above; this only guarantees the caller
+  // never receives fewer rows than it passed in.
+  for (const repo of repos) if (!placed.has(repo)) ordered.push(repo);
+
+  return ordered;
+}
+
+/**
+ * Builds the workspace context an assistant loads at session start.
+ *
+ * Kept deliberately small. It carries only what an assistant cannot cheaply
+ * work out for itself, and links to the rest:
+ *
+ *  - what to build
+ *  - where each repo is, and how the repos relate to each other
+ *  - how to verify each repo
+ *  - the one structural rule that is not inferable (worktree isolation)
+ *
+ * Everything else is a pointer. Per-repo language, framework, build tool, port
+ * and purpose used to be listed here; two independent agents evaluating a
+ * generated workspace used none of it — they needed code-level facts instead,
+ * like a module's exports — while that same block is where a wrong claim
+ * appeared ("Build tools: none detected" for a repo whose package.json has
+ * "build": "tsc"). Anything derivable from a manifest is better read from the
+ * manifest, where it cannot go stale.
+ */
 export async function buildContextContent(ctx: WorkspaceContext): Promise<string> {
   const { feature, repos, analysis } = ctx;
-  const workspacePath = feature.workspacePath;
-
-  // Build project sections — rich if analysis is available, simple if not
-  let projectSections: string;
-
-  if (analysis && analysis.size > 0) {
-    const sections = repos.map((r) => {
-      const a = analysis.get(r.path);
-      if (a) return formatProjectSection(a, workspacePath);
-      return `### ${r.name}\n- **Path**: \`${r.path}\``;
-    });
-    projectSections = sections.join('\n\n');
-  } else {
-    projectSections = repos
-      .map((r) => `- **${r.name}** — \`${r.path}\` (default branch: \`${r.defaultBranch}\`)`)
-      .join('\n');
-  }
-
-  // Build existing AI configs section
-  let existingConfigsSection = '';
-  if (analysis && analysis.size > 0) {
-    const allConfigs: string[] = [];
-    for (const [, a] of analysis) {
-      for (const config of a.existingAIConfigs) {
-        allConfigs.push(`- **${a.name}** has \`${config.relativePath}\` (${config.assistant})`);
-      }
-    }
-    if (allConfigs.length > 0) {
-      existingConfigsSection = `
----
-
-## Existing AI Configurations
-
-The following repos already have AI assistant configuration files.
-Incorporate their instructions when working in those repos:
-
-${allConfigs.join('\n')}
-`;
-    }
-  }
-
-  // Verification & services section — auto-derived; legacy manifests may
-  // contribute stored custom commands on top.
-  const verificationSection = await buildVerificationSection(ctx);
-
-  const knowledgePath = resolveWorkspaceFileUrl(workspacePath, feature.id, 'nexusflow-knowledge.md').replace(/\\/g, '/');
-
-  let setupDone = false;
-  try {
-    if (fs.existsSync(knowledgePath)) {
-      const content = fs.readFileSync(knowledgePath, 'utf-8');
-      if (!content.includes('No assumptions recorded yet') && !content.includes('AI assistant to populate')) {
-        setupDone = true;
-      }
-    }
-  } catch {}
-
-  // Teamwork strategy section
-  let teamworkSection = '';
-  if (feature.teamworkInstructions) {
-    teamworkSection = `
----
-
-## Team Collaboration Strategy
-
-${feature.teamworkInstructions}
-`;
-  }
-
-  // The structural rules differ fundamentally by mode: worktree workspaces
-  // isolate agents inside checked-out subdirectories, while in-place
-  // workspaces point at the original source repositories — telling an agent
-  // "never touch the original repos" there would forbid the only correct
-  // behavior.
   const inPlace = isInPlace(feature);
 
-  const projectsIntro = inPlace
-    ? `This workspace references the following projects at their original
-source locations (in-place mode — no worktrees, no feature branch):`
-    : `This workspace contains the following projects, each checked out as a
-git worktree on the feature branch:`;
+  const relations = analysis && analysis.size > 0
+    ? computeRepoRelations(ctx)
+    : new Map<string, RepoRelations>();
+  const ordered = orderReposByDependency(repos, relations);
 
-  const structureGuideline = inPlace
-    ? `- **In-Place Workspace Structure**: This workspace references one or more Git repositories at their original locations on disk (absolute paths listed above). There are no worktrees and no dedicated feature branch — you work directly in the source repositories on whatever branch each repo currently has checked out.
-  - **All code changes** are made directly in the source repository directories listed above.
-  - **Branch awareness**: Check which branch a repo is on before committing (\`git branch --show-current\`); NexusFlow does not manage branches for in-place workspaces.
-  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific repository directories, NOT in this workspace folder (it only holds the manifest and generated context files).
-  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must also be run inside the repository directories.
-  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
-    - \`nexusflow diff\` — view changes across all repositories.
-    - \`nexusflow commit\` — commit and push changes across modified repositories.
-    - \`nexusflow refresh\` — regenerate maps, context files and plans.
-    - \`nexusflow doctor\` — run diagnostics to verify workspace health.
-    - (\`nexusflow sync\` is intentionally a no-op for in-place workspaces — branches are yours to manage.)`
-    : `- **Multi-Repo Workspace Structure**: This workspace is a multi-repository developer environment where each project subdirectory (e.g. \`my-api\`, \`my-frontend\`) is a separate Git worktree checked out on the feature branch \`${feature.branchName}\`.
-  - **All code changes** must be made within the appropriate project subdirectories.
-  - **Worktree Isolation**: Under no circumstances should you edit files, read code, or run commands in the original/main repository directories outside of this workspace folder. All development must be strictly contained within the checked-out worktree subdirectories of this workspace.
-  - **Git commands** (like \`git status\`, \`git add\`, \`git commit\`, \`git push\`) must be run inside the specific project subdirectories (e.g. \`cd my-api && git commit -m "..."\`), NOT in the workspace root.
-  - **Project commands** (like \`npm install\`, \`npm run build\`, \`npm run test\`) must be run inside the project subdirectories.
-  - **Global helpers**: Alternatively, you can run NexusFlow CLI commands from the workspace root:
-    - \`nexusflow diff\` — view changes across all sub-repositories.
-    - \`nexusflow commit\` — commit and push changes across modified repositories.
-    - \`nexusflow sync\` — rebase all repositories with their default base branches.
-    - \`nexusflow refresh\` — regenerate maps, context files and plans without rebasing.
-    - \`nexusflow doctor\` — run diagnostics to verify workspace health.`;
+  // One row per repo: where it is, how to check it, and who it is tied to.
+  const rows = ordered.map((repo) => {
+    const a = analysis?.get(repo.path);
+    const rel = relations.get(repo.name);
+    const verify = a ? getConventionalTestCommand(a) : '';
 
-  const taskSection = setupDone
-    ? `## Setup Status\n\n✅ **Setup Completed**: Project assumptions and initial questions have been addressed. Refer to [nexusflow-knowledge.md](file:///${knowledgePath}) for persistent session details.`
-    : `## First Steps\n\nYour very first task upon entering this workspace is to explore the codebase and align with the user:\n\n1. **Verify Assumptions**: Open [nexusflow-knowledge.md](file:///${knowledgePath}) and fill in the **Project Assumptions** section with a brief description of what each project does, its tech stack, and responsibilities.\n2. **Raise Questions**: Document any outstanding uncertainties or architectural questions in the **Clarifying Questions for the User** section.\n3. **Obtain Approval**: Ask the user to confirm your assumptions and answer your questions before writing any code.`;
+    // In-place repos can each sit on a different branch, which is worth stating.
+    // In worktree mode they are all on the feature branch named just below, so
+    // repeating it per row would be noise.
+    const branch = rel?.branch;
+    const location = inPlace
+      ? `${repo.path}${branch ? ` (on ${branch})` : ''}`
+      : repo.name;
 
-  return `# Multi-Repo Workspace Context
+    const ties: string[] = [];
+    if (rel?.dependsOn.length) ties.push(`needs ${rel.dependsOn.map((n) => '`' + n + '`').join(', ')}`);
+    if (rel?.consumedBy.length) ties.push(`used by ${rel.consumedBy.map((n) => '`' + n + '`').join(', ')}`);
 
-## Feature: ${feature.id}
+    return `| \`${repo.name}\` | \`${location}\` | ${verify ? '`' + verify + '`' : '—'} | ${ties.join('; ') || '—'} |`;
+  });
 
-**Description:** ${feature.description}
+  // The earliest repo something actually builds on — and it names what. The
+  // previous test was "does any repo anywhere have a dependency", which pointed
+  // at `ordered[0]` regardless: a workspace of [alpha (independent), lib, web]
+  // where only web needs lib produced "Start with `alpha` — the others build on
+  // it" directly above alpha's own row showing no ties at all. Since `ordered` is
+  // already dependency-ordered, the first entry with consumers is the real
+  // starting point, and if nothing has consumers there is no order to give.
+  const startsWith = ordered.find((repo) => (relations.get(repo.name)?.consumedBy.length ?? 0) > 0);
+  const consumers = startsWith ? relations.get(startsWith.name)!.consumedBy : [];
+  const startHint = startsWith
+    ? `\n\nStart with \`${startsWith.name}\` — ${consumers.map((n) => '`' + n + '`').join(', ')} ${consumers.length === 1 ? 'builds' : 'build'} on it.`
+    : '';
 
-> For the detailed feature specification, architecture decisions, and session memory, see [nexusflow-knowledge.md](file:///${knowledgePath}).
+  // Only the rule an assistant cannot infer. Which directory to run a command
+  // in, and how git works, are not worth the tokens.
+  const structureRule = inPlace
+    ? 'These are the original repositories, on whatever branch each has checked out — NexusFlow does not manage branches here, so check before you commit.'
+    : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
----
+  // Repos that already ship their own assistant instructions; those override
+  // anything here for that repo, so it is worth naming them. Walked via `repos`
+  // rather than the analysis map, so an analysis entry for a repo that is not in
+  // this workspace cannot put a name in the list — the same scoping the plan's
+  // contract table needed.
+  const existing = ordered
+    .map((repo) => analysis?.get(repo.path))
+    .filter((a): a is NonNullable<typeof a> => !!a && a.existingAIConfigs.length > 0)
+    .map((a) => `\`${a.name}\` (${a.existingAIConfigs.map((c) => c.relativePath).join(', ')})`);
 
-## Projects
+  const teamwork = feature.teamworkInstructions
+    ? `\n## How to work together\n\n${feature.teamworkInstructions}\n`
+    : '';
 
-${projectsIntro}
+  const ownInstructions = existing.length > 0
+    ? `- These repos carry their own assistant instructions, which take precedence inside them: ${existing.join(', ')}\n`
+    : '';
 
-${projectSections}
-${existingConfigsSection}
-${verificationSection}
----
+  // Commands the person who created this workspace typed in by hand. Exactly the
+  // kind of thing an assistant cannot derive: a mock/seed step, a non-standard
+  // start command, a test command that differs from the convention. The API still
+  // accepts and persists these, and for a while nothing read them — deleting the
+  // only reader as "dead code" silently dropped them from every generated file.
+  const custom: string[] = [];
+  if (feature.resumption?.testCommand) custom.push(`- Verify with \`${feature.resumption.testCommand}\` — this overrides the per-repo commands above.`);
+  if (feature.resumption?.mockCommand) custom.push(`- Set up dependencies first with \`${feature.resumption.mockCommand}\`.`);
+  if (feature.resumption?.startCommand) custom.push(`- Start the services with \`${feature.resumption.startCommand}\`.`);
+  const customCommands = custom.length > 0
+    ? `\n## Commands recorded for this workspace\n\nThese were entered by hand and are not derivable from any manifest.\n\n${custom.join('\n')}\n`
+    : '';
 
-${taskSection}
-${teamworkSection}
----
+  // A table header over no rows, followed by "Each repo above is a separate git
+  // worktree", describes nothing. `create` should never produce this, but the
+  // writer had no guard, so say the true thing instead.
+  const reposSection = rows.length > 0
+    ? `## Repos
 
-## Guidelines
+| Repo | ${inPlace ? 'Path' : 'Directory'} | Verify | Cross-repo |
+|---|---|---|---|
+${rows.join('\n')}
 
-${structureGuideline}
-- **Implementation Plan**: Refer to \`nexusflow-plan.md\` for the suggested implementation order based on dependency analysis. Follow the phased implementation order to avoid blocking yourself on cross-repo dependencies.
-- **Workspace Knowledge**: Read \`nexusflow-knowledge.md\` at the start of every session. It serves as the persistent memory for this feature. Record learnings *as you go* with the \`add_knowledge\` MCP tool, or \`nexusflow knowledge add -t decision|gotcha|progress -m "..."\` — this appends under the right section for you, so you never hand-edit (or accidentally overwrite) the file. Before ending your session, promote reusable, cross-feature learnings into each repo's base knowledge with the \`promote_knowledge\` tool or \`nexusflow knowledge promote\`.
-- Read each project's existing \`README.md\` and any doc files before proposing changes.
-- When modifying a shared library, check every downstream consumer for breakage.
-- Prefer small, focused commits that touch one repo at a time when possible.
-- If a change must span repos, describe the ordering and any migration steps.
+${structureRule}${startHint}`
+    : `This workspace has no repositories yet — add one with \`nexusflow add-repo\`.`;
 
+  return `# ${feature.id}
 
+${feature.description}
 
+${reposSection}
 
-`;
+## Where to look
+
+- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha -m "..."\`, keeping each entry to a rule and its reason
+- \`nexusflow-plan.md\` — phase order when a change spans repos
+${ownInstructions}${customCommands}${teamwork}`;
 }

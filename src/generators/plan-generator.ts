@@ -8,6 +8,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import chalk from 'chalk';
 import { writeWorkspaceFile } from '../core/storage.js';
+import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import type {
   WorkspaceContext,
   ProjectAnalysis,
@@ -42,49 +43,27 @@ export function buildDependencyGraph(
     });
   }
 
-  // Build a quick lookup: repo name → ProjectAnalysis
-  const analysisByName = new Map<string, ProjectAnalysis>();
+  // ── Edges, from the one shared inference ─────────────────────────────
+  // This used to re-implement the package matching that
+  // `findInterRepoDependencies` already does, and the two drifted: the other
+  // copy grew a substring fallback, so `AGENTS.md` claimed "Start with `core`"
+  // for a workspace whose `nexusflow-plan.md` said no dependencies were
+  // detected at all. Two generated files contradicting each other is worse than
+  // either being wrong alone, because an assistant has no way to pick. One
+  // function now answers the question for both.
+  const inScope = new Map<string, ProjectAnalysis>();
+  const repoNames = new Map<string, string>();
   for (const repo of repos) {
     const a = analysis.get(repo.path);
-    if (a) analysisByName.set(repo.name, a);
-  }
-
-  // ── 1. Produced/consumed package dependencies ──────────────────────────
-  // Map each produced package name to the repo name that produces it
-  const packageToRepo = new Map<string, string>();
-  for (const repo of repos) {
-    const a = analysisByName.get(repo.name);
-    if (!a) continue;
-
-    // Map the repo name itself as a produced product (for direct matching)
-    packageToRepo.set(repo.name.toLowerCase(), repo.name);
-
-    if (a.produces) {
-      for (const product of a.produces) {
-        packageToRepo.set(product.name.toLowerCase(), repo.name);
-        // Map basename (e.g. Hogia.EmploymentService.Client -> Client)
-        const base = product.name.split('.').pop() ?? product.name;
-        if (base && base.length > 3) {
-          packageToRepo.set(base.toLowerCase(), repo.name);
-        }
-      }
+    if (a) {
+      inScope.set(repo.path, a);
+      repoNames.set(repo.path, repo.name);
     }
   }
 
-  for (const repo of repos) {
-    const a = analysisByName.get(repo.name);
-    if (!a) continue;
-
-    for (const dep of a.dependencies) {
-      const depNameLower = dep.name.toLowerCase();
-
-      // Direct match with a produced package
-      if (packageToRepo.has(depNameLower)) {
-        const targetRepo = packageToRepo.get(depNameLower)!;
-        if (targetRepo !== repo.name) {
-          addEdge(graph, repo.name, targetRepo);
-        }
-      }
+  for (const [consumer, providers] of findInterRepoDependencies(inScope, repoNames)) {
+    for (const provider of providers) {
+      addEdge(graph, consumer, provider);
     }
   }
 
@@ -202,7 +181,27 @@ export async function generateImplementationPlan(
     const graph = buildDependencyGraph(analysis, repos);
     const phases = topologicalSort(graph);
 
-    // ── Render markdown ─────────────────────────────────────────────────
+    // ── What this plan can actually say ─────────────────────────────────
+    // Everything below describes cross-repo structure. With no dependency edges
+    // and no shared packages there is nothing to order, and this file used to
+    // say so five separate ways: a single-node diagram, a phase whose rationale
+    // claimed "other repos depend on them" when none did, an all-dashes table,
+    // a contracts table of packages nobody consumed, and a local-package loop
+    // for packages with no consumers. One honest sentence replaces all of it.
+    const hasEdges = [...graph.values()].some((n) => n.dependsOn.length > 0);
+    // Restricted to the repos the graph was built from. Derived from the whole
+    // analysis map, a stray entry could produce contracts with no matching edge,
+    // so the file promised a phase order it then never printed.
+    const contracts = findPackageRelations(analysis, repos).filter((rel) => rel.consumers.length > 0);
+
+    /** Repos in this phase that depend on another repo in the same phase. */
+    const cycleMembers = (phase: string[]): string[] => {
+      const inPhase = new Set(phase);
+      return phase.filter((name) =>
+        (graph.get(name)?.dependsOn ?? []).some((dep) => inPhase.has(dep)),
+      );
+    };
+
     const md: string[] = [];
 
     md.push(`# Implementation Plan — ${feature.id}`);
@@ -210,217 +209,205 @@ export async function generateImplementationPlan(
     md.push(`> **Generated At**: ${new Date().toISOString()} (UTC)`);
     md.push(`> **Regeneration Command**: Run \`nexusflow refresh\` to update this plan.`);
     md.push('');
+
+    if (!hasEdges && contracts.length === 0) {
+      // Worded per repo count: "between the single repo" and "from one of these
+      // repos to another" both read as nonsense for a one-repo workspace.
+      md.push(
+        repos.length === 1
+          ? 'This workspace has one repo, so there is no cross-repo build order to describe.'
+          : `No package dependencies were detected between the ${repos.length} repos in this workspace, so no build order is forced — work in whichever order suits the task.`,
+      );
+      md.push('');
+      md.push(
+        repos.length === 1
+          ? 'Add another repo with `nexusflow add-repo`, then run `nexusflow refresh`, and this plan will describe any order between them.'
+          : 'If you add a dependency from one of these repos to another, run `nexusflow refresh` and this plan will describe the resulting order.',
+      );
+      md.push('');
+      await writeWorkspaceFile(workspacePath, feature.id, 'nexusflow-plan.md', md.join('\n'));
+      console.log(chalk.green('  ✔'), 'Generated nexusflow-plan.md');
+      return;
+    }
+
     md.push(
       '> Auto-generated by NexusFlow based on dependency analysis between repos.',
     );
-    md.push(
-      '> Follow the phase order to avoid blocking yourself on cross-repo dependencies.',
-    );
-    md.push('');
-
-    // ── Mermaid diagram ─────────────────────────────────────────────────
-    md.push('## Dependency Diagram');
-    md.push('');
-    md.push('```mermaid');
-    md.push('graph TD');
-
-    const alias = buildAliasMap(graph);
-
-    for (const [name, node] of graph) {
-      if (node.dependsOn.length === 0 && node.dependedOnBy.length === 0) {
-        // Isolated node — still show it
-        md.push(`    ${alias.get(name)}["${name}"]`);
-      }
-      for (const dep of node.dependsOn) {
-        // Arrow: dependency → dependent (dep is built first)
-        md.push(
-          `    ${alias.get(dep)}["${dep}"] --> ${alias.get(name)}["${name}"]`,
-        );
-      }
+    if (hasEdges) {
+      // Promised only when the phases below actually exist. Gating this on having
+      // got past the early return instead meant a workspace with a shared package
+      // but no resolvable edge — two repos both claiming to publish it, so the
+      // only match is a repo on itself and no edge is added — was told to follow
+      // an order the file never printed.
+      md.push(
+        '> Follow the phase order to avoid blocking yourself on cross-repo dependencies.',
+      );
+    } else {
+      md.push(
+        '> No build order could be resolved, so the packages below are listed without one.',
+      );
     }
-
-    md.push('```');
-    md.push('');
-    md.push('> ⚠️ This diagram is derived from detected package dependencies (`package.json`, `.csproj`, etc.) only.');
-    md.push('> If you changed a package, the producing repo must release/build before consumer repos can merge.');
     md.push('');
 
-    // ── Phase descriptions ──────────────────────────────────────────────
-    md.push('## Suggested Implementation Order');
-    md.push('');
-
-    for (let i = 0; i < phases.length; i++) {
-      const phase = phases[i];
-      const ordinal = ordinalWord(i + 1);
-
-      md.push(`### Phase ${i + 1}`);
+    if (hasEdges) {
+      // ── Mermaid diagram ───────────────────────────────────────────────
+      md.push('## Dependency Diagram');
       md.push('');
-      md.push(`**Repos:** ${phase.join(', ')}`);
-      md.push('');
+      md.push('```mermaid');
+      md.push('graph TD');
 
-      if (i === 0) {
-        md.push(
-          `**Why first:** These repos have no dependencies on other workspace repos. Other repos depend on them.`,
-        );
-      } else if (i === phases.length - 1) {
-        md.push(
-          `**Why ${ordinal}:** Depends on APIs and types from earlier phases.`,
-        );
-      } else {
-        const prevPhases = phases
-          .slice(0, i)
-          .flat()
-          .join(', ');
-        md.push(
-          `**Why ${ordinal}:** Depends on Phase ${i === 1 ? '1' : `1–${i}`} repos (${prevPhases}). Build these before the consumers.`,
-        );
-      }
+      const alias = buildAliasMap(graph);
 
-      md.push('');
-    }
-
-    // ── Dependency table ────────────────────────────────────────────────
-    md.push('## Dependency Table');
-    md.push('');
-    md.push('| Repo | Depends On | Depended On By |');
-    md.push('|:---|:---|:---|');
-
-    // Sort repos by phase order for a natural reading experience
-    const orderedNames = phases.flat();
-    for (const name of orderedNames) {
-      const node = graph.get(name)!;
-      const deps = node.dependsOn.length > 0 ? node.dependsOn.join(', ') : '—';
-      const rdeps =
-        node.dependedOnBy.length > 0 ? node.dependedOnBy.join(', ') : '—';
-      md.push(`| ${name} | ${deps} | ${rdeps} |`);
-    }
-
-    md.push('');
-
-    // ── Contracts & Clients Table ───────────────────────────────────────
-    md.push('## 📦 Contracts & Clients');
-    md.push('');
-    md.push('| Package | Contributing Projects | Producing Repo | Consuming Repos (Version) | Feed Source | Type |');
-    md.push('|:---|:---|:---|:---|:---|:---|');
-
-    // Build package relations
-    interface PackageRelation {
-      pkgName: string;
-      contributing?: string[];
-      producer: string;
-      consumers: { repoName: string; version?: string }[];
-      type: 'npm' | 'nuget' | 'other';
-      feeds?: { name: string; url: string }[];
-    }
-
-    const packageRelations: PackageRelation[] = [];
-
-    // Find all produced packages
-    for (const [repoPath, a] of analysis) {
-      if (a.produces) {
-        for (const product of a.produces) {
-          // Find consumers
-          const consumers: { repoName: string; version?: string }[] = [];
-          for (const [otherPath, otherA] of analysis) {
-            if (otherPath === repoPath) continue;
-            for (const dep of otherA.dependencies) {
-              if (dep.name.toLowerCase() === product.name.toLowerCase()) {
-                consumers.push({ repoName: otherA.name, version: dep.version });
-              }
-            }
-          }
-          packageRelations.push({
-            pkgName: product.name,
-            contributing: (product as any).contributing,
-            producer: a.name,
-            consumers,
-            type: product.type,
-            feeds: a.nugetFeeds,
-          });
+      for (const [name, node] of graph) {
+        if (node.dependsOn.length === 0 && node.dependedOnBy.length === 0) {
+          // Isolated node — still show it
+          md.push(`    ${alias.get(name)}["${name}"]`);
+        }
+        for (const dep of node.dependsOn) {
+          // Arrow: dependency → dependent (dep is built first)
+          md.push(
+            `    ${alias.get(dep)}["${dep}"] --> ${alias.get(name)}["${name}"]`,
+          );
         }
       }
-    }
 
-    if (packageRelations.length > 0) {
-      for (const rel of packageRelations) {
-        const contribStr = rel.contributing && rel.contributing.length > 0
-          ? rel.contributing.map(c => `\`${c}\``).join(', ')
-          : '—';
-        const consumerStr = rel.consumers.length > 0
-          ? rel.consumers.map(c => `\`${c.repoName}\` (${c.version || 'pinned'})`).join(', ')
-          : '_None_';
-        const feedStr = rel.feeds && rel.feeds.length > 0
-          ? rel.feeds.map(f => `\`${f.name}\` (${f.url})`).join('<br>')
-          : '—';
-        md.push(`| \`${rel.pkgName}\` | ${contribStr} | \`${rel.producer}\` | ${consumerStr} | ${feedStr} | \`${rel.type}\` |`);
-      }
-    } else {
-      md.push('| _No package relations detected_ | | | | | |');
-    }
-    md.push('');
+      md.push('```');
+      md.push('');
+      md.push('> ⚠️ This diagram is derived from detected package dependencies (`package.json`, `.csproj`, etc.) only.');
+      md.push('> If you changed a package, the producing repo must release/build before consumer repos can merge.');
+      md.push('');
 
-    // ── Cross-Repo Messaging Roll-up ────────────────────────────────────
-    md.push('## 📨 Cross-Repo Messaging');
-    md.push('');
-    md.push('| Publisher Repo | Message | → Subscriber Repo | Handler |');
-    md.push('|---|---|---|---|');
+      // ── Phase descriptions ────────────────────────────────────────────
+      md.push('## Suggested Implementation Order');
+      md.push('');
 
-    interface CrossRepoMessage {
-      pubRepo: string;
-      message: string;
-      subRepo: string;
-      handler: string;
-    }
-    const crossRepoMessages: CrossRepoMessage[] = [];
+      for (let i = 0; i < phases.length; i++) {
+        const phase = phases[i]!;
+        const ordinal = ordinalWord(i + 1);
 
-    for (const [pubPath, pubA] of analysis) {
-      if (!pubA.messaging || !pubA.messaging.publishers) continue;
-      for (const pub of pubA.messaging.publishers) {
-        // Find subscribers in other repos matching this contract type
-        for (const [subPath, subA] of analysis) {
-          if (subPath === pubPath) continue;
-          if (!subA.messaging || !subA.messaging.subscribers) continue;
-          for (const sub of subA.messaging.subscribers) {
-            const pubContract = pub.contractType.toLowerCase().trim();
-            const subContract = sub.contractType.toLowerCase().trim();
-            if (pubContract === subContract && pubContract !== 'goservicebusmessage' && pubContract !== 'servicebusmessage') {
-              crossRepoMessages.push({
-                pubRepo: pubA.name,
-                message: pub.contractType,
-                subRepo: subA.name,
-                handler: sub.handlerFile,
-              });
-            }
-          }
+        md.push(`### Phase ${i + 1}`);
+        md.push('');
+        md.push(`**Repos:** ${phase.join(', ')}`);
+        md.push('');
+
+        // A phase containing repos that depend on each other came from the cycle
+        // fallback in topologicalSort, not from a resolved ordering. Saying so
+        // beats the positional rationale, which asserted "no dependencies on
+        // other workspace repos" about repos that plainly had them.
+        const cyclic = cycleMembers(phase);
+        if (cyclic.length > 0) {
+          md.push(
+            `**Cycle:** ${cyclic.join(', ')} depend on each other, so no build order resolves this phase — break the cycle before relying on this plan.`,
+          );
+        } else if (i === 0) {
+          // Only claim downstream consumers for the repos that actually have
+          // them. The old wording asserted it for every phase-1 repo.
+          const consumed = phase.filter((name) => (graph.get(name)?.dependedOnBy.length ?? 0) > 0);
+          md.push(
+            consumed.length > 0
+              ? `**Why first:** No dependencies on other workspace repos, and ${consumed.join(', ')} ${consumed.length === 1 ? 'is' : 'are'} depended on by a later phase.`
+              : '**Why first:** No dependencies on other workspace repos.',
+          );
+        } else if (i === phases.length - 1) {
+          md.push(
+            `**Why ${ordinal}:** Depends on APIs and types from earlier phases.`,
+          );
+        } else {
+          const prevPhases = phases
+            .slice(0, i)
+            .flat()
+            .join(', ');
+          md.push(
+            `**Why ${ordinal}:** Depends on Phase ${i === 1 ? '1' : `1–${i}`} repos (${prevPhases}). Build these before the consumers.`,
+          );
         }
+
+        md.push('');
       }
+
+      // ── Dependency table ──────────────────────────────────────────────
+      md.push('## Dependency Table');
+      md.push('');
+      md.push('| Repo | Depends On | Depended On By |');
+      md.push('|:---|:---|:---|');
+
+      // Sort repos by phase order for a natural reading experience
+      for (const name of phases.flat()) {
+        const node = graph.get(name)!;
+        const deps = node.dependsOn.length > 0 ? node.dependsOn.join(', ') : '—';
+        const rdeps =
+          node.dependedOnBy.length > 0 ? node.dependedOnBy.join(', ') : '—';
+        md.push(`| ${name} | ${deps} | ${rdeps} |`);
+      }
+
+      md.push('');
     }
 
-    if (crossRepoMessages.length > 0) {
-      for (const m of crossRepoMessages) {
-        md.push(`| \`${m.pubRepo}\` | \`${m.message}\` | \`${m.subRepo}\` | \`${m.handler}\` |`);
-      }
-    } else {
-      md.push('| _No cross-repo messaging detected_ | | | |');
-    }
-    md.push('');
+    // ── Contracts & Clients ─────────────────────────────────────────────
+    // Only packages a sibling repo actually consumes. A published package with
+    // no workspace consumer is not a cross-repo contract, and rendering it with
+    // "_None_" in the consumers column was the largest block of the old file.
+    if (contracts.length > 0) {
+      const anyContributing = contracts.some((c) => (c.contributing?.length ?? 0) > 0);
 
-    // ── Local Package Development Loop Tip ──────────────────────────────
-    md.push('## 💡 Local Package Development Loop');
-    md.push('');
-    md.push('When making changes to a shared contract or client library package, follow this standard local feed loop to test and verify consumers before pushing:');
-    md.push('');
-    md.push('### For .NET / NuGet packages:');
-    md.push('1. **Pack locally**: Run `dotnet pack -c Release -o ./local-packages` inside the producing project folder.');
-    md.push('2. **Add local feed**: Configure a local feed in your consumer project\'s `NuGet.config` pointing to the `./local-packages` directory.');
-    md.push('3. **Reference local version**: Reference the package with a local development version (e.g. `3.41.0-local`) in the consuming `.csproj`.');
-    md.push('4. **Revert before merging**: Verify changes compile and tests pass, then **revert** the consuming project\'s package version reference to the official release before merging to master.');
-    md.push('');
-    md.push('### For Node.js / npm packages:');
-    md.push('1. **Link locally**: Run `npm link` inside the producing package folder.');
-    md.push('2. **Use link**: Run `npm link <package-name>` inside the consuming folder to link it.');
-    md.push('3. **Revert before merging**: Uninstall the linked package and install the official package version before committing.');
-    md.push('');
+      md.push('## 📦 Contracts & Clients');
+      md.push('');
+      md.push(
+        anyContributing
+          ? '| Package | Contributing Projects | Producing Repo | Consuming Repos (Version) | Feed Source | Type |'
+          : '| Package | Producing Repo | Consuming Repos (Version) | Feed Source | Type |',
+      );
+      md.push(anyContributing ? '|:---|:---|:---|:---|:---|:---|' : '|:---|:---|:---|:---|:---|');
+
+      for (const rel of contracts) {
+        const cells = [`\`${rel.pkgName}\``];
+        if (anyContributing) {
+          cells.push(
+            rel.contributing && rel.contributing.length > 0
+              ? rel.contributing.map((c) => `\`${c}\``).join(', ')
+              : '—',
+          );
+        }
+        cells.push(`\`${rel.producer}\``);
+        cells.push(rel.consumers.map((c) => `\`${c.repoName}\` (${c.version || 'pinned'})`).join(', '));
+        cells.push(
+          rel.feeds && rel.feeds.length > 0
+            ? rel.feeds.map((f) => `\`${f.name}\` (${f.url})`).join('<br>')
+            : '—',
+        );
+        cells.push(`\`${rel.type}\``);
+        md.push(`| ${cells.join(' | ')} |`);
+      }
+      md.push('');
+
+      // ── Local Package Development Loop ────────────────────────────────
+      // Gated on a shared package existing at all, and on the ecosystems those
+      // packages actually use. It used to emit both branches whenever the
+      // workspace merely contained the language, so a TypeScript-only workspace
+      // carried four .NET/NuGet steps — 47% of the plan, none of it applicable.
+      const types = new Set(contracts.map((c) => c.type));
+
+      md.push('## 💡 Local Package Development Loop');
+      md.push('');
+      md.push('When changing a shared package, verify its consumers against a local build before pushing:');
+      md.push('');
+
+      if (types.has('nuget')) {
+        md.push('### .NET / NuGet');
+        md.push('1. `dotnet pack -c Release -o ./local-packages` in the producing project.');
+        md.push('2. Point a local feed in the consumer\'s `NuGet.config` at `./local-packages`.');
+        md.push('3. Reference a local version (e.g. `3.41.0-local`) in the consuming `.csproj`.');
+        md.push('4. **Revert the version reference to the official release before merging.**');
+        md.push('');
+      }
+
+      if (types.has('npm')) {
+        md.push('### Node.js / npm');
+        md.push('1. `npm link` in the producing package, then `npm link <package-name>` in the consumer.');
+        md.push('2. **Unlink and reinstall the published version before committing.**');
+        md.push('');
+      }
+    }
 
     // ── Write file ──────────────────────────────────────────────────────
     await writeWorkspaceFile(workspacePath, feature.id, 'nexusflow-plan.md', md.join('\n'));
@@ -435,6 +422,63 @@ export async function generateImplementationPlan(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
+
+/** A package one repo publishes, with whichever sibling repos consume it. */
+interface PackageRelation {
+  pkgName: string;
+  contributing?: string[];
+  producer: string;
+  consumers: { repoName: string; version?: string }[];
+  type: 'npm' | 'nuget' | 'other';
+  feeds?: { name: string; url: string }[];
+}
+
+/**
+ * Pairs every produced package with the workspace repos that depend on it.
+ *
+ * Restricted to `repos` so this agrees with {@link buildDependencyGraph}, which
+ * also walks only those: derived from the whole analysis map, the two could
+ * disagree and the plan would claim a phase order it never printed.
+ *
+ * Consumers may be empty — the caller decides whether a package with no
+ * workspace consumer is worth reporting.
+ */
+function findPackageRelations(
+  analysis: Map<string, ProjectAnalysis>,
+  repos: RepoInfo[],
+): PackageRelation[] {
+  const inScope: [string, ProjectAnalysis][] = [];
+  for (const repo of repos) {
+    const a = analysis.get(repo.path);
+    if (a) inScope.push([repo.path, a]);
+  }
+
+  const relations: PackageRelation[] = [];
+
+  for (const [repoPath, a] of inScope) {
+    for (const product of a.produces ?? []) {
+      const consumers: { repoName: string; version?: string }[] = [];
+      for (const [otherPath, otherA] of inScope) {
+        if (otherPath === repoPath) continue;
+        for (const dep of otherA.dependencies ?? []) {
+          if (dep.name.toLowerCase() === product.name.toLowerCase()) {
+            consumers.push({ repoName: otherA.name, version: dep.version });
+          }
+        }
+      }
+      relations.push({
+        pkgName: product.name,
+        contributing: product.contributing,
+        producer: a.name,
+        consumers,
+        type: product.type,
+        feeds: a.nugetFeeds,
+      });
+    }
+  }
+
+  return relations;
+}
 
 /**
  * Add a directed edge: `from` depends on `to`.

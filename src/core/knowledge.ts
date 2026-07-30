@@ -4,10 +4,10 @@
  * `knowledge` command, the dashboard server, and the MCP `add_knowledge` /
  * `promote_knowledge` tools.
  *
- * All file I/O routes through the active storage adapter (`core/storage.ts`)
- * so the local and central-vault backends keep working — the previous
- * direct-`fs` knowledge routes silently wrote to a file the generators never
- * read under vault adapters.
+ * All file I/O routes through the active storage adapter (`core/storage.ts`) so
+ * the GUI, the CLI and the generators always read and write the same file. The
+ * previous direct-`fs` knowledge routes bypassed it and could silently write
+ * somewhere the generators never looked.
  *
  * The markdown helpers (`insertUnderHeading`, `formatEntry`,
  * `parseKnowledgeEntries`) are pure and section-aware: they insert under the
@@ -157,8 +157,18 @@ export function formatEntry(entry: KnowledgeEntry, _target: 'workspace' | 'base'
     case 'gotcha':
     case 'assumption':
     case 'question':
-    default:
-      return `- **${date}:** ${msg}`;
+    default: {
+      // Lead with the title when there is one, so the file stays skimmable: it
+      // only grows, and a reader must be able to judge relevance from the first
+      // few words rather than by reading every entry.
+      //
+      // Without a title, fall back to leading with the date. Deriving a label
+      // from the message instead printed its first 60 characters twice — once as
+      // the bold label and again in the body — which is pure waste in the one
+      // file this project is trying to keep small.
+      const title = entry.title?.trim();
+      return title ? `- **${title}** (${date}) — ${msg}` : `- **${date}:** ${msg}`;
+    }
   }
 }
 
@@ -303,10 +313,49 @@ async function resolveFeatureId(workspacePath: string): Promise<string> {
   return feature?.id ?? path.basename(workspacePath);
 }
 
-function assertMessage(message: string): void {
-  if (!message || !message.trim()) {
+/**
+ * Longest a single entry may be.
+ *
+ * The knowledge file is read by an assistant and only grows. One workspace
+ * reached 44 KB — about 11,000 tokens, twenty times its own auto-loaded context
+ * — across 21 entries averaging 1,200 characters, because each was written as a
+ * write-up rather than a rule. 300 characters fits a rule plus the reason it
+ * exists; anything longer belongs in a document the entry links to.
+ */
+export const MAX_ENTRY_CHARS = 300;
+
+/**
+ * Validates an entry message and returns the exact string to store.
+ *
+ * Enforced here rather than in the CLI because every path that writes a *new*
+ * entry converges on `addWorkspaceKnowledge`/`addBaseKnowledge`: the CLI, the MCP
+ * `add_knowledge` and `promote_knowledge` tools, and the HTTP endpoint. A cap in
+ * the command handler bound none of the others — including the MCP tools, which
+ * are how an assistant records knowledge and so the callers that produced the
+ * 44 KB. `promoteKnowledge` is the one exception, and deliberately so: it copies
+ * markdown already on disk, which was capped when it was written.
+ *
+ * Returns the normalised message so the string that was measured is the string
+ * that gets written; validating the trimmed form and storing the raw one let
+ * surrounding whitespace and embedded newlines past the limit and broke the
+ * one-entry-per-line shape the file's own header promises.
+ */
+function normaliseMessage(message: string): string {
+  const normalised = (message ?? '').replace(/\s+/g, ' ').trim();
+
+  if (!normalised) {
     throw new Error('Knowledge entry message cannot be empty.');
   }
+  if (normalised.length > MAX_ENTRY_CHARS) {
+    throw new Error(
+      `Knowledge entry is ${normalised.length} characters; the limit is ${MAX_ENTRY_CHARS}. ` +
+      'An entry has to be a rule, not a write-up: state what to do and why in one or two ' +
+      'sentences, split separate findings into separate entries, and put long material in ' +
+      'a document the entry points to.',
+    );
+  }
+
+  return normalised;
 }
 
 /** Reads the workspace knowledge file, or `null` when it does not exist. */
@@ -334,15 +383,15 @@ export async function addWorkspaceKnowledge(
   workspacePath: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  assertMessage(entry.message);
+  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
   const featureId = await resolveFeatureId(workspacePath);
   const exists = await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE);
   const content = exists
     ? await readWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE)
     : `# Workspace Knowledge — ${featureId}\n`;
 
-  const aliases = SECTION_ALIASES[entry.type].workspace;
-  const updated = insertUnderHeading(content, aliases, formatEntry(entry, 'workspace'));
+  const aliases = SECTION_ALIASES[checked.type].workspace;
+  const updated = insertUnderHeading(content, aliases, formatEntry(checked, 'workspace'));
   await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, updated);
 
   return {
@@ -387,8 +436,8 @@ export async function addBaseKnowledge(
   repoName: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  assertMessage(entry.message);
-  return insertIntoBase(workspacePath, repoName, entry.type, formatEntry(entry, 'base'));
+  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
+  return insertIntoBase(workspacePath, repoName, checked.type, formatEntry(checked, 'base'));
 }
 
 /**
@@ -406,7 +455,13 @@ export async function promoteKnowledge(
 
   let baseLocation = resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE);
   for (const e of promotable) {
-    // Preserve the entry's original markdown rather than reformatting it.
+    // Preserve the entry's original markdown rather than reformatting it: `text`
+    // is a whole bullet line or `### ` block, so running it back through
+    // `formatEntry` would nest one entry inside another. Its length is not
+    // re-checked either — it was capped when it was written, and re-validating
+    // here would make promotion fail for entries that predate the limit, which
+    // is a worse outcome than a long line in base knowledge. Callers handing in
+    // free text rather than a parsed entry must cap it themselves.
     const res = await insertIntoBase(workspacePath, repoName, e.type!, e.text);
     baseLocation = res.location;
   }

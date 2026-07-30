@@ -1333,8 +1333,7 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
 // 13a. Get workspace knowledge (nexusflow-knowledge.md)
 // Routed through the active storage adapter so the GUI edits the same file the
-// generators write (under the central-vault adapter this lives outside the
-// workspace directory).
+// generators write, whichever backend is active.
 app.get('/api/workspace/:id/knowledge', async (c) => {
   try {
     const id = c.req.param('id');

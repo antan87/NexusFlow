@@ -54,13 +54,13 @@ export interface StoragePort {
   /** Resolves the human-readable path or link to the workspace document for the AI assistant. */
   resolveWorkspaceFileUrl(workspacePath: string, featureId: string, filename: string): string;
 
-  /** Writes a base-layer context document (stable maps/conventions across workspaces). */
+  /** Writes a per-repo base document that outlives any one feature workspace. */
   writeBaseFile(workspacePath: string, repoName: string, filename: string, content: string): Promise<void>;
 
-  /** Reads a base-layer context document. */
+  /** Reads a per-repo base document. */
   readBaseFile(workspacePath: string, repoName: string, filename: string): Promise<string>;
 
-  /** Checks if a base-layer context document exists. */
+  /** Checks if a per-repo base document exists. */
   baseFileExists(workspacePath: string, repoName: string, filename: string): Promise<boolean>;
 
   /** Resolves the human-readable path or link to the base document. */

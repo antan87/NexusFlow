@@ -1,21 +1,68 @@
 /**
  * @module core/analysis-cache
- * Persists per-repo analysis results in `.nexusflow-analysis-cache.json` at
- * the workspace root, keyed by a git content fingerprint (HEAD SHA plus a
- * signature of dirty files). Lets refresh/sync re-analyze only repos whose
- * content actually changed, keeping unchanged maps byte-identical — which
- * avoids file churn and preserves AI assistants' prompt caches (token saving).
+ * Persists per-repo analysis results in `.nexusflow-analysis-cache.json` at the
+ * workspace root, keyed by this package's version plus a git content fingerprint
+ * (HEAD SHA plus a signature of dirty files). Lets refresh/sync re-analyze only
+ * repos whose content actually changed, while still re-running everything after
+ * an upgrade so the generators never read stale analysis.
  */
 
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 
 import type { ProjectAnalysis } from '../types.js';
 
 /** Name of the analysis cache file, written at the workspace root. */
 const CACHE_FILE = '.nexusflow-analysis-cache.json';
+
+/** Memoised own version; resolved once per process. */
+let generatorVersion: string | undefined;
+
+/**
+ * This package's version, used as part of every repo fingerprint.
+ *
+ * Read locally rather than via `utils/update-check`, which drags config loading
+ * and the network update check into `core/`.
+ */
+function getGeneratorVersion(): string {
+  if (generatorVersion !== undefined) return generatorVersion;
+
+  let resolved: string | undefined;
+  try {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 5; i++) {
+      const manifest = path.join(dir, 'package.json');
+      if (existsSync(manifest)) {
+        resolved = (JSON.parse(readFileSync(manifest, 'utf-8')) as { version?: string }).version;
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // Fall through to the warning below.
+  }
+
+  if (!resolved) {
+    // Say so rather than degrade quietly. A constant prefix keeps cache hits
+    // correct within one installed copy, but it stops an upgrade from
+    // invalidating anything — which is the whole reason the version is in the
+    // key, so a silent fallback would restore the bug it was added to fix.
+    console.warn(
+      '  ⚠ Could not read NexusFlow\'s own version, so cached analysis will not be ' +
+      'invalidated by an upgrade. Run `nexusflow refresh --force` after upgrading.',
+    );
+    resolved = 'unknown';
+  }
+
+  generatorVersion = resolved;
+  return resolved;
+}
 
 /** A cached analysis result for a single repo. */
 export interface AnalysisCacheEntry {
@@ -101,10 +148,17 @@ function unquotePorcelainPath(p: string): string {
 }
 
 /**
- * Computes a content fingerprint for a repo: the HEAD commit SHA, extended
- * with a hash of the dirty working-tree files (status line + size + mtime per
- * file) when the tree is not clean. Editing, adding, or deleting an
+ * Computes a content fingerprint for a repo: this package's version, the HEAD
+ * commit SHA, and a hash of the dirty working-tree files (status line + size +
+ * mtime per file) when the tree is not clean. Editing, adding, or deleting an
  * uncommitted file therefore changes the fingerprint too.
+ *
+ * The version is part of the key so that upgrading NexusFlow re-runs the
+ * analysis the generators read from. Keyed on repo content alone, an upgrade that
+ * improved them reached no existing workspace until someone happened to run
+ * `refresh --force`. Including the version costs one local re-analysis per
+ * upgrade — file IO, no tokens — and makes stale context impossible to serve by
+ * default.
  *
  * @param repoPath - Absolute path to the repo root.
  * @returns The fingerprint, or null when git fails (caller should re-analyze).
@@ -113,6 +167,8 @@ export async function getRepoFingerprint(
   repoPath: string,
 ): Promise<string | null> {
   try {
+    const prefix = `nf${getGeneratorVersion()}:`;
+
     const { stdout: shaOut } = await execa('git', ['rev-parse', 'HEAD'], {
       cwd: repoPath,
     });
@@ -123,7 +179,7 @@ export async function getRepoFingerprint(
     });
     const lines = statusOut.split('\n').filter(Boolean);
     if (lines.length === 0) {
-      return sha;
+      return `${prefix}${sha}`;
     }
 
     let dirtySignature = '';
@@ -144,7 +200,7 @@ export async function getRepoFingerprint(
       .update(dirtySignature)
       .digest('hex')
       .slice(0, 12);
-    return `${sha}+${dirtyHash}`;
+    return `${prefix}${sha}+${dirtyHash}`;
   } catch {
     return null;
   }

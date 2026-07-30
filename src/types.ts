@@ -219,7 +219,6 @@ export interface WorkspaceContext {
 
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
-
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────
@@ -278,13 +277,6 @@ export interface TechStack {
   projectType: ProjectType;
 }
 
-/** A detected API endpoint or route. */
-export interface ApiEndpoint {
-  method: string;
-  path: string;
-  source?: string;
-}
-
 /** An inter-repo dependency reference. */
 export interface RepoDependency {
   /** Name of the dependency (npm package, NuGet package, etc.). */
@@ -310,8 +302,6 @@ export interface ProjectAnalysis {
   path: string;
   /** Detected tech stack. */
   techStack: TechStack;
-  /** Detected API endpoints. */
-  endpoints: ApiEndpoint[];
   /** Detected dependencies. */
   dependencies: RepoDependency[];
   /** Detected ports/services. */
@@ -324,28 +314,14 @@ export interface ProjectAnalysis {
   produces?: { name: string; type: 'npm' | 'nuget' | 'other'; version?: string; contributing?: string[] }[];
   /** NuGet feeds detected in the repo's NuGet.config files. */
   nugetFeeds?: { name: string; url: string }[];
-  /** Detected messaging topology. */
-  messaging?: MessagingTopology;
   /** Detected run configurations. */
   runConfig?: RunConfig;
 }
 
-export interface MessagePublisher {
-  contractType: string;
-  topicOrQueue: string;
-  publisherFile: string;
-}
-
-export interface MessageSubscriber {
-  contractType: string;
-  handlerFile: string;
-  registrationFile: string;
-}
-
-export interface MessagingTopology {
-  publishers: MessagePublisher[];
-  subscribers: MessageSubscriber[];
-}
+// ApiEndpoint, MessagePublisher, MessageSubscriber and MessagingTopology are
+// gone with detect-apis and messaging-analyzer, which reported header reads as
+// HTTP routes and Set insertions as queue publishers. Nothing populated them
+// afterwards, so they only described a shape no analysis produced.
 
 export interface RunConfigEntryPoint {
   projectPath: string;

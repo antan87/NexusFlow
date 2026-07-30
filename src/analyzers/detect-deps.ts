@@ -247,25 +247,24 @@ export function findInterRepoDependencies(
     const thisName = repoNames.get(repoPath) ?? a.name;
     const dependsOn: string[] = [];
 
-    for (const dep of a.dependencies) {
+    // Tolerate an analysis without a dependency list rather than throwing. This
+    // now feeds the assistant context file on every build, so an incomplete
+    // analysis must degrade to "no relations known" instead of failing context
+    // generation outright.
+    for (const dep of a.dependencies ?? []) {
       const depNameLower = dep.name.toLowerCase();
       
-      // 1. Direct match with a produced package
-      if (packageToRepo.has(depNameLower)) {
-        const targetRepo = packageToRepo.get(depNameLower)!;
-        if (targetRepo !== thisName && !dependsOn.includes(targetRepo)) {
-          dependsOn.push(targetRepo);
-        }
-      } else {
-        // 2. Check if the dependency contains or is contained by a produced package name
-        for (const [prodPkg, targetRepo] of packageToRepo) {
-          if (targetRepo === thisName) continue;
-          if (depNameLower.includes(prodPkg) || prodPkg.includes(depNameLower)) {
-            if (!dependsOn.includes(targetRepo)) {
-              dependsOn.push(targetRepo);
-            }
-          }
-        }
+      // Exact match only. There used to be a substring fallback — `depName`
+      // contains a produced package name, or vice versa — and it manufactured
+      // dependencies out of coincidental name fragments: a repo called `core`
+      // beside one declaring `@babel/core`, or a repo called `commserver`
+      // beside one declaring `ms`. That was survivable while the only consumer
+      // was a graph nobody read, but this now feeds the auto-loaded context
+      // file, where a fabricated `needs`/`used by`/`Start with` is worse than
+      // silence: an assistant cannot tell an invented edge from a real one.
+      const targetRepo = packageToRepo.get(depNameLower);
+      if (targetRepo && targetRepo !== thisName && !dependsOn.includes(targetRepo)) {
+        dependsOn.push(targetRepo);
       }
     }
 

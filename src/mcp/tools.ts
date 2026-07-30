@@ -216,13 +216,11 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'refresh_context',
     description:
-      'Regenerate the workspace context files, architecture maps, and plan. Only re-analyzes repos whose content changed (unchanged maps stay byte-identical to preserve prompt caches). Run this after code changes so the AI context stays current.',
+      'Regenerate the workspace context files and plan. Only re-analyzes repos whose content changed, and after a NexusFlow upgrade. Run this after code changes so the AI context stays current.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        repo: { type: 'string', description: 'Only refresh a single repo (by directory name).' },
-        baseOnly: { type: 'boolean', description: 'Only refresh base-layer maps and knowledge.' },
         force: { type: 'boolean', description: 'Ignore the analysis cache and re-analyze every repo.' },
         ...workspaceIdProp,
       },
@@ -231,11 +229,7 @@ export const tools: NexusFlowTool[] = [
       try {
         await requireWorkspace(ctx);
         return json(
-          await refreshWorkspace(ctx.workspacePath, {
-            onlyRepo: args.repo ? String(args.repo) : undefined,
-            baseOnly: Boolean(args.baseOnly),
-            force: Boolean(args.force),
-          }),
+          await refreshWorkspace(ctx.workspacePath, { force: Boolean(args.force) }),
         );
       } catch (error: any) {
         return errorResult(`Error refreshing context: ${error.message}`);
@@ -311,12 +305,14 @@ export const tools: NexusFlowTool[] = [
         const type = args.type as KnowledgeEntryType;
         const textValue = String(args.text ?? '').trim();
         if (!textValue) return errorResult('The learning text is required.');
-        // Store the supplied text verbatim under the base section for its type.
-        const entry: ParsedKnowledgeEntry = { section: '', type, text: textValue };
-        const result = await promoteKnowledge(ctx.workspacePath, {
-          repoName: String(args.repo),
-          entries: [entry],
-          mode: 'copy',
+        // This is a new entry, not the promotion of an existing one, so it goes
+        // through the capped writer. Routing it via `promoteKnowledge` stored it
+        // verbatim — undated, unformatted, and past the length limit, since that
+        // function deliberately preserves the markdown of entries already on
+        // disk and cannot tell fabricated input from a parsed line.
+        const result = await addBaseKnowledge(ctx.workspacePath, String(args.repo), {
+          type,
+          message: textValue,
         });
         return json(result);
       } catch (error: any) {

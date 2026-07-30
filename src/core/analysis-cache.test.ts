@@ -16,7 +16,6 @@ const mockAnalysis: ProjectAnalysis = {
   name: 'repo-1',
   path: '/ws/repo-1',
   techStack: { languages: ['typescript'], frameworks: [], buildTools: [], projectType: 'backend' },
-  endpoints: [],
   dependencies: [],
   ports: [],
   readmeSummary: null,
@@ -86,7 +85,7 @@ describe('analysis-cache', () => {
   });
 
   describe('getRepoFingerprint', () => {
-    it('returns the bare HEAD SHA for a clean tree', async () => {
+    it('returns the version-prefixed HEAD SHA for a clean tree', async () => {
       vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
         if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
         return { stdout: '' }; // clean status
@@ -94,7 +93,10 @@ describe('analysis-cache', () => {
 
       const fp = await getRepoFingerprint('/ws/repo-1');
 
-      expect(fp).toBe('abc123');
+      // The version prefix gates map regeneration on upgrade, not just on repo
+      // content — otherwise a generator improvement reaches no existing
+      // workspace until someone runs `refresh --force`.
+      expect(fp).toMatch(/^nf\S+:abc123$/);
     });
 
     it('extends the SHA with a dirty-files hash when the tree is dirty', async () => {
@@ -106,7 +108,20 @@ describe('analysis-cache', () => {
 
       const fp = await getRepoFingerprint('/ws/repo-1');
 
-      expect(fp).toMatch(/^abc123\+[0-9a-f]{12}$/);
+      expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+    });
+
+    it('invalidates every cached fingerprint when the version changes', async () => {
+      // The whole point: an upgraded install must not accept the old key.
+      vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
+        if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
+        return { stdout: '' };
+      }) as any);
+
+      const fp = await getRepoFingerprint('/ws/repo-1');
+
+      expect(fp).not.toBe('abc123');
+      expect(fp!.split(':')[0]).not.toBe('nf');
     });
 
     it('changes the fingerprint when a dirty file is edited', async () => {

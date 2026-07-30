@@ -121,9 +121,9 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
     else errorCount++;
   }
 
-  // Regenerate maps/context only when a rebase actually changed repo content
+  // Regenerate context only when a rebase actually changed repo content
   // ('rebased' or 'stash-conflict'). When every repo was already up to date,
-  // skipping regeneration keeps context files byte-identical — no wasted
+  // skipping regeneration keeps the context files byte-identical — no wasted
   // analysis and no invalidated AI prompt caches. The cached analyzer then
   // limits the work to the repos that changed. A regen failure must never
   // fail the sync itself — the rebases already happened.
@@ -137,7 +137,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
 
       const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };
-      await generateContextFiles(ctx, feature.assistants, workspacePath, undefined, undefined, analyzed);
+      await generateContextFiles(ctx, feature.assistants, workspacePath);
       contextRefreshed = true;
     } catch {
       // Best-effort regeneration; ignore failures.

@@ -214,10 +214,12 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.adapters).toBeDefined();
       expect(Array.isArray(data.adapters)).toBe(true);
-      // It should include at least 'local' and 'central-vault'
+      // `local` is the only built-in backend: a backend that relocates the
+      // generated files out of the workspace cannot work, since assistants read
+      // AGENTS.md and CLAUDE.md from the root. Plugins may still register more.
       const names = data.adapters.map((a: any) => a.name);
       expect(names).toContain('local');
-      expect(names).toContain('central-vault');
+      expect(names).not.toContain('central-vault');
     });
   });
 

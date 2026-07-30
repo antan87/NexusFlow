@@ -14,6 +14,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { getConfigDir, ensureConfigDir } from './config.js';
+import { acquireLock, createMutationQueue } from './locks.js';
 import { syncWorkspace } from './sync.js';
 import { refreshWorkspace } from './refresh.js';
 
@@ -24,7 +25,6 @@ const RUN_LOCK_DIR = 'schedule-runs';
 const STORE_LOCK_TIMEOUT_MS = 10_000;
 const STORE_LOCK_STALE_MS = 2 * 60_000;
 const RUN_LOCK_STALE_MS = 24 * 60 * 60_000;
-const LOCK_RETRY_MS = 50;
 
 /** Kinds of work a schedule can run. */
 export type ScheduleTask = 'sync' | 'refresh';
@@ -63,7 +63,7 @@ export interface JobRunResult {
   message: string;
 }
 
-let scheduleStoreMutationQueue: Promise<void> = Promise.resolve();
+const enqueueScheduleStoreMutation = createMutationQueue();
 
 /**
  * Returns the path to the schedules file (~/.nexusflow/schedules.json).
@@ -79,76 +79,6 @@ function getSchedulesLockPath(): string {
 function getRunLockPath(jobId: string): string {
   const safeId = jobId.replace(/[^a-zA-Z0-9._-]/g, '_');
   return path.join(getConfigDir(), RUN_LOCK_DIR, `${safeId}.lock`);
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? String((error as NodeJS.ErrnoException).code)
-    : undefined;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function clearStaleLock(lockPath: string, staleMs: number): Promise<boolean> {
-  try {
-    const stat = await fs.stat(lockPath);
-    if (Date.now() - stat.mtimeMs <= staleMs) return false;
-    await fs.unlink(lockPath);
-    return true;
-  } catch (error) {
-    return getErrorCode(error) === 'ENOENT';
-  }
-}
-
-async function acquireLock(
-  lockPath: string,
-  options: {
-    staleMs: number;
-    timeoutMs: number;
-    timeoutMessage: string;
-  },
-): Promise<() => Promise<void>> {
-  await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  const startedAt = Date.now();
-
-  for (;;) {
-    try {
-      const handle = await fs.open(lockPath, 'wx');
-      try {
-        await handle.writeFile(JSON.stringify({
-          pid: process.pid,
-          createdAt: new Date().toISOString(),
-        }) + '\n', 'utf-8');
-      } catch (error) {
-        await handle.close().catch(() => {});
-        await fs.unlink(lockPath).catch(() => {});
-        throw error;
-      }
-
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await handle.close().catch(() => {});
-        await fs.unlink(lockPath).catch(() => {});
-      };
-    } catch (error) {
-      if (getErrorCode(error) !== 'EEXIST') throw error;
-      if (await clearStaleLock(lockPath, options.staleMs)) continue;
-      if (Date.now() - startedAt >= options.timeoutMs) {
-        throw new Error(options.timeoutMessage);
-      }
-      await delay(LOCK_RETRY_MS);
-    }
-  }
-}
-
-function enqueueScheduleStoreMutation<T>(operation: () => Promise<T>): Promise<T> {
-  const run = scheduleStoreMutationQueue.then(operation, operation);
-  scheduleStoreMutationQueue = run.then(() => undefined, () => undefined);
-  return run;
 }
 
 async function mutateSchedules<T>(

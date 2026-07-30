@@ -41,32 +41,27 @@ export async function suggestWorkflow(
 ): Promise<WorkflowSuggestion> {
   const repoNames = repos.map((r) => r.name);
   
-  const descLower = (description || '').toLowerCase();
-  const isComplexWord = descLower.includes('refactor') ||
-                        descLower.includes('migrate') ||
-                        descLower.includes('architecture') ||
-                        descLower.includes('design') ||
-                        descLower.includes('rewrite') ||
-                        descLower.includes('optimize') ||
-                        descLower.includes('performance') ||
-                        descLower.includes('security') ||
-                        descLower.includes('database') ||
-                        descLower.includes('schema') ||
-                        descLower.includes('break') ||
-                        descLower.includes('major');
-  
-  const isSimpleWord = descLower.includes('fix') ||
-                       descLower.includes('bug') ||
-                       descLower.includes('typo') ||
-                       descLower.includes('tweak') ||
-                       descLower.includes('color') ||
-                       descLower.includes('alignment') ||
-                       descLower.includes('comment') ||
-                       descLower.includes('readme') ||
-                       descLower.includes('test') ||
-                       descLower.includes('doc');
+  // Whole words, not substrings. `includes('fix')` matched "prefix" and
+  // "suffix", and `includes('design')` matched "the design doc" — so "Add a
+  // prefix to the docker tag" was classified as a simple task by accident.
+  const words = new Set((description || '').toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const mentions = (...candidates: string[]) => candidates.some((word) => words.has(word));
 
-  if (repos.length > 2 || isComplexWord) {
+  const isComplexWord = mentions(
+    'refactor', 'refactoring', 'migrate', 'migration', 'architecture', 'architectural',
+    'rewrite', 'optimize', 'optimise', 'performance', 'security', 'database',
+    'schema', 'breaking', 'major',
+  );
+
+  const isSimpleWord = mentions(
+    'fix', 'bug', 'typo', 'tweak', 'color', 'colour', 'alignment',
+    'comment', 'readme', 'doc', 'docs', 'rename', 'wording',
+  );
+
+  // Repo count no longer overrides an explicit signal. Coordinating several
+  // repos is real work, but a typo across three repos is still a typo — and the
+  // old `repos.length > 2 ||` sent it to the heaviest tier.
+  if (isComplexWord || (repos.length > 2 && !isSimpleWord)) {
     const content = await loadTemplateContent(
       'plan-implement-review',
       `# Team Strategy: Plan, Implement, Review\n\nThis workspace involves complex changes across multiple projects: ${repoNames.join(', ')}.\n\n## Roles & Coordination\n1. **Lead Planner**: Analyzes requirements and details a step-by-step design plan in \`implementation_plan.md\`.\n2. **Code Implementer**: Executes modifications project-by-project following the approved design.\n3. **Code Reviewer**: Runs testing/verification and approves before completion.\n\nPlease follow these roles strictly.`
@@ -77,15 +72,18 @@ export async function suggestWorkflow(
       rationale: `This task spans multiple repositories or involves architectural components (${repoNames.join(', ')}). A structured Plan-Implement-Review strategy is recommended to coordinate changes carefully.`,
       customInstructions: content,
     };
-  } else if (repos.length === 1 && isSimpleWord && !isComplexWord) {
+    // A localized change stays localized whether it touches one repo or several,
+    // so this no longer requires `repos.length === 1`.
+  } else if (isSimpleWord) {
+    const where = repoNames.length === 1 ? repoNames[0]! : repoNames.join(', ') || 'the project';
     const content = await loadTemplateContent(
       'solo-developer',
-      `# Team Strategy: Solo Developer\n\nThis task is a localized fix in ${repoNames[0] || 'the project'}.\n\n## Guidelines\n- Direct implementation by the main agent.\n- Run tests and compile code immediately.\n- Avoid spawning subagents to reduce overhead.`
+      `# Team Strategy: Solo Developer\n\nThis task is a localized fix in ${where}.\n\n## Guidelines\n- Direct implementation by the main agent.\n- Run tests and compile code immediately.\n- Avoid spawning subagents to reduce overhead.`
     );
     return {
       difficulty: 'simple',
       suggestedWorkflowId: 'solo-developer',
-      rationale: `This is a localized fix/tweak within a single repository (${repoNames.join(', ')}). A Solo Developer pattern minimizes overhead and speeds up the modification.`,
+      rationale: `This is a localized fix/tweak in ${where}. A Solo Developer pattern minimizes overhead and speeds up the modification.`,
       customInstructions: content,
     };
   } else {

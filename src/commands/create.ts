@@ -286,6 +286,7 @@ export async function createCommand(): Promise<void> {
     );
   }
 
+
   // ── 8. Open in editor ───────────────────────────────────────────────
   const detectedEditors = await detectEditors();
   const editor = await promptSelectEditor(detectedEditors);

@@ -16,6 +16,7 @@ import {
   readBaseKnowledge,
   parseKnowledgeEntries,
   promoteKnowledge,
+  MAX_ENTRY_CHARS,
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
@@ -51,6 +52,29 @@ function parseType(type: string): KnowledgeEntryType | null {
     return null;
   }
   return type as KnowledgeEntryType;
+}
+
+/**
+ * Rejects an over-long entry, explaining how to shorten it.
+ *
+ * The rule itself lives in `core/knowledge.ts` so every write path shares it;
+ * this only front-runs it to fail before the workspace prompt and to print the
+ * advice across several dim lines instead of one long error.
+ *
+ * @returns True when the message is within {@link MAX_ENTRY_CHARS}.
+ */
+export function checkEntryLength(message: string): boolean {
+  const length = (message ?? '').replace(/\s+/g, ' ').trim().length;
+  if (length <= MAX_ENTRY_CHARS) return true;
+
+  console.error(
+    chalk.red(`✖ Entry is ${length} characters; the limit is ${MAX_ENTRY_CHARS}.`),
+  );
+  console.log(chalk.dim('  This file is read by an assistant and only grows, so an entry has to be a'));
+  console.log(chalk.dim('  rule, not a write-up. State what to do and why in one or two sentences.'));
+  console.log(chalk.dim('  Split genuinely separate findings into separate entries, and put long'));
+  console.log(chalk.dim('  material in a document the entry points to.'));
+  return false;
 }
 
 /** Collapses an entry's markdown to a single line for list display. */
@@ -91,6 +115,10 @@ export async function knowledgeAddCommand(workspaceArg: string | undefined, opti
     console.error(chalk.red('✖ A message is required (-m "...").'));
     return;
   }
+
+  // Checked before the workspace prompt, so an over-long entry fails immediately
+  // rather than after picking a workspace.
+  if (!checkEntryLength(options.message)) return;
 
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:');
   if (!workspacePath) return;
@@ -195,6 +223,7 @@ export async function knowledgePromoteCommand(
       console.error(chalk.red(`✖ '${type}' entries cannot be promoted to base knowledge.`));
       return;
     }
+    if (!checkEntryLength(options.message)) return;
     const res = await addBaseKnowledge(workspacePath, options.repo, { type, message: options.message });
     console.log(chalk.green(`  ✔ Promoted to ${chalk.bold(options.repo)} base knowledge under "${res.section}"`));
     console.log(chalk.dim(`  ${res.location}`));

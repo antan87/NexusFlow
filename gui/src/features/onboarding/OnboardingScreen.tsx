@@ -173,16 +173,13 @@ export function OnboardingScreen({
                         </SelectItem>
                       ))
                     ) : (
-                      <>
-                        <SelectItem value="local">Local Workspace (Folders)</SelectItem>
-                        <SelectItem value="central-vault">Obsidian Central Vault</SelectItem>
-                      </>
+                      <SelectItem value="local">Local Workspace (Folders)</SelectItem>
                     )}
                   </SelectPopup>
                 </Select>
                 <span className="text-xs text-muted-foreground mt-1 block leading-normal">
-                  {adapters.find(a => a.name === (config.storageProvider || 'local'))?.description || 
-                    'Choose where to store maps, plans, and knowledge files. Centralized vault keeps repositories 100% clean and allows Obsidian integration.'}
+                  {adapters.find(a => a.name === (config.storageProvider || 'local'))?.description ||
+                    'Where the generated context files are written. They must sit at the workspace root for an assistant to load them.'}
                 </span>
               </div>
 

@@ -357,13 +357,11 @@ program
 
 program
   .command('refresh')
-  .description('Refresh workspace context, maps, plans and handoff files (re-analyzes only changed repos)')
+  .description('Refresh workspace context, plan and handoff files (re-analyzes only changed repos)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .option('-r, --repo <repo>', 'Only refresh the map for a specific repository')
-  .option('-b, --base', 'Only refresh base-layer maps and codebase knowledge from main')
   .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
   .option('-s, --strategy <id>', 'Update the teamwork strategy (use template ID, or "auto" for AI suggestion)')
-  .action(async (workspace: string | undefined, options: { repo?: string; base?: boolean; force?: boolean; strategy?: string }) => {
+  .action(async (workspace: string | undefined, options: { force?: boolean; strategy?: string }) => {
     try {
       await refreshCommand(options, workspace);
     } catch (error) {
@@ -419,7 +417,7 @@ knowledgeCmd
   .description('Append a timestamped learning to the workspace knowledge file')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | progress | assumption | question')
-  .requiredOption('-m, --message <msg>', 'The learning to record')
+  .requiredOption('-m, --message <msg>', 'The learning to record, as a rule plus its reason (max 300 chars)')
   .option('--title <title>', 'Short title (used for decision headings)')
   .option('-r, --repo <repo>', "Write to this repo's persistent base knowledge instead")
   .action(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {

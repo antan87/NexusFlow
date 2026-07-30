@@ -11,14 +11,14 @@ import { suggestWorkflow } from '../utils/workflow-advisor.js';
 
 /**
  * Runs the refresh command.
- * Updates context files, maps, and plans — re-analyzing only repos whose
+ * Regenerates the workspace context files — re-analyzing only repos whose
  * content changed since the last run (use --force to re-analyze everything).
  *
- * @param options - CLI options, e.g. { repo: 'API_CoworkerFacade', force: true, strategy: 'solo-developer' }.
+ * @param options - CLI options, e.g. { force: true, strategy: 'solo-developer' }.
  * @param workspaceArg - Optional workspace path.
  */
 export async function refreshCommand(
-  options: { repo?: string; base?: boolean; force?: boolean; strategy?: string },
+  options: { force?: boolean; strategy?: string },
   workspaceArg?: string,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
@@ -63,29 +63,14 @@ export async function refreshCommand(
     await saveFeatureConfig(workspacePath, feature);
   }
 
-  const onlyRepo = options.repo;
-  if (onlyRepo) {
-    const hasRepo = feature.repos.some(r => path.basename(r) === onlyRepo);
-    if (!hasRepo) {
-      console.error(chalk.red(`✖ Repository "${onlyRepo}" is not part of this workspace.`));
-      console.log(chalk.dim(`  Available repos: ${feature.repos.map(r => path.basename(r)).join(', ')}`));
-      return;
-    }
-    console.log(`Refreshing context for repository: ${chalk.bold(onlyRepo)}`);
-  } else {
-    console.log('Refreshing context for all repositories...');
-  }
+  console.log('Refreshing context for all repositories...');
   if (options.force) {
     console.log(chalk.dim('Force mode: ignoring analysis cache.'));
   }
 
   let report;
   try {
-    report = await refreshWorkspace(workspacePath, {
-      onlyRepo,
-      baseOnly: options.base,
-      force: options.force,
-    });
+    report = await refreshWorkspace(workspacePath, { force: options.force });
   } catch (error) {
     console.error(chalk.red(`✖ Failed to refresh: ${error instanceof Error ? error.message : String(error)}`));
     return;

@@ -10,6 +10,7 @@ class MockAgentHarness implements AgentHarness {
   async send(data: string) {}
   stop() {}
   on(event: string, listener: any) { return this; }
+  off(event: string, listener: any) { return this; }
 }
 
 // The registry is a shared singleton without a reset method, so each test
