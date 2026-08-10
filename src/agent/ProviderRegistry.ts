@@ -7,6 +7,14 @@ export interface ProviderStatus {
   message?: string;
   icon?: string;
   accessLabel?: string;
+  capabilities: ProviderCapabilities;
+}
+
+export interface ProviderCapabilities {
+  transport: 'native-api' | 'cli-print' | 'acp';
+  sessionIdentity: 'none' | 'client-assigned' | 'provider-assigned';
+  workspaceAccess: 'read-only' | 'workspace-write' | 'harness-managed';
+  sessionIdFormat?: 'uuid' | 'opaque';
 }
 
 export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session';
@@ -33,6 +41,7 @@ export interface ProviderAdapter {
   name: string;
   icon?: string;
   accessLabel?: string;
+  capabilities: ProviderCapabilities;
   isConfigured(): boolean;
   getStatusMessage(): string | undefined;
   createInstance(): AgentHarness;
@@ -55,6 +64,7 @@ class ProviderRegistryImpl {
       name: p.name,
       icon: p.icon,
       accessLabel: p.accessLabel,
+      capabilities: p.capabilities,
       isConfigured: p.isConfigured(),
       message: p.getStatusMessage()
     }));

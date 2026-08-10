@@ -43,6 +43,11 @@ export interface CodexDetectOptions extends DetectOptions {
   loginStatus?: { exitCode: number | null; error?: string };
 }
 
+export interface CopilotDetectOptions extends DetectOptions {
+  /** Injected command outcome for deterministic tests. */
+  helpStatus?: { exitCode: number | null; output?: string; error?: string };
+}
+
 /**
  * Resolves an executable on PATH the way a shell would, honouring PATHEXT on
  * Windows so `claude.cmd` and `claude.exe` both count.
@@ -185,5 +190,62 @@ export function detectCodexCliStatus(options: CodexDetectOptions = {}): CliStatu
     message: loginStatus.error
       ? `The Codex CLI is installed, but NexusFlow could not verify its login (${loginStatus.error}). Run \`codex login\` and try again.`
       : 'The Codex CLI is installed but not signed in. Run `codex login` to use your ChatGPT account; no API key is required.',
+  };
+}
+
+/**
+ * Whether the installed Copilot CLI exposes its supported ACP server.
+ *
+ * Copilot has no documented non-interactive login-status command. Session
+ * creation is therefore the authentication authority; this probe only avoids
+ * advertising older installations that cannot speak ACP at all.
+ */
+export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliStatus {
+  const env = options.env ?? process.env;
+  const executable = options.hasBinary === false ? null : findExecutable('copilot', env);
+  const hasBinary = options.hasBinary ?? executable !== null;
+
+  if (!hasBinary) {
+    return {
+      usable: false,
+      message: 'The GitHub Copilot CLI was not found on PATH. Install it, then run `copilot login`.',
+    };
+  }
+
+  // A classic PAT takes precedence over saved OAuth but is unsupported by the
+  // Copilot CLI, so this is one credential failure we can identify safely.
+  const token = env.COPILOT_GITHUB_TOKEN ?? env.GH_TOKEN ?? env.GITHUB_TOKEN;
+  if (token?.startsWith('ghp_')) {
+    return {
+      usable: false,
+      message: 'GitHub Copilot CLI does not support classic `ghp_` tokens. Remove the overriding token and run `copilot login`.',
+    };
+  }
+
+  let helpStatus = options.helpStatus;
+  if (!helpStatus) {
+    const result = spawnSync(executable ?? 'copilot', ['help'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable ?? ''),
+    });
+    helpStatus = {
+      exitCode: result.status,
+      output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+      error: result.error?.message,
+    };
+  }
+
+  if (helpStatus.exitCode === 0 && /--acp\b/.test(helpStatus.output ?? '')) {
+    return { usable: true };
+  }
+
+  return {
+    usable: false,
+    message: helpStatus.error
+      ? `NexusFlow could not inspect GitHub Copilot CLI ACP support (${helpStatus.error}). Update Copilot CLI and try again.`
+      : 'The installed GitHub Copilot CLI does not expose ACP. Update it, then run `copilot login`.',
   };
 }

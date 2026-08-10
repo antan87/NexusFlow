@@ -19,6 +19,7 @@ function makeProvider(id: string, overrides: Partial<ProviderAdapter> = {}): Pro
   return {
     id,
     name: 'Mock',
+    capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
     isConfigured: () => true,
     getStatusMessage: () => undefined,
     createInstance: () => new MockAgentHarness(),
@@ -49,6 +50,7 @@ describe('ProviderRegistry', () => {
     expect(unconfiguredStatus).toBeDefined();
     expect(unconfiguredStatus?.isConfigured).toBe(false);
     expect(unconfiguredStatus?.message).toBe('Missing API Key');
+    expect(unconfiguredStatus?.capabilities.workspaceAccess).toBe('read-only');
   });
 
   it('should create an instance correctly', () => {

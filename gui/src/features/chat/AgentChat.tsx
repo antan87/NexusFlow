@@ -18,6 +18,23 @@ interface AgentChatProps {
   ws: Feature;
 }
 
+interface ProviderCapabilities {
+  transport: 'native-api' | 'cli-print' | 'acp';
+  sessionIdentity: 'none' | 'client-assigned' | 'provider-assigned';
+  workspaceAccess: 'read-only' | 'workspace-write' | 'harness-managed';
+  sessionIdFormat?: 'uuid' | 'opaque';
+}
+
+interface ChatProvider {
+  id: string;
+  name: string;
+  icon?: string;
+  accessLabel?: string;
+  isConfigured: boolean;
+  message?: string;
+  capabilities: ProviderCapabilities;
+}
+
 /** Session-history assistant ids mapped to their embedded CLI providers. */
 const SESSION_PROVIDERS: Record<string, string> = {
   claude: 'claude-cli',
@@ -92,7 +109,7 @@ const MessageBubble = memo(function MessageBubble({
 });
 
 export function AgentChat({ ws }: AgentChatProps) {
-  const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; accessLabel?: string; isConfigured: boolean; message?: string }[]>([]);
+  const [providers, setProviders] = useState<ChatProvider[]>([]);
 
   // The component is remounted per workspace (keyed by branch), so the
   // one-time initializer always reads the right store.
@@ -249,16 +266,16 @@ export function AgentChat({ ws }: AgentChatProps) {
         // generated context files live (see src/utils/feature.ts).
         cwd: ws.workspacePath,
       };
-      if (agentName === SESSION_PROVIDERS.claude) {
+      if (currentProvider?.capabilities.sessionIdentity === 'client-assigned') {
         // Claude accepts a caller-assigned UUID for a new session.
         const existing = sessionsRef.current[agentName];
         const session = existing ?? { id: crypto.randomUUID(), started: false };
         sessionsRef.current = { ...sessionsRef.current, [agentName]: session };
         startPayload.sessionId = session.id;
         startPayload.resume = session.started;
-      } else if (agentName === SESSION_PROVIDERS.codex) {
-        // Codex creates its own thread UUID. Only pass one when resuming a
-        // thread captured from a previous `thread.started` event.
+      } else if (currentProvider?.capabilities.sessionIdentity === 'provider-assigned') {
+        // ACP providers and Codex create their own session ids. Only pass one
+        // when resuming an id captured from the provider's session event.
         const session = sessionsRef.current[agentName];
         if (session?.started) {
           startPayload.sessionId = session.id;

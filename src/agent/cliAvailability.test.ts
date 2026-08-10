@@ -7,6 +7,7 @@ import {
   detectAntigravityCliStatus,
   detectClaudeCliStatus,
   detectCodexCliStatus,
+  detectCopilotCliStatus,
   findExecutable,
 } from './cliAvailability.js';
 
@@ -180,5 +181,51 @@ describe('detectCodexCliStatus', () => {
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/timed out/);
     expect(status.message).toMatch(/codex login/i);
+  });
+});
+
+describe('detectCopilotCliStatus', () => {
+  it('is unusable when the binary is missing', () => {
+    const status = detectCopilotCliStatus({ hasBinary: false, env: {} });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/not found on PATH/i);
+  });
+
+  it('accepts an installation whose help advertises ACP', () => {
+    expect(detectCopilotCliStatus({
+      hasBinary: true,
+      env: {},
+      helpStatus: { exitCode: 0, output: '  --acp  Start Agent Client Protocol server' },
+    })).toEqual({ usable: true });
+  });
+
+  it('asks users with an older CLI to update it', () => {
+    const status = detectCopilotCliStatus({
+      hasBinary: true,
+      env: {},
+      helpStatus: { exitCode: 0, output: 'Usage: copilot' },
+    });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/does not expose ACP/i);
+  });
+
+  it('reports a failed or timed-out capability probe', () => {
+    const status = detectCopilotCliStatus({
+      hasBinary: true,
+      env: {},
+      helpStatus: { exitCode: null, error: 'timed out' },
+    });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/timed out/);
+  });
+
+  it('rejects an overriding classic PAT that Copilot cannot use', () => {
+    const status = detectCopilotCliStatus({
+      hasBinary: true,
+      env: { COPILOT_GITHUB_TOKEN: 'ghp_classic' },
+      helpStatus: { exitCode: 0, output: '--acp' },
+    });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/classic/i);
   });
 });

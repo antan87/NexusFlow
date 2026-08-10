@@ -1,17 +1,24 @@
 import { ProviderRegistry } from './ProviderRegistry.js';
-import { detectAntigravityCliStatus, detectClaudeCliStatus, detectCodexCliStatus } from './cliAvailability.js';
+import {
+  detectAntigravityCliStatus,
+  detectClaudeCliStatus,
+  detectCodexCliStatus,
+  detectCopilotCliStatus,
+} from './cliAvailability.js';
 import { NativeClaudeAgent } from './NativeClaudeAgent.js';
 import { NativeAgent } from './NativeAgent.js';
 import { NativeGoogleAgent } from './NativeGoogleAgent.js';
 import { ClaudeCliAdapter } from './ClaudeCliAdapter.js';
 import { AntigravityCliAdapter } from './AntigravityCliAdapter.js';
 import { CodexCliAdapter } from './CodexCliAdapter.js';
+import { CopilotAcpAdapter } from './CopilotAcpAdapter.js';
 
 ProviderRegistry.register({
   id: 'claude-native',
   name: 'Claude',
   icon: 'Bot',
   accessLabel: 'Read-only tools',
+  capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
   isConfigured: () => !!process.env.ANTHROPIC_API_KEY,
   getStatusMessage: () => process.env.ANTHROPIC_API_KEY ? undefined : 'Anthropic API key is not configured in ANTHROPIC_API_KEY.',
   createInstance: () => new NativeClaudeAgent()
@@ -22,6 +29,7 @@ ProviderRegistry.register({
   name: 'OpenAI',
   icon: 'Sparkles',
   accessLabel: 'Read-only tools',
+  capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
   isConfigured: () => !!process.env.OPENAI_API_KEY,
   getStatusMessage: () => process.env.OPENAI_API_KEY ? undefined : 'OpenAI API key is not configured in OPENAI_API_KEY.',
   createInstance: () => new NativeAgent()
@@ -32,6 +40,7 @@ ProviderRegistry.register({
   name: 'Google Gemini',
   icon: 'Sparkles',
   accessLabel: 'Read-only tools',
+  capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
   isConfigured: () => !!process.env.GEMINI_API_KEY,
   getStatusMessage: () => process.env.GEMINI_API_KEY ? undefined : 'Google API key is not configured in GEMINI_API_KEY.',
   createInstance: () => new NativeGoogleAgent()
@@ -74,12 +83,19 @@ export function cachedStatus<T>(detect: () => T, ttlMs = 5_000): () => T {
 const claudeCliStatus = cachedStatus(() => detectClaudeCliStatus());
 const antigravityCliStatus = cachedStatus(() => detectAntigravityCliStatus());
 const codexCliStatus = cachedStatus(() => detectCodexCliStatus());
+const copilotCliStatus = cachedStatus(() => detectCopilotCliStatus());
 
 ProviderRegistry.register({
   id: 'claude-cli',
   name: 'Claude Code (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Harness-managed access',
+  capabilities: {
+    transport: 'cli-print',
+    sessionIdentity: 'client-assigned',
+    workspaceAccess: 'harness-managed',
+    sessionIdFormat: 'uuid',
+  },
   isConfigured: () => claudeCliStatus().usable,
   getStatusMessage: () => claudeCliStatus().message,
   createInstance: () => new ClaudeCliAdapter()
@@ -90,6 +106,7 @@ ProviderRegistry.register({
   name: 'Antigravity (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Harness-managed access',
+  capabilities: { transport: 'cli-print', sessionIdentity: 'none', workspaceAccess: 'harness-managed' },
   isConfigured: () => antigravityCliStatus().usable,
   getStatusMessage: () => antigravityCliStatus().message,
   createInstance: () => new AntigravityCliAdapter()
@@ -100,9 +117,31 @@ ProviderRegistry.register({
   name: 'Codex (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Workspace write',
+  capabilities: {
+    transport: 'cli-print',
+    sessionIdentity: 'provider-assigned',
+    workspaceAccess: 'workspace-write',
+    sessionIdFormat: 'uuid',
+  },
   isConfigured: () => codexCliStatus().usable,
   getStatusMessage: () => codexCliStatus().message,
   createInstance: () => new CodexCliAdapter()
+});
+
+ProviderRegistry.register({
+  id: 'copilot-cli',
+  name: 'GitHub Copilot (Local CLI)',
+  icon: 'Terminal',
+  accessLabel: 'Read-only workspace tools',
+  capabilities: {
+    transport: 'acp',
+    sessionIdentity: 'provider-assigned',
+    workspaceAccess: 'read-only',
+    sessionIdFormat: 'uuid',
+  },
+  isConfigured: () => copilotCliStatus().usable,
+  getStatusMessage: () => copilotCliStatus().message,
+  createInstance: () => new CopilotAcpAdapter()
 });
 
 export { ProviderRegistry };
