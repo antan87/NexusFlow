@@ -13,6 +13,7 @@ import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
+import { ProviderRegistry } from './agent/ProviderRegistry.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -39,6 +40,92 @@ describe('Server API Endpoints Unit Tests', () => {
     const response = await app.request('/api/session/codex/53/transcript');
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid Codex session id.' });
+  });
+
+  describe('CLI adapter status probes', () => {
+    it('keeps the legacy GET endpoint side-effect-free', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        headers: { Origin: 'https://evil.example' },
+      });
+
+      expect(response.status).toBe(405);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('rejects a hostile initial status POST before running CLI detectors', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(403);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('allows a local-origin initial status POST', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4173' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:4173');
+      expect(status).toHaveBeenCalledWith();
+      status.mockRestore();
+    });
+
+    it('rejects a hostile browser origin before refreshing a CLI detector', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+        body: JSON.stringify({ providerId: 'claude-cli' }),
+      });
+
+      expect(response.status).toBe(403);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('refreshes only an allowlisted CLI for a same-origin request', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4173' },
+        body: JSON.stringify({ providerId: 'codex-cli' }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:4173');
+      expect(status).toHaveBeenCalledWith({ refreshProviderId: 'codex-cli' });
+      status.mockRestore();
+    });
+
+    it('rejects attempts to refresh other providers', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4173' },
+        body: JSON.stringify({ providerId: 'copilot-cli' }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
   });
 
   describe('POST /api/open-editor', () => {

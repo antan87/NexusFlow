@@ -58,4 +58,31 @@ describe('cachedStatus', () => {
 
     expect(detect).toHaveBeenCalledTimes(1);
   });
+
+  it('re-detects immediately after an explicit invalidation', () => {
+    const detect = vi.fn()
+      .mockReturnValueOnce({ usable: false })
+      .mockReturnValueOnce({ usable: true });
+    const read = cachedStatus(detect);
+
+    expect(read()).toEqual({ usable: false });
+    read.invalidate();
+    expect(read()).toEqual({ usable: true });
+    expect(detect).toHaveBeenCalledTimes(2);
+  });
+
+  it('ages the cache from completion of a slow detector', () => {
+    vi.useFakeTimers();
+    const detect = vi.fn(() => {
+      vi.advanceTimersByTime(5_000);
+      return { usable: false };
+    });
+    const read = cachedStatus(detect, 5_000);
+
+    read();
+    read();
+    read();
+
+    expect(detect).toHaveBeenCalledTimes(1);
+  });
 });

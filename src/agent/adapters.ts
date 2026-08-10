@@ -1,5 +1,6 @@
-import { ProviderRegistry } from './ProviderRegistry.js';
+import { ProviderRegistry, type ProviderSetupHelp } from './ProviderRegistry.js';
 import {
+  type CliStatus,
   detectAntigravityCliStatus,
   detectClaudeCliStatus,
   detectCodexCliStatus,
@@ -50,29 +51,47 @@ ProviderRegistry.register({
  * Wraps a synchronous detector in a short-lived cache.
  *
  * `isConfigured()` and `getStatusMessage()` are separate calls on the same
- * provider, so listing statuses ran every detector twice — and each one walks
- * PATH with a `statSync` per directory per PATHEXT entry, then reads a
- * credentials file. `getStatuses()` over both CLI providers meant four full
- * scans per HTTP status request.
+ * provider, so listing statuses ran every detector twice. CLI detectors walk
+ * PATH and may spawn a bounded provider-owned status command, so duplicate
+ * probes materially slow the request.
  *
  * A few seconds is the right window: long enough to collapse the duplicate calls
  * within one request, short enough that installing a CLI or signing in is
  * noticed almost immediately rather than needing a restart.
  */
-export function cachedStatus<T>(detect: () => T, ttlMs = 5_000): () => T {
+export type CachedStatusReader<T> = (() => T) & { invalidate(): void };
+
+export function cachedStatus<T>(detect: () => T, ttlMs = 5_000): CachedStatusReader<T> {
   // Freshness is tracked with a flag, not by testing the value: keying on
   // `value === undefined` would make a detector that legitimately returns
   // undefined re-run on every read, which is the case this exists to avoid.
   let cached: { value: T } | null = null;
   let readAt = 0;
 
-  return () => {
+  const read = (() => {
     const now = Date.now();
     if (!cached || now - readAt >= ttlMs) {
-      cached = { value: detect() };
-      readAt = now;
+      const value = detect();
+      // Age the cache from completion. A detector that consumes its whole
+      // timeout must still be reused by the other fields in this status read.
+      cached = { value };
+      readAt = Date.now();
     }
     return cached.value;
+  }) as CachedStatusReader<T>;
+  read.invalidate = () => {
+    cached = null;
+    readAt = 0;
+  };
+  return read;
+}
+
+function setupHelp(status: CliStatus): ProviderSetupHelp | undefined {
+  if (!status.setupIssue || !status.recoveryCommand || !status.recoveryLabel) return undefined;
+  return {
+    setupIssue: status.setupIssue,
+    recoveryCommand: status.recoveryCommand,
+    recoveryLabel: status.recoveryLabel,
   };
 }
 
@@ -98,6 +117,8 @@ ProviderRegistry.register({
   },
   isConfigured: () => claudeCliStatus().usable,
   getStatusMessage: () => claudeCliStatus().message,
+  getSetupHelp: () => setupHelp(claudeCliStatus()),
+  invalidateStatus: () => claudeCliStatus.invalidate(),
   createInstance: () => new ClaudeCliAdapter()
 });
 
@@ -125,6 +146,8 @@ ProviderRegistry.register({
   },
   isConfigured: () => codexCliStatus().usable,
   getStatusMessage: () => codexCliStatus().message,
+  getSetupHelp: () => setupHelp(codexCliStatus()),
+  invalidateStatus: () => codexCliStatus.invalidate(),
   createInstance: () => new CodexCliAdapter()
 });
 

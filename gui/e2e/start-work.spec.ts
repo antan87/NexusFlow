@@ -1,4 +1,5 @@
 import { test, expect, type Page } from './fixtures';
+import type { Route } from '@playwright/test';
 
 async function mockCompletedCreationStream(page: Page) {
   await page.addInitScript(() => {
@@ -221,6 +222,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
   test('refreshes CLI availability and preserves prior chat across explicit kickoff retries', async ({ page }) => {
     await mockCompletedCreationStream(page);
     let providerConfigured = false;
+    let providerIssue: 'signed-out' | 'probe-failed' = 'signed-out';
+    let refreshChecks = 0;
     await page.addInitScript(() => {
       localStorage.setItem('nexusflow_chat_demo-worktree', JSON.stringify({
         v: 3,
@@ -275,8 +278,17 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
       (window as any).__handoffFrames = frames;
       (window as any).WebSocket = MockWebSocket;
+      (window as any).__copiedRecovery = '';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            (window as any).__copiedRecovery = text;
+          },
+        },
+      });
     });
-    await page.route('**/api/adapters/status', async (route) => {
+    const fulfillProviderStatus = async (route: Route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -284,7 +296,18 @@ test.describe('NexusFlow E2E GUI Tests', () => {
           id: 'claude-cli',
           name: 'Claude Code (Local CLI)',
           isConfigured: providerConfigured,
-          message: providerConfigured ? undefined : 'Run claude login first.',
+          message: providerConfigured
+            ? undefined
+            : providerIssue === 'signed-out'
+              ? 'Claude Code is installed but not signed in. No API key is required.'
+              : 'NexusFlow could not verify Claude Code login.',
+          setupIssue: providerConfigured ? undefined : providerIssue,
+          recoveryCommand: providerConfigured
+            ? undefined
+            : providerIssue === 'signed-out' ? 'claude auth login' : 'claude auth status --json',
+          recoveryLabel: providerConfigured
+            ? undefined
+            : providerIssue === 'signed-out' ? 'Copy sign-in command' : 'Copy status command',
           capabilities: {
             transport: 'cli-print',
             sessionIdentity: 'client-assigned',
@@ -293,6 +316,15 @@ test.describe('NexusFlow E2E GUI Tests', () => {
           },
         }]),
       });
+    };
+    await page.route('**/api/adapters/status/refresh', async (route, request) => {
+      refreshChecks += 1;
+      expect(request.method()).toBe('POST');
+      expect(request.postDataJSON()).toEqual({ providerId: 'claude-cli' });
+      await fulfillProviderStatus(route);
+    });
+    await page.route('**/api/adapters/status', async (route) => {
+      await fulfillProviderStatus(route);
     });
     await page.route('**/api/projects', async (route) => {
       await route.fulfill({
@@ -325,16 +357,27 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await page.getByRole('button', { name: 'Start task with Claude' }).click();
     await expect(page.getByText('Preserve this previous chat')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Retry task handoff' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Recheck & retry' })).toBeVisible();
+    await page.getByRole('button', { name: 'Copy sign-in command' }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__copiedRecovery)).toBe('claude auth login');
+    expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
+
+    providerIssue = 'probe-failed';
+    await page.getByRole('button', { name: 'Recheck & retry' }).click();
+    await expect.poll(() => refreshChecks).toBe(1);
+    await expect(page.getByRole('button', { name: 'Try with existing CLI auth' })).toBeVisible();
+    await expect(page.getByText('claude auth status --json')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
+
+    await page.getByRole('button', { name: 'Try with existing CLI auth' }).click();
+    await expect.poll(() => refreshChecks).toBe(2);
+    await expect(page.getByText(/Could not open the local agent connection/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Recheck & retry' })).toBeVisible();
     expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
 
     providerConfigured = true;
-    await page.getByRole('button', { name: 'Retry task handoff' }).click();
-    await expect(page.getByText(/Could not open the local agent connection/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Retry task handoff' })).toBeVisible();
-    expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
-
-    await page.getByRole('button', { name: 'Retry task handoff' }).click();
+    await page.getByRole('button', { name: 'Recheck & retry' }).click();
+    await expect.poll(() => refreshChecks).toBe(3);
     await expect.poll(() => page.evaluate(() => (window as any).__handoffFrames.length)).toBe(2);
     const frames = await page.evaluate(() => (window as any).__handoffFrames);
     expect(frames[0]).toMatchObject({
@@ -346,6 +389,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     expect(frames[1]).toMatchObject({ type: 'input' });
     await expect(page.getByText('Preserve this previous chat')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__handoffInstances)).toBe(2);
+    expect(refreshChecks).toBe(3);
   });
 
   test('should create an in-place workspace without showing branch fields', async ({ page }) => {

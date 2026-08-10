@@ -67,4 +67,30 @@ describe('ProviderRegistry', () => {
       expect(instance.started).toBe(true);
     }
   });
+
+  it('exposes closed setup recovery metadata and invalidates cached status on refresh', () => {
+    let configured = false;
+    let invalidations = 0;
+    ProviderRegistry.register(makeProvider('mock-refreshable', {
+      isConfigured: () => configured,
+      getStatusMessage: () => configured ? undefined : 'Sign in.',
+      getSetupHelp: () => configured ? undefined : {
+        setupIssue: 'signed-out',
+        recoveryCommand: 'mock auth login',
+        recoveryLabel: 'Copy sign-in command',
+      },
+      invalidateStatus: () => {
+        invalidations += 1;
+        configured = true;
+      },
+    }));
+
+    expect(ProviderRegistry.getAllStatus().find(status => status.id === 'mock-refreshable'))
+      .toMatchObject({ isConfigured: false, setupIssue: 'signed-out' });
+
+    expect(ProviderRegistry.getAllStatus({ refreshProviderId: 'mock-refreshable' }).find(status => status.id === 'mock-refreshable'))
+      .toMatchObject({ isConfigured: true });
+    ProviderRegistry.getAllStatus({ refreshProviderId: 'mock-refreshable' });
+    expect(invalidations).toBe(1);
+  });
 });

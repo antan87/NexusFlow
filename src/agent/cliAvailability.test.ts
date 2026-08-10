@@ -21,25 +21,6 @@ afterEach(async () => {
   await fs.rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
-/** Writes a credential store with the given oauth block. */
-async function writeCredentials(oauth: Record<string, unknown>): Promise<void> {
-  await fs.mkdir(path.join(home, '.claude'), { recursive: true });
-  await fs.writeFile(
-    path.join(home, '.claude', '.credentials.json'),
-    JSON.stringify({ claudeAiOauth: oauth }),
-    'utf-8',
-  );
-}
-
-/** The observed real-world shape: scopes present, every token empty. */
-const HOLLOW = {
-  accessToken: '',
-  refreshToken: '',
-  expiresAt: 0,
-  scopes: ['user:inference'],
-  subscriptionType: 'team',
-};
-
 describe('findExecutable', () => {
   it('finds a file on PATH', async () => {
     const name = process.platform === 'win32' ? 'thing.cmd' : 'thing';
@@ -59,76 +40,82 @@ describe('findExecutable', () => {
 
 describe('detectClaudeCliStatus', () => {
   it('is unusable when the binary is missing, and says so', () => {
-    const status = detectClaudeCliStatus({ hasBinary: false, env: {}, homeDir: home });
+    const status = detectClaudeCliStatus({ hasBinary: false, env: {} });
 
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/not found on PATH/);
+    expect(status).toMatchObject({
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'npm install -g @anthropic-ai/claude-code',
+    });
   });
 
-  it('is usable when an API key is set, regardless of the credential store', async () => {
-    await writeCredentials(HOLLOW);
-
+  it('is usable when an API key is set without inspecting auth status', () => {
     const status = detectClaudeCliStatus({
       hasBinary: true,
       env: { ANTHROPIC_API_KEY: 'sk-test' },
-      homeDir: home,
+      authStatus: { exitCode: 1, stdout: '{not json', error: 'must not leak' },
     });
 
-    expect(status.usable).toBe(true);
-    expect(status.message).toBeUndefined();
+    expect(status).toEqual({ usable: true });
   });
 
-  it('reports unusable when the credential store has no tokens at all', async () => {
-    // The real failure: an interactive claude works because its host injects
-    // tokens, but a spawned `claude -p` finds nothing on disk to use.
-    await writeCredentials(HOLLOW);
-
-    const status = detectClaudeCliStatus({ hasBinary: true, env: {}, homeDir: home });
-
-    expect(status.usable).toBe(false);
-    expect(status.message).toMatch(/not signed in|credentials are empty/i);
+  it.each([
+    { ANTHROPIC_AUTH_TOKEN: 'gateway-token' },
+    { CLAUDE_CODE_USE_BEDROCK: '1' },
+    { CLAUDE_CODE_USE_VERTEX: '1' },
+    { CLAUDE_CODE_USE_FOUNDRY: '1' },
+  ])('accepts a declared provider-owned external auth mode', (externalEnv) => {
+    expect(detectClaudeCliStatus({
+      hasBinary: true,
+      env: externalEnv,
+      authStatus: { exitCode: 1, stdout: JSON.stringify({ loggedIn: false }) },
+    })).toEqual({ usable: true });
   });
 
-  it('names the host-managed case when the app is providing auth', async () => {
-    await writeCredentials(HOLLOW);
-
+  it('accepts provider-owned subscription login without returning account metadata', () => {
     const status = detectClaudeCliStatus({
       hasBinary: true,
-      env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' },
-      homeDir: home,
+      env: {},
+      authStatus: {
+        exitCode: 0,
+        stdout: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'private@example.test' }),
+      },
     });
 
-    expect(status.usable).toBe(false);
-    expect(status.message).toMatch(/holds your tokens in memory/i);
-    // The message must be actionable, not just descriptive.
-    expect(status.message).toMatch(/ANTHROPIC_API_KEY/);
+    expect(status).toEqual({ usable: true });
   });
 
-  it('is usable with an access token present', async () => {
-    await writeCredentials({ ...HOLLOW, accessToken: 'tok' });
+  it('maps a parsed signed-out response to keyless Claude login recovery', () => {
+    const status = detectClaudeCliStatus({
+      hasBinary: true,
+      env: {},
+      authStatus: { exitCode: 1, stdout: JSON.stringify({ loggedIn: false }) },
+    });
 
-    expect(detectClaudeCliStatus({ hasBinary: true, env: {}, homeDir: home }).usable).toBe(true);
+    expect(status).toMatchObject({
+      usable: false,
+      setupIssue: 'signed-out',
+      recoveryCommand: 'claude auth login',
+      recoveryLabel: 'Copy sign-in command',
+    });
+    expect(status.message).toMatch(/no API key is required/i);
   });
 
-  it('is usable with only a refresh token, which can mint a new one', async () => {
-    await writeCredentials({ ...HOLLOW, refreshToken: 'refresh' });
+  it.each([
+    { name: 'malformed output', authStatus: { exitCode: 0, stdout: '{ not json' } },
+    { name: 'unknown schema', authStatus: { exitCode: 0, stdout: '{"authenticated":true}' } },
+    { name: 'timeout', authStatus: { exitCode: null, stdout: '', error: 'timed out at C:\\private\\path' } },
+  ])('sanitizes a $name auth probe failure', ({ authStatus }) => {
+    const status = detectClaudeCliStatus({ hasBinary: true, env: {}, authStatus });
 
-    expect(detectClaudeCliStatus({ hasBinary: true, env: {}, homeDir: home }).usable).toBe(true);
-  });
-
-  it('assumes usable when there is no credential file to judge', () => {
-    // Conservative on purpose: an install that stores tokens elsewhere must not
-    // be disabled just because this particular file is absent.
-    const status = detectClaudeCliStatus({ hasBinary: true, env: {}, homeDir: home });
-
-    expect(status.usable).toBe(true);
-  });
-
-  it('assumes usable when the credential file is malformed', async () => {
-    await fs.mkdir(path.join(home, '.claude'), { recursive: true });
-    await fs.writeFile(path.join(home, '.claude', '.credentials.json'), '{ not json', 'utf-8');
-
-    expect(detectClaudeCliStatus({ hasBinary: true, env: {}, homeDir: home }).usable).toBe(true);
+    expect(status).toMatchObject({
+      usable: false,
+      setupIssue: 'probe-failed',
+      recoveryCommand: 'claude auth status --json',
+    });
+    expect(status.message).not.toContain('private');
+    expect(status).not.toHaveProperty('stdout');
   });
 });
 
@@ -150,6 +137,10 @@ describe('detectCodexCliStatus', () => {
     const status = detectCodexCliStatus({ hasBinary: false, env: {} });
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/not found on PATH/i);
+    expect(status).toMatchObject({
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'npm install -g @openai/codex',
+    });
   });
 
   it('accepts a saved ChatGPT or API login reported by the CLI', () => {
@@ -168,8 +159,11 @@ describe('detectCodexCliStatus', () => {
       loginStatus: { exitCode: 1 },
     });
     expect(status.usable).toBe(false);
-    expect(status.message).toMatch(/codex login/i);
     expect(status.message).toMatch(/no API key is required/i);
+    expect(status).toMatchObject({
+      setupIssue: 'signed-out',
+      recoveryCommand: 'codex login',
+    });
   });
 
   it('reports a timed-out or failed auth probe actionably', () => {
@@ -179,8 +173,11 @@ describe('detectCodexCliStatus', () => {
       loginStatus: { exitCode: null, error: 'timed out' },
     });
     expect(status.usable).toBe(false);
-    expect(status.message).toMatch(/timed out/);
-    expect(status.message).toMatch(/codex login/i);
+    expect(status).toMatchObject({
+      setupIssue: 'probe-failed',
+      recoveryCommand: 'codex login status',
+    });
+    expect(status.message).not.toMatch(/timed out/);
   });
 });
 

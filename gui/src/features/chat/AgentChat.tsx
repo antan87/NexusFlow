@@ -34,7 +34,123 @@ interface ChatProvider {
   accessLabel?: string;
   isConfigured: boolean;
   message?: string;
+  setupIssue?: 'missing-cli' | 'signed-out' | 'probe-failed';
+  recoveryCommand?: string;
+  recoveryLabel?: string;
   capabilities: ProviderCapabilities;
+}
+
+const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
+  'claude-cli': new Set([
+    'npm install -g @anthropic-ai/claude-code',
+    'claude auth login',
+    'claude auth status --json',
+  ]),
+  'codex-cli': new Set([
+    'npm install -g @openai/codex',
+    'codex login',
+    'codex login status',
+  ]),
+};
+
+const PROVIDER_TRANSPORTS = new Set(['native-api', 'cli-print', 'acp']);
+const PROVIDER_SESSION_IDENTITIES = new Set(['none', 'client-assigned', 'provider-assigned']);
+const PROVIDER_WORKSPACE_ACCESS = new Set(['read-only', 'workspace-write', 'harness-managed']);
+const PROVIDER_SESSION_ID_FORMATS = new Set(['uuid', 'opaque']);
+const PROVIDER_SETUP_ISSUES = new Set(['missing-cli', 'signed-out', 'probe-failed']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
+}
+
+function decodeProviderCapabilities(value: unknown): ProviderCapabilities | null {
+  if (!isRecord(value)
+    || typeof value.transport !== 'string'
+    || !PROVIDER_TRANSPORTS.has(value.transport)
+    || typeof value.sessionIdentity !== 'string'
+    || !PROVIDER_SESSION_IDENTITIES.has(value.sessionIdentity)
+    || typeof value.workspaceAccess !== 'string'
+    || !PROVIDER_WORKSPACE_ACCESS.has(value.workspaceAccess)
+    || (value.sessionIdFormat !== undefined
+      && (typeof value.sessionIdFormat !== 'string' || !PROVIDER_SESSION_ID_FORMATS.has(value.sessionIdFormat)))) {
+    return null;
+  }
+
+  return {
+    transport: value.transport as ProviderCapabilities['transport'],
+    sessionIdentity: value.sessionIdentity as ProviderCapabilities['sessionIdentity'],
+    workspaceAccess: value.workspaceAccess as ProviderCapabilities['workspaceAccess'],
+    ...(value.sessionIdFormat === undefined
+      ? {}
+      : { sessionIdFormat: value.sessionIdFormat as ProviderCapabilities['sessionIdFormat'] }),
+  };
+}
+
+function decodeChatProvider(value: unknown): ChatProvider | null {
+  if (!isRecord(value)
+    || typeof value.id !== 'string'
+    || typeof value.name !== 'string'
+    || typeof value.isConfigured !== 'boolean'
+    || !optionalString(value.icon)
+    || !optionalString(value.accessLabel)
+    || !optionalString(value.message)
+    || !optionalString(value.recoveryCommand)
+    || !optionalString(value.recoveryLabel)
+    || (value.setupIssue !== undefined
+      && (typeof value.setupIssue !== 'string' || !PROVIDER_SETUP_ISSUES.has(value.setupIssue)))) {
+    return null;
+  }
+
+  const capabilities = decodeProviderCapabilities(value.capabilities);
+  if (!capabilities) return null;
+
+  const hasAnySetup = value.setupIssue !== undefined
+    || value.recoveryCommand !== undefined
+    || value.recoveryLabel !== undefined;
+  const hasCompleteSetup = value.setupIssue !== undefined
+    && value.recoveryCommand !== undefined
+    && value.recoveryLabel !== undefined;
+  if ((hasAnySetup && !hasCompleteSetup) || (value.isConfigured && hasAnySetup)) return null;
+
+  return {
+    id: value.id,
+    name: value.name,
+    isConfigured: value.isConfigured,
+    capabilities,
+    ...(value.icon === undefined ? {} : { icon: value.icon }),
+    ...(value.accessLabel === undefined ? {} : { accessLabel: value.accessLabel }),
+    ...(value.message === undefined ? {} : { message: value.message }),
+    ...(value.setupIssue === undefined
+      ? {}
+      : { setupIssue: value.setupIssue as ChatProvider['setupIssue'] }),
+    ...(value.recoveryCommand === undefined ? {} : { recoveryCommand: value.recoveryCommand }),
+    ...(value.recoveryLabel === undefined ? {} : { recoveryLabel: value.recoveryLabel }),
+  };
+}
+
+function decodeChatProviders(value: unknown): ChatProvider[] | null {
+  if (!Array.isArray(value)) return null;
+  const providers: ChatProvider[] = [];
+  for (const candidate of value) {
+    const provider = decodeChatProvider(candidate);
+    if (!provider) return null;
+    providers.push(provider);
+  }
+  return providers;
+}
+
+function recoveryFor(provider: ChatProvider): { command: string; label: string } | null {
+  if (!provider.recoveryCommand || !PROVIDER_RECOVERY_COMMANDS[provider.id]?.has(provider.recoveryCommand)) {
+    return null;
+  }
+  return {
+    command: provider.recoveryCommand,
+    label: provider.recoveryLabel ?? 'Copy recovery command',
+  };
 }
 
 interface StartAgentOptions {
@@ -140,6 +256,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [sessionSwitching, setSessionSwitching] = useState(false);
   const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
   const [retryChecking, setRetryChecking] = useState(false);
+  const [copiedRecoveryProvider, setCopiedRecoveryProvider] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -210,14 +327,20 @@ export function AgentChat({ ws }: AgentChatProps) {
     const controller = new AbortController();
     let active = true;
 
-    fetch(`${API_BASE}/api/adapters/status`, { signal: controller.signal })
+    fetch(`${API_BASE}/api/adapters/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: controller.signal,
+    })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then(providerData => {
         if (!active || requestId !== providerRequestRef.current) return;
-        const nextProviders = Array.isArray(providerData) ? providerData : [];
+        const nextProviders = decodeChatProviders(providerData);
+        if (!nextProviders) throw new Error('Invalid provider status response');
         setProviders(nextProviders);
 
         // Prefer the provider used last time, else the first configured one.
@@ -641,21 +764,32 @@ export function AgentChat({ ws }: AgentChatProps) {
     void loadSession(session);
   }, [loadSession]);
 
-  const dispatchKickoff = useCallback(async (claim: RetryableKickoff, refreshStatus = false): Promise<boolean> => {
+  const dispatchKickoff = useCallback(async (
+    claim: RetryableKickoff,
+    refreshStatus = false,
+    allowUnverified = false,
+  ): Promise<boolean> => {
     setRetryableKickoff(claim);
     let freshProvider: ChatProvider | undefined;
 
     if (refreshStatus) {
       setRetryChecking(true);
       try {
-        const response = await fetch(`${API_BASE}/api/adapters/status`);
+        const response = await fetch(`${API_BASE}/api/adapters/status/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerId: claim.providerId }),
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        const nextProviders: ChatProvider[] = Array.isArray(data) ? data : [];
+        const data: unknown = await response.json();
+        const nextProviders = decodeChatProviders(data);
+        if (!nextProviders) throw new Error('Invalid provider status response');
         if (!mountedRef.current) return false;
         setProviders(nextProviders);
         freshProvider = nextProviders.find((provider) => provider.id === claim.providerId);
-        if (!freshProvider?.isConfigured) {
+        const canTryUnverified = allowUnverified
+          && (freshProvider?.setupIssue === 'signed-out' || freshProvider?.setupIssue === 'probe-failed');
+        if (!freshProvider || (!freshProvider.isConfigured && !canTryUnverified)) {
           appendSystemNote(
             freshProvider?.message ?? 'The selected local CLI is still unavailable. Install it and sign in, then retry.',
             'error',
@@ -674,7 +808,10 @@ export function AgentChat({ ws }: AgentChatProps) {
 
     return startAgent(claim.providerId, {
       firstMessage: claim.kickoff,
-      provider: freshProvider,
+      provider: freshProvider && allowUnverified
+        && (freshProvider.setupIssue === 'signed-out' || freshProvider.setupIssue === 'probe-failed')
+        ? { ...freshProvider, isConfigured: true }
+        : freshProvider,
       resetSession: true,
       resetMessagesOnDispatch: true,
       onDispatched: () => {
@@ -780,6 +917,27 @@ export function AgentChat({ ws }: AgentChatProps) {
   };
 
   const showThinking = busy && !turnOpen;
+  const currentRecovery = currentProvider ? recoveryFor(currentProvider) : null;
+
+  const copyRecoveryCommand = () => {
+    if (!currentProvider || !currentRecovery) return;
+    const copyFailed = () => appendSystemNote('Could not copy the recovery command. Copy the command shown above manually.', 'error');
+    try {
+      const writeText = navigator.clipboard?.writeText;
+      if (!writeText) {
+        copyFailed();
+        return;
+      }
+      void writeText.call(navigator.clipboard, currentRecovery.command).then(() => {
+        setCopiedRecoveryProvider(currentProvider.id);
+        setTimeout(() => {
+          if (mountedRef.current) setCopiedRecoveryProvider(current => current === currentProvider.id ? null : current);
+        }, 1500);
+      }).catch(copyFailed);
+    } catch {
+      copyFailed();
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -851,9 +1009,24 @@ export function AgentChat({ ws }: AgentChatProps) {
 
       <div className="flex shrink-0 flex-col gap-2 border-t border-border bg-card p-3">
         {currentProvider && !currentProvider.isConfigured && (
-          <div className="flex items-center gap-2 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
-            <span className="font-semibold">{currentProvider.name} provider status:</span>
-            <span>{currentProvider.message}</span>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
+            <div className="flex min-w-0 flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 font-semibold">{currentProvider.name} provider status:</span>
+                <span>{currentProvider.message}</span>
+              </div>
+              {currentRecovery && (
+                <code className="w-fit rounded bg-background/70 px-2 py-1 font-mono text-[11px] text-foreground">
+                  {currentRecovery.command}
+                </code>
+              )}
+            </div>
+            {currentRecovery && (
+              <Button size="sm" variant="outline" onClick={copyRecoveryCommand} className="shrink-0">
+                {copiedRecoveryProvider === currentProvider.id ? <Check size={12} /> : <Copy size={12} />}
+                {copiedRecoveryProvider === currentProvider.id ? 'Copied' : currentRecovery.label}
+              </Button>
+            )}
           </div>
         )}
         {retryableKickoff && !connecting && !connected && (
@@ -865,8 +1038,18 @@ export function AgentChat({ ws }: AgentChatProps) {
               onClick={() => void dispatchKickoff(retryableKickoff, true)}
               disabled={sessionSwitching || retryChecking}
             >
-              {retryChecking ? 'Checking CLI…' : 'Retry task handoff'}
+              {retryChecking ? 'Checking CLI…' : 'Recheck & retry'}
             </Button>
+            {currentProvider?.setupIssue && currentProvider.setupIssue !== 'missing-cli' && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void dispatchKickoff(retryableKickoff, true, true)}
+                disabled={sessionSwitching || retryChecking}
+              >
+                Try with existing CLI auth
+              </Button>
+            )}
           </div>
         )}
         <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">

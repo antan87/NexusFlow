@@ -10,18 +10,24 @@ const feature = {
   createdAt: '2026-08-10T00:00:00.000Z',
 };
 
-const provider = (assistant: 'claude' | 'codex', isConfigured = true) => ({
-  id: `${assistant}-cli`,
-  name: assistant === 'claude' ? 'Claude Code (Local CLI)' : 'Codex (Local CLI)',
-  isConfigured,
-  message: isConfigured ? undefined : `Run ${assistant} login first.`,
-  capabilities: {
-    transport: 'cli-print',
-    sessionIdentity: assistant === 'claude' ? 'client-assigned' : 'provider-assigned',
-    workspaceAccess: 'workspace-write',
-    sessionIdFormat: 'uuid',
-  },
-});
+const provider = (assistant: 'claude' | 'codex', isConfigured = true) => {
+  const recoveryCommand = assistant === 'claude' ? 'claude auth login' : 'codex login';
+  return {
+    id: `${assistant}-cli`,
+    name: assistant === 'claude' ? 'Claude Code (Local CLI)' : 'Codex (Local CLI)',
+    isConfigured,
+    message: isConfigured ? undefined : `${assistant === 'claude' ? 'Claude Code' : 'Codex'} is not signed in. No API key is required.`,
+    setupIssue: isConfigured ? undefined : 'signed-out',
+    recoveryCommand: isConfigured ? undefined : recoveryCommand,
+    recoveryLabel: isConfigured ? undefined : 'Copy sign-in command',
+    capabilities: {
+      transport: 'cli-print',
+      sessionIdentity: assistant === 'claude' ? 'client-assigned' : 'provider-assigned',
+      workspaceAccess: 'workspace-write',
+      sessionIdFormat: 'uuid',
+    },
+  };
+};
 
 async function mockProviderStatus(page: Page, providers: unknown[]) {
   await page.route('**/api/adapters/status', async (route) => {
@@ -173,6 +179,9 @@ test.describe('Claude and Codex embedded handoff', () => {
   test('does not open a socket for an unavailable local CLI', async ({ page }) => {
     let socketCount = 0;
     let transcriptRequests = 0;
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    });
     await mockProviderStatus(page, [provider('claude', false)]);
     await page.route('**/api/workspace/feature-x/sessions', async (route) => {
       await route.fulfill({
@@ -201,10 +210,62 @@ test.describe('Claude and Codex embedded handoff', () => {
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByRole('button', { name: 'Resume in Chat' }).click();
 
-    await expect(page.getByText(/Run claude login first/i).first()).toBeVisible();
+    await expect(page.getByText(/Claude Code is not signed in/i).first()).toBeVisible();
+    await expect(page.getByText('claude auth login')).toBeVisible();
+    await page.getByRole('button', { name: 'Copy sign-in command' }).click();
+    await expect(page.getByText(/Copy the command shown above manually/i)).toBeVisible();
     expect(transcriptRequests).toBe(0);
     expect(socketCount).toBe(0);
   });
+
+  for (const malformed of [
+    {
+      name: 'non-boolean availability',
+      status: { ...provider('claude'), isConfigured: 'false' },
+    },
+    {
+      name: 'unknown capability',
+      status: {
+        ...provider('claude'),
+        capabilities: { ...provider('claude').capabilities, workspaceAccess: 'unrestricted' },
+      },
+    },
+    {
+      name: 'unknown setup state',
+      status: { ...provider('claude', false), setupIssue: 'ready' },
+    },
+  ]) {
+    test(`fails closed for ${malformed.name} in provider status`, async ({ page }) => {
+      let socketCount = 0;
+      const frames: Array<Record<string, unknown>> = [];
+      await mockProviderStatus(page, [malformed.status]);
+      await page.routeWebSocket('**/ws', (socket) => {
+        socketCount += 1;
+        socket.onMessage((message) => frames.push(JSON.parse(String(message))));
+      });
+
+      await page.goto('/#/dashboard');
+      await page.evaluate(() => {
+        window.history.replaceState({
+          usr: {
+            chatLaunch: {
+              nonce: crypto.randomUUID(),
+              providerId: 'claude-cli',
+              assistant: 'claude',
+              kickoff: 'This retained kickoff must not be dispatched.',
+            },
+          },
+          key: 'malformed-provider-status',
+          idx: 0,
+        }, '', '/#/workspaces/feature-x');
+        window.location.reload();
+      });
+
+      await expect(page.getByText(/selected local CLI is unavailable/i)).toBeVisible();
+      expect(socketCount).toBe(0);
+      expect(frames).toEqual([]);
+    });
+  }
 
   test('cancels a delayed resume when the workspace chat unmounts', async ({ page }) => {
     let socketCount = 0;

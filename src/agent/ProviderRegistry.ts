@@ -7,7 +7,18 @@ export interface ProviderStatus {
   message?: string;
   icon?: string;
   accessLabel?: string;
+  setupIssue?: ProviderSetupIssue;
+  recoveryCommand?: string;
+  recoveryLabel?: string;
   capabilities: ProviderCapabilities;
+}
+
+export type ProviderSetupIssue = 'missing-cli' | 'signed-out' | 'probe-failed';
+
+export interface ProviderSetupHelp {
+  setupIssue: ProviderSetupIssue;
+  recoveryCommand: string;
+  recoveryLabel: string;
 }
 
 export interface ProviderCapabilities {
@@ -44,11 +55,14 @@ export interface ProviderAdapter {
   capabilities: ProviderCapabilities;
   isConfigured(): boolean;
   getStatusMessage(): string | undefined;
+  getSetupHelp?(): ProviderSetupHelp | undefined;
+  invalidateStatus?(): void;
   createInstance(): AgentHarness;
 }
 
 class ProviderRegistryImpl {
   private providers: Map<string, ProviderAdapter> = new Map();
+  private lastRefreshCompletedAt: Map<string, number> = new Map();
 
   register(provider: ProviderAdapter) {
     this.providers.set(provider.id, provider);
@@ -58,16 +72,39 @@ class ProviderRegistryImpl {
     return this.providers.get(id);
   }
 
-  getAllStatus(): ProviderStatus[] {
-    return Array.from(this.providers.values()).map(p => ({
-      id: p.id,
-      name: p.name,
-      icon: p.icon,
-      accessLabel: p.accessLabel,
-      capabilities: p.capabilities,
-      isConfigured: p.isConfigured(),
-      message: p.getStatusMessage()
-    }));
+  getAllStatus(options: { refreshProviderId?: string } = {}): ProviderStatus[] {
+    const providers = Array.from(this.providers.values());
+    const refreshProvider = options.refreshProviderId
+      ? this.providers.get(options.refreshProviderId)
+      : undefined;
+    const lastRefresh = options.refreshProviderId
+      ? this.lastRefreshCompletedAt.get(options.refreshProviderId) ?? 0
+      : 0;
+    const shouldRefresh = Boolean(
+      refreshProvider?.invalidateStatus
+      && Date.now() - lastRefresh >= 1_000,
+    );
+    if (shouldRefresh) refreshProvider?.invalidateStatus?.();
+
+    const statuses = providers.map(provider => {
+      const setup = provider.getSetupHelp?.();
+      return {
+        id: provider.id,
+        name: provider.name,
+        icon: provider.icon,
+        accessLabel: provider.accessLabel,
+        capabilities: provider.capabilities,
+        isConfigured: provider.isConfigured(),
+        message: provider.getStatusMessage(),
+        ...setup,
+      };
+    });
+    // Timestamp after all synchronous probes finish so requests queued during
+    // a slow refresh reuse its result instead of immediately spawning again.
+    if (shouldRefresh && options.refreshProviderId) {
+      this.lastRefreshCompletedAt.set(options.refreshProviderId, Date.now());
+    }
+    return statuses;
   }
 }
 

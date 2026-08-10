@@ -88,9 +88,15 @@ export const app = new Hono();
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
-app.get('/api/adapters/status', (c) => {
-  return c.json(ProviderRegistry.getAllStatus());
-});
+function hasTrustedLocalOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+  } catch {
+    return false;
+  }
+}
 
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
@@ -292,6 +298,33 @@ app.use(
 );
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
+
+// Status checks may execute a trusted local CLI from PATH. Keep that work
+// behind a non-simple, same-machine POST so a remote page cannot trigger it
+// with an image, link, or cross-origin fetch. These routes intentionally sit
+// after the API CORS middleware so the separate Vite dev origin can read them.
+app.get('/api/adapters/status', (c) => {
+  return c.json({ error: 'Use the same-origin POST status endpoint.' }, 405);
+});
+
+app.post('/api/adapters/status', (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  return c.json(ProviderRegistry.getAllStatus());
+});
+
+app.post('/api/adapters/status/refresh', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null) as { providerId?: unknown } | null;
+  if (body?.providerId !== 'claude-cli' && body?.providerId !== 'codex-cli') {
+    return c.json({ error: 'Only Claude Code and Codex status can be refreshed.' }, 400);
+  }
+  return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: body.providerId }));
+});
 
 // 1. Get current configuration
 app.get('/api/config', async (c) => {
