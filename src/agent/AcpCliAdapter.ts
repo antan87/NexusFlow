@@ -289,7 +289,9 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
         ));
       }
     } catch (error) {
-      if (!this.stopped) this.emit('error', this.toActionableError(error));
+      if (!this.stopped && !this.reportedProcessFailure) {
+        this.emit('error', this.toActionableError(error));
+      }
     } finally {
       this.processing = false;
       if (!this.stopped) this.emit('idle');
@@ -332,7 +334,9 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     if (this.reportedProcessFailure) return;
     this.reportedProcessFailure = true;
     this.emit('error', this.toActionableError(error));
-    this.emit('idle');
+    // An in-flight prompt owns the idle transition in send(). Publishing idle
+    // here would let the server admit a second prompt while processing is true.
+    if (!this.processing) this.emit('idle');
     this.stopTransport(true);
   }
 

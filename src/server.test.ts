@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
-import { app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
+import { AgentTurnGate, app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -41,6 +41,21 @@ describe('Server API Endpoints Unit Tests', () => {
     const response = await app.request('/api/session/codex/53/transcript');
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'Invalid Codex session id.' });
+  });
+
+  describe('embedded turn admission', () => {
+    it('rejects overlapping input until the active turn settles', () => {
+      const gate = new AgentTurnGate();
+
+      expect(gate.tryBegin()).toBe(true);
+      expect(gate.isActive()).toBe(true);
+      expect(gate.tryBegin()).toBe(false);
+
+      gate.settle();
+
+      expect(gate.isActive()).toBe(false);
+      expect(gate.tryBegin()).toBe(true);
+    });
   });
 
   describe('CLI adapter status probes', () => {

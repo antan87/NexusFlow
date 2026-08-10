@@ -216,7 +216,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
     expect(chatFrames[0].sessionId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(chatFrames.filter((frame) => frame.type === 'start')).toHaveLength(1);
-    expect(chatFrames.filter((frame) => frame.type === 'input')).toEqual([
+    expect(chatFrames.filter((frame) => frame.type === 'input')).toMatchObject([
       {
         type: 'input',
         input: 'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.',

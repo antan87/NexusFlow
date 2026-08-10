@@ -137,7 +137,7 @@ test.describe('Claude and Codex embedded handoff', () => {
       await composer.fill('Continue from there');
       await composer.press('Enter');
       await expect.poll(() => frames.filter((frame) => frame.type === 'input').length).toBe(1);
-      expect(frames.filter((frame) => frame.type === 'input')).toEqual([
+      expect(frames.filter((frame) => frame.type === 'input')).toMatchObject([
         { type: 'input', input: 'Continue from there', executionProfile: 'review' },
       ]);
       expect(legacyRequests).toEqual([]);
@@ -174,7 +174,7 @@ test.describe('Claude and Codex embedded handoff', () => {
     await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(2);
 
     expect(frames.filter(frame => frame.type === 'start')).toHaveLength(1);
-    expect(frames.filter(frame => frame.type === 'input')).toEqual([
+    expect(frames.filter(frame => frame.type === 'input')).toMatchObject([
       { type: 'input', input: 'Inspect without edits', executionProfile: 'review' },
       { type: 'input', input: 'Apply the approved change', executionProfile: 'workspace-write' },
     ]);
@@ -247,6 +247,38 @@ test.describe('Claude and Codex embedded handoff', () => {
     });
   });
 
+  test('keeps the active turn busy when the server rejects overlapping input', async ({ page }) => {
+    await mockProviderStatus(page, [provider('codex')]);
+    await page.routeWebSocket('**/ws', (socket) => {
+      socket.onMessage((message) => {
+        const frame = JSON.parse(String(message)) as Record<string, unknown>;
+        if (frame.type === 'input' && typeof frame.turnId === 'string') {
+          socket.send(JSON.stringify({
+            type: 'rejected',
+            reason: 'busy',
+            message: 'The agent is still processing the current turn.',
+            turnId: frame.turnId,
+          }));
+        }
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
+    await page.getByRole('button', { name: 'Start' }).click();
+
+    await expect(page.getByText('The agent is still processing the current turn.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await expect(page.getByPlaceholder(/Message the agent/)).toHaveValue('Inspect the workspace');
+    await expect.poll(() => page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem('nexusflow_chat_feature-x') ?? '{}');
+      return stored.messages?.some((message: Record<string, unknown>) => (
+        message.role === 'user' && message.content === 'Inspect the workspace'
+      ));
+    })).toBe(false);
+  });
+
   test('resets an in-chat session resume to Review before the next turn', async ({ page }) => {
     const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
     const frames: Array<Record<string, unknown>> = [];
@@ -304,7 +336,7 @@ test.describe('Claude and Codex embedded handoff', () => {
       sessionId,
       resume: true,
     }]);
-    expect(frames.filter(frame => frame.type === 'input')).toEqual([
+    expect(frames.filter(frame => frame.type === 'input')).toMatchObject([
       { type: 'input', input: 'Continue reviewing', executionProfile: 'review' },
     ]);
   });
@@ -593,7 +625,7 @@ test.describe('Claude and Codex embedded handoff', () => {
 
     await expect(page.getByLabel('Select Provider')).toContainText('Codex');
     expect(frames[0]).toMatchObject({ command: 'codex-cli', cwd: 'C:/ws/feature-x' });
-    expect(frames[1]).toEqual({
+    expect(frames[1]).toMatchObject({
       type: 'input',
       input: 'Use the bound provider',
       executionProfile: 'review',

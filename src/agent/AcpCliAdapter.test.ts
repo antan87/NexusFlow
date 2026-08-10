@@ -241,6 +241,34 @@ describe('AcpCliAdapter', () => {
     finishPrompt({ stopReason: 'cancelled' });
     await sending;
   });
+
+  it('does not publish idle for a process failure until the active prompt settles', async () => {
+    let rejectPrompt!: (error: Error) => void;
+    const connection = makeConnection({
+      prompt: vi.fn(() => new Promise<acp.PromptResponse>((_resolve, reject) => {
+        rejectPrompt = reject;
+      })),
+    });
+    const { harness, child } = makeHarness(connection);
+    const errors: string[] = [];
+    const idle: number[] = [];
+    harness.on('error', (error: Error) => errors.push(error.message));
+    harness.on('idle', () => idle.push(1));
+    await harness.start('C:\\workspace');
+    const sending = harness.send('Long task');
+    await vi.waitFor(() => expect(connection.prompt).toHaveBeenCalled());
+
+    child.emit('error', new Error('transport broke'));
+
+    expect(errors).toEqual(['GitHub Copilot CLI failed: transport broke']);
+    expect(idle).toEqual([]);
+
+    rejectPrompt(new Error('connection closed'));
+    await sending;
+
+    expect(errors).toEqual(['GitHub Copilot CLI failed: transport broke']);
+    expect(idle).toHaveLength(1);
+  });
 });
 
 describe('isSafeAcpSessionId', () => {

@@ -212,6 +212,12 @@ interface RetryableKickoff {
   executionProfile: ChatExecutionProfile;
 }
 
+interface PendingTurnAdmission {
+  turnId: string;
+  text: string;
+  message: ChatMessage;
+}
+
 const formatTime = (ts?: number) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
@@ -317,6 +323,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const sessionsRef = useRef(initialStore.sessions);
+  const pendingAdmissionsRef = useRef<PendingTurnAdmission[]>([]);
   // Whether stream chunks may append to the last assistant bubble (the one
   // opened by the current turn) — prevents merging into errors or old turns.
   const turnOpenRef = useRef(false);
@@ -480,17 +487,27 @@ export function AgentChat({ ws }: AgentChatProps) {
     text: string,
     executionProfile?: ChatExecutionProfile,
   ) => {
-    socket.send(JSON.stringify({
-      type: 'input',
-      input: text,
-      ...(executionProfile ? { executionProfile } : {}),
-    }));
-    setMessages(prev => [...prev, {
+    const turnId = crypto.randomUUID();
+    const message: ChatMessage = {
       role: 'user',
       content: text,
       ts: Date.now(),
       ...(executionProfile ? { executionProfile } : {}),
-    }]);
+    };
+    pendingAdmissionsRef.current.push({ turnId, text, message });
+    try {
+      socket.send(JSON.stringify({
+        type: 'input',
+        input: text,
+        turnId,
+        ...(executionProfile ? { executionProfile } : {}),
+      }));
+    } catch (error) {
+      pendingAdmissionsRef.current = pendingAdmissionsRef.current
+        .filter(admission => admission.turnId !== turnId);
+      throw error;
+    }
+    setMessages(prev => [...prev, message]);
     setInput('');
     setBusy(true);
     closeTurn();
@@ -563,7 +580,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     wsUrl += '/ws';
 
     endedNoteRef.current = false;
-    let dispatched = false;
+      let dispatched = false;
     let failureReported = false;
     let socket: WebSocket;
 
@@ -620,17 +637,32 @@ export function AgentChat({ ws }: AgentChatProps) {
       // a surprise write-capable first turn. `undefined` retains the manual
       // Start/Enter behavior of sending the visible draft.
       const firstMessage = options.firstMessage === null ? '' : (options.firstMessage ?? input).trim();
+      let kickoffAdmission: PendingTurnAdmission | undefined;
 
       try {
         socket.send(JSON.stringify(startPayload));
         if (firstMessage) {
+          const turnId = crypto.randomUUID();
+          const message: ChatMessage = {
+            role: 'user',
+            content: firstMessage,
+            ts: Date.now(),
+            ...(turnExecutionProfile ? { executionProfile: turnExecutionProfile } : {}),
+          };
+          kickoffAdmission = { turnId, text: firstMessage, message };
+          pendingAdmissionsRef.current.push(kickoffAdmission);
           socket.send(JSON.stringify({
             type: 'input',
             input: firstMessage,
+            turnId,
             ...(turnExecutionProfile ? { executionProfile: turnExecutionProfile } : {}),
           }));
         }
       } catch {
+        if (kickoffAdmission) {
+          pendingAdmissionsRef.current = pendingAdmissionsRef.current
+            .filter(admission => admission.turnId !== kickoffAdmission?.turnId);
+        }
         failBeforeDispatch();
         wsRef.current = null;
         connectionProviderRef.current = null;
@@ -651,7 +683,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       if (firstMessage) {
         setMessages(prev => [
           ...(options.resetMessagesOnDispatch ? [] : prev),
-          {
+          kickoffAdmission?.message ?? {
             role: 'user',
             content: firstMessage,
             ts: Date.now(),
@@ -702,17 +734,38 @@ export function AgentChat({ ws }: AgentChatProps) {
               'error',
             );
           }
+        } else if (payload.type === 'accepted' && typeof payload.turnId === 'string') {
+          pendingAdmissionsRef.current = pendingAdmissionsRef.current
+            .filter(admission => admission.turnId !== payload.turnId);
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
           if (payload.state !== 'busy') closeTurn();
         } else if (payload.type === 'system') {
           appendSystemNote(payload.message, 'note');
           closeTurn();
+        } else if (payload.type === 'rejected' && payload.reason === 'busy') {
+          const rejectedIndex = pendingAdmissionsRef.current
+            .findIndex(admission => admission.turnId === payload.turnId);
+          const rejected = rejectedIndex === -1
+            ? undefined
+            : pendingAdmissionsRef.current.splice(rejectedIndex, 1)[0];
+          if (rejected) {
+            setMessages(prev => prev.filter(message => message !== rejected.message));
+            setInput(current => current ? `${rejected.text}\n\n${current}` : rejected.text);
+          }
+          appendSystemNote(
+            typeof payload.message === 'string'
+              ? payload.message
+              : 'The agent is still processing the current turn.',
+            'error',
+          );
         } else if (payload.type === 'error') {
+          pendingAdmissionsRef.current = [];
           appendSystemNote(payload.message, 'error');
           setBusy(false);
           closeTurn();
         } else if (payload.type === 'close') {
+          pendingAdmissionsRef.current = [];
           setConnected(false);
           setBusy(false);
           closeTurn();

@@ -115,6 +115,25 @@ export function dispatchAgentInput(
   return null;
 }
 
+/** Per-socket admission guard so a second prompt is rejected, never dropped. */
+export class AgentTurnGate {
+  private active = false;
+
+  public tryBegin(): boolean {
+    if (this.active) return false;
+    this.active = true;
+    return true;
+  }
+
+  public settle(): void {
+    this.active = false;
+  }
+
+  public isActive(): boolean {
+    return this.active;
+  }
+}
+
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
   const origin = c.req.header('origin');
@@ -130,12 +149,15 @@ app.get('/ws', async (c, next) => {
   
   // Chat protocol:
   //   client -> server: {type:'start', command, cwd, sessionId?, resume?}
-  //                    | {type:'input', input, executionProfile?} | {type:'stop'} | 'ping'
+  //                    | {type:'input', input, turnId?, executionProfile?} | {type:'stop'} | 'ping'
   //   server -> client: {type:'stream', text} | {type:'session', id} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
-  //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
+  //                     | {type:'accepted', turnId?} | {type:'error', message}
+  //                     | {type:'rejected', reason:'busy', message, turnId?}
+  //                     | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
     let activeProvider: ProviderAdapter | null = null;
+    const turnGate = new AgentTurnGate();
 
     return {
       onMessage(event, ws) {
@@ -150,9 +172,12 @@ app.get('/ws', async (c, next) => {
             if (payload.type === 'ping') {
               ws.send(JSON.stringify({ type: 'pong' }));
             } else if (payload.type === 'start') {
+              turnGate.settle();
               if (agent) {
-                agent.stop();
+                const previousAgent = agent;
+                agent = null;
                 activeProvider = null;
+                previousAgent.stop();
               }
               const provider = ProviderRegistry.getProvider(payload.command);
               if (!provider) {
@@ -169,46 +194,78 @@ app.get('/ws', async (c, next) => {
                 session = { id: payload.sessionId, resume: Boolean(payload.resume) };
               }
 
-              agent = provider.createInstance();
+              const startedAgent = provider.createInstance();
+              agent = startedAgent;
               activeProvider = provider;
-              agent.on('data', (text: string) => {
+              const isCurrentAgent = () => agent === startedAgent;
+              startedAgent.on('data', (text: string) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'stream', text }));
               });
-              agent.on('system', (message: string) => {
+              startedAgent.on('system', (message: string) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'system', message }));
               });
-              agent.on('session', (id: string) => {
+              startedAgent.on('session', (id: string) => {
+                if (!isCurrentAgent()) return;
                 // Provider output is still boundary input. Only inert UUIDs
                 // may be persisted by the renderer and sent back in argv.
                 if (isValidSessionUuid(id)) {
                   ws.send(JSON.stringify({ type: 'session', id }));
                 }
               });
-              agent.on('idle', () => {
+              startedAgent.on('idle', () => {
+                if (!isCurrentAgent()) return;
+                turnGate.settle();
                 ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
-              agent.on('close', (code: number) => {
+              startedAgent.on('close', (code: number) => {
+                if (!isCurrentAgent()) return;
+                turnGate.settle();
                 ws.send(JSON.stringify({ type: 'close', code }));
               });
-              agent.on('error', (error: Error) => {
+              startedAgent.on('error', (error: Error) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
-                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
-              agent.start(payload.cwd, session);
+              startedAgent.start(payload.cwd, session);
             } else if (payload.type === 'input') {
               if (agent && activeProvider) {
+                if (!turnGate.tryBegin()) {
+                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                  ws.send(JSON.stringify({
+                    type: 'rejected',
+                    reason: 'busy',
+                    message: 'The agent is still processing the current turn.',
+                    ...(turnId ? { turnId } : {}),
+                  }));
+                  return;
+                }
                 const error = dispatchAgentInput(agent, activeProvider, payload);
                 if (error) {
+                  turnGate.settle();
                   ws.send(JSON.stringify({ type: 'error', message: error }));
                   return;
                 }
-                ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
+                // Some harness validation failures emit error + idle
+                // synchronously from send(); do not overwrite that settled
+                // state with a late busy frame.
+                if (turnGate.isActive()) {
+                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                  ws.send(JSON.stringify({
+                    type: 'accepted',
+                    ...(turnId ? { turnId } : {}),
+                  }));
+                  ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
+                }
               }
             } else if (payload.type === 'stop') {
+              turnGate.settle();
               if (agent) {
-                agent.stop();
+                const stoppedAgent = agent;
                 agent = null;
                 activeProvider = null;
+                stoppedAgent.stop();
               }
             }
           } catch (err) {
@@ -221,10 +278,12 @@ app.get('/ws', async (c, next) => {
       },
       onClose(_event, _ws) {
         console.log('[WS] Client disconnected');
+        turnGate.settle();
         if (agent) {
-          agent.stop();
+          const disconnectedAgent = agent;
           agent = null;
           activeProvider = null;
+          disconnectedAgent.stop();
         }
       },
     };
