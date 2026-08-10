@@ -189,6 +189,64 @@ test.describe('Claude and Codex embedded handoff', () => {
     await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
   });
 
+  test('only resumes a new Claude session after the provider acknowledges its id', async ({ page }) => {
+    const starts: Array<Record<string, unknown>> = [];
+    let connectionCount = 0;
+    await mockProviderStatus(page, [provider('claude')]);
+    await page.routeWebSocket('**/ws', (socket) => {
+      const connection = ++connectionCount;
+      let currentStart: Record<string, unknown> | null = null;
+      socket.onMessage((message) => {
+        const frame = JSON.parse(String(message)) as Record<string, unknown>;
+        if (frame.type === 'start') {
+          currentStart = frame;
+          starts.push(frame);
+        } else if (frame.type === 'input') {
+          if (connection === 1) {
+            socket.send(JSON.stringify({ type: 'session', id: '123e4567-e89b-42d3-a456-426614174999' }));
+            socket.send(JSON.stringify({ type: 'error', message: 'Claude failed before session init.' }));
+            socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
+          } else if (connection === 2 && typeof currentStart?.sessionId === 'string') {
+            socket.send(JSON.stringify({ type: 'session', id: currentStart.sessionId.toUpperCase() }));
+            socket.send(JSON.stringify({ type: 'stream', text: 'Claude acknowledged the session.' }));
+            socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
+          }
+        }
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    const startTurn = async (text: string, expectedStarts: number) => {
+      await page.getByPlaceholder(/Start the agent/).fill(text);
+      await page.getByRole('button', { name: 'Start' }).click();
+      await expect.poll(() => starts.length).toBe(expectedStarts);
+    };
+
+    await startTurn('First attempt fails before acknowledgement', 1);
+    await expect(page.getByText('Claude failed before session init.')).toBeVisible();
+    await page.getByRole('button', { name: 'Stop' }).click();
+
+    await startTurn('Retry the unacknowledged session', 2);
+    await expect(page.getByText('Claude acknowledged the session.')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem('nexusflow_chat_feature-x') ?? '{}');
+      return stored.sessions?.['claude-cli']?.started;
+    })).toBe(true);
+    await page.reload();
+
+    await startTurn('Resume only after acknowledgement', 3);
+
+    expect(starts[0].sessionId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(starts[1]).toMatchObject({
+      sessionId: starts[0].sessionId,
+      resume: false,
+    });
+    expect(starts[2]).toMatchObject({
+      sessionId: starts[0].sessionId,
+      resume: true,
+    });
+  });
+
   test('resets an in-chat session resume to Review before the next turn', async ({ page }) => {
     const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
     const frames: Array<Record<string, unknown>> = [];

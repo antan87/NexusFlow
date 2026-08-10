@@ -35,15 +35,22 @@ export function buildClaudeTurnArgs(
   session?: AgentSession,
   executionProfile: AgentExecutionProfile = 'review',
 ): string[] {
+  const outputArgs = [
+    '--output-format', 'stream-json',
+    '--verbose',
+    '--include-partial-messages',
+  ];
   const permissionArgs = [
     '--permission-mode',
     executionProfile === 'workspace-write' ? 'acceptEdits' : 'plan',
   ];
   if (!session) {
-    return isFirstTurn ? ['-p', ...permissionArgs] : ['-c', '-p', ...permissionArgs];
+    return isFirstTurn
+      ? ['-p', ...outputArgs, ...permissionArgs]
+      : ['-c', '-p', ...outputArgs, ...permissionArgs];
   }
   if (!session.resume && isFirstTurn) {
-    return ['-p', ...permissionArgs, '--session-id', session.id];
+    return ['-p', ...outputArgs, ...permissionArgs, '--session-id', session.id];
   }
-  return ['-p', ...permissionArgs, '--resume', session.id];
+  return ['-p', ...outputArgs, ...permissionArgs, '--resume', session.id];
 }

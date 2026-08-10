@@ -303,6 +303,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [profilesByProvider, setProfilesByProvider] = useState(initialStore.profilesByProvider);
   const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [sessionRevision, setSessionRevision] = useState(0);
   const [sessionSwitching, setSessionSwitching] = useState(false);
   const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
   const [retryChecking, setRetryChecking] = useState(false);
@@ -360,7 +361,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     // history); debounce so a burst of chunks writes at most once.
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(flushPersist, 400);
-  }, [messages, agentName, profilesByProvider, flushPersist]);
+  }, [messages, agentName, profilesByProvider, sessionRevision, flushPersist]);
 
   useEffect(() => {
     // pagehide fires on a hard window/tab close where React's unmount cleanup
@@ -477,7 +478,6 @@ export function AgentChat({ ws }: AgentChatProps) {
   const sendTurn = useCallback((
     socket: WebSocket,
     text: string,
-    providerId: string,
     executionProfile?: ChatExecutionProfile,
   ) => {
     socket.send(JSON.stringify({
@@ -485,15 +485,6 @@ export function AgentChat({ ws }: AgentChatProps) {
       input: text,
       ...(executionProfile ? { executionProfile } : {}),
     }));
-    // A turn has been dispatched, so an already-known CLI session is now
-    // persisted. Codex supplies its id asynchronously via `thread.started`.
-    const knownSession = sessionsRef.current[providerId];
-    if (knownSession) {
-      sessionsRef.current = {
-        ...sessionsRef.current,
-        [providerId]: { ...knownSession, started: true },
-      };
-    }
     setMessages(prev => [...prev, {
       role: 'user',
       content: text,
@@ -652,9 +643,6 @@ export function AgentChat({ ws }: AgentChatProps) {
       // Only commit session/chat replacement after both frames have been
       // accepted by an open transport. A failed kickoff therefore cannot
       // erase the user's prior local conversation.
-      if (firstMessage && nextSessions[providerId]) {
-        nextSessions[providerId] = { ...nextSessions[providerId], started: true };
-      }
       sessionsRef.current = nextSessions;
       dispatched = true;
       setConnecting(false);
@@ -695,10 +683,25 @@ export function AgentChat({ ws }: AgentChatProps) {
             return [...prev, { role: 'assistant', content: payload.text, ts: Date.now() }];
           });
         } else if (payload.type === 'session' && typeof payload.id === 'string') {
-          sessionsRef.current = {
-            ...sessionsRef.current,
-            [providerId]: { id: payload.id, started: true },
-          };
+          const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id);
+          const pendingSession = sessionsRef.current[providerId];
+          const matchesRequestedSession = selectedProvider.capabilities.sessionIdentity !== 'client-assigned'
+            || pendingSession?.id.toLowerCase() === payload.id.toLowerCase();
+          if (validId && matchesRequestedSession) {
+            const acknowledgedId = selectedProvider.capabilities.sessionIdentity === 'client-assigned'
+              ? pendingSession!.id
+              : payload.id;
+            sessionsRef.current = {
+              ...sessionsRef.current,
+              [providerId]: { id: acknowledgedId, started: true },
+            };
+            setSessionRevision(current => current + 1);
+          } else {
+            appendSystemNote(
+              'The local CLI returned an unexpected session identity. This turn will not be resumed automatically.',
+              'error',
+            );
+          }
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
           if (payload.state !== 'busy') closeTurn();
@@ -765,7 +768,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     const provider = providers.find(candidate => candidate.id === providerId);
     const executionProfile = profileForProvider(providerId, provider);
     if (provider?.executionProfiles?.length && !executionProfile) return;
-    sendTurn(wsRef.current, text, providerId, executionProfile);
+    sendTurn(wsRef.current, text, executionProfile);
   }, [busy, input, profileForProvider, providers, sendTurn]);
 
   const copyMessage = useCallback((idx: number, content: string) => {
