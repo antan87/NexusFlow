@@ -241,7 +241,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       onClick={() => handleResumeSession(selected)}
                     >
                       <Play size={13} className={resumingWs === selected.branchName ? 'animate-spin' : ''} />
-                      {resumingWs === selected.branchName ? 'Resuming…' : 'Resume in Editor'}
+                      {resumingWs === selected.branchName ? 'Opening…' : 'Continue in Chat'}
                     </Button>
                     <Menu>
                       <MenuTrigger

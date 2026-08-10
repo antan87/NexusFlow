@@ -29,6 +29,13 @@ import {
   type CreateWorkspacePayload,
 } from '../lib/api/queries.js';
 import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
+import {
+  WORKSPACE_KICKOFF,
+  assistantLabel,
+  createChatLaunchIntent,
+  providerForAssistant,
+  type EmbeddedHarnessAssistant,
+} from '../features/chat/chatLaunch.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
 import type { RepoInfo, WorkspaceMode } from '../types.js';
 
@@ -244,6 +251,9 @@ export function StartWorkPage() {
 
   // 'none' is a legacy persisted sentinel meaning "no editor configured".
   const defaultEditor = config?.defaultEditor && config.defaultEditor !== 'none' ? config.defaultEditor : null;
+  const embeddedAssistant = assistants.find(
+    (assistant): assistant is EmbeddedHarnessAssistant => providerForAssistant(assistant) !== null,
+  );
 
   const openInEditor = async () => {
     if (!progress.workspacePath) return;
@@ -295,7 +305,22 @@ export function StartWorkPage() {
         <div className="mt-6 flex gap-2">
           {progress.status === 'completed' && progress.workspaceId && (
             <>
-              <Button onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}>
+              {embeddedAssistant && (
+                <Button
+                  onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`, {
+                    state: {
+                      chatLaunch: createChatLaunchIntent(embeddedAssistant, { kickoff: WORKSPACE_KICKOFF }),
+                    },
+                  })}
+                >
+                  <Sparkles />
+                  Start task with {assistantLabel(embeddedAssistant)}
+                </Button>
+              )}
+              <Button
+                variant={embeddedAssistant ? 'outline' : undefined}
+                onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}
+              >
                 Open workspace
               </Button>
               {canOpenEditor && (

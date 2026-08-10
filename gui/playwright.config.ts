@@ -32,9 +32,10 @@ export default defineConfig({
     },
   ],
 
-  /* Run local dev server before starting the tests */
+  /* Keep React's development StrictMode checks active in E2E. Production
+   * bundling is verified separately by `npm run build`. */
   webServer: {
-    command: 'npm run preview -- --port 4173',
+    command: 'npm run dev -- --port 4173',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
   },

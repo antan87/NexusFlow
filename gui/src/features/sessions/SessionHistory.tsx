@@ -91,12 +91,14 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                 >
                   <MessageSquare size={13} /> View Chat Log
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}
-                >
-                  <Play size={11} /> Resume
-                </Button>
+                {(sess.assistant === 'claude' || sess.assistant === 'codex') && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}
+                  >
+                    <Play size={11} /> Resume in Chat
+                  </Button>
+                )}
               </div>
             </div>
           ))}

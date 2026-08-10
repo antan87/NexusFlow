@@ -5,8 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
  * Shared lifecycle for CLI-backed agents (claude, codex, agy). Each turn spawns the
  * binary once in print mode, streams stdout as `data`, and emits `idle` when
  * the turn ends. Subclasses supply the binary, the per-turn args, how the
- * prompt is delivered, and (optionally) a one-shot fallback used when the
- * first attempt of a turn fails with no output.
+ * prompt is delivered.
  *
  * Prompt delivery differs per CLI: `claude` is an npm `.cmd` shim that needs
  * `shell: true` on Windows, and under a shell an argv prompt would be split on
@@ -51,20 +50,6 @@ export abstract class CliAdapterBase extends EventEmitter {
     return false;
   }
 
-  /**
-   * Args to retry with when the first attempt of a turn exits non-zero with no
-   * output (e.g. resuming a purged session). Return null for no fallback.
-   */
-  protected fallbackArgs(): string[] | null {
-    return null;
-  }
-
-  /** Message emitted as a `system` event when the fallback kicks in. */
-  protected fallbackMessage: string = 'Retrying…';
-
-  /** Called once per turn after it settles; `succeeded` if it produced output or exited 0. */
-  protected onTurnComplete(_succeeded: boolean): void {}
-
   public async start(cwd: string): Promise<void> {
     this.cwd = cwd;
     this.isFirstTurn = true;
@@ -77,15 +62,20 @@ export abstract class CliAdapterBase extends EventEmitter {
 
     const args = this.buildArgs(this.isFirstTurn, data);
     this.isFirstTurn = false;
-    this.runTurn(args, data, true);
+    this.runTurn(args, data);
   }
 
-  private runTurn(args: string[], data: string, allowFallback: boolean) {
-    const cliProcess = spawn(this.binary, args, {
+  /** Kept as a seam so lifecycle tests can exercise process failures without a real CLI. */
+  protected spawnProcess(args: string[]): ChildProcess {
+    return spawn(this.binary, args, {
       cwd: this.cwd,
       shell: this.useShell,
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
+  }
+
+  private runTurn(args: string[], data: string) {
+    const cliProcess = this.spawnProcess(args);
     this.child = cliProcess;
     if (this.promptViaStdin) {
       cliProcess.stdin?.write(data);
@@ -117,17 +107,7 @@ export abstract class CliAdapterBase extends EventEmitter {
       this.child = null;
       producedOutput = this.finishStdout(code) || producedOutput;
 
-      if (!this.stopped && code !== 0 && !producedOutput && allowFallback) {
-        const fb = this.fallbackArgs();
-        if (fb) {
-          this.emit('system', this.fallbackMessage);
-          this.runTurn(fb, data, false);
-          return;
-        }
-      }
-
       this.isProcessing = false;
-      this.onTurnComplete(code === 0 || producedOutput);
       // A non-zero exit after an intentional stop is expected, not an error.
       if (!this.stopped && code !== 0 && !producedOutput) {
         this.emit('error', new Error(`${this.label} exited with code ${code}${stderrTail ? `: ${stderrTail.trim()}` : ''}`));

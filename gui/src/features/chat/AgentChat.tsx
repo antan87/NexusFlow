@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
@@ -9,6 +10,7 @@ import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
+import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import AnsiImport from 'ansi-to-react';
 
@@ -35,11 +37,20 @@ interface ChatProvider {
   capabilities: ProviderCapabilities;
 }
 
-/** Session-history assistant ids mapped to their embedded CLI providers. */
-const SESSION_PROVIDERS: Record<string, string> = {
-  claude: 'claude-cli',
-  codex: 'codex-cli',
-};
+interface StartAgentOptions {
+  firstMessage?: string | null;
+  provider?: ChatProvider;
+  session?: { id: string; started: boolean };
+  resetSession?: boolean;
+  resetMessagesOnDispatch?: boolean;
+  onDispatched?: () => void;
+  onFailure?: () => void;
+}
+
+interface RetryableKickoff {
+  providerId: string;
+  kickoff: string;
+}
 
 const formatTime = (ts?: number) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
@@ -109,7 +120,10 @@ const MessageBubble = memo(function MessageBubble({
 });
 
 export function AgentChat({ ws }: AgentChatProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [providers, setProviders] = useState<ChatProvider[]>([]);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
 
   // The component is remounted per workspace (keyed by branch), so the
   // one-time initializer always reads the right store.
@@ -121,6 +135,11 @@ export function AgentChat({ ws }: AgentChatProps) {
   // True once the current turn has streamed its first chunk.
   const [turnOpen, setTurnOpen] = useState(false);
   const [agentName, setAgentName] = useState('');
+  const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [sessionSwitching, setSessionSwitching] = useState(false);
+  const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
+  const [retryChecking, setRetryChecking] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -137,6 +156,13 @@ export function AgentChat({ ws }: AgentChatProps) {
   // Latest snapshot for the debounced/unmount flush.
   const latestRef = useRef({ messages, agentName });
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consumedIntentRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const providerRequestRef = useRef(0);
+  const connectionProviderRef = useRef<string | null>(null);
+  const sessionSwitchingRef = useRef(false);
+  const sessionLoadRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
+  const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
 
   useEffect(() => {
     latestRef.current = { messages, agentName };
@@ -180,69 +206,132 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [flushPersist]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/adapters/status`)
-      .then(res => res.json())
+    const requestId = ++providerRequestRef.current;
+    const controller = new AbortController();
+    let active = true;
+
+    fetch(`${API_BASE}/api/adapters/status`, { signal: controller.signal })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(providerData => {
-        setProviders(providerData);
+        if (!active || requestId !== providerRequestRef.current) return;
+        const nextProviders = Array.isArray(providerData) ? providerData : [];
+        setProviders(nextProviders);
 
         // Prefer the provider used last time, else the first configured one.
         const persisted = initialStore.providerId
-          ? providerData.find((p: any) => p.id === initialStore.providerId)
+          ? nextProviders.find((p: ChatProvider) => p.id === initialStore.providerId)
           : undefined;
-        const firstProvider = persisted || providerData.find((p: any) => p.isConfigured) || providerData[0];
-        if (firstProvider) {
-          setAgentName(firstProvider.id);
-        }
+        const firstProvider = persisted || nextProviders.find((p: ChatProvider) => p.isConfigured) || nextProviders[0];
+        // A StrictMode replay or delayed response must not overwrite a user
+        // selection or the provider already bound to a connection.
+        if (firstProvider) setAgentName(current => current || firstProvider.id);
       })
-      .catch(err => console.error('Failed to fetch agent data', err));
-  }, []);
+      .catch(err => {
+        if (active && err?.name !== 'AbortError') console.error('Failed to fetch agent data', err);
+      })
+      .finally(() => {
+        if (active && requestId === providerRequestRef.current) setProvidersLoaded(true);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [initialStore.providerId]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      sessionLoadRef.current.id += 1;
+      sessionLoadRef.current.controller?.abort();
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [ws.branchName, ws.workspacePath]);
 
-  const currentProvider = providers.find(p => p.id === agentName);
-  const canStart = Boolean(agentName) && (!currentProvider || currentProvider.isConfigured);
+  const displayedProviderId = connectionProviderId ?? agentName;
+  const currentProvider = providers.find(p => p.id === displayedProviderId);
+  const canStart = Boolean(agentName) && Boolean(currentProvider?.isConfigured) && !connecting && !sessionSwitching;
 
-  const closeTurn = () => {
+  const closeTurn = useCallback(() => {
     turnOpenRef.current = false;
     setTurnOpen(false);
-  };
+  }, []);
 
-  const appendSystemNote = (content: string, kind: 'error' | 'note') => {
+  const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
     setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
-  };
+  }, []);
 
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
-  const sendTurn = (socket: WebSocket, text: string) => {
+  const sendTurn = useCallback((socket: WebSocket, text: string, providerId: string) => {
     socket.send(JSON.stringify({ type: 'input', input: text }));
     // A turn has been dispatched, so an already-known CLI session is now
     // persisted. Codex supplies its id asynchronously via `thread.started`.
-    const knownSession = sessionsRef.current[agentName];
+    const knownSession = sessionsRef.current[providerId];
     if (knownSession) {
       sessionsRef.current = {
         ...sessionsRef.current,
-        [agentName]: { ...knownSession, started: true },
+        [providerId]: { ...knownSession, started: true },
       };
     }
     setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
     setInput('');
     setBusy(true);
     closeTurn();
-  };
+  }, [closeTurn]);
 
-  const noteSessionEnded = () => {
+  const noteSessionEnded = useCallback(() => {
     if (endedNoteRef.current) return;
     endedNoteRef.current = true;
     appendSystemNote('Session ended', 'note');
-  };
+  }, [appendSystemNote]);
 
-  const startAgent = () => {
-    if (wsRef.current || !canStart) return;
+  const stopAgent = useCallback(() => {
+    const socket = wsRef.current;
+    if (!socket) return;
+
+    // Closing a CONNECTING socket is valid, but sending on it throws. A stop
+    // frame is only meaningful once the transport is open.
+    if (socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: 'stop' }));
+      } catch {
+        // The close below is the authoritative local stop even if the socket
+        // changed state between the readyState check and send.
+      }
+    }
+    wsRef.current = null;
+    connectionProviderRef.current = null;
+    setConnectionProviderId(null);
+    setConnecting(false);
+    socket.close();
+    setConnected(false);
+    setBusy(false);
+    closeTurn();
+    noteSessionEnded();
+  }, [closeTurn, noteSessionEnded]);
+
+  const startAgent = useCallback((providerId = agentName, options: StartAgentOptions = {}): boolean => {
+    if (wsRef.current) {
+      options.onFailure?.();
+      return false;
+    }
+
+    const selectedProvider = options.provider ?? providers.find((provider) => provider.id === providerId);
+    setAgentName(providerId);
+    if (!selectedProvider?.isConfigured) {
+      appendSystemNote(
+        selectedProvider?.message ?? `The ${providerId} provider is unavailable. Check its local CLI installation and login.`,
+        'error',
+      );
+      options.onFailure?.();
+      return false;
+    }
 
     // Convert API_BASE to ws:// or wss://
     let wsUrl = API_BASE;
@@ -254,42 +343,98 @@ export function AgentChat({ ws }: AgentChatProps) {
     wsUrl += '/ws';
 
     endedNoteRef.current = false;
-    const socket = new WebSocket(wsUrl);
-    socket.onopen = () => {
-      if (wsRef.current !== socket) return;
-      setConnected(true);
+    let dispatched = false;
+    let failureReported = false;
+    let socket: WebSocket;
 
+    const failBeforeDispatch = () => {
+      if (failureReported || dispatched || !mountedRef.current) return;
+      failureReported = true;
+      appendSystemNote('Could not open the local agent connection. Your current chat was preserved; retry explicitly when ready.', 'error');
+      options.onFailure?.();
+    };
+
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch {
+      failBeforeDispatch();
+      return false;
+    }
+    socket.onopen = () => {
+      if (!mountedRef.current || wsRef.current !== socket) {
+        socket.close();
+        return;
+      }
       const startPayload: Record<string, unknown> = {
         type: 'start',
-        command: agentName,
+        command: providerId,
         // Sessions always run in the workspace dir — that's where the
         // generated context files live (see src/utils/feature.ts).
         cwd: ws.workspacePath,
       };
-      if (currentProvider?.capabilities.sessionIdentity === 'client-assigned') {
+      const nextSessions = { ...sessionsRef.current };
+      if (options.resetSession) delete nextSessions[providerId];
+      if (options.session) nextSessions[providerId] = options.session;
+
+      if (selectedProvider.capabilities.sessionIdentity === 'client-assigned') {
         // Claude accepts a caller-assigned UUID for a new session.
-        const existing = sessionsRef.current[agentName];
+        const existing = nextSessions[providerId];
         const session = existing ?? { id: crypto.randomUUID(), started: false };
-        sessionsRef.current = { ...sessionsRef.current, [agentName]: session };
+        nextSessions[providerId] = session;
         startPayload.sessionId = session.id;
         startPayload.resume = session.started;
-      } else if (currentProvider?.capabilities.sessionIdentity === 'provider-assigned') {
+      } else if (selectedProvider.capabilities.sessionIdentity === 'provider-assigned') {
         // ACP providers and Codex create their own session ids. Only pass one
         // when resuming an id captured from the provider's session event.
-        const session = sessionsRef.current[agentName];
+        const session = nextSessions[providerId];
         if (session?.started) {
           startPayload.sessionId = session.id;
           startPayload.resume = true;
         }
       }
-      socket.send(JSON.stringify(startPayload));
 
       // If the user already typed a message, send it as the first turn so
       // Enter connects and sends in one step instead of requiring a second Enter.
-      const firstMessage = input.trim();
-      if (firstMessage) {
-        sendTurn(socket, firstMessage);
+      // `null` is an explicit programmatic connect-without-send. This matters
+      // for session resume: an unrelated draft in the composer must not become
+      // a surprise write-capable first turn. `undefined` retains the manual
+      // Start/Enter behavior of sending the visible draft.
+      const firstMessage = options.firstMessage === null ? '' : (options.firstMessage ?? input).trim();
+
+      try {
+        socket.send(JSON.stringify(startPayload));
+        if (firstMessage) socket.send(JSON.stringify({ type: 'input', input: firstMessage }));
+      } catch {
+        failBeforeDispatch();
+        wsRef.current = null;
+        connectionProviderRef.current = null;
+        setConnectionProviderId(null);
+        setConnecting(false);
+        socket.close();
+        return;
       }
+
+      // Only commit session/chat replacement after both frames have been
+      // accepted by an open transport. A failed kickoff therefore cannot
+      // erase the user's prior local conversation.
+      if (firstMessage && nextSessions[providerId]) {
+        nextSessions[providerId] = { ...nextSessions[providerId], started: true };
+      }
+      sessionsRef.current = nextSessions;
+      dispatched = true;
+      setConnecting(false);
+      setConnected(true);
+      if (options.resetMessagesOnDispatch) setMessages([]);
+      if (firstMessage) {
+        setMessages(prev => [
+          ...(options.resetMessagesOnDispatch ? [] : prev),
+          { role: 'user', content: firstMessage, ts: Date.now() },
+        ]);
+        setInput('');
+        setBusy(true);
+        closeTurn();
+      }
+      options.onDispatched?.();
     };
 
     socket.onmessage = (event) => {
@@ -312,7 +457,7 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'session' && typeof payload.id === 'string') {
           sessionsRef.current = {
             ...sessionsRef.current,
-            [agentName]: { id: payload.id, started: true },
+            [providerId]: { id: payload.id, started: true },
           };
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
@@ -342,34 +487,43 @@ export function AgentChat({ ws }: AgentChatProps) {
       // already superseded (Stop then immediate Start) must not clobber the
       // new connection or emit a spurious "Session ended".
       if (wsRef.current !== socket) return;
+      if (!dispatched) failBeforeDispatch();
       setConnected(false);
+      setConnecting(false);
       setBusy(false);
       closeTurn();
-      noteSessionEnded();
+      if (dispatched) noteSessionEnded();
       wsRef.current = null;
+      connectionProviderRef.current = null;
+      setConnectionProviderId(null);
+    };
+
+    socket.onerror = () => {
+      if (wsRef.current !== socket) return;
+      failBeforeDispatch();
+      if (!dispatched) {
+        wsRef.current = null;
+        connectionProviderRef.current = null;
+        setConnectionProviderId(null);
+        setConnecting(false);
+        setConnected(false);
+        socket.close();
+      }
     };
 
     wsRef.current = socket;
-  };
+    connectionProviderRef.current = providerId;
+    setConnectionProviderId(providerId);
+    setConnecting(true);
+    return true;
+  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, providers, ws.workspacePath]);
 
-  const stopAgent = () => {
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: 'stop' }));
-      const socket = wsRef.current;
-      wsRef.current = null;
-      socket.close();
-      setConnected(false);
-      setBusy(false);
-      closeTurn();
-      noteSessionEnded();
-    }
-  };
-
-  const sendMessage = () => {
+  const sendMessage = useCallback(() => {
     const text = input.trim();
-    if (!text || !wsRef.current || busy) return;
-    sendTurn(wsRef.current, text);
-  };
+    const providerId = connectionProviderRef.current;
+    if (!text || !wsRef.current || !providerId || busy || sessionSwitchingRef.current) return;
+    sendTurn(wsRef.current, text, providerId);
+  }, [busy, input, sendTurn]);
 
   const copyMessage = useCallback((idx: number, content: string) => {
     navigator.clipboard.writeText(content).then(() => {
@@ -378,18 +532,53 @@ export function AgentChat({ ws }: AgentChatProps) {
     }).catch(() => {});
   }, []);
 
-  const pickSession = async (session: PickableSession) => {
+  const finishSessionSwitch = useCallback((requestId: number) => {
+    if (sessionLoadRef.current.id !== requestId) return;
+    sessionLoadRef.current.controller = null;
+    sessionSwitchingRef.current = false;
+    if (mountedRef.current) setSessionSwitching(false);
+  }, []);
+
+  const loadSession = useCallback(async (session: PickableSession, connectAfterLoad = false): Promise<boolean> => {
+    const requestId = sessionLoadRef.current.id + 1;
+    sessionLoadRef.current.controller?.abort();
+    const controller = new AbortController();
+    sessionLoadRef.current = { id: requestId, controller };
+    sessionSwitchingRef.current = true;
+    setSessionSwitching(true);
     setPickerError(null);
-    if (wsRef.current) {
-      stopAgent();
+    const providerId = providerForAssistant(session.assistant);
+    if (!providerId) {
+      appendSystemNote('Only Claude Code and Codex sessions can resume in embedded chat.', 'error');
+      finishSessionSwitch(requestId);
+      return false;
     }
+
+    const provider = providers.find((candidate) => candidate.id === providerId);
+    if (!provider?.isConfigured) {
+      appendSystemNote(
+        provider?.message ?? `The ${providerId} provider is unavailable. Check its local CLI installation and login.`,
+        'error',
+      );
+      finishSessionSwitch(requestId);
+      return false;
+    }
+
+    const isCurrentRequest = () => (
+      mountedRef.current
+      && sessionLoadRef.current.id === requestId
+      && !controller.signal.aborted
+    );
+
     try {
-      const providerId = SESSION_PROVIDERS[session.assistant];
-      if (!providerId) throw new Error('Unsupported session provider');
-      const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(session.assistant)}/${encodeURIComponent(session.id)}/transcript`);
+      const res = await fetch(
+        `${API_BASE}/api/session/${encodeURIComponent(session.assistant)}/${encodeURIComponent(session.id)}/transcript`,
+        { signal: controller.signal },
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const transcript: ChatMessage[] = (data.messages || [])
+      if (!isCurrentRequest()) return false;
+      const transcript: ChatMessage[] = (Array.isArray(data.messages) ? data.messages : [])
         // The transcript parser yields empty strings for tool_use/tool_result
         // records; drop them instead of rendering empty bubbles.
         .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
@@ -399,20 +588,180 @@ export function AgentChat({ ws }: AgentChatProps) {
           ts: m.timestamp ? Date.parse(m.timestamp) || undefined : undefined,
         }));
 
+      if (wsRef.current && !window.confirm('Stop the current chat and resume this session?')) {
+        finishSessionSwitch(requestId);
+        return false;
+      }
+      if (wsRef.current) stopAgent();
+
+      setAgentName(providerId);
+      const commitTranscript = () => {
+        if (!isCurrentRequest()) return;
+        setMessages([
+          ...transcript,
+          { role: 'system', kind: 'note', content: 'Loaded session — your next message resumes it.', ts: Date.now() },
+        ]);
+        // A draft belongs to the previous context. Clear it only after the
+        // requested session switch has actually succeeded.
+        setInput('');
+        setPickerOpen(false);
+        finishSessionSwitch(requestId);
+      };
+
+      if (connectAfterLoad) {
+        const started = startAgent(providerId, {
+          firstMessage: null,
+          session: { id: session.id, started: true },
+          onDispatched: commitTranscript,
+          onFailure: () => {
+            if (!isCurrentRequest()) return;
+            setPickerError('Failed to connect to the selected session.');
+            finishSessionSwitch(requestId);
+          },
+        });
+        return started;
+      }
+
       sessionsRef.current = {
         ...sessionsRef.current,
         [providerId]: { id: session.id, started: true },
       };
-      setAgentName(providerId);
-      setMessages([
-        ...transcript,
-        { role: 'system', kind: 'note', content: 'Loaded session — your next message resumes it.', ts: Date.now() },
-      ]);
-      setPickerOpen(false);
-    } catch {
+      commitTranscript();
+      return true;
+    } catch (error) {
+      if (!isCurrentRequest() || (error instanceof DOMException && error.name === 'AbortError')) return false;
       setPickerError('Failed to load the session transcript.');
+      appendSystemNote('Failed to load the session transcript. Your current chat was preserved.', 'error');
+      finishSessionSwitch(requestId);
+      return false;
     }
-  };
+  }, [appendSystemNote, finishSessionSwitch, providers, startAgent, stopAgent]);
+
+  const pickSession = useCallback((session: PickableSession) => {
+    void loadSession(session);
+  }, [loadSession]);
+
+  const dispatchKickoff = useCallback(async (claim: RetryableKickoff, refreshStatus = false): Promise<boolean> => {
+    setRetryableKickoff(claim);
+    let freshProvider: ChatProvider | undefined;
+
+    if (refreshStatus) {
+      setRetryChecking(true);
+      try {
+        const response = await fetch(`${API_BASE}/api/adapters/status`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const nextProviders: ChatProvider[] = Array.isArray(data) ? data : [];
+        if (!mountedRef.current) return false;
+        setProviders(nextProviders);
+        freshProvider = nextProviders.find((provider) => provider.id === claim.providerId);
+        if (!freshProvider?.isConfigured) {
+          appendSystemNote(
+            freshProvider?.message ?? 'The selected local CLI is still unavailable. Install it and sign in, then retry.',
+            'error',
+          );
+          return false;
+        }
+      } catch {
+        if (mountedRef.current) {
+          appendSystemNote('Could not refresh the local CLI status. The task handoff was not dispatched.', 'error');
+        }
+        return false;
+      } finally {
+        if (mountedRef.current) setRetryChecking(false);
+      }
+    }
+
+    return startAgent(claim.providerId, {
+      firstMessage: claim.kickoff,
+      provider: freshProvider,
+      resetSession: true,
+      resetMessagesOnDispatch: true,
+      onDispatched: () => {
+        if (mountedRef.current) setRetryableKickoff(null);
+      },
+      onFailure: () => {
+        if (mountedRef.current) setRetryableKickoff(claim);
+      },
+    });
+  }, [appendSystemNote, startAgent]);
+
+  useEffect(() => {
+    if (!providersLoaded || !launchIntent) return;
+
+    let previouslyConsumed = consumedIntentRef.current === launchIntent.nonce;
+    try {
+      previouslyConsumed = previouslyConsumed
+        || sessionStorage.getItem('nexusflow.chatLaunch.consumed') === launchIntent.nonce;
+      sessionStorage.setItem('nexusflow.chatLaunch.consumed', launchIntent.nonce);
+    } catch {
+      // sessionStorage can be disabled; the component-local guard still
+      // prevents repeats during this mount.
+    }
+    consumedIntentRef.current = launchIntent.nonce;
+
+    // Remove the write-capable intent before opening a socket. Browser back,
+    // reload, and React re-renders must never replay a kickoff.
+    const nextState = location.state && typeof location.state === 'object'
+      ? { ...(location.state as Record<string, unknown>) }
+      : {};
+    delete nextState.chatLaunch;
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: Object.keys(nextState).length > 0 ? nextState : null,
+    });
+
+    if (previouslyConsumed) return;
+
+    const provider = providers.find((candidate) => candidate.id === launchIntent.providerId);
+    setAgentName(launchIntent.providerId);
+    if (!provider?.isConfigured) {
+      appendSystemNote(
+        provider?.message ?? 'The selected local CLI is unavailable. Install it and sign in, then try again.',
+        'error',
+      );
+      if (launchIntent.kickoff) {
+        setRetryableKickoff({ providerId: launchIntent.providerId, kickoff: launchIntent.kickoff });
+      }
+      return;
+    }
+
+    if (launchIntent.sessionId && launchIntent.assistant) {
+      void loadSession({
+        id: launchIntent.sessionId,
+        assistant: launchIntent.assistant,
+        title: '',
+        createdAt: '',
+        updatedAt: '',
+        messageCount: 0,
+      }, true);
+      return;
+    }
+
+    if (wsRef.current && !window.confirm('Stop the current chat and continue with the selected local CLI?')) {
+      return;
+    }
+    if (wsRef.current) stopAgent();
+
+    if (launchIntent.kickoff) {
+      void dispatchKickoff({ providerId: launchIntent.providerId, kickoff: launchIntent.kickoff });
+    } else {
+      startAgent(launchIntent.providerId, { firstMessage: null });
+    }
+  }, [
+    appendSystemNote,
+    dispatchKickoff,
+    launchIntent,
+    loadSession,
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    providers,
+    providersLoaded,
+    startAgent,
+    stopAgent,
+  ]);
 
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear this chat history? This also starts a new agent session.')) {
@@ -463,7 +812,14 @@ export function AgentChat({ ws }: AgentChatProps) {
         </div>
       </div>
 
-      <SessionPicker open={pickerOpen} onClose={() => setPickerOpen(false)} ws={ws} onPick={pickSession} error={pickerError} />
+      <SessionPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        ws={ws}
+        onPick={pickSession}
+        error={pickerError}
+        pending={sessionSwitching}
+      />
 
       <div
         ref={listRef}
@@ -500,6 +856,19 @@ export function AgentChat({ ws }: AgentChatProps) {
             <span>{currentProvider.message}</span>
           </div>
         )}
+        {retryableKickoff && !connecting && !connected && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-foreground">
+            <span>The workspace kickoff was not dispatched.</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void dispatchKickoff(retryableKickoff, true)}
+              disabled={sessionSwitching || retryChecking}
+            >
+              {retryChecking ? 'Checking CLI…' : 'Retry task handoff'}
+            </Button>
+          </div>
+        )}
         <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
           <div className="flex items-center gap-2 border-b border-border/50 p-2">
             <Menu>
@@ -528,6 +897,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           <div className="flex items-end gap-2 p-2">
             <Textarea
               value={input}
+              disabled={sessionSwitching}
               onChange={(e) => {
                 setInput(e.target.value);
                 const el = e.target;
@@ -537,7 +907,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  if (busy) return;
+                  if (busy || connecting || sessionSwitchingRef.current) return;
                   if (!connected) {
                     startAgent();
                   } else {
@@ -553,7 +923,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               rows={1}
             />
             {!connected ? (
-              <Button className="h-11 shrink-0 rounded-lg" onClick={startAgent} disabled={!canStart}>
+              <Button className="h-11 shrink-0 rounded-lg" onClick={() => startAgent()} disabled={!canStart}>
                 <PlaySquare size={14} />
                 Start
               </Button>
@@ -561,7 +931,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               <Button
                 className="h-11 shrink-0 rounded-lg"
                 onClick={sendMessage}
-                disabled={!input.trim() || busy}
+                disabled={!input.trim() || busy || sessionSwitching}
               >
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                 Send
