@@ -20,6 +20,17 @@ const provider = (assistant: 'claude' | 'codex', isConfigured = true) => {
     setupIssue: isConfigured ? undefined : 'signed-out',
     recoveryCommand: isConfigured ? undefined : recoveryCommand,
     recoveryLabel: isConfigured ? undefined : 'Copy sign-in command',
+    executionProfiles: [
+      { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+      {
+        id: 'workspace-write',
+        label: 'Edit workspace',
+        description: assistant === 'claude'
+          ? 'Auto-accepts in-workspace file edits and common filesystem actions; other approval-requiring commands are unavailable in embedded chat.'
+          : 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
+      },
+    ],
+    defaultExecutionProfile: 'review',
     capabilities: {
       transport: 'cli-print',
       sessionIdentity: assistant === 'claude' ? 'client-assigned' : 'provider-assigned',
@@ -127,11 +138,163 @@ test.describe('Claude and Codex embedded handoff', () => {
       await composer.press('Enter');
       await expect.poll(() => frames.filter((frame) => frame.type === 'input').length).toBe(1);
       expect(frames.filter((frame) => frame.type === 'input')).toEqual([
-        { type: 'input', input: 'Continue from there' },
+        { type: 'input', input: 'Continue from there', executionProfile: 'review' },
       ]);
       expect(legacyRequests).toEqual([]);
     });
   }
+
+  test('authorizes each Codex turn with the profile selected for that turn', async ({ page }) => {
+    const frames: Array<Record<string, unknown>> = [];
+    await mockProviderStatus(page, [provider('claude'), provider('codex')]);
+    await page.routeWebSocket('**/ws', (socket) => {
+      socket.onMessage((message) => {
+        const frame = JSON.parse(String(message));
+        frames.push(frame);
+        if (frame.type === 'input') {
+          socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
+        }
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await page.getByLabel('Select Provider').click();
+    await page.getByRole('menuitem', { name: /Codex/ }).click();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
+
+    await page.getByPlaceholder(/Start the agent/).fill('Inspect without edits');
+    await page.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
+
+    await page.getByLabel('Select execution profile').click();
+    await page.getByRole('menuitem', { name: /Edit workspace/ }).click();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
+    await page.getByPlaceholder(/Message the agent/).fill('Apply the approved change');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(2);
+
+    expect(frames.filter(frame => frame.type === 'start')).toHaveLength(1);
+    expect(frames.filter(frame => frame.type === 'input')).toEqual([
+      { type: 'input', input: 'Inspect without edits', executionProfile: 'review' },
+      { type: 'input', input: 'Apply the approved change', executionProfile: 'workspace-write' },
+    ]);
+
+    await page.reload();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
+    await page.getByLabel('Select Provider').click();
+    await page.getByRole('menuitem', { name: /Claude Code/ }).click();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
+    await page.getByLabel('Select Provider').click();
+    await page.getByRole('menuitem', { name: /Codex/ }).click();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
+  });
+
+  test('resets an in-chat session resume to Review before the next turn', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    const frames: Array<Record<string, unknown>> = [];
+    await page.addInitScript(() => {
+      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
+        v: 4,
+        sessions: {},
+        providerId: 'codex-cli',
+        profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'workspace-write' },
+        messages: [{ role: 'assistant', content: 'Existing workspace chat' }],
+      }));
+    });
+    await mockProviderStatus(page, [provider('claude'), provider('codex')]);
+    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            id: sessionId,
+            assistant: 'codex',
+            title: 'Prior Codex review',
+            createdAt: '2026-08-09T00:00:00.000Z',
+            updatedAt: '2026-08-10T00:00:00.000Z',
+            messageCount: 2,
+          }],
+        }),
+      });
+    });
+    await page.route(`**/api/session/codex/${sessionId}/transcript`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ messages: [{ role: 'assistant', content: 'Prior session loaded' }] }),
+      });
+    });
+    await page.routeWebSocket('**/ws', (socket) => {
+      socket.onMessage((message) => frames.push(JSON.parse(String(message))));
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
+    await page.getByTitle('Resume a past session').click();
+    await page.getByRole('button', { name: /Prior Codex review/ }).click();
+
+    await expect(page.getByText('Prior session loaded')).toBeVisible();
+    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
+    await page.getByPlaceholder(/Start the agent/).fill('Continue reviewing');
+    await page.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
+    expect(frames.filter(frame => frame.type === 'start')).toEqual([{
+      type: 'start',
+      command: 'codex-cli',
+      cwd: 'C:/ws/feature-x',
+      sessionId,
+      resume: true,
+    }]);
+    expect(frames.filter(frame => frame.type === 'input')).toEqual([
+      { type: 'input', input: 'Continue reviewing', executionProfile: 'review' },
+    ]);
+  });
+
+  test('rejects a write kickoff when the refreshed provider only supports Review', async ({ page }) => {
+    let socketCount = 0;
+    await page.addInitScript(() => {
+      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
+        v: 4,
+        sessions: {},
+        providerId: 'claude-cli',
+        profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'review' },
+        messages: [{ role: 'assistant', content: 'Preserve this chat' }],
+      }));
+    });
+    const reviewOnlyProvider = {
+      ...provider('claude'),
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+      ],
+    };
+    await mockProviderStatus(page, [reviewOnlyProvider]);
+    await page.routeWebSocket('**/ws', () => {
+      socketCount += 1;
+    });
+
+    await page.goto('/#/dashboard');
+    await page.evaluate(() => {
+      window.history.replaceState({
+        usr: {
+          chatLaunch: {
+            nonce: crypto.randomUUID(),
+            providerId: 'claude-cli',
+            assistant: 'claude',
+            kickoff: 'Do not dispatch this unsupported write turn.',
+            executionProfile: 'workspace-write',
+          },
+        },
+        key: 'unsupported-write-profile',
+        idx: 0,
+      }, '', '/#/workspaces/feature-x');
+      window.location.reload();
+    });
+
+    await expect(page.getByText('Preserve this chat')).toBeVisible();
+    await expect(page.getByText(/Select a supported execution profile/i)).toBeVisible();
+    expect(socketCount).toBe(0);
+  });
 
   test('preserves the current chat when a resume transcript cannot be loaded', async ({ page }) => {
     let socketCount = 0;
@@ -234,6 +397,14 @@ test.describe('Claude and Codex embedded handoff', () => {
       name: 'unknown setup state',
       status: { ...provider('claude', false), setupIssue: 'ready' },
     },
+    {
+      name: 'unknown execution profile',
+      status: {
+        ...provider('claude'),
+        executionProfiles: [{ id: 'unrestricted', label: 'Unsafe', description: 'Anything goes.' }],
+        defaultExecutionProfile: 'unrestricted',
+      },
+    },
   ]) {
     test(`fails closed for ${malformed.name} in provider status`, async ({ page }) => {
       let socketCount = 0;
@@ -253,6 +424,7 @@ test.describe('Claude and Codex embedded handoff', () => {
               providerId: 'claude-cli',
               assistant: 'claude',
               kickoff: 'This retained kickoff must not be dispatched.',
+              executionProfile: 'workspace-write',
             },
           },
           key: 'malformed-provider-status',
@@ -363,7 +535,11 @@ test.describe('Claude and Codex embedded handoff', () => {
 
     await expect(page.getByLabel('Select Provider')).toContainText('Codex');
     expect(frames[0]).toMatchObject({ command: 'codex-cli', cwd: 'C:/ws/feature-x' });
-    expect(frames[1]).toEqual({ type: 'input', input: 'Use the bound provider' });
+    expect(frames[1]).toEqual({
+      type: 'input',
+      input: 'Use the bound provider',
+      executionProfile: 'review',
+    });
   });
 
   test('keeps unsupported sessions view-only', async ({ page }) => {

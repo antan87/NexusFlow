@@ -1,6 +1,7 @@
 import { CliAdapterBase } from './CliAdapterBase.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import { findExecutable } from './cliAvailability.js';
+import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 export type CodexOutputEvent =
   | { type: 'session'; id: string }
@@ -67,17 +68,26 @@ export function decodeCodexLine(line: string): CodexOutputEvent[] {
   return [];
 }
 
-const CODEX_RUN_CONFIG = [
-  '-c', 'sandbox_mode="workspace-write"',
-  '-c', 'approval_policy="never"',
-];
+function codexRunConfig(executionProfile: AgentExecutionProfile): string[] {
+  return [
+    '-c', `sandbox_mode="${executionProfile === 'workspace-write' ? 'workspace-write' : 'read-only'}"`,
+    '-c', 'approval_policy="never"',
+    ...(executionProfile === 'workspace-write'
+      ? ['-c', 'sandbox_workspace_write.network_access=false']
+      : []),
+  ];
+}
 
 /** Build one keyless Codex CLI turn. Prompts always arrive over stdin. */
-export function buildCodexTurnArgs(sessionId?: string): string[] {
+export function buildCodexTurnArgs(
+  sessionId?: string,
+  executionProfile: AgentExecutionProfile = 'review',
+): string[] {
+  const runConfig = codexRunConfig(executionProfile);
   if (sessionId) {
-    return ['exec', 'resume', '--json', ...CODEX_RUN_CONFIG, sessionId, '-'];
+    return ['exec', 'resume', '--json', ...runConfig, sessionId, '-'];
   }
-  return ['exec', '--json', '--color', 'never', ...CODEX_RUN_CONFIG, '-'];
+  return ['exec', '--json', '--color', 'never', ...runConfig, '-'];
 }
 
 export class CodexCliAdapter extends CliAdapterBase {
@@ -105,13 +115,17 @@ export class CodexCliAdapter extends CliAdapterBase {
     this.sawTurnOutcome = false;
   }
 
-  protected buildArgs(isFirstTurn: boolean): string[] {
+  protected buildArgs(
+    isFirstTurn: boolean,
+    _prompt: string,
+    executionProfile: AgentExecutionProfile = 'review',
+  ): string[] {
     this.decoder = new CodexJsonlDecoder();
     this.sawTurnOutcome = false;
     const sessionId = isFirstTurn
       ? (this.requestedSession?.resume ? this.requestedSession.id : undefined)
       : this.activeSessionId;
-    return buildCodexTurnArgs(sessionId);
+    return buildCodexTurnArgs(sessionId, executionProfile);
   }
 
   protected handleStdout(text: string): boolean {

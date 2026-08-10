@@ -142,6 +142,11 @@ test.describe('NexusFlow E2E GUI Tests', () => {
             id: 'claude-cli',
             name: 'Claude Code (Local CLI)',
             isConfigured: true,
+            executionProfiles: [
+              { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+              { id: 'workspace-write', label: 'Edit workspace', description: 'Auto-accepts in-workspace file edits.' },
+            ],
+            defaultExecutionProfile: 'review',
             capabilities: {
               transport: 'cli-print',
               sessionIdentity: 'client-assigned',
@@ -197,10 +202,11 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await expect.poll(() => workspaceBody?.mode).toBe('worktree');
     await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start task with Claude' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start editing with Claude' })).toBeVisible();
+    await expect(page.getByText(/Embedded start allows edits inside this workspace/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open workspace' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Start task with Claude' }).click();
+    await page.getByRole('button', { name: 'Start editing with Claude' }).click();
     await expect.poll(() => chatFrames.length).toBeGreaterThanOrEqual(2);
     expect(chatFrames[0]).toMatchObject({
       type: 'start',
@@ -214,6 +220,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       {
         type: 'input',
         input: 'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.',
+        executionProfile: 'workspace-write',
       },
     ]);
     expect(legacyRequests).toEqual([]);
@@ -222,6 +229,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
   test('refreshes CLI availability and preserves prior chat across explicit kickoff retries', async ({ page }) => {
     await mockCompletedCreationStream(page);
     let providerConfigured = false;
+    let supportsWorkspaceWrite = true;
     let providerIssue: 'signed-out' | 'probe-failed' = 'signed-out';
     let refreshChecks = 0;
     await page.addInitScript(() => {
@@ -308,6 +316,13 @@ test.describe('NexusFlow E2E GUI Tests', () => {
           recoveryLabel: providerConfigured
             ? undefined
             : providerIssue === 'signed-out' ? 'Copy sign-in command' : 'Copy status command',
+          executionProfiles: supportsWorkspaceWrite
+            ? [
+                { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+                { id: 'workspace-write', label: 'Edit workspace', description: 'Auto-accepts in-workspace file edits.' },
+              ]
+            : [{ id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' }],
+          defaultExecutionProfile: 'review',
           capabilities: {
             transport: 'cli-print',
             sessionIdentity: 'client-assigned',
@@ -355,7 +370,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('button', { name: 'Create workspace' }).click();
     await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Start task with Claude' }).click();
+    await page.getByRole('button', { name: 'Start editing with Claude' }).click();
     await expect(page.getByText('Preserve this previous chat')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Recheck & retry' })).toBeVisible();
     await page.getByRole('button', { name: 'Copy sign-in command' }).click();
@@ -376,8 +391,17 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
 
     providerConfigured = true;
+    supportsWorkspaceWrite = false;
     await page.getByRole('button', { name: 'Recheck & retry' }).click();
     await expect.poll(() => refreshChecks).toBe(3);
+    await expect(page.getByText(/Select a supported execution profile/i)).toBeVisible();
+    await expect(page.getByText('Preserve this previous chat')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__handoffFrames)).toEqual([]);
+    expect(await page.evaluate(() => (window as any).__handoffInstances)).toBe(1);
+
+    supportsWorkspaceWrite = true;
+    await page.getByRole('button', { name: 'Recheck & retry' }).click();
+    await expect.poll(() => refreshChecks).toBe(4);
     await expect.poll(() => page.evaluate(() => (window as any).__handoffFrames.length)).toBe(2);
     const frames = await page.evaluate(() => (window as any).__handoffFrames);
     expect(frames[0]).toMatchObject({
@@ -386,10 +410,10 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       cwd: 'C:\\mock-dev\\workspaces\\demo-worktree',
       resume: false,
     });
-    expect(frames[1]).toMatchObject({ type: 'input' });
+    expect(frames[1]).toMatchObject({ type: 'input', executionProfile: 'workspace-write' });
     await expect(page.getByText('Preserve this previous chat')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__handoffInstances)).toBe(2);
-    expect(refreshChecks).toBe(3);
+    expect(refreshChecks).toBe(4);
   });
 
   test('should create an in-place workspace without showing branch fields', async ({ page }) => {

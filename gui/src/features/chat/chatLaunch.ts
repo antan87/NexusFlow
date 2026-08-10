@@ -1,3 +1,5 @@
+import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
+
 export type EmbeddedHarnessAssistant = 'claude' | 'codex';
 export type EmbeddedHarnessProvider = 'claude-cli' | 'codex-cli';
 
@@ -7,6 +9,7 @@ export interface ChatLaunchIntent {
   assistant?: EmbeddedHarnessAssistant;
   sessionId?: string;
   kickoff?: string;
+  executionProfile: ChatExecutionProfile;
 }
 
 export const WORKSPACE_KICKOFF =
@@ -26,12 +29,13 @@ export function assistantLabel(assistant: EmbeddedHarnessAssistant): string {
 
 export function createChatLaunchIntent(
   assistant: EmbeddedHarnessAssistant,
-  options: { sessionId?: string; kickoff?: string } = {},
+  options: { sessionId?: string; kickoff?: string; executionProfile?: ChatExecutionProfile } = {},
 ): ChatLaunchIntent {
   return {
     nonce: globalThis.crypto.randomUUID(),
     providerId: providerForAssistant(assistant)!,
     assistant,
+    executionProfile: options.executionProfile ?? (options.kickoff ? 'workspace-write' : 'review'),
     ...options,
   };
 }
@@ -50,6 +54,7 @@ export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
   const value = candidate as Partial<ChatLaunchIntent>;
   if (!UUID_RE.test(value.nonce ?? '')) return null;
   if (value.providerId !== 'claude-cli' && value.providerId !== 'codex-cli') return null;
+  if (!isChatExecutionProfile(value.executionProfile)) return null;
   if (value.kickoff !== undefined && (typeof value.kickoff !== 'string' || value.kickoff.length > 2_000)) {
     return null;
   }

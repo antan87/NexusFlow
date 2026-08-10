@@ -35,11 +35,27 @@ describe('ClaudeCliAdapter', () => {
     await adapter.send('Continue from the saved context');
 
     expect(adapter.processes).toHaveLength(1);
-    expect(adapter.processes[0].args).toEqual(['-p', '--resume', SESSION_ID]);
+    expect(adapter.processes[0].args).toEqual([
+      '-p', '--permission-mode', 'plan', '--resume', SESSION_ID,
+    ]);
 
     adapter.processes[0].child.emit('close', 1);
 
     expect(adapter.processes).toHaveLength(1);
     expect(errors).toEqual(['claude CLI exited with code 1']);
+  });
+
+  it('applies the selected execution profile to each spawned turn', async () => {
+    const adapter = new TestClaudeCliAdapter();
+    await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+
+    await adapter.send('Inspect first', 'review');
+    adapter.processes[0].child.emit('close', 0);
+    await adapter.send('Now edit', 'workspace-write');
+
+    expect(adapter.processes.map(process => process.args)).toEqual([
+      ['-p', '--permission-mode', 'plan', '--session-id', SESSION_ID],
+      ['-p', '--permission-mode', 'acceptEdits', '--resume', SESSION_ID],
+    ]);
   });
 });

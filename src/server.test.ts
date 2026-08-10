@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
-import { app, isAllowedUpdateUrl } from './server.js';
+import { app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -14,6 +14,7 @@ import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
+import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -125,6 +126,51 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(400);
       expect(status).not.toHaveBeenCalled();
       status.mockRestore();
+    });
+  });
+
+  describe('embedded turn execution profiles', () => {
+    const provider = {
+      id: 'profiled-test',
+      name: 'Profiled test',
+      capabilities: { transport: 'cli-print', sessionIdentity: 'none', workspaceAccess: 'harness-managed' },
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Read-only.' },
+        { id: 'workspace-write', label: 'Edit workspace', description: 'May edit.' },
+      ],
+      defaultExecutionProfile: 'review',
+      isConfigured: () => true,
+      getStatusMessage: () => undefined,
+      createInstance: () => harness(),
+    } satisfies ProviderAdapter;
+
+    function harness() {
+      return {
+        start: vi.fn(),
+        send: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn(),
+        on: vi.fn().mockReturnThis(),
+        off: vi.fn().mockReturnThis(),
+      } as unknown as AgentHarness;
+    }
+
+    it.each([undefined, 'danger-full-access', false])(
+      'rejects a missing or unsupported profile %j before harness send',
+      (executionProfile) => {
+        const agent = harness();
+        expect(dispatchAgentInput(agent, provider, { input: 'Do work', executionProfile }))
+          .toMatch(/supported execution profile/i);
+        expect(agent.send).not.toHaveBeenCalled();
+      },
+    );
+
+    it('passes a validated profile to the harness', () => {
+      const agent = harness();
+      expect(dispatchAgentInput(agent, provider, {
+        input: 'Inspect only',
+        executionProfile: 'review',
+      })).toBeNull();
+      expect(agent.send).toHaveBeenCalledWith('Inspect only', 'review');
     });
   });
 

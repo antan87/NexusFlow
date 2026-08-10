@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 /**
  * Shared lifecycle for CLI-backed agents (claude, codex, agy). Each turn spawns the
@@ -31,7 +32,11 @@ export abstract class CliAdapterBase extends EventEmitter {
 
   /** Args for one print-mode turn. Receives the prompt so argv-mode CLIs can
    *  include it; stdin-mode CLIs ignore it. */
-  protected abstract buildArgs(isFirstTurn: boolean, prompt: string): string[];
+  protected abstract buildArgs(
+    isFirstTurn: boolean,
+    prompt: string,
+    executionProfile?: AgentExecutionProfile,
+  ): string[];
 
   /**
    * Consume one stdout chunk. Structured-output adapters override this to
@@ -55,12 +60,12 @@ export abstract class CliAdapterBase extends EventEmitter {
     this.isFirstTurn = true;
   }
 
-  public async send(data: string): Promise<void> {
+  public async send(data: string, executionProfile?: AgentExecutionProfile): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.stopped = false;
 
-    const args = this.buildArgs(this.isFirstTurn, data);
+    const args = this.buildArgs(this.isFirstTurn, data, executionProfile);
     this.isFirstTurn = false;
     this.runTurn(args, data);
   }

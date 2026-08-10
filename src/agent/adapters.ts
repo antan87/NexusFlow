@@ -109,6 +109,15 @@ ProviderRegistry.register({
   name: 'Claude Code (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Harness-managed access',
+  executionProfiles: [
+    { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+    {
+      id: 'workspace-write',
+      label: 'Edit workspace',
+      description: 'Auto-accepts in-workspace file edits and common filesystem actions; other approval-requiring commands are unavailable in embedded chat.',
+    },
+  ],
+  defaultExecutionProfile: 'review',
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'client-assigned',
@@ -138,6 +147,15 @@ ProviderRegistry.register({
   name: 'Codex (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Workspace write',
+  executionProfiles: [
+    { id: 'review', label: 'Review only', description: 'Read-only sandbox; escalation is denied.' },
+    {
+      id: 'workspace-write',
+      label: 'Edit workspace',
+      description: 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
+    },
+  ],
+  defaultExecutionProfile: 'review',
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'provider-assigned',

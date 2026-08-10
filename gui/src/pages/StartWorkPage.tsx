@@ -301,6 +301,11 @@ export function StartWorkPage() {
         {progress.status === 'completed' && progress.workspacePath && (
           <p className="mt-4 truncate font-mono text-xs text-muted-foreground">{progress.workspacePath}</p>
         )}
+        {progress.status === 'completed' && embeddedAssistant && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Embedded start allows edits inside this workspace; you can switch to Review only in chat.
+          </p>
+        )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div className="mt-6 flex gap-2">
           {progress.status === 'completed' && progress.workspaceId && (
@@ -309,12 +314,15 @@ export function StartWorkPage() {
                 <Button
                   onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`, {
                     state: {
-                      chatLaunch: createChatLaunchIntent(embeddedAssistant, { kickoff: WORKSPACE_KICKOFF }),
+                      chatLaunch: createChatLaunchIntent(embeddedAssistant, {
+                        kickoff: WORKSPACE_KICKOFF,
+                        executionProfile: 'workspace-write',
+                      }),
                     },
                   })}
                 >
                   <Sparkles />
-                  Start task with {assistantLabel(embeddedAssistant)}
+                  Start editing with {assistantLabel(embeddedAssistant)}
                 </Button>
               )}
               <Button

@@ -3,6 +3,8 @@
  * Session identity for chat agents that support resumable conversations.
  */
 
+import type { AgentExecutionProfile } from './ProviderRegistry.js';
+
 /** A chat session to create or resume. `resume` means the session already has turns on disk. */
 export interface AgentSession {
   id: string;
@@ -28,12 +30,20 @@ export function isValidSessionUuid(id: unknown): id is string {
  * --session-id on the first turn and every later turn resumes that id;
  * resumed sessions use --resume from the start.
  */
-export function buildClaudeTurnArgs(isFirstTurn: boolean, session?: AgentSession): string[] {
+export function buildClaudeTurnArgs(
+  isFirstTurn: boolean,
+  session?: AgentSession,
+  executionProfile: AgentExecutionProfile = 'review',
+): string[] {
+  const permissionArgs = [
+    '--permission-mode',
+    executionProfile === 'workspace-write' ? 'acceptEdits' : 'plan',
+  ];
   if (!session) {
-    return isFirstTurn ? ['-p'] : ['-c', '-p'];
+    return isFirstTurn ? ['-p', ...permissionArgs] : ['-c', '-p', ...permissionArgs];
   }
   if (!session.resume && isFirstTurn) {
-    return ['-p', '--session-id', session.id];
+    return ['-p', ...permissionArgs, '--session-id', session.id];
   }
-  return ['-p', '--resume', session.id];
+  return ['-p', ...permissionArgs, '--resume', session.id];
 }

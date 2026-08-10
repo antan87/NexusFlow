@@ -1,5 +1,6 @@
 import { CliAdapterBase } from './CliAdapterBase.js';
 import { buildClaudeTurnArgs, type AgentSession } from './session.js';
+import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 export class ClaudeCliAdapter extends CliAdapterBase {
   protected readonly binary = 'claude';
@@ -16,7 +17,11 @@ export class ClaudeCliAdapter extends CliAdapterBase {
     this.session = session;
   }
 
-  protected buildArgs(isFirstTurn: boolean): string[] {
-    return buildClaudeTurnArgs(isFirstTurn, this.session);
+  protected buildArgs(
+    isFirstTurn: boolean,
+    _prompt: string,
+    executionProfile: AgentExecutionProfile = 'review',
+  ): string[] {
+    return buildClaudeTurnArgs(isFirstTurn, this.session, executionProfile);
   }
 }

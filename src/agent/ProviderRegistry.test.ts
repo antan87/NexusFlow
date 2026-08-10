@@ -93,4 +93,34 @@ describe('ProviderRegistry', () => {
     ProviderRegistry.getAllStatus({ refreshProviderId: 'mock-refreshable' });
     expect(invalidations).toBe(1);
   });
+
+  it('exposes provider-owned execution profiles and validates turn authorization', () => {
+    const provider = makeProvider('mock-profiled', {
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Read-only.' },
+        { id: 'workspace-write', label: 'Edit workspace', description: 'Workspace edits.' },
+      ],
+      defaultExecutionProfile: 'review',
+    });
+    ProviderRegistry.register(provider);
+
+    expect(ProviderRegistry.getAllStatus().find(status => status.id === 'mock-profiled'))
+      .toMatchObject({
+        defaultExecutionProfile: 'review',
+        executionProfiles: [
+          { id: 'review', label: 'Review only' },
+          { id: 'workspace-write', label: 'Edit workspace' },
+        ],
+      });
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'review')).toBe('review');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'workspace-write')).toBe('workspace-write');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, undefined)).toBeNull();
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'danger-full-access')).toBeNull();
+  });
+
+  it('keeps legacy providers profile-free', () => {
+    const provider = makeProvider('mock-legacy-profile');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, undefined)).toBeUndefined();
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'review')).toBeNull();
+  });
 });

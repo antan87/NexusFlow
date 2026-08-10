@@ -10,7 +10,17 @@ export interface ProviderStatus {
   setupIssue?: ProviderSetupIssue;
   recoveryCommand?: string;
   recoveryLabel?: string;
+  executionProfiles?: readonly ProviderExecutionProfile[];
+  defaultExecutionProfile?: AgentExecutionProfile;
   capabilities: ProviderCapabilities;
+}
+
+export type AgentExecutionProfile = 'review' | 'workspace-write';
+
+export interface ProviderExecutionProfile {
+  id: AgentExecutionProfile;
+  label: string;
+  description: string;
 }
 
 export type ProviderSetupIssue = 'missing-cli' | 'signed-out' | 'probe-failed';
@@ -32,7 +42,7 @@ export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'sessi
 
 export interface AgentHarness {
   start(cwd: string, session?: AgentSession): Promise<void>;
-  send(data: string): Promise<void>;
+  send(data: string, executionProfile?: AgentExecutionProfile): Promise<void>;
   stop(): void;
   on(event: AgentEvent, listener: (...args: any[]) => void): this;
   /**
@@ -53,6 +63,8 @@ export interface ProviderAdapter {
   icon?: string;
   accessLabel?: string;
   capabilities: ProviderCapabilities;
+  executionProfiles?: readonly ProviderExecutionProfile[];
+  defaultExecutionProfile?: AgentExecutionProfile;
   isConfigured(): boolean;
   getStatusMessage(): string | undefined;
   getSetupHelp?(): ProviderSetupHelp | undefined;
@@ -70,6 +82,14 @@ class ProviderRegistryImpl {
 
   getProvider(id: string): ProviderAdapter | undefined {
     return this.providers.get(id);
+  }
+
+  /** Resolve an untyped renderer value against provider-owned profiles. */
+  resolveExecutionProfile(provider: ProviderAdapter, requested: unknown): AgentExecutionProfile | undefined | null {
+    const profiles = provider.executionProfiles;
+    if (!profiles?.length) return requested === undefined ? undefined : null;
+    if (requested !== 'review' && requested !== 'workspace-write') return null;
+    return profiles.some(profile => profile.id === requested) ? requested : null;
   }
 
   getAllStatus(options: { refreshProviderId?: string } = {}): ProviderStatus[] {
@@ -94,6 +114,8 @@ class ProviderRegistryImpl {
         icon: provider.icon,
         accessLabel: provider.accessLabel,
         capabilities: provider.capabilities,
+        executionProfiles: provider.executionProfiles,
+        defaultExecutionProfile: provider.defaultExecutionProfile,
         isConfigured: provider.isConfigured(),
         message: provider.getStatusMessage(),
         ...setup,

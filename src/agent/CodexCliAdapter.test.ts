@@ -6,20 +6,37 @@ import { CodexCliAdapter } from './CodexCliAdapter.js';
 const ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';
 
 describe('buildCodexTurnArgs', () => {
-  it('starts a JSONL exec turn with workspace-only writes and no approval prompts', () => {
-    expect(buildCodexTurnArgs()).toEqual([
+  it('starts a JSONL exec turn in a read-only sandbox by default', () => {
+    expect(buildCodexTurnArgs(undefined, 'review')).toEqual([
       'exec', '--json', '--color', 'never',
-      '-c', 'sandbox_mode="workspace-write"',
+      '-c', 'sandbox_mode="read-only"',
       '-c', 'approval_policy="never"',
       '-',
     ]);
   });
 
   it('resumes the exact Codex thread id', () => {
-    expect(buildCodexTurnArgs(ID)).toEqual([
+    expect(buildCodexTurnArgs(ID, 'review')).toEqual([
+      'exec', 'resume', '--json',
+      '-c', 'sandbox_mode="read-only"',
+      '-c', 'approval_policy="never"',
+      ID, '-',
+    ]);
+  });
+
+  it('uses workspace-write with network and approval escalation disabled', () => {
+    expect(buildCodexTurnArgs(undefined, 'workspace-write')).toEqual([
+      'exec', '--json', '--color', 'never',
+      '-c', 'sandbox_mode="workspace-write"',
+      '-c', 'approval_policy="never"',
+      '-c', 'sandbox_workspace_write.network_access=false',
+      '-',
+    ]);
+    expect(buildCodexTurnArgs(ID, 'workspace-write')).toEqual([
       'exec', 'resume', '--json',
       '-c', 'sandbox_mode="workspace-write"',
       '-c', 'approval_policy="never"',
+      '-c', 'sandbox_workspace_write.network_access=false',
       ID, '-',
     ]);
   });

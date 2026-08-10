@@ -34,7 +34,7 @@ import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
-import { AgentHarness } from './agent/ProviderRegistry.js';
+import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -98,6 +98,23 @@ function hasTrustedLocalOrigin(origin: string | undefined): boolean {
   }
 }
 
+/** Validate and dispatch one renderer turn without letting malformed authority reach a harness. */
+export function dispatchAgentInput(
+  agent: AgentHarness,
+  provider: ProviderAdapter,
+  payload: { input?: unknown; executionProfile?: unknown },
+): string | null {
+  if (typeof payload.input !== 'string' || !payload.input.trim()) {
+    return 'A non-empty input message is required.';
+  }
+  const executionProfile = ProviderRegistry.resolveExecutionProfile(provider, payload.executionProfile);
+  if (executionProfile === null) {
+    return 'Select a supported execution profile before sending this turn.';
+  }
+  void agent.send(payload.input, executionProfile);
+  return null;
+}
+
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
   const origin = c.req.header('origin');
@@ -112,11 +129,13 @@ app.get('/ws', async (c, next) => {
   }
   
   // Chat protocol:
-  //   client -> server: {type:'start', command, cwd, sessionId?, resume?} | {type:'input', input} | {type:'stop'} | 'ping'
+  //   client -> server: {type:'start', command, cwd, sessionId?, resume?}
+  //                    | {type:'input', input, executionProfile?} | {type:'stop'} | 'ping'
   //   server -> client: {type:'stream', text} | {type:'session', id} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
   //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
+    let activeProvider: ProviderAdapter | null = null;
 
     return {
       onMessage(event, ws) {
@@ -133,6 +152,7 @@ app.get('/ws', async (c, next) => {
             } else if (payload.type === 'start') {
               if (agent) {
                 agent.stop();
+                activeProvider = null;
               }
               const provider = ProviderRegistry.getProvider(payload.command);
               if (!provider) {
@@ -150,6 +170,7 @@ app.get('/ws', async (c, next) => {
               }
 
               agent = provider.createInstance();
+              activeProvider = provider;
               agent.on('data', (text: string) => {
                 ws.send(JSON.stringify({ type: 'stream', text }));
               });
@@ -175,14 +196,19 @@ app.get('/ws', async (c, next) => {
               });
               agent.start(payload.cwd, session);
             } else if (payload.type === 'input') {
-              if (agent) {
-                agent.send(payload.input);
+              if (agent && activeProvider) {
+                const error = dispatchAgentInput(agent, activeProvider, payload);
+                if (error) {
+                  ws.send(JSON.stringify({ type: 'error', message: error }));
+                  return;
+                }
                 ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
               }
             } else if (payload.type === 'stop') {
               if (agent) {
                 agent.stop();
                 agent = null;
+                activeProvider = null;
               }
             }
           } catch (err) {
@@ -198,6 +224,7 @@ app.get('/ws', async (c, next) => {
         if (agent) {
           agent.stop();
           agent = null;
+          activeProvider = null;
         }
       },
     };

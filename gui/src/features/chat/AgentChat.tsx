@@ -12,6 +12,7 @@ import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
+import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
@@ -37,7 +38,15 @@ interface ChatProvider {
   setupIssue?: 'missing-cli' | 'signed-out' | 'probe-failed';
   recoveryCommand?: string;
   recoveryLabel?: string;
+  executionProfiles?: ExecutionProfileOption[];
+  defaultExecutionProfile?: ChatExecutionProfile;
   capabilities: ProviderCapabilities;
+}
+
+interface ExecutionProfileOption {
+  id: ChatExecutionProfile;
+  label: string;
+  description: string;
 }
 
 const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
@@ -108,6 +117,35 @@ function decodeChatProvider(value: unknown): ChatProvider | null {
   const capabilities = decodeProviderCapabilities(value.capabilities);
   if (!capabilities) return null;
 
+  let executionProfiles: ExecutionProfileOption[] | undefined;
+  if (value.executionProfiles !== undefined) {
+    if (!Array.isArray(value.executionProfiles) || value.executionProfiles.length === 0) return null;
+    executionProfiles = [];
+    const seen = new Set<ChatExecutionProfile>();
+    for (const candidate of value.executionProfiles) {
+      if (!isRecord(candidate)
+        || !isChatExecutionProfile(candidate.id)
+        || typeof candidate.label !== 'string'
+        || typeof candidate.description !== 'string'
+        || seen.has(candidate.id)) {
+        return null;
+      }
+      seen.add(candidate.id);
+      executionProfiles.push({
+        id: candidate.id,
+        label: candidate.label,
+        description: candidate.description,
+      });
+    }
+  }
+  if (value.defaultExecutionProfile !== undefined
+    && (!isChatExecutionProfile(value.defaultExecutionProfile)
+      || !executionProfiles?.some(profile => profile.id === value.defaultExecutionProfile))) {
+    return null;
+  }
+  if (executionProfiles && value.defaultExecutionProfile === undefined) return null;
+  if (!executionProfiles && value.defaultExecutionProfile !== undefined) return null;
+
   const hasAnySetup = value.setupIssue !== undefined
     || value.recoveryCommand !== undefined
     || value.recoveryLabel !== undefined;
@@ -129,6 +167,10 @@ function decodeChatProvider(value: unknown): ChatProvider | null {
       : { setupIssue: value.setupIssue as ChatProvider['setupIssue'] }),
     ...(value.recoveryCommand === undefined ? {} : { recoveryCommand: value.recoveryCommand }),
     ...(value.recoveryLabel === undefined ? {} : { recoveryLabel: value.recoveryLabel }),
+    ...(executionProfiles === undefined ? {} : { executionProfiles }),
+    ...(value.defaultExecutionProfile === undefined
+      ? {}
+      : { defaultExecutionProfile: value.defaultExecutionProfile }),
   };
 }
 
@@ -155,6 +197,7 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
 
 interface StartAgentOptions {
   firstMessage?: string | null;
+  executionProfile?: ChatExecutionProfile;
   provider?: ChatProvider;
   session?: { id: string; started: boolean };
   resetSession?: boolean;
@@ -166,6 +209,7 @@ interface StartAgentOptions {
 interface RetryableKickoff {
   providerId: string;
   kickoff: string;
+  executionProfile: ChatExecutionProfile;
 }
 
 const formatTime = (ts?: number) =>
@@ -228,6 +272,11 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
       </div>
+      {isUser && msg.executionProfile && (
+        <span className="mt-1 rounded border border-border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+          {msg.executionProfile === 'workspace-write' ? 'Edit' : 'Review'}
+        </span>
+      )}
       {msg.ts && (
         <span className="mt-1 text-[10px] text-muted-foreground">{formatTime(msg.ts)}</span>
       )}
@@ -251,6 +300,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   // True once the current turn has streamed its first chunk.
   const [turnOpen, setTurnOpen] = useState(false);
   const [agentName, setAgentName] = useState('');
+  const [profilesByProvider, setProfilesByProvider] = useState(initialStore.profilesByProvider);
   const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [sessionSwitching, setSessionSwitching] = useState(false);
@@ -271,7 +321,8 @@ export function AgentChat({ ws }: AgentChatProps) {
   const turnOpenRef = useRef(false);
   const endedNoteRef = useRef(false);
   // Latest snapshot for the debounced/unmount flush.
-  const latestRef = useRef({ messages, agentName });
+  const latestRef = useRef({ messages, agentName, profilesByProvider });
+  const profilesByProviderRef = useRef(profilesByProvider);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedIntentRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -282,15 +333,17 @@ export function AgentChat({ ws }: AgentChatProps) {
   const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
 
   useEffect(() => {
-    latestRef.current = { messages, agentName };
-  }, [messages, agentName]);
+    latestRef.current = { messages, agentName, profilesByProvider };
+    profilesByProviderRef.current = profilesByProvider;
+  }, [messages, agentName, profilesByProvider]);
 
   const flushPersist = useCallback(() => {
     persistTimer.current = null;
     saveChatStore(ws.branchName, {
-      v: 3,
+      v: 4,
       sessions: sessionsRef.current,
       providerId: latestRef.current.agentName || initialStore.providerId,
+      profilesByProvider: latestRef.current.profilesByProvider,
       messages: latestRef.current.messages,
     });
   }, [ws.branchName, initialStore.providerId]);
@@ -307,7 +360,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     // history); debounce so a burst of chunks writes at most once.
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(flushPersist, 400);
-  }, [messages, agentName, flushPersist]);
+  }, [messages, agentName, profilesByProvider, flushPersist]);
 
   useEffect(() => {
     // pagehide fires on a hard window/tab close where React's unmount cleanup
@@ -342,6 +395,18 @@ export function AgentChat({ ws }: AgentChatProps) {
         const nextProviders = decodeChatProviders(providerData);
         if (!nextProviders) throw new Error('Invalid provider status response');
         setProviders(nextProviders);
+        setProfilesByProvider(current => {
+          let changed = false;
+          const next = { ...current };
+          for (const provider of nextProviders) {
+            if (!provider.executionProfiles?.length || !provider.defaultExecutionProfile) continue;
+            if (!provider.executionProfiles.some(profile => profile.id === current[provider.id])) {
+              next[provider.id] = provider.defaultExecutionProfile;
+              changed = true;
+            }
+          }
+          return changed ? next : current;
+        });
 
         // Prefer the provider used last time, else the first configured one.
         const persisted = initialStore.providerId
@@ -379,7 +444,25 @@ export function AgentChat({ ws }: AgentChatProps) {
 
   const displayedProviderId = connectionProviderId ?? agentName;
   const currentProvider = providers.find(p => p.id === displayedProviderId);
-  const canStart = Boolean(agentName) && Boolean(currentProvider?.isConfigured) && !connecting && !sessionSwitching;
+  const currentExecutionProfile = currentProvider?.executionProfiles?.find(
+    profile => profile.id === profilesByProvider[currentProvider.id],
+  ) ?? currentProvider?.executionProfiles?.find(
+    profile => profile.id === currentProvider.defaultExecutionProfile,
+  );
+  const canStart = Boolean(agentName)
+    && Boolean(currentProvider?.isConfigured)
+    && (!currentProvider?.executionProfiles || Boolean(currentExecutionProfile))
+    && !connecting
+    && !sessionSwitching;
+
+  const profileForProvider = useCallback((providerId: string, providerOverride?: ChatProvider) => {
+    const provider = providerOverride ?? providers.find(candidate => candidate.id === providerId);
+    if (!provider?.executionProfiles?.length) return undefined;
+    const selected = profilesByProviderRef.current[providerId];
+    return provider.executionProfiles.some(profile => profile.id === selected)
+      ? selected
+      : provider.defaultExecutionProfile;
+  }, [providers]);
 
   const closeTurn = useCallback(() => {
     turnOpenRef.current = false;
@@ -391,8 +474,17 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, []);
 
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
-  const sendTurn = useCallback((socket: WebSocket, text: string, providerId: string) => {
-    socket.send(JSON.stringify({ type: 'input', input: text }));
+  const sendTurn = useCallback((
+    socket: WebSocket,
+    text: string,
+    providerId: string,
+    executionProfile?: ChatExecutionProfile,
+  ) => {
+    socket.send(JSON.stringify({
+      type: 'input',
+      input: text,
+      ...(executionProfile ? { executionProfile } : {}),
+    }));
     // A turn has been dispatched, so an already-known CLI session is now
     // persisted. Codex supplies its id asynchronously via `thread.started`.
     const knownSession = sessionsRef.current[providerId];
@@ -402,7 +494,12 @@ export function AgentChat({ ws }: AgentChatProps) {
         [providerId]: { ...knownSession, started: true },
       };
     }
-    setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: text,
+      ts: Date.now(),
+      ...(executionProfile ? { executionProfile } : {}),
+    }]);
     setInput('');
     setBusy(true);
     closeTurn();
@@ -452,6 +549,15 @@ export function AgentChat({ ws }: AgentChatProps) {
         selectedProvider?.message ?? `The ${providerId} provider is unavailable. Check its local CLI installation and login.`,
         'error',
       );
+      options.onFailure?.();
+      return false;
+    }
+    const turnExecutionProfile = options.executionProfile ?? profileForProvider(providerId, selectedProvider);
+    const supportsExecutionProfile = turnExecutionProfile !== undefined
+      && selectedProvider.executionProfiles?.some(profile => profile.id === turnExecutionProfile) === true;
+    if ((options.executionProfile !== undefined || selectedProvider.executionProfiles?.length)
+      && !supportsExecutionProfile) {
+      appendSystemNote('Select a supported execution profile before starting this local CLI.', 'error');
       options.onFailure?.();
       return false;
     }
@@ -526,7 +632,13 @@ export function AgentChat({ ws }: AgentChatProps) {
 
       try {
         socket.send(JSON.stringify(startPayload));
-        if (firstMessage) socket.send(JSON.stringify({ type: 'input', input: firstMessage }));
+        if (firstMessage) {
+          socket.send(JSON.stringify({
+            type: 'input',
+            input: firstMessage,
+            ...(turnExecutionProfile ? { executionProfile: turnExecutionProfile } : {}),
+          }));
+        }
       } catch {
         failBeforeDispatch();
         wsRef.current = null;
@@ -551,7 +663,12 @@ export function AgentChat({ ws }: AgentChatProps) {
       if (firstMessage) {
         setMessages(prev => [
           ...(options.resetMessagesOnDispatch ? [] : prev),
-          { role: 'user', content: firstMessage, ts: Date.now() },
+          {
+            role: 'user',
+            content: firstMessage,
+            ts: Date.now(),
+            ...(turnExecutionProfile ? { executionProfile: turnExecutionProfile } : {}),
+          },
         ]);
         setInput('');
         setBusy(true);
@@ -639,14 +756,17 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, providers, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
     const providerId = connectionProviderRef.current;
     if (!text || !wsRef.current || !providerId || busy || sessionSwitchingRef.current) return;
-    sendTurn(wsRef.current, text, providerId);
-  }, [busy, input, sendTurn]);
+    const provider = providers.find(candidate => candidate.id === providerId);
+    const executionProfile = profileForProvider(providerId, provider);
+    if (provider?.executionProfiles?.length && !executionProfile) return;
+    sendTurn(wsRef.current, text, providerId, executionProfile);
+  }, [busy, input, profileForProvider, providers, sendTurn]);
 
   const copyMessage = useCallback((idx: number, content: string) => {
     navigator.clipboard.writeText(content).then(() => {
@@ -720,6 +840,12 @@ export function AgentChat({ ws }: AgentChatProps) {
       setAgentName(providerId);
       const commitTranscript = () => {
         if (!isCurrentRequest()) return;
+        // Resuming an existing conversation is a new authorization decision.
+        // Never inherit a persisted write-capable profile from the prior chat.
+        setProfilesByProvider(current => ({
+          ...current,
+          [providerId]: 'review',
+        }));
         setMessages([
           ...transcript,
           { role: 'system', kind: 'note', content: 'Loaded session — your next message resumes it.', ts: Date.now() },
@@ -808,6 +934,7 @@ export function AgentChat({ ws }: AgentChatProps) {
 
     return startAgent(claim.providerId, {
       firstMessage: claim.kickoff,
+      executionProfile: claim.executionProfile,
       provider: freshProvider && allowUnverified
         && (freshProvider.setupIssue === 'signed-out' || freshProvider.setupIssue === 'probe-failed')
         ? { ...freshProvider, isConfigured: true }
@@ -852,13 +979,21 @@ export function AgentChat({ ws }: AgentChatProps) {
 
     const provider = providers.find((candidate) => candidate.id === launchIntent.providerId);
     setAgentName(launchIntent.providerId);
+    setProfilesByProvider(current => ({
+      ...current,
+      [launchIntent.providerId]: launchIntent.executionProfile,
+    }));
     if (!provider?.isConfigured) {
       appendSystemNote(
         provider?.message ?? 'The selected local CLI is unavailable. Install it and sign in, then try again.',
         'error',
       );
       if (launchIntent.kickoff) {
-        setRetryableKickoff({ providerId: launchIntent.providerId, kickoff: launchIntent.kickoff });
+        setRetryableKickoff({
+          providerId: launchIntent.providerId,
+          kickoff: launchIntent.kickoff,
+          executionProfile: launchIntent.executionProfile,
+        });
       }
       return;
     }
@@ -881,7 +1016,11 @@ export function AgentChat({ ws }: AgentChatProps) {
     if (wsRef.current) stopAgent();
 
     if (launchIntent.kickoff) {
-      void dispatchKickoff({ providerId: launchIntent.providerId, kickoff: launchIntent.kickoff });
+      void dispatchKickoff({
+        providerId: launchIntent.providerId,
+        kickoff: launchIntent.kickoff,
+        executionProfile: launchIntent.executionProfile,
+      });
     } else {
       startAgent(launchIntent.providerId, { firstMessage: null });
     }
@@ -1031,7 +1170,9 @@ export function AgentChat({ ws }: AgentChatProps) {
         )}
         {retryableKickoff && !connecting && !connected && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-foreground">
-            <span>The workspace kickoff was not dispatched.</span>
+            <span>
+              The workspace kickoff was not dispatched ({retryableKickoff.executionProfile === 'workspace-write' ? 'Edit workspace' : 'Review only'}).
+            </span>
             <Button
               size="sm"
               variant="outline"
@@ -1075,7 +1216,45 @@ export function AgentChat({ ws }: AgentChatProps) {
               </MenuPopup>
             </Menu>
             <div className="h-4 w-px bg-border"></div>
-            <span className="text-xs text-muted-foreground">{currentProvider?.accessLabel ?? 'Harness-managed access'}</span>
+            {currentProvider?.executionProfiles?.length && currentExecutionProfile ? (
+              <>
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Select execution profile"
+                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {currentExecutionProfile.label}
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="top" className="max-w-80">
+                    {currentProvider.executionProfiles.map((profile) => (
+                      <MenuItem
+                        key={profile.id}
+                        onClick={() => setProfilesByProvider(current => ({
+                          ...current,
+                          [currentProvider.id]: profile.id,
+                        }))}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium">{profile.label}</span>
+                          <span className="text-xs text-muted-foreground">{profile.description}</span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+                <span
+                  className="min-w-0 truncate text-xs text-muted-foreground"
+                  title={currentExecutionProfile.description}
+                >
+                  {currentExecutionProfile.description}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {currentProvider?.accessLabel ?? 'Harness-managed access'}
+              </span>
+            )}
           </div>
           <div className="flex items-end gap-2 p-2">
             <Textarea
