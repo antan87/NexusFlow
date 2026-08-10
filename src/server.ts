@@ -107,7 +107,7 @@ app.get('/ws', async (c, next) => {
   
   // Chat protocol:
   //   client -> server: {type:'start', command, cwd, sessionId?, resume?} | {type:'input', input} | {type:'stop'} | 'ping'
-  //   server -> client: {type:'stream', text} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
+  //   server -> client: {type:'stream', text} | {type:'session', id} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
   //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
@@ -149,6 +149,13 @@ app.get('/ws', async (c, next) => {
               });
               agent.on('system', (message: string) => {
                 ws.send(JSON.stringify({ type: 'system', message }));
+              });
+              agent.on('session', (id: string) => {
+                // Provider output is still boundary input. Only inert UUIDs
+                // may be persisted by the renderer and sent back in argv.
+                if (isValidSessionUuid(id)) {
+                  ws.send(JSON.stringify({ type: 'session', id }));
+                }
               });
               agent.on('idle', () => {
                 ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
@@ -1573,6 +1580,9 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
   const assistant = c.req.param('assistant');
   const sessionId = c.req.param('sessionId');
   try {
+    if (assistant === 'codex' && !isValidSessionUuid(sessionId)) {
+      return c.json({ error: 'Invalid Codex session id.' }, 400);
+    }
 
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
@@ -1764,6 +1774,7 @@ app.post('/api/workflows/templates/:id/analyze', async (c) => {
     const selectedAssistant = assistant || 'antigravity';
     let command = '';
     let args: string[] = [];
+    let commandInput = '';
 
     let prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
 Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
@@ -1794,12 +1805,17 @@ and suffix it with:
       args = ['-p', prompt];
     } else if (command === 'agy') {
       args = [prompt];
+    } else if (command === 'codex') {
+      // Captured stdio cannot host the interactive TUI. `codex exec` is the
+      // supported non-interactive surface and reuses the user's CLI login.
+      args = ['exec', '--color', 'never', '-'];
+      commandInput = prompt;
     } else {
       args = [prompt];
     }
 
     const result = await execa(command, args, {
-      input: '',
+      input: commandInput,
       shell: false,
       reject: false
     });

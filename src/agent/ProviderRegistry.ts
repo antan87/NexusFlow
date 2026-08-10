@@ -6,9 +6,10 @@ export interface ProviderStatus {
   isConfigured: boolean;
   message?: string;
   icon?: string;
+  accessLabel?: string;
 }
 
-export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle';
+export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session';
 
 export interface AgentHarness {
   start(cwd: string, session?: AgentSession): Promise<void>;
@@ -31,6 +32,7 @@ export interface ProviderAdapter {
   id: string;
   name: string;
   icon?: string;
+  accessLabel?: string;
   isConfigured(): boolean;
   getStatusMessage(): string | undefined;
   createInstance(): AgentHarness;
@@ -52,6 +54,7 @@ class ProviderRegistryImpl {
       id: p.id,
       name: p.name,
       icon: p.icon,
+      accessLabel: p.accessLabel,
       isConfigured: p.isConfigured(),
       message: p.getStatusMessage()
     }));

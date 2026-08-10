@@ -58,6 +58,17 @@ export function codexMessageText(payload: any): string {
   return '';
 }
 
+/** Extract the resumable thread UUID from a Codex `session_meta` record. */
+export function codexSessionId(record: any): string | null {
+  const id = record?.type === 'session_meta' ? record?.payload?.id : null;
+  return isCodexSessionId(id) ? id : null;
+}
+
+export function isCodexSessionId(id: unknown): id is string {
+  return typeof id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 /**
  * True for a user message that is CLI-injected context (Codex
  * <environment_context>/<user_instructions>, Copilot <system_reminder>) rather
@@ -275,7 +286,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   // ─── 3. OpenAI Codex Sessions (rollout-*.jsonl) ──────────────────────────
   // Codex writes a `session_meta` record (payload.cwd) followed by
   // `response_item` records (payload.type==='message', role, content[].text).
-  const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  const codexSessionsDir = path.join(codexHome, 'sessions');
   try {
     const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
     for (const file of codexFiles) {
@@ -284,6 +296,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         const lines = content.split('\n').filter(Boolean);
 
         let sessionCwd: string | null = null;
+        let sessionId: string | null = null;
         let messageCount = 0;
         let createdAt: string | null = null;
         let updatedAt: string | null = null;
@@ -300,8 +313,9 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             updatedAt = iso;
           }
 
-          if (record.type === 'session_meta' && record.payload?.cwd) {
-            sessionCwd = record.payload.cwd;
+          if (record.type === 'session_meta') {
+            if (record.payload?.cwd) sessionCwd = record.payload.cwd;
+            sessionId = codexSessionId(record) ?? sessionId;
           } else if (record.type === 'response_item' && record.payload?.type === 'message') {
             const role = record.payload.role;
             if (role !== 'user' && role !== 'assistant') continue;
@@ -322,7 +336,9 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         // Skip contentless sessions (only injected context, no real turns).
         if (messageCount === 0) continue;
 
-        const sessionId = path.basename(file, '.jsonl');
+        // Current rollout filenames include timestamps. The stable resume id is
+        // session_meta.payload.id, not the filename.
+        if (!sessionId) continue;
         sessions.push({
           id: sessionId,
           assistant: 'codex',
@@ -479,15 +495,37 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
       }
     }
   } else if (assistant === 'codex') {
-    const codexDir = path.join(os.homedir(), '.codex');
-    const codexSessionsDir = path.join(codexDir, 'sessions');
+    if (!isCodexSessionId(sessionId)) {
+      throw new Error('Invalid Codex session id');
+    }
+    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    const codexSessionsDir = path.join(codexHome, 'sessions');
     const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
     let transcriptPath: string | null = null;
 
-    for (const file of codexFiles) {
-      if (path.basename(file, '.jsonl') === sessionId) {
-        transcriptPath = file;
-        break;
+    // Filename matches are checked first for speed, but metadata is always the
+    // authority; a suffix collision or renamed rollout must never select a
+    // different thread.
+    const candidates = [...codexFiles].sort((a, b) => {
+      const aMatch = path.basename(a, '.jsonl').endsWith(sessionId) ? 0 : 1;
+      const bMatch = path.basename(b, '.jsonl').endsWith(sessionId) ? 0 : 1;
+      return aMatch - bMatch;
+    });
+    for (const file of candidates) {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
+        const found = content
+          .split('\n')
+          .filter(Boolean)
+          .some((line) => {
+            try { return codexSessionId(JSON.parse(line)) === sessionId; } catch { return false; }
+          });
+        if (found) {
+          transcriptPath = file;
+          break;
+        }
+      } catch {
+        // Ignore unreadable or concurrently-rotated rollout files.
       }
     }
 

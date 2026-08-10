@@ -18,8 +18,11 @@ interface AgentChatProps {
   ws: Feature;
 }
 
-/** Providers whose conversations can be resumed by session id. */
-const SESSION_PROVIDER = 'claude-cli';
+/** Session-history assistant ids mapped to their embedded CLI providers. */
+const SESSION_PROVIDERS: Record<string, string> = {
+  claude: 'claude-cli',
+  codex: 'codex-cli',
+};
 
 const formatTime = (ts?: number) =>
   ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
@@ -89,7 +92,7 @@ const MessageBubble = memo(function MessageBubble({
 });
 
 export function AgentChat({ ws }: AgentChatProps) {
-  const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; isConfigured: boolean; message?: string }[]>([]);
+  const [providers, setProviders] = useState<{ id: string; name: string; icon?: string; accessLabel?: string; isConfigured: boolean; message?: string }[]>([]);
 
   // The component is remounted per workspace (keyed by branch), so the
   // one-time initializer always reads the right store.
@@ -109,8 +112,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
-  const sessionIdRef = useRef<string | null>(initialStore.sessionId);
-  const sessionStartedRef = useRef<boolean>(initialStore.sessionStarted);
+  const sessionsRef = useRef(initialStore.sessions);
   // Whether stream chunks may append to the last assistant bubble (the one
   // opened by the current turn) — prevents merging into errors or old turns.
   const turnOpenRef = useRef(false);
@@ -126,10 +128,9 @@ export function AgentChat({ ws }: AgentChatProps) {
   const flushPersist = useCallback(() => {
     persistTimer.current = null;
     saveChatStore(ws.branchName, {
-      v: 2,
-      sessionId: sessionIdRef.current,
+      v: 3,
+      sessions: sessionsRef.current,
       providerId: latestRef.current.agentName || initialStore.providerId,
-      sessionStarted: sessionStartedRef.current,
       messages: latestRef.current.messages,
     });
   }, [ws.branchName, initialStore.providerId]);
@@ -202,11 +203,15 @@ export function AgentChat({ ws }: AgentChatProps) {
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
   const sendTurn = (socket: WebSocket, text: string) => {
     socket.send(JSON.stringify({ type: 'input', input: text }));
-    // A turn has been dispatched, so the CLI will create/extend the session:
-    // future reconnects should resume it. Only meaningful for the session
-    // provider (unread otherwise). Marking it here — rather than on connect —
-    // avoids a spurious resume of a session that was never actually started.
-    sessionStartedRef.current = true;
+    // A turn has been dispatched, so an already-known CLI session is now
+    // persisted. Codex supplies its id asynchronously via `thread.started`.
+    const knownSession = sessionsRef.current[agentName];
+    if (knownSession) {
+      sessionsRef.current = {
+        ...sessionsRef.current,
+        [agentName]: { ...knownSession, started: true },
+      };
+    }
     setMessages(prev => [...prev, { role: 'user', content: text, ts: Date.now() }]);
     setInput('');
     setBusy(true);
@@ -244,16 +249,21 @@ export function AgentChat({ ws }: AgentChatProps) {
         // generated context files live (see src/utils/feature.ts).
         cwd: ws.workspacePath,
       };
-      // Only claude-cli supports resume-by-id; give it a stable session UUID
-      // so the conversation survives reconnects and app restarts.
-      const isSessionProvider = agentName === SESSION_PROVIDER;
-      if (isSessionProvider) {
-        if (!sessionIdRef.current) {
-          sessionIdRef.current = crypto.randomUUID();
-          sessionStartedRef.current = false;
+      if (agentName === SESSION_PROVIDERS.claude) {
+        // Claude accepts a caller-assigned UUID for a new session.
+        const existing = sessionsRef.current[agentName];
+        const session = existing ?? { id: crypto.randomUUID(), started: false };
+        sessionsRef.current = { ...sessionsRef.current, [agentName]: session };
+        startPayload.sessionId = session.id;
+        startPayload.resume = session.started;
+      } else if (agentName === SESSION_PROVIDERS.codex) {
+        // Codex creates its own thread UUID. Only pass one when resuming a
+        // thread captured from a previous `thread.started` event.
+        const session = sessionsRef.current[agentName];
+        if (session?.started) {
+          startPayload.sessionId = session.id;
+          startPayload.resume = true;
         }
-        startPayload.sessionId = sessionIdRef.current;
-        startPayload.resume = sessionStartedRef.current;
       }
       socket.send(JSON.stringify(startPayload));
 
@@ -282,6 +292,11 @@ export function AgentChat({ ws }: AgentChatProps) {
             }
             return [...prev, { role: 'assistant', content: payload.text, ts: Date.now() }];
           });
+        } else if (payload.type === 'session' && typeof payload.id === 'string') {
+          sessionsRef.current = {
+            ...sessionsRef.current,
+            [agentName]: { id: payload.id, started: true },
+          };
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
           if (payload.state !== 'busy') closeTurn();
@@ -352,7 +367,9 @@ export function AgentChat({ ws }: AgentChatProps) {
       stopAgent();
     }
     try {
-      const res = await fetch(`${API_BASE}/api/session/claude/${encodeURIComponent(session.id)}/transcript`);
+      const providerId = SESSION_PROVIDERS[session.assistant];
+      if (!providerId) throw new Error('Unsupported session provider');
+      const res = await fetch(`${API_BASE}/api/session/${encodeURIComponent(session.assistant)}/${encodeURIComponent(session.id)}/transcript`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const transcript: ChatMessage[] = (data.messages || [])
@@ -365,9 +382,11 @@ export function AgentChat({ ws }: AgentChatProps) {
           ts: m.timestamp ? Date.parse(m.timestamp) || undefined : undefined,
         }));
 
-      sessionIdRef.current = session.id;
-      sessionStartedRef.current = true;
-      setAgentName(SESSION_PROVIDER);
+      sessionsRef.current = {
+        ...sessionsRef.current,
+        [providerId]: { id: session.id, started: true },
+      };
+      setAgentName(providerId);
       setMessages([
         ...transcript,
         { role: 'system', kind: 'note', content: 'Loaded session — your next message resumes it.', ts: Date.now() },
@@ -383,10 +402,11 @@ export function AgentChat({ ws }: AgentChatProps) {
       // Tear down the live agent first so the next message can't resume the
       // conversation we're clearing.
       if (wsRef.current) stopAgent();
-      // A fresh UUID is required: the old session file still exists, so
-      // reusing the id with --session-id would collide.
-      sessionIdRef.current = null;
-      sessionStartedRef.current = false;
+      // Forget only the selected provider's session; switching providers later
+      // can still resume its own independently-scoped conversation.
+      const remainingSessions = { ...sessionsRef.current };
+      delete remainingSessions[agentName];
+      sessionsRef.current = remainingSessions;
       endedNoteRef.current = false;
       setMessages([]);
       clearChatStore(ws.branchName);
@@ -486,7 +506,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               </MenuPopup>
             </Menu>
             <div className="h-4 w-px bg-border"></div>
-            <span className="text-xs text-muted-foreground">Full access</span>
+            <span className="text-xs text-muted-foreground">{currentProvider?.accessLabel ?? 'Harness-managed access'}</span>
           </div>
           <div className="flex items-end gap-2 p-2">
             <Textarea

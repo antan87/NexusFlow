@@ -1,15 +1,17 @@
 import { ProviderRegistry } from './ProviderRegistry.js';
-import { detectAntigravityCliStatus, detectClaudeCliStatus } from './cliAvailability.js';
+import { detectAntigravityCliStatus, detectClaudeCliStatus, detectCodexCliStatus } from './cliAvailability.js';
 import { NativeClaudeAgent } from './NativeClaudeAgent.js';
 import { NativeAgent } from './NativeAgent.js';
 import { NativeGoogleAgent } from './NativeGoogleAgent.js';
 import { ClaudeCliAdapter } from './ClaudeCliAdapter.js';
 import { AntigravityCliAdapter } from './AntigravityCliAdapter.js';
+import { CodexCliAdapter } from './CodexCliAdapter.js';
 
 ProviderRegistry.register({
   id: 'claude-native',
   name: 'Claude',
   icon: 'Bot',
+  accessLabel: 'Read-only tools',
   isConfigured: () => !!process.env.ANTHROPIC_API_KEY,
   getStatusMessage: () => process.env.ANTHROPIC_API_KEY ? undefined : 'Anthropic API key is not configured in ANTHROPIC_API_KEY.',
   createInstance: () => new NativeClaudeAgent()
@@ -19,6 +21,7 @@ ProviderRegistry.register({
   id: 'openai-native',
   name: 'OpenAI',
   icon: 'Sparkles',
+  accessLabel: 'Read-only tools',
   isConfigured: () => !!process.env.OPENAI_API_KEY,
   getStatusMessage: () => process.env.OPENAI_API_KEY ? undefined : 'OpenAI API key is not configured in OPENAI_API_KEY.',
   createInstance: () => new NativeAgent()
@@ -28,6 +31,7 @@ ProviderRegistry.register({
   id: 'google-native',
   name: 'Google Gemini',
   icon: 'Sparkles',
+  accessLabel: 'Read-only tools',
   isConfigured: () => !!process.env.GEMINI_API_KEY,
   getStatusMessage: () => process.env.GEMINI_API_KEY ? undefined : 'Google API key is not configured in GEMINI_API_KEY.',
   createInstance: () => new NativeGoogleAgent()
@@ -69,11 +73,13 @@ export function cachedStatus<T>(detect: () => T, ttlMs = 5_000): () => T {
 // happened to print.
 const claudeCliStatus = cachedStatus(() => detectClaudeCliStatus());
 const antigravityCliStatus = cachedStatus(() => detectAntigravityCliStatus());
+const codexCliStatus = cachedStatus(() => detectCodexCliStatus());
 
 ProviderRegistry.register({
   id: 'claude-cli',
   name: 'Claude Code (Local CLI)',
   icon: 'Terminal',
+  accessLabel: 'Harness-managed access',
   isConfigured: () => claudeCliStatus().usable,
   getStatusMessage: () => claudeCliStatus().message,
   createInstance: () => new ClaudeCliAdapter()
@@ -83,9 +89,20 @@ ProviderRegistry.register({
   id: 'antigravity-cli',
   name: 'Antigravity (Local CLI)',
   icon: 'Terminal',
+  accessLabel: 'Harness-managed access',
   isConfigured: () => antigravityCliStatus().usable,
   getStatusMessage: () => antigravityCliStatus().message,
   createInstance: () => new AntigravityCliAdapter()
+});
+
+ProviderRegistry.register({
+  id: 'codex-cli',
+  name: 'Codex (Local CLI)',
+  icon: 'Terminal',
+  accessLabel: 'Workspace write',
+  isConfigured: () => codexCliStatus().usable,
+  getStatusMessage: () => codexCliStatus().message,
+  createInstance: () => new CodexCliAdapter()
 });
 
 export { ProviderRegistry };

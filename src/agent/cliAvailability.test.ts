@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   detectAntigravityCliStatus,
   detectClaudeCliStatus,
+  detectCodexCliStatus,
   findExecutable,
 } from './cliAvailability.js';
 
@@ -140,5 +141,44 @@ describe('detectAntigravityCliStatus', () => {
 
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/agy/);
+  });
+});
+
+describe('detectCodexCliStatus', () => {
+  it('is unusable when the binary is missing', () => {
+    const status = detectCodexCliStatus({ hasBinary: false, env: {} });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/not found on PATH/i);
+  });
+
+  it('accepts a saved ChatGPT or API login reported by the CLI', () => {
+    const status = detectCodexCliStatus({
+      hasBinary: true,
+      env: {},
+      loginStatus: { exitCode: 0 },
+    });
+    expect(status).toEqual({ usable: true });
+  });
+
+  it('directs signed-out users to ChatGPT login without demanding an API key', () => {
+    const status = detectCodexCliStatus({
+      hasBinary: true,
+      env: {},
+      loginStatus: { exitCode: 1 },
+    });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/codex login/i);
+    expect(status.message).toMatch(/no API key is required/i);
+  });
+
+  it('reports a timed-out or failed auth probe actionably', () => {
+    const status = detectCodexCliStatus({
+      hasBinary: true,
+      env: {},
+      loginStatus: { exitCode: null, error: 'timed out' },
+    });
+    expect(status.usable).toBe(false);
+    expect(status.message).toMatch(/timed out/);
+    expect(status.message).toMatch(/codex login/i);
   });
 });

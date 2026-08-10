@@ -21,6 +21,7 @@
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 export interface CliStatus {
   /** Whether a turn stands a chance of succeeding. */
@@ -35,6 +36,11 @@ export interface DetectOptions {
   homeDir?: string;
   /** Skips the PATH scan when availability is already known. */
   hasBinary?: boolean;
+}
+
+export interface CodexDetectOptions extends DetectOptions {
+  /** Injected command outcome for deterministic tests. */
+  loginStatus?: { exitCode: number | null; error?: string };
 }
 
 /**
@@ -137,4 +143,47 @@ export function detectAntigravityCliStatus(options: DetectOptions = {}): CliStat
       usable: false,
       message: 'The Antigravity CLI (`agy`) was not found on PATH.',
     };
+}
+
+/**
+ * Whether Codex can run non-interactively with the user's existing CLI login.
+ * `codex login status` is the supported auth probe and does not expose or copy
+ * the credential store. A ChatGPT subscription login is sufficient; no API key
+ * is required.
+ */
+export function detectCodexCliStatus(options: CodexDetectOptions = {}): CliStatus {
+  const env = options.env ?? process.env;
+  const executable = options.hasBinary === false ? null : findExecutable('codex', env);
+  const hasBinary = options.hasBinary ?? executable !== null;
+
+  if (!hasBinary) {
+    return {
+      usable: false,
+      message: 'The Codex CLI was not found on PATH. Install Codex, then run `codex login`.',
+    };
+  }
+
+  let loginStatus = options.loginStatus;
+  if (!loginStatus) {
+    const result = spawnSync(executable ?? 'codex', ['login', 'status'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable ?? ''),
+    });
+    loginStatus = {
+      exitCode: result.status,
+      error: result.error?.message,
+    };
+  }
+
+  if (loginStatus.exitCode === 0) return { usable: true };
+
+  return {
+    usable: false,
+    message: loginStatus.error
+      ? `The Codex CLI is installed, but NexusFlow could not verify its login (${loginStatus.error}). Run \`codex login\` and try again.`
+      : 'The Codex CLI is installed but not signed in. Run `codex login` to use your ChatGPT account; no API key is required.',
+  };
 }

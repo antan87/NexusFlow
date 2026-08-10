@@ -35,6 +35,12 @@ describe('Server API Endpoints Unit Tests', () => {
     vi.clearAllMocks();
   });
 
+  it('rejects an invalid Codex transcript id at the HTTP boundary', async () => {
+    const response = await app.request('/api/session/codex/53/transcript');
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid Codex session id.' });
+  });
+
   describe('POST /api/open-editor', () => {
     it('should return 400 for forbidden editor commands', async () => {
       const response = await app.request('/api/open-editor', {
@@ -565,6 +571,32 @@ describe('Server API Endpoints Unit Tests', () => {
       
       const calledArgs = vi.mocked(execa).mock.calls[0][1];
       expect(JSON.stringify(calledArgs)).toContain('Check for timeouts');
+    });
+
+    it('uses non-interactive codex exec with the prompt on stdin', async () => {
+      vi.mocked(detectAi.detectAIAssistants).mockResolvedValue([
+        { name: 'codex', displayName: 'OpenAI Codex', detected: true, command: 'codex' }
+      ]);
+      vi.mocked(execa).mockResolvedValue({
+        exitCode: 0,
+        stdout: 'Review result'
+      } as any);
+
+      const response = await app.request('/api/workflows/templates/test-id/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Rules', assistant: 'codex' })
+      });
+
+      expect(response.status).toBe(200);
+      const [command, args, options] = vi.mocked(execa).mock.calls[0] as unknown as [
+        string,
+        string[],
+        { input?: string },
+      ];
+      expect(command).toBe('codex');
+      expect(args).toEqual(['exec', '--color', 'never', '-']);
+      expect(options?.input).toContain('Rules');
     });
 
     describe('POST /api/workspace/suggest-workflow', () => {

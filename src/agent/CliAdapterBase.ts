@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 /**
- * Shared lifecycle for CLI-backed agents (claude, agy). Each turn spawns the
+ * Shared lifecycle for CLI-backed agents (claude, codex, agy). Each turn spawns the
  * binary once in print mode, streams stdout as `data`, and emits `idle` when
  * the turn ends. Subclasses supply the binary, the per-turn args, how the
  * prompt is delivered, and (optionally) a one-shot fallback used when the
@@ -33,6 +33,23 @@ export abstract class CliAdapterBase extends EventEmitter {
   /** Args for one print-mode turn. Receives the prompt so argv-mode CLIs can
    *  include it; stdin-mode CLIs ignore it. */
   protected abstract buildArgs(isFirstTurn: boolean, prompt: string): string[];
+
+  /**
+   * Consume one stdout chunk. Structured-output adapters override this to
+   * decode provider events and emit only user-facing text. The return value
+   * means the chunk was handled as a meaningful result (including a structured
+   * provider error), so a later non-zero exit should not add a duplicate error.
+   */
+  protected handleStdout(text: string): boolean {
+    if (!text) return false;
+    this.emit('data', text);
+    return true;
+  }
+
+  /** Flush a final unterminated structured-output record, if any. */
+  protected finishStdout(_exitCode: number | null): boolean {
+    return false;
+  }
 
   /**
    * Args to retry with when the first attempt of a turn exits non-zero with no
@@ -79,8 +96,7 @@ export abstract class CliAdapterBase extends EventEmitter {
     let stderrTail = '';
 
     cliProcess.stdout?.on('data', (chunk) => {
-      producedOutput = true;
-      this.emit('data', chunk.toString());
+      producedOutput = this.handleStdout(chunk.toString()) || producedOutput;
     });
 
     // CLIs print warnings and progress on stderr; only keep it for diagnostics.
@@ -99,6 +115,7 @@ export abstract class CliAdapterBase extends EventEmitter {
 
     cliProcess.on('close', (code) => {
       this.child = null;
+      producedOutput = this.finishStdout(code) || producedOutput;
 
       if (!this.stopped && code !== 0 && !producedOutput && allowFallback) {
         const fb = this.fallbackArgs();
