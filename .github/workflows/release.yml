@@ -52,15 +52,19 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # provenance attestation
+      id-token: write   # npm trusted publishing and provenance
       contents: read
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '22.14.0'
           registry-url: 'https://registry.npmjs.org/'
+          package-manager-cache: false
+
+      # Trusted publishing requires npm 11.5.1+ and Node 22.14.0+.
+      - run: npm install --global npm@11.5.1
 
       - run: npm ci
       - run: npm ci --prefix gui
@@ -68,7 +72,6 @@ jobs:
 
       - name: Publish to npm
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.guard.outputs.version }}
           PRERELEASE: ${{ needs.guard.outputs.prerelease }}
         run: |
