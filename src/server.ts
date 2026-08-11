@@ -25,7 +25,7 @@ import { createNewRepo } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
-import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
+import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
@@ -344,7 +344,7 @@ async function resolveExactLaunchWorkspace(
     fs.realpath(lexicalPath),
   ]);
   const safeWorkspacePath = assertWithin(canonicalRoot, canonicalWorkspace);
-  const feature = await loadFeatureConfig(safeWorkspacePath);
+  const feature = await loadWorkspaceManifest(safeWorkspacePath);
   if (!feature || typeof feature.workspacePath !== 'string') return null;
 
   try {

@@ -265,7 +265,7 @@ describe('Server API Endpoints Unit Tests', () => {
       } as any);
       vi.spyOn(fs, 'access').mockRejectedValue(new Error('No generated workspace file'));
       vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
-      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
         id: 'test-workspace',
         workspacePath,
       } as any);
@@ -317,7 +317,7 @@ describe('Server API Endpoints Unit Tests', () => {
     beforeEach(() => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
       vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
-      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
         id: 'safe-workspace',
         workspacePath,
       } as any);
@@ -368,6 +368,7 @@ describe('Server API Endpoints Unit Tests', () => {
     });
 
     it('rejects a child path that only inherits a parent workspace manifest', async () => {
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue(null);
       vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
         id: 'parent-workspace',
         workspacePath: workspacesDir,
