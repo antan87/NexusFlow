@@ -10,6 +10,11 @@ import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
+import {
+  createChatLaunchIntent,
+  providerForAssistant,
+  type EmbeddedHarnessAssistant,
+} from './features/chat/chatLaunch.js';
 import { Spinner } from './components/ui/spinner.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
@@ -552,37 +557,25 @@ function AppInner() {
   const handleResumeSession = async (ws: Feature, sessionId?: string, assistant?: string) => {
     setResumingWs(ws.branchName);
     try {
-      const encodedId = encodeURIComponent(ws.branchName);
-      const editor = editors.find((e) => e.detected) || editors[0];
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/resume`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: editor?.command,
-          sessionId,
-          assistant,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        if (isVsCode) {
-          window.parent.postMessage({
-            type: 'executeTerminalCommand',
-            command: data.resumeCommand,
-            cwd: ws.workspacePath
-          }, '*');
-          setActiveWsId(ws.branchName);
-        } else {
-          navigator.clipboard.writeText(data.resumeCommand);
-          showToast(`Session Resumed!\n\n1. Editor launched.\n2. Command "${data.resumeCommand}" copied to clipboard! Paste it into your terminal inside the workspace to continue.`, 'success');
-          setActiveWsId(ws.branchName);
-        }
-      } else {
-        showToast(`Error: ${data.error || 'Failed to resume session'}`, 'error');
+      if (assistant && !providerForAssistant(assistant)) {
+        showToast('Only Claude Code and Codex sessions can resume in embedded chat.', 'error');
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      showToast('Network error when resuming session.', 'error');
+      const selectedAssistant = assistant
+        ? assistant as EmbeddedHarnessAssistant
+        : ws.assistants.find((candidate): candidate is EmbeddedHarnessAssistant => providerForAssistant(candidate) !== null);
+
+      if (!selectedAssistant) {
+        showToast('Select Claude Code or Codex for this workspace to continue in embedded chat.', 'error');
+        return;
+      }
+
+      navigate(`/workspaces/${encodeURIComponent(ws.branchName)}`, {
+        state: {
+          chatLaunch: createChatLaunchIntent(selectedAssistant, sessionId ? { sessionId } : {}),
+        },
+      });
+      setActiveWsId(ws.branchName);
     } finally {
       setResumingWs(null);
     }

@@ -34,7 +34,7 @@ import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
-import { AgentHarness } from './agent/ProviderRegistry.js';
+import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -88,9 +88,51 @@ export const app = new Hono();
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
-app.get('/api/adapters/status', (c) => {
-  return c.json(ProviderRegistry.getAllStatus());
-});
+function hasTrustedLocalOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Validate and dispatch one renderer turn without letting malformed authority reach a harness. */
+export function dispatchAgentInput(
+  agent: AgentHarness,
+  provider: ProviderAdapter,
+  payload: { input?: unknown; executionProfile?: unknown },
+): string | null {
+  if (typeof payload.input !== 'string' || !payload.input.trim()) {
+    return 'A non-empty input message is required.';
+  }
+  const executionProfile = ProviderRegistry.resolveExecutionProfile(provider, payload.executionProfile);
+  if (executionProfile === null) {
+    return 'Select a supported execution profile before sending this turn.';
+  }
+  void agent.send(payload.input, executionProfile);
+  return null;
+}
+
+/** Per-socket admission guard so a second prompt is rejected, never dropped. */
+export class AgentTurnGate {
+  private active = false;
+
+  public tryBegin(): boolean {
+    if (this.active) return false;
+    this.active = true;
+    return true;
+  }
+
+  public settle(): void {
+    this.active = false;
+  }
+
+  public isActive(): boolean {
+    return this.active;
+  }
+}
 
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
@@ -106,11 +148,16 @@ app.get('/ws', async (c, next) => {
   }
   
   // Chat protocol:
-  //   client -> server: {type:'start', command, cwd, sessionId?, resume?} | {type:'input', input} | {type:'stop'} | 'ping'
-  //   server -> client: {type:'stream', text} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
-  //                     | {type:'error', message} | {type:'close', code} | {type:'pong'}
+  //   client -> server: {type:'start', command, cwd, sessionId?, resume?}
+  //                    | {type:'input', input, turnId?, executionProfile?} | {type:'stop'} | 'ping'
+  //   server -> client: {type:'stream', text} | {type:'session', id} | {type:'status', state:'busy'|'idle'} | {type:'system', message}
+  //                     | {type:'accepted', turnId?} | {type:'error', message}
+  //                     | {type:'rejected', reason:'busy', message, turnId?}
+  //                     | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
+    let activeProvider: ProviderAdapter | null = null;
+    const turnGate = new AgentTurnGate();
 
     return {
       onMessage(event, ws) {
@@ -125,8 +172,12 @@ app.get('/ws', async (c, next) => {
             if (payload.type === 'ping') {
               ws.send(JSON.stringify({ type: 'pong' }));
             } else if (payload.type === 'start') {
+              turnGate.settle();
               if (agent) {
-                agent.stop();
+                const previousAgent = agent;
+                agent = null;
+                activeProvider = null;
+                previousAgent.stop();
               }
               const provider = ProviderRegistry.getProvider(payload.command);
               if (!provider) {
@@ -143,33 +194,78 @@ app.get('/ws', async (c, next) => {
                 session = { id: payload.sessionId, resume: Boolean(payload.resume) };
               }
 
-              agent = provider.createInstance();
-              agent.on('data', (text: string) => {
+              const startedAgent = provider.createInstance();
+              agent = startedAgent;
+              activeProvider = provider;
+              const isCurrentAgent = () => agent === startedAgent;
+              startedAgent.on('data', (text: string) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'stream', text }));
               });
-              agent.on('system', (message: string) => {
+              startedAgent.on('system', (message: string) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'system', message }));
               });
-              agent.on('idle', () => {
+              startedAgent.on('session', (id: string) => {
+                if (!isCurrentAgent()) return;
+                // Provider output is still boundary input. Only inert UUIDs
+                // may be persisted by the renderer and sent back in argv.
+                if (isValidSessionUuid(id)) {
+                  ws.send(JSON.stringify({ type: 'session', id }));
+                }
+              });
+              startedAgent.on('idle', () => {
+                if (!isCurrentAgent()) return;
+                turnGate.settle();
                 ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
-              agent.on('close', (code: number) => {
+              startedAgent.on('close', (code: number) => {
+                if (!isCurrentAgent()) return;
+                turnGate.settle();
                 ws.send(JSON.stringify({ type: 'close', code }));
               });
-              agent.on('error', (error: Error) => {
+              startedAgent.on('error', (error: Error) => {
+                if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
-                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
               });
-              agent.start(payload.cwd, session);
+              startedAgent.start(payload.cwd, session);
             } else if (payload.type === 'input') {
-              if (agent) {
-                agent.send(payload.input);
-                ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
+              if (agent && activeProvider) {
+                if (!turnGate.tryBegin()) {
+                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                  ws.send(JSON.stringify({
+                    type: 'rejected',
+                    reason: 'busy',
+                    message: 'The agent is still processing the current turn.',
+                    ...(turnId ? { turnId } : {}),
+                  }));
+                  return;
+                }
+                const error = dispatchAgentInput(agent, activeProvider, payload);
+                if (error) {
+                  turnGate.settle();
+                  ws.send(JSON.stringify({ type: 'error', message: error }));
+                  return;
+                }
+                // Some harness validation failures emit error + idle
+                // synchronously from send(); do not overwrite that settled
+                // state with a late busy frame.
+                if (turnGate.isActive()) {
+                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                  ws.send(JSON.stringify({
+                    type: 'accepted',
+                    ...(turnId ? { turnId } : {}),
+                  }));
+                  ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
+                }
               }
             } else if (payload.type === 'stop') {
+              turnGate.settle();
               if (agent) {
-                agent.stop();
+                const stoppedAgent = agent;
                 agent = null;
+                activeProvider = null;
+                stoppedAgent.stop();
               }
             }
           } catch (err) {
@@ -182,9 +278,12 @@ app.get('/ws', async (c, next) => {
       },
       onClose(_event, _ws) {
         console.log('[WS] Client disconnected');
+        turnGate.settle();
         if (agent) {
-          agent.stop();
+          const disconnectedAgent = agent;
           agent = null;
+          activeProvider = null;
+          disconnectedAgent.stop();
         }
       },
     };
@@ -285,6 +384,33 @@ app.use(
 );
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
+
+// Status checks may execute a trusted local CLI from PATH. Keep that work
+// behind a non-simple, same-machine POST so a remote page cannot trigger it
+// with an image, link, or cross-origin fetch. These routes intentionally sit
+// after the API CORS middleware so the separate Vite dev origin can read them.
+app.get('/api/adapters/status', (c) => {
+  return c.json({ error: 'Use the same-origin POST status endpoint.' }, 405);
+});
+
+app.post('/api/adapters/status', (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  return c.json(ProviderRegistry.getAllStatus());
+});
+
+app.post('/api/adapters/status/refresh', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null) as { providerId?: unknown } | null;
+  if (body?.providerId !== 'claude-cli' && body?.providerId !== 'codex-cli') {
+    return c.json({ error: 'Only Claude Code and Codex status can be refreshed.' }, 400);
+  }
+  return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: body.providerId }));
+});
 
 // 1. Get current configuration
 app.get('/api/config', async (c) => {
@@ -1573,6 +1699,9 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
   const assistant = c.req.param('assistant');
   const sessionId = c.req.param('sessionId');
   try {
+    if (assistant === 'codex' && !isValidSessionUuid(sessionId)) {
+      return c.json({ error: 'Invalid Codex session id.' }, 400);
+    }
 
     const messages = await getSessionTranscript(assistant, sessionId);
     return c.json({ messages });
@@ -1764,6 +1893,7 @@ app.post('/api/workflows/templates/:id/analyze', async (c) => {
     const selectedAssistant = assistant || 'antigravity';
     let command = '';
     let args: string[] = [];
+    let commandInput = '';
 
     let prompt = `You are an expert AI system engineering reviewer. Analyze the following Agent Teamwork Strategy guidelines.
 Evaluate its instructions, identify any ambiguities or contradictions, rate its expected effectiveness for orchestrating subagents, and provide specific recommendations or improvements. Format your analysis in clean Markdown with clear headings (e.g. Overview, Strengths, Weaknesses, Recommendations).
@@ -1794,12 +1924,17 @@ and suffix it with:
       args = ['-p', prompt];
     } else if (command === 'agy') {
       args = [prompt];
+    } else if (command === 'codex') {
+      // Captured stdio cannot host the interactive TUI. `codex exec` is the
+      // supported non-interactive surface and reuses the user's CLI login.
+      args = ['exec', '--color', 'never', '-'];
+      commandInput = prompt;
     } else {
       args = [prompt];
     }
 
     const result = await execa(command, args, {
-      input: '',
+      input: commandInput,
       shell: false,
       reject: false
     });

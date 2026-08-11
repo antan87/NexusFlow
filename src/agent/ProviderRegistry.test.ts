@@ -19,6 +19,7 @@ function makeProvider(id: string, overrides: Partial<ProviderAdapter> = {}): Pro
   return {
     id,
     name: 'Mock',
+    capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
     isConfigured: () => true,
     getStatusMessage: () => undefined,
     createInstance: () => new MockAgentHarness(),
@@ -49,6 +50,7 @@ describe('ProviderRegistry', () => {
     expect(unconfiguredStatus).toBeDefined();
     expect(unconfiguredStatus?.isConfigured).toBe(false);
     expect(unconfiguredStatus?.message).toBe('Missing API Key');
+    expect(unconfiguredStatus?.capabilities.workspaceAccess).toBe('read-only');
   });
 
   it('should create an instance correctly', () => {
@@ -64,5 +66,61 @@ describe('ProviderRegistry', () => {
       instance.start('/');
       expect(instance.started).toBe(true);
     }
+  });
+
+  it('exposes closed setup recovery metadata and invalidates cached status on refresh', () => {
+    let configured = false;
+    let invalidations = 0;
+    ProviderRegistry.register(makeProvider('mock-refreshable', {
+      isConfigured: () => configured,
+      getStatusMessage: () => configured ? undefined : 'Sign in.',
+      getSetupHelp: () => configured ? undefined : {
+        setupIssue: 'signed-out',
+        recoveryCommand: 'mock auth login',
+        recoveryLabel: 'Copy sign-in command',
+      },
+      invalidateStatus: () => {
+        invalidations += 1;
+        configured = true;
+      },
+    }));
+
+    expect(ProviderRegistry.getAllStatus().find(status => status.id === 'mock-refreshable'))
+      .toMatchObject({ isConfigured: false, setupIssue: 'signed-out' });
+
+    expect(ProviderRegistry.getAllStatus({ refreshProviderId: 'mock-refreshable' }).find(status => status.id === 'mock-refreshable'))
+      .toMatchObject({ isConfigured: true });
+    ProviderRegistry.getAllStatus({ refreshProviderId: 'mock-refreshable' });
+    expect(invalidations).toBe(1);
+  });
+
+  it('exposes provider-owned execution profiles and validates turn authorization', () => {
+    const provider = makeProvider('mock-profiled', {
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Read-only.' },
+        { id: 'workspace-write', label: 'Edit workspace', description: 'Workspace edits.' },
+      ],
+      defaultExecutionProfile: 'review',
+    });
+    ProviderRegistry.register(provider);
+
+    expect(ProviderRegistry.getAllStatus().find(status => status.id === 'mock-profiled'))
+      .toMatchObject({
+        defaultExecutionProfile: 'review',
+        executionProfiles: [
+          { id: 'review', label: 'Review only' },
+          { id: 'workspace-write', label: 'Edit workspace' },
+        ],
+      });
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'review')).toBe('review');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'workspace-write')).toBe('workspace-write');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, undefined)).toBeNull();
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'danger-full-access')).toBeNull();
+  });
+
+  it('keeps legacy providers profile-free', () => {
+    const provider = makeProvider('mock-legacy-profile');
+    expect(ProviderRegistry.resolveExecutionProfile(provider, undefined)).toBeUndefined();
+    expect(ProviderRegistry.resolveExecutionProfile(provider, 'review')).toBeNull();
   });
 });

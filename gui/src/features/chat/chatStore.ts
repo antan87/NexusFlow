@@ -2,6 +2,8 @@
  * Persistent per-workspace chat state (localStorage).
  */
 
+import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -9,26 +11,28 @@ export interface ChatMessage {
   ts?: number;
   /** Rendering variant for system messages. */
   kind?: 'error' | 'note';
+  /** Authorization used for this user turn. */
+  executionProfile?: ChatExecutionProfile;
 }
 
 export interface ChatStore {
-  v: 2;
-  /** Claude session UUID; null until the first claude-cli start. */
-  sessionId: string | null;
+  v: 4;
+  /** Resumable session identity scoped to each CLI provider. */
+  sessions: Record<string, { id: string; started: boolean }>;
   /** Last used provider id. */
   providerId: string | null;
-  /** True once the session has at least one persisted turn on disk. */
-  sessionStarted: boolean;
+  /** Last explicitly selected profile, scoped to each profile-aware provider. */
+  profilesByProvider: Record<string, ChatExecutionProfile>;
   messages: ChatMessage[];
 }
 
 export const chatStorageKey = (branchName: string) => `nexusflow_chat_${branchName}`;
 
 const emptyStore = (): ChatStore => ({
-  v: 2,
-  sessionId: null,
+  v: 4,
+  sessions: {},
   providerId: null,
-  sessionStarted: false,
+  profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'review' },
   messages: [],
 });
 
@@ -49,8 +53,41 @@ export function loadChatStore(branchName: string): ChatStore {
           .map((m) => ({ role: m.role, content: m.content })),
       };
     }
+    if (parsed && parsed.v === 4 && parsed.sessions && Array.isArray(parsed.messages)) {
+      const profilesByProvider = Object.fromEntries(
+        Object.entries(parsed.profilesByProvider ?? {})
+          .filter((entry): entry is [string, ChatExecutionProfile] => isChatExecutionProfile(entry[1])),
+      );
+      return {
+        ...emptyStore(),
+        sessions: parsed.sessions,
+        providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
+        profilesByProvider: { ...emptyStore().profilesByProvider, ...profilesByProvider },
+        messages: parsed.messages,
+      };
+    }
+    if (parsed && parsed.v === 3 && parsed.sessions && Array.isArray(parsed.messages)) {
+      return {
+        ...emptyStore(),
+        sessions: parsed.sessions,
+        providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
+        messages: parsed.messages,
+      };
+    }
     if (parsed && parsed.v === 2 && Array.isArray(parsed.messages)) {
-      return parsed as ChatStore;
+      // v2 only assigned session ids to claude-cli, even if the user later
+      // switched the selected provider. Scope that legacy id accordingly.
+      const sessions: ChatStore['sessions'] = {};
+      if (typeof parsed.sessionId === 'string' && parsed.sessionId) {
+        sessions['claude-cli'] = { id: parsed.sessionId, started: Boolean(parsed.sessionStarted) };
+      }
+      return {
+        v: 4,
+        sessions,
+        providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
+        profilesByProvider: emptyStore().profilesByProvider,
+        messages: parsed.messages,
+      };
     }
     return emptyStore();
   } catch {

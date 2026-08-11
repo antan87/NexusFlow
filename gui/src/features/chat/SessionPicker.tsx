@@ -28,9 +28,10 @@ interface SessionPickerProps {
   onPick: (session: PickableSession) => void;
   /** Set by the parent when loading a picked session's transcript fails. */
   error?: string | null;
+  pending?: boolean;
 }
 
-export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPickerProps) {
+export function SessionPicker({ open, onClose, ws, onPick, error, pending = false }: SessionPickerProps) {
   const [sessions, setSessions] = useState<PickableSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -42,9 +43,10 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
     fetch(`${API_BASE}/api/workspace/${encodeURIComponent(ws.branchName)}/sessions`)
       .then(res => res.json())
       .then(data => {
-        // Only claude sessions can be resumed by id in the chat.
-        const claudeSessions = (data.sessions || []).filter((s: PickableSession) => s.assistant === 'claude');
-        setSessions(claudeSessions);
+        const resumableSessions = (data.sessions || []).filter(
+          (s: PickableSession) => s.assistant === 'claude' || s.assistant === 'codex',
+        );
+        setSessions(resumableSessions);
       })
       .catch(() => setFetchError('Failed to load sessions.'))
       .finally(() => setLoading(false));
@@ -74,8 +76,8 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
               <EmptyMedia variant="icon">
                 <History />
               </EmptyMedia>
-              <EmptyTitle>No Claude sessions found</EmptyTitle>
-              <EmptyDescription>Past Claude Code conversations for this workspace will show up here.</EmptyDescription>
+              <EmptyTitle>No resumable sessions found</EmptyTitle>
+              <EmptyDescription>Past Claude Code and Codex conversations for this workspace will show up here.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -83,11 +85,17 @@ export function SessionPicker({ open, onClose, ws, onPick, error }: SessionPicke
             <button
               key={s.id}
               onClick={() => onPick(s)}
-              className="cursor-pointer rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-foreground/15 hover:bg-accent/50"
+              disabled={pending}
+              className="cursor-pointer rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-foreground/15 hover:bg-accent/50 disabled:cursor-wait disabled:opacity-60"
             >
-              <div className="truncate text-sm font-medium text-foreground" title={s.title}>{s.title}</div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                  {s.assistant === 'codex' ? 'Codex' : 'Claude'}
+                </span>
+                <div className="truncate text-sm font-medium text-foreground" title={s.title}>{s.title}</div>
+              </div>
               <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span>{new Date(s.updatedAt).toLocaleString()}</span>
+                <span>{pending ? 'Loading transcript…' : new Date(s.updatedAt).toLocaleString()}</span>
                 <span>·</span>
                 <MessageSquare size={11} />
                 <span>{s.messageCount} messages</span>

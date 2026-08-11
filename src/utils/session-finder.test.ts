@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText, codexMessageText, isInjectedContextText } from './session-finder.js';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -61,6 +64,75 @@ describe('codexMessageText', () => {
   });
   it('handles string content', () => {
     expect(codexMessageText({ content: 'plain' })).toBe('plain');
+  });
+});
+
+describe('codexSessionId', () => {
+  it('uses session_meta.payload.id instead of the timestamped rollout filename', () => {
+    expect(codexSessionId({
+      type: 'session_meta',
+      payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a53', cwd: '/repo' },
+    })).toBe('0199a213-81c0-7800-8aa1-bbab2a035a53');
+  });
+
+  it('ignores unrelated or empty records', () => {
+    expect(codexSessionId({ type: 'turn_context', payload: { id: 'wrong' } })).toBeNull();
+    expect(codexSessionId({ type: 'session_meta', payload: { id: '' } })).toBeNull();
+    expect(codexSessionId({ type: 'session_meta', payload: { id: 'thread-name' } })).toBeNull();
+  });
+});
+
+describe('isCodexSessionId', () => {
+  it('accepts only complete UUIDs', () => {
+    expect(isCodexSessionId('0199a213-81c0-7800-8aa1-bbab2a035a53')).toBe(true);
+    expect(isCodexSessionId('53')).toBe(false);
+    expect(isCodexSessionId('0199a213-81c0-7800-8aa1-bbab2a035a53; whoami')).toBe(false);
+  });
+});
+
+describe('Codex transcript identity', () => {
+  const targetId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+  const otherId = '0199a213-81c0-7800-8aa1-bbab2a035a54';
+  let codexHome = '';
+  let previousCodexHome: string | undefined;
+
+  beforeEach(async () => {
+    previousCodexHome = process.env.CODEX_HOME;
+    codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-codex-sessions-'));
+    process.env.CODEX_HOME = codexHome;
+    await fs.mkdir(path.join(codexHome, 'sessions'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    await fs.rm(codexHome, { recursive: true, force: true });
+  });
+
+  it('verifies session_meta even when another rollout filename has the requested suffix', async () => {
+    const sessionsDir = path.join(codexHome, 'sessions');
+    await fs.writeFile(
+      path.join(sessionsDir, `rollout-timestamp-${targetId}.jsonl`),
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: otherId } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'wrong' } }),
+      ].join('\n'),
+    );
+    await fs.writeFile(
+      path.join(sessionsDir, 'renamed-rollout.jsonl'),
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: targetId } }),
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'correct' } }),
+      ].join('\n'),
+    );
+
+    await expect(getSessionTranscript('codex', targetId)).resolves.toEqual([
+      { role: 'assistant', content: 'correct', timestamp: undefined },
+    ]);
+  });
+
+  it('rejects partial or attacker-controlled ids before scanning files', async () => {
+    await expect(getSessionTranscript('codex', '53')).rejects.toThrow(/Invalid Codex session id/);
   });
 });
 

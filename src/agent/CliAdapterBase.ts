@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 /**
- * Shared lifecycle for CLI-backed agents (claude, agy). Each turn spawns the
+ * Shared lifecycle for CLI-backed agents (claude, codex, agy). Each turn spawns the
  * binary once in print mode, streams stdout as `data`, and emits `idle` when
  * the turn ends. Subclasses supply the binary, the per-turn args, how the
- * prompt is delivered, and (optionally) a one-shot fallback used when the
- * first attempt of a turn fails with no output.
+ * prompt is delivered.
  *
  * Prompt delivery differs per CLI: `claude` is an npm `.cmd` shim that needs
  * `shell: true` on Windows, and under a shell an argv prompt would be split on
@@ -20,6 +20,7 @@ export abstract class CliAdapterBase extends EventEmitter {
   private isProcessing: boolean = false;
   private stopped: boolean = false;
   private child: ChildProcess | null = null;
+  private pendingTurnError: Error | null = null;
 
   /** Executable name, e.g. 'claude' or 'agy'. */
   protected abstract readonly binary: string;
@@ -29,46 +30,81 @@ export abstract class CliAdapterBase extends EventEmitter {
   protected readonly useShell: boolean = false;
   /** Pipe the prompt to stdin (true) vs. include it in argv via buildArgs (false). */
   protected readonly promptViaStdin: boolean = false;
+  /**
+   * Most legacy CLI adapters treat process dispatch as enough to advance their
+   * first-turn argv. Structured adapters can opt out and call
+   * acknowledgeFirstTurn() only after the provider confirms session creation.
+   */
+  protected readonly advanceFirstTurnOnDispatch: boolean = true;
 
   /** Args for one print-mode turn. Receives the prompt so argv-mode CLIs can
    *  include it; stdin-mode CLIs ignore it. */
-  protected abstract buildArgs(isFirstTurn: boolean, prompt: string): string[];
+  protected abstract buildArgs(
+    isFirstTurn: boolean,
+    prompt: string,
+    executionProfile?: AgentExecutionProfile,
+  ): string[];
 
   /**
-   * Args to retry with when the first attempt of a turn exits non-zero with no
-   * output (e.g. resuming a purged session). Return null for no fallback.
+   * Consume one stdout chunk. Structured-output adapters override this to
+   * decode provider events and emit only user-facing text. The return value
+   * means the chunk was handled as a meaningful result (including a structured
+   * provider error), so a later non-zero exit should not add a duplicate error.
    */
-  protected fallbackArgs(): string[] | null {
-    return null;
+  protected handleStdout(text: string): boolean {
+    if (!text) return false;
+    this.emit('data', text);
+    return true;
   }
 
-  /** Message emitted as a `system` event when the fallback kicks in. */
-  protected fallbackMessage: string = 'Retrying…';
+  /** Flush a final unterminated structured-output record, if any. */
+  protected finishStdout(_exitCode: number | null): boolean {
+    return false;
+  }
 
-  /** Called once per turn after it settles; `succeeded` if it produced output or exited 0. */
-  protected onTurnComplete(_succeeded: boolean): void {}
+  /** Mark the current provider session as created/resumable. */
+  protected acknowledgeFirstTurn(): void {
+    this.isFirstTurn = false;
+  }
+
+  /**
+   * Fail the active turn without publishing an idle/error state before its
+   * subprocess has actually settled. Protocol failures may also terminate the
+   * process so a write-capable CLI cannot outlive the UI's busy state.
+   */
+  protected failCurrentTurn(error: Error, terminateProcess = false): void {
+    this.pendingTurnError ??= error;
+    if (terminateProcess) killTree(this.child);
+  }
 
   public async start(cwd: string): Promise<void> {
     this.cwd = cwd;
     this.isFirstTurn = true;
+    this.pendingTurnError = null;
   }
 
-  public async send(data: string): Promise<void> {
+  public async send(data: string, executionProfile?: AgentExecutionProfile): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.stopped = false;
+    this.pendingTurnError = null;
 
-    const args = this.buildArgs(this.isFirstTurn, data);
-    this.isFirstTurn = false;
-    this.runTurn(args, data, true);
+    const args = this.buildArgs(this.isFirstTurn, data, executionProfile);
+    if (this.advanceFirstTurnOnDispatch) this.acknowledgeFirstTurn();
+    this.runTurn(args, data);
   }
 
-  private runTurn(args: string[], data: string, allowFallback: boolean) {
-    const cliProcess = spawn(this.binary, args, {
+  /** Kept as a seam so lifecycle tests can exercise process failures without a real CLI. */
+  protected spawnProcess(args: string[]): ChildProcess {
+    return spawn(this.binary, args, {
       cwd: this.cwd,
       shell: this.useShell,
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
+  }
+
+  private runTurn(args: string[], data: string) {
+    const cliProcess = this.spawnProcess(args);
     this.child = cliProcess;
     if (this.promptViaStdin) {
       cliProcess.stdin?.write(data);
@@ -77,10 +113,13 @@ export abstract class CliAdapterBase extends EventEmitter {
 
     let producedOutput = false;
     let stderrTail = '';
+    let settled = false;
 
+    // Let Node's StringDecoder preserve UTF-8 code points split across OS
+    // buffer boundaries before structured adapters see the text.
+    cliProcess.stdout?.setEncoding?.('utf8');
     cliProcess.stdout?.on('data', (chunk) => {
-      producedOutput = true;
-      this.emit('data', chunk.toString());
+      producedOutput = this.handleStdout(typeof chunk === 'string' ? chunk : chunk.toString()) || producedOutput;
     });
 
     // CLIs print warnings and progress on stderr; only keep it for diagnostics.
@@ -90,39 +129,40 @@ export abstract class CliAdapterBase extends EventEmitter {
       console.warn(`[${this.label} stderr]`, text.trimEnd());
     });
 
-    cliProcess.on('error', (err) => {
+    const settle = (code: number | null, startError?: Error) => {
+      if (settled) return;
+      settled = true;
       this.isProcessing = false;
       this.child = null;
-      this.emit('error', new Error(`Failed to start ${this.label}: ${err.message}`));
-      this.emit('idle');
-    });
+      if (!startError) producedOutput = this.finishStdout(code) || producedOutput;
 
-    cliProcess.on('close', (code) => {
-      this.child = null;
-
-      if (!this.stopped && code !== 0 && !producedOutput && allowFallback) {
-        const fb = this.fallbackArgs();
-        if (fb) {
-          this.emit('system', this.fallbackMessage);
-          this.runTurn(fb, data, false);
-          return;
-        }
-      }
-
-      this.isProcessing = false;
-      this.onTurnComplete(code === 0 || producedOutput);
-      // A non-zero exit after an intentional stop is expected, not an error.
-      if (!this.stopped && code !== 0 && !producedOutput) {
+      const turnError = this.pendingTurnError;
+      this.pendingTurnError = null;
+      if (turnError) {
+        this.emit('error', turnError);
+      } else if (startError) {
+        this.emit('error', new Error(`Failed to start ${this.label}: ${startError.message}`));
+      } else if (!this.stopped && code !== 0 && !producedOutput) {
+        // A non-zero exit after an intentional stop is expected, not an error.
         this.emit('error', new Error(`${this.label} exited with code ${code}${stderrTail ? `: ${stderrTail.trim()}` : ''}`));
       }
       // Turn separation is the GUI's concern — do not inject stray output here,
       // or a failed turn would spawn an empty bubble on the client.
       this.emit('idle');
+    };
+
+    cliProcess.on('error', (err) => {
+      settle(null, err);
+    });
+
+    cliProcess.on('close', (code) => {
+      settle(code);
     });
   }
 
   public stop(): void {
     this.stopped = true;
+    this.pendingTurnError = null;
     killTree(this.child);
     this.child = null;
     this.isProcessing = false;

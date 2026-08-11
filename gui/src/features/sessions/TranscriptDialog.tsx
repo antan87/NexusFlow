@@ -95,7 +95,9 @@ export function TranscriptDialog({
         {/* Modal Footer */}
         <DialogFooter className="sm:justify-between">
           <span className="text-[11px] text-muted-foreground">
-            Resuming will copy the shell command and open your code editor.
+            {activeSession.assistant === 'claude' || activeSession.assistant === 'codex'
+              ? 'Claude Code and Codex sessions resume directly in NexusFlow chat.'
+              : 'This provider remains available as a view-only transcript.'}
           </span>
           <div className="flex gap-2">
             <Button
@@ -112,22 +114,24 @@ export function TranscriptDialog({
             >
               <Copy size={13} /> Copy Resume Command
             </Button>
-            <Button
-              size="sm"
-              onClick={() => {
-                // Never fall back to an arbitrary workspace — resuming a
-                // session against the wrong cwd silently loses its context.
-                const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
-                if (!ws) {
-                  showToast('Could not match this session to a workspace — it may have been removed.', 'error');
-                  return;
-                }
-                handleResumeSession(ws, activeSession.id, activeSession.assistant);
-                setActiveSession(null);
-              }}
-            >
-              <Play size={12} /> Resume Conversation
-            </Button>
+            {(activeSession.assistant === 'claude' || activeSession.assistant === 'codex') && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  // Never fall back to an arbitrary workspace — resuming a
+                  // session against the wrong cwd silently loses its context.
+                  const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
+                  if (!ws) {
+                    showToast('Could not match this session to a workspace — it may have been removed.', 'error');
+                    return;
+                  }
+                  handleResumeSession(ws, activeSession.id, activeSession.assistant);
+                  setActiveSession(null);
+                }}
+              >
+                <Play size={12} /> Resume in Chat
+              </Button>
+            )}
           </div>
         </DialogFooter>
       </DialogPopup>

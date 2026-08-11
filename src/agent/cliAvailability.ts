@@ -7,34 +7,49 @@
  * when it cannot run, so a chat opens, the first turn fails, and the message the
  * user sees is whatever the CLI happened to print.
  *
- * The case worth naming: the Claude Code desktop app keeps OAuth tokens in memory
- * and injects them into the sessions it spawns itself, so `~/.claude/.credentials.json`
- * can exist with scopes but **empty tokens**. An interactive `claude` under the
- * desktop app then works while an independently spawned `claude -p` cannot
- * authenticate at all — the tokens simply are not on disk for it to find.
+ * Provider-owned status commands are the source of truth. In particular,
+ * NexusFlow must not infer Claude login from private credential-file shapes:
+ * newer installations may use a keychain or host-managed subscription login.
  *
- * Checks are synchronous because `ProviderAdapter.isConfigured()` is, and they are
- * deliberately conservative: a provider is only reported unusable when there is
- * positive evidence it cannot work, never merely because something is unfamiliar.
+ * Checks are synchronous because `ProviderAdapter.isConfigured()` is. Probe output
+ * is reduced to a closed setup state so account and credential details never cross
+ * the server boundary.
  */
 
 import * as fsSync from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 export interface CliStatus {
   /** Whether a turn stands a chance of succeeding. */
   usable: boolean;
   /** User-facing explanation. Present whenever `usable` is false. */
   message?: string;
+  setupIssue?: 'missing-cli' | 'signed-out' | 'probe-failed';
+  recoveryCommand?: string;
+  recoveryLabel?: string;
 }
 
 export interface DetectOptions {
   /** Overrides for tests. */
   env?: NodeJS.ProcessEnv;
-  homeDir?: string;
   /** Skips the PATH scan when availability is already known. */
   hasBinary?: boolean;
+}
+
+export interface CodexDetectOptions extends DetectOptions {
+  /** Injected command outcome for deterministic tests. */
+  loginStatus?: { exitCode: number | null; error?: string };
+}
+
+export interface ClaudeDetectOptions extends DetectOptions {
+  /** Injected command outcome for deterministic tests. */
+  authStatus?: { exitCode: number | null; stdout?: string; error?: string };
+}
+
+export interface CopilotDetectOptions extends DetectOptions {
+  /** Injected command outcome for deterministic tests. */
+  helpStatus?: { exitCode: number | null; output?: string; error?: string };
 }
 
 /**
@@ -65,64 +80,76 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
   return null;
 }
 
-interface StoredOauth {
-  accessToken?: string;
-  refreshToken?: string;
-  expiresAt?: number | string;
-}
-
-/** Reads the on-disk Claude credential store. Null when absent or unreadable. */
-function readStoredOauth(homeDir: string): StoredOauth | null {
-  const file = path.join(homeDir, '.claude', '.credentials.json');
-  try {
-    const parsed = JSON.parse(fsSync.readFileSync(file, 'utf-8')) as { claudeAiOauth?: StoredOauth };
-    return parsed.claudeAiOauth ?? null;
-  } catch {
-    // Missing, malformed, or stored somewhere else entirely — all "unknown".
-    return null;
-  }
-}
-
 /**
  * Whether `claude` can be driven in print mode.
  *
- * Order matters: an API key makes the credential store irrelevant, and an absent
- * store is treated as unknown rather than broken so an installation that keeps
- * tokens elsewhere is never wrongly disabled.
+ * `claude auth status --json` is the provider-owned authority. NexusFlow only
+ * inspects the boolean `loggedIn` field and never reads or returns credential,
+ * account, auth-method, or provider values.
  */
-export function detectClaudeCliStatus(options: DetectOptions = {}): CliStatus {
+export function detectClaudeCliStatus(options: ClaudeDetectOptions = {}): CliStatus {
   const env = options.env ?? process.env;
-  const homeDir = options.homeDir ?? os.homedir();
-
-  const hasBinary = options.hasBinary ?? findExecutable('claude', env) !== null;
+  const executable = options.hasBinary === false ? null : findExecutable('claude', env);
+  const hasBinary = options.hasBinary ?? executable !== null;
   if (!hasBinary) {
     return {
       usable: false,
-      message: 'The claude CLI was not found on PATH. Install Claude Code, or pick a provider that uses an API key.',
+      message: 'The Claude Code CLI was not found on PATH.',
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'npm install -g @anthropic-ai/claude-code',
+      recoveryLabel: 'Copy install command',
     };
   }
 
-  if (env.ANTHROPIC_API_KEY) return { usable: true };
+  if (
+    env.ANTHROPIC_API_KEY
+    || env.ANTHROPIC_AUTH_TOKEN
+    || env.CLAUDE_CODE_USE_BEDROCK === '1'
+    || env.CLAUDE_CODE_USE_VERTEX === '1'
+    || env.CLAUDE_CODE_USE_FOUNDRY === '1'
+  ) return { usable: true };
 
-  const oauth = readStoredOauth(homeDir);
-  if (!oauth) return { usable: true };
+  let authStatus = options.authStatus;
+  if (!authStatus) {
+    const result = spawnSync(executable ?? 'claude', ['auth', 'status', '--json'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable ?? ''),
+    });
+    authStatus = {
+      exitCode: result.status,
+      stdout: result.stdout ?? '',
+      error: result.error?.message,
+    };
+  }
 
-  const hasToken = Boolean(oauth.accessToken) || Boolean(oauth.refreshToken);
-  if (hasToken) return { usable: true };
-
-  // Tokens are absent, so nothing spawned from here can authenticate or renew.
-  const hostManaged = Boolean(env.CLAUDE_CODE_ENTRYPOINT)
-    || env.CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH === '1'
-    || env.CLAUDECODE === '1';
+  if (!authStatus.error && typeof authStatus.stdout === 'string') {
+    try {
+      const parsed = JSON.parse(authStatus.stdout) as { loggedIn?: unknown };
+      if (parsed.loggedIn === true) return { usable: true };
+      if (parsed.loggedIn === false) {
+        return {
+          usable: false,
+          message: 'Claude Code is installed but not signed in. Use your Claude subscription; no API key is required.',
+          setupIssue: 'signed-out',
+          recoveryCommand: 'claude auth login',
+          recoveryLabel: 'Copy sign-in command',
+        };
+      }
+    } catch {
+      // A changed or malformed provider response is a compatibility failure,
+      // not evidence that the user is signed out.
+    }
+  }
 
   return {
     usable: false,
-    message: hostManaged
-      ? 'The claude CLI is installed but its stored credentials are empty, so a headless turn cannot authenticate. '
-        + 'This happens when the Claude Code app holds your tokens in memory for its own sessions instead of writing them to disk. '
-        + 'Run `claude` in a normal terminal and sign in, or set ANTHROPIC_API_KEY and use the Claude (API) provider.'
-      : 'The claude CLI is installed but not signed in — its stored credentials are empty. '
-        + 'Run `claude` in a terminal and sign in, or set ANTHROPIC_API_KEY and use the Claude (API) provider.',
+    message: 'NexusFlow could not verify Claude Code login. Check it in a terminal, then recheck.',
+    setupIssue: 'probe-failed',
+    recoveryCommand: 'claude auth status --json',
+    recoveryLabel: 'Copy status command',
   };
 }
 
@@ -137,4 +164,118 @@ export function detectAntigravityCliStatus(options: DetectOptions = {}): CliStat
       usable: false,
       message: 'The Antigravity CLI (`agy`) was not found on PATH.',
     };
+}
+
+/**
+ * Whether Codex can run non-interactively with the user's existing CLI login.
+ * `codex login status` is the supported auth probe and does not expose or copy
+ * the credential store. A ChatGPT subscription login is sufficient; no API key
+ * is required.
+ */
+export function detectCodexCliStatus(options: CodexDetectOptions = {}): CliStatus {
+  const env = options.env ?? process.env;
+  const executable = options.hasBinary === false ? null : findExecutable('codex', env);
+  const hasBinary = options.hasBinary ?? executable !== null;
+
+  if (!hasBinary) {
+    return {
+      usable: false,
+      message: 'The Codex CLI was not found on PATH.',
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'npm install -g @openai/codex',
+      recoveryLabel: 'Copy install command',
+    };
+  }
+
+  let loginStatus = options.loginStatus;
+  if (!loginStatus) {
+    const result = spawnSync(executable ?? 'codex', ['login', 'status'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable ?? ''),
+    });
+    loginStatus = {
+      exitCode: result.status,
+      error: result.error?.message,
+    };
+  }
+
+  if (!loginStatus.error && loginStatus.exitCode === 0) return { usable: true };
+
+  if (!loginStatus.error && loginStatus.exitCode === 1) {
+    return {
+      usable: false,
+      message: 'Codex is installed but not signed in. Use your ChatGPT account; no API key is required.',
+      setupIssue: 'signed-out',
+      recoveryCommand: 'codex login',
+      recoveryLabel: 'Copy sign-in command',
+    };
+  }
+
+  return {
+    usable: false,
+    message: 'NexusFlow could not verify Codex login. Check it in a terminal, then recheck.',
+    setupIssue: 'probe-failed',
+    recoveryCommand: 'codex login status',
+    recoveryLabel: 'Copy status command',
+  };
+}
+
+/**
+ * Whether the installed Copilot CLI exposes its supported ACP server.
+ *
+ * Copilot has no documented non-interactive login-status command. Session
+ * creation is therefore the authentication authority; this probe only avoids
+ * advertising older installations that cannot speak ACP at all.
+ */
+export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliStatus {
+  const env = options.env ?? process.env;
+  const executable = options.hasBinary === false ? null : findExecutable('copilot', env);
+  const hasBinary = options.hasBinary ?? executable !== null;
+
+  if (!hasBinary) {
+    return {
+      usable: false,
+      message: 'The GitHub Copilot CLI was not found on PATH. Install it, then run `copilot login`.',
+    };
+  }
+
+  // A classic PAT takes precedence over saved OAuth but is unsupported by the
+  // Copilot CLI, so this is one credential failure we can identify safely.
+  const token = env.COPILOT_GITHUB_TOKEN ?? env.GH_TOKEN ?? env.GITHUB_TOKEN;
+  if (token?.startsWith('ghp_')) {
+    return {
+      usable: false,
+      message: 'GitHub Copilot CLI does not support classic `ghp_` tokens. Remove the overriding token and run `copilot login`.',
+    };
+  }
+
+  let helpStatus = options.helpStatus;
+  if (!helpStatus) {
+    const result = spawnSync(executable ?? 'copilot', ['help'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable ?? ''),
+    });
+    helpStatus = {
+      exitCode: result.status,
+      output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+      error: result.error?.message,
+    };
+  }
+
+  if (helpStatus.exitCode === 0 && /--acp\b/.test(helpStatus.output ?? '')) {
+    return { usable: true };
+  }
+
+  return {
+    usable: false,
+    message: helpStatus.error
+      ? `NexusFlow could not inspect GitHub Copilot CLI ACP support (${helpStatus.error}). Update Copilot CLI and try again.`
+      : 'The installed GitHub Copilot CLI does not expose ACP. Update it, then run `copilot login`.',
+  };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
-import { app, isAllowedUpdateUrl } from './server.js';
+import { AgentTurnGate, app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -13,6 +13,8 @@ import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
+import { ProviderRegistry } from './agent/ProviderRegistry.js';
+import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -33,6 +35,158 @@ vi.mock('./orchestration/index.js');
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('rejects an invalid Codex transcript id at the HTTP boundary', async () => {
+    const response = await app.request('/api/session/codex/53/transcript');
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid Codex session id.' });
+  });
+
+  describe('embedded turn admission', () => {
+    it('rejects overlapping input until the active turn settles', () => {
+      const gate = new AgentTurnGate();
+
+      expect(gate.tryBegin()).toBe(true);
+      expect(gate.isActive()).toBe(true);
+      expect(gate.tryBegin()).toBe(false);
+
+      gate.settle();
+
+      expect(gate.isActive()).toBe(false);
+      expect(gate.tryBegin()).toBe(true);
+    });
+  });
+
+  describe('CLI adapter status probes', () => {
+    it('keeps the legacy GET endpoint side-effect-free', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        headers: { Origin: 'https://evil.example' },
+      });
+
+      expect(response.status).toBe(405);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('rejects a hostile initial status POST before running CLI detectors', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(403);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('allows a local-origin initial status POST', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4173' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:4173');
+      expect(status).toHaveBeenCalledWith();
+      status.mockRestore();
+    });
+
+    it('rejects a hostile browser origin before refreshing a CLI detector', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+        body: JSON.stringify({ providerId: 'claude-cli' }),
+      });
+
+      expect(response.status).toBe(403);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+
+    it('refreshes only an allowlisted CLI for a same-origin request', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4173' },
+        body: JSON.stringify({ providerId: 'codex-cli' }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:4173');
+      expect(status).toHaveBeenCalledWith({ refreshProviderId: 'codex-cli' });
+      status.mockRestore();
+    });
+
+    it('rejects attempts to refresh other providers', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4173' },
+        body: JSON.stringify({ providerId: 'copilot-cli' }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(status).not.toHaveBeenCalled();
+      status.mockRestore();
+    });
+  });
+
+  describe('embedded turn execution profiles', () => {
+    const provider = {
+      id: 'profiled-test',
+      name: 'Profiled test',
+      capabilities: { transport: 'cli-print', sessionIdentity: 'none', workspaceAccess: 'harness-managed' },
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Read-only.' },
+        { id: 'workspace-write', label: 'Edit workspace', description: 'May edit.' },
+      ],
+      defaultExecutionProfile: 'review',
+      isConfigured: () => true,
+      getStatusMessage: () => undefined,
+      createInstance: () => harness(),
+    } satisfies ProviderAdapter;
+
+    function harness() {
+      return {
+        start: vi.fn(),
+        send: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn(),
+        on: vi.fn().mockReturnThis(),
+        off: vi.fn().mockReturnThis(),
+      } as unknown as AgentHarness;
+    }
+
+    it.each([undefined, 'danger-full-access', false])(
+      'rejects a missing or unsupported profile %j before harness send',
+      (executionProfile) => {
+        const agent = harness();
+        expect(dispatchAgentInput(agent, provider, { input: 'Do work', executionProfile }))
+          .toMatch(/supported execution profile/i);
+        expect(agent.send).not.toHaveBeenCalled();
+      },
+    );
+
+    it('passes a validated profile to the harness', () => {
+      const agent = harness();
+      expect(dispatchAgentInput(agent, provider, {
+        input: 'Inspect only',
+        executionProfile: 'review',
+      })).toBeNull();
+      expect(agent.send).toHaveBeenCalledWith('Inspect only', 'review');
+    });
   });
 
   describe('POST /api/open-editor', () => {
@@ -565,6 +719,32 @@ describe('Server API Endpoints Unit Tests', () => {
       
       const calledArgs = vi.mocked(execa).mock.calls[0][1];
       expect(JSON.stringify(calledArgs)).toContain('Check for timeouts');
+    });
+
+    it('uses non-interactive codex exec with the prompt on stdin', async () => {
+      vi.mocked(detectAi.detectAIAssistants).mockResolvedValue([
+        { name: 'codex', displayName: 'OpenAI Codex', detected: true, command: 'codex' }
+      ]);
+      vi.mocked(execa).mockResolvedValue({
+        exitCode: 0,
+        stdout: 'Review result'
+      } as any);
+
+      const response = await app.request('/api/workflows/templates/test-id/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Rules', assistant: 'codex' })
+      });
+
+      expect(response.status).toBe(200);
+      const [command, args, options] = vi.mocked(execa).mock.calls[0] as unknown as [
+        string,
+        string[],
+        { input?: string },
+      ];
+      expect(command).toBe('codex');
+      expect(args).toEqual(['exec', '--color', 'never', '-']);
+      expect(options?.input).toContain('Rules');
     });
 
     describe('POST /api/workspace/suggest-workflow', () => {
