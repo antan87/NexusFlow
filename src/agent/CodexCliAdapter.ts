@@ -144,8 +144,10 @@ export class CodexCliAdapter extends CliAdapterBase {
     this.useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(this.binary);
   }
 
-  public async start(cwd: string, session?: AgentSession): Promise<void> {
-    await super.start(cwd);
+  public start(cwd: string, session?: AgentSession): Promise<void> {
+    // The renderer sends start and the first input as adjacent WebSocket
+    // frames. Capture the requested resume identity before returning the
+    // start promise so that input cannot accidentally launch a new thread.
     this.requestedSession = session;
     this.activeSessionId = session?.resume ? session.id : undefined;
     this.decoder = new CodexJsonlDecoder();
@@ -153,6 +155,7 @@ export class CodexCliAdapter extends CliAdapterBase {
     this.sawAssistantMessage = false;
     this.acknowledgedThisTurn = false;
     this.turnFinished = false;
+    return super.start(cwd);
   }
 
   protected buildArgs(

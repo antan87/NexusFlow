@@ -161,6 +161,18 @@ describe('Codex JSONL decoding', () => {
 });
 
 describe('Codex acknowledged thread lifecycle', () => {
+  it('uses the requested resume id even when input follows start immediately', async () => {
+    const adapter = new TestCodexCliAdapter();
+
+    const starting = adapter.start('C:\\workspace', { id: ID, resume: true });
+    await adapter.send('Resume without waiting for transport setup');
+    await starting;
+
+    expect(adapter.processes).toHaveLength(1);
+    expect(adapter.processes[0].args).toContain(ID);
+    expect(adapter.processes[0].args.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
+  });
+
   it('acknowledges a new thread, returns its message, then resumes the exact id', async () => {
     const adapter = new TestCodexCliAdapter();
     const sessions: string[] = [];
