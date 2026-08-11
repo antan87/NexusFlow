@@ -128,6 +128,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await mockCompletedCreationStream(page);
     const chatFrames: Array<Record<string, unknown>> = [];
     const legacyRequests: string[] = [];
+    let launchBody: Record<string, unknown> | null = null;
     page.on('request', (request) => {
       if (/\/resume$|\/api\/open-editor$/.test(new URL(request.url()).pathname)) {
         legacyRequests.push(request.url());
@@ -179,6 +180,15 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       });
     });
 
+    await page.route('**/api/workspace/demo-worktree/launch', async (route, request) => {
+      launchBody = request.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, targetId: launchBody?.targetId }),
+      });
+    });
+
     let workspaceBody: any = null;
     await page.route('**/api/workspace', async (route, request) => {
       workspaceBody = request.postDataJSON();
@@ -205,6 +215,14 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page.getByRole('button', { name: 'Start editing with Claude' })).toBeVisible();
     await expect(page.getByText(/Embedded start allows edits inside this workspace/i)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open workspace' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open with…' }).click();
+    await expect(page.getByRole('heading', { name: 'Open workspace with…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open workspace in Codex Desktop' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Claude Desktop unavailable' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Open workspace in VS Code' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'VS Code Insiders unavailable' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Open workspace in Codex Desktop' }).click();
+    await expect.poll(() => launchBody).toEqual({ targetId: 'codex-desktop' });
 
     await page.getByRole('button', { name: 'Start editing with Claude' }).click();
     await expect.poll(() => chatFrames.length).toBeGreaterThanOrEqual(2);

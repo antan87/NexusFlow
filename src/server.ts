@@ -32,6 +32,11 @@ import { generateContextFiles } from './generators/index.js';
 
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
+import {
+  detectWorkspaceLaunchTargets,
+  launchTargetIdForEditorCommand,
+  launchWorkspaceTarget,
+} from './utils/workspace-launch.js';
 import { findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
@@ -1055,7 +1060,47 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
   }
 });
 
-// 8. Open workspace in editor
+// 8. List the closed, server-owned launch catalog.
+app.get('/api/workspace-launch-targets', async (c) => {
+  try {
+    return c.json(await detectWorkspaceLaunchTargets());
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 8a. Open a real NexusFlow workspace in a selected desktop app or editor.
+app.post('/api/workspace/:id/launch', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const { targetId } = await c.req.json().catch(() => ({})) as { targetId?: unknown };
+    if (typeof targetId !== 'string' || !targetId) {
+      return c.json({ error: 'A workspace launch target is required.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const targets = await detectWorkspaceLaunchTargets();
+    const target = targets.find((candidate) => candidate.id === targetId);
+    if (!target) return c.json({ error: 'Unknown workspace launch target.' }, 400);
+    if (!target.available) {
+      return c.json({ error: target.unavailableReason ?? `${target.name} is unavailable.` }, 409);
+    }
+
+    await launchWorkspaceTarget(targetId, workspacePath);
+    return c.json({ success: true, targetId });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 8b. Legacy editor route retained for older clients. New clients use a
+// workspace id and closed target id through /api/workspace/:id/launch.
 app.post('/api/open-editor', async (c) => {
   try {
     const { workspacePath, command } = await c.req.json() as {
@@ -1063,32 +1108,28 @@ app.post('/api/open-editor', async (c) => {
       command: string;
     };
 
-    if (!ALLOWED_EDITORS.has(command)) {
+    const targetId = launchTargetIdForEditorCommand(command);
+    if (!ALLOWED_EDITORS.has(command) || !targetId) {
       return c.json({ error: 'Forbidden editor command' }, 400);
     }
 
-    // Validate path exists and is a directory
+    const config = await loadConfig();
+    const safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+
+    // Validate this is an existing NexusFlow workspace, not an arbitrary path.
     try {
-      const stats = await fs.stat(workspacePath);
+      const stats = await fs.stat(safeWorkspacePath);
       if (!stats.isDirectory()) {
         return c.json({ error: 'Workspace path is not a directory' }, 400);
       }
     } catch {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
+    if (!(await loadFeatureConfig(safeWorkspacePath))) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
 
-    // Spawn editor process
-    const isWin = process.platform === 'win32';
-    const child = execa(command, [workspacePath], {
-      detached: true,
-      stdio: 'ignore',
-      shell: isWin,
-      cleanup: false,
-    });
-    child.unref();
-    child.catch((err) => {
-      console.error(`Failed to launch editor ${command} for path ${workspacePath}:`, err);
-    });
+    await launchWorkspaceTarget(targetId, safeWorkspacePath);
 
     return c.json({ success: true });
   } catch (error) {

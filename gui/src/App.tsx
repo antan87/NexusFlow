@@ -581,40 +581,6 @@ function AppInner() {
     }
   };
 
-  const handleOpenInEditor = async (workspacePath: string) => {
-    if (isVsCode) {
-      window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath }, '*');
-      return;
-    }
-    if (config?.defaultEditor === 'none') {
-      showToast('Your preferred editor is set to "None" (skip opening). You can change this in Settings.', 'info');
-      return;
-    }
-    let editor: DetectedEditor | null | undefined = null;
-    if (config?.defaultEditor) {
-      editor = editors.find((e) => e.command === config.defaultEditor);
-    }
-    if (!editor) {
-      editor = editors.find((e) => e.detected) || editors[0];
-    }
-    if (!editor) {
-      showToast('No detected editors available.', 'error');
-      return;
-    }
-    try {
-      await fetch(`${API_BASE}/api/open-editor`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspacePath,
-          command: editor.command,
-        }),
-      });
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const executeTerminal = (command: string) => {
     if (!activeWsId) return;
     const ws = workspaces.find(w => w.branchName === activeWsId);
@@ -871,7 +837,6 @@ Core Instructions:
       resumingWs={resumingWs}
       handleResumeSession={handleResumeSession}
       handleCopyPrompt={handleCopyPrompt}
-      handleOpenInEditor={handleOpenInEditor}
       handleDeleteWorkspace={handleDeleteWorkspace}
       deleteWsLoading={deleteWsLoading}
       repos={repos}

@@ -24,6 +24,12 @@ describe('detectEditors', () => {
       { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
       { name: 'Cursor', command: 'cursor', detected: true },
       { name: 'Antigravity', command: 'antigravity', detected: false },
+      { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+      { name: 'WebStorm', command: 'webstorm', detected: false },
+      { name: 'PyCharm', command: 'charm', detected: false },
+      { name: 'Sublime Text', command: 'subl', detected: false },
+      { name: 'Zed', command: 'zed', detected: false },
+      { name: 'Windsurf', command: 'windsurf', detected: false },
     ]);
 
     const isWin = process.platform === 'win32';
@@ -43,6 +49,12 @@ describe('detectEditors', () => {
       { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
       { name: 'Cursor', command: 'cursor', detected: false },
       { name: 'Antigravity', command: 'antigravity', detected: false },
+      { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+      { name: 'WebStorm', command: 'webstorm', detected: false },
+      { name: 'PyCharm', command: 'charm', detected: false },
+      { name: 'Sublime Text', command: 'subl', detected: false },
+      { name: 'Zed', command: 'zed', detected: false },
+      { name: 'Windsurf', command: 'windsurf', detected: false },
     ]);
   });
 });

@@ -32,6 +32,32 @@ export interface DetectedEditor {
   detected: boolean;
 }
 
+export type WorkspaceLaunchTargetKind = 'ai-app' | 'editor';
+
+export type WorkspaceLaunchIcon =
+  | 'codex'
+  | 'claude'
+  | 'vscode'
+  | 'vscode-insiders'
+  | 'cursor'
+  | 'antigravity'
+  | 'intellij'
+  | 'webstorm'
+  | 'pycharm'
+  | 'sublime'
+  | 'zed'
+  | 'windsurf';
+
+export interface WorkspaceLaunchTarget {
+  id: string;
+  name: string;
+  description: string;
+  kind: WorkspaceLaunchTargetKind;
+  icon: WorkspaceLaunchIcon;
+  available: boolean;
+  unavailableReason?: string;
+}
+
 export interface RepoInfo {
   name: string;
   path: string;

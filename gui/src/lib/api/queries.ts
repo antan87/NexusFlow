@@ -19,6 +19,7 @@ import type {
   RunningService,
   ServiceConfig,
   WorkspaceMode,
+  WorkspaceLaunchTarget,
   WorkspaceStatus,
 } from '../../types.js';
 
@@ -178,6 +179,14 @@ export function useEditorDetect() {
   return useQuery({
     queryKey: ['editor-detect'],
     queryFn: () => apiFetch<DetectedEditor[]>('/api/editor-detect'),
+    staleTime: 60_000,
+  });
+}
+
+export function useWorkspaceLaunchTargets() {
+  return useQuery({
+    queryKey: ['workspace-launch-targets'],
+    queryFn: () => apiFetch<WorkspaceLaunchTarget[]>('/api/workspace-launch-targets'),
     staleTime: 60_000,
   });
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ComponentProps } from 'react';
-import { RefreshCw, Play, MoreVertical, ExternalLink, Copy, Trash2, Search, FolderGit2 } from 'lucide-react';
+import { RefreshCw, Play, MoreVertical, Copy, Trash2, Search, FolderGit2 } from 'lucide-react';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
@@ -19,6 +19,7 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { AgentChat } from '../features/chat/AgentChat.js';
+import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 
 type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan';
 
@@ -34,6 +35,8 @@ const TABS: Array<{ value: SubTab; label: string }> = [
 const FILTERS = ['all', 'changes', 'running'] as const;
 type Filter = (typeof FILTERS)[number];
 
+const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
+
 interface WorkspacesPageProps {
   workspaces: Feature[];
   workspaceStatuses: Record<string, WorkspaceStatus>;
@@ -46,7 +49,6 @@ interface WorkspacesPageProps {
   resumingWs: string | null;
   handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
   handleCopyPrompt: (ws: Feature) => void;
-  handleOpenInEditor: (workspacePath: string) => Promise<void>;
   handleDeleteWorkspace: (wsName: string) => Promise<void>;
   deleteWsLoading: string | null;
   repos: RepoInfo[];
@@ -71,7 +73,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     resumingWs,
     handleResumeSession,
     handleCopyPrompt,
-    handleOpenInEditor,
     handleDeleteWorkspace,
     deleteWsLoading,
     repos,
@@ -219,7 +220,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           ) : (
             <div>
               <Card className="mb-4 p-5">
-                <div className="flex flex-row justify-between items-start gap-4">
+                <div className="flex flex-col items-start gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <h2 className="truncate text-xl font-bold text-foreground" title={selected.branchName}>
@@ -235,7 +236,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <span>{selected.repos.length} repos</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       disabled={resumingWs === selected.branchName}
                       onClick={() => handleResumeSession(selected)}
@@ -243,6 +244,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <Play size={13} className={resumingWs === selected.branchName ? 'animate-spin' : ''} />
                       {resumingWs === selected.branchName ? 'Opening…' : 'Continue in Chat'}
                     </Button>
+                    <WorkspaceLauncher
+                      workspaceId={selected.branchName}
+                      workspacePath={selected.workspacePath}
+                      isVsCode={isVsCode}
+                    />
                     <Menu>
                       <MenuTrigger
                         aria-label="More actions"
@@ -251,9 +257,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         <MoreVertical size={16} />
                       </MenuTrigger>
                       <MenuPopup align="end">
-                        <MenuItem onClick={() => void handleOpenInEditor(selected.workspacePath)}>
-                          <ExternalLink size={14} /> Open Folder
-                        </MenuItem>
                         <MenuItem onClick={() => handleCopyPrompt(selected)}>
                           <Copy size={14} /> Copy AI Context
                         </MenuItem>
