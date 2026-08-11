@@ -6,6 +6,7 @@ import {
   hasDesktopProtocol,
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
+  openDesktopUri,
 } from './workspace-launch.js';
 
 vi.mock('execa');
@@ -29,6 +30,29 @@ describe('workspace launch catalog', () => {
       ['query', 'HKCU\\Software\\Classes\\codex'],
       { reject: false, shell: false },
     );
+  });
+
+  it('detects and activates Claude Desktop links on Linux', async () => {
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0, stdout: 'claude.desktop\n' } as any);
+
+    await expect(hasDesktopProtocol({ scheme: 'claude', macAppNames: [] }, 'linux')).resolves.toBe(true);
+    expect(execa).toHaveBeenCalledWith(
+      'xdg-mime',
+      ['query', 'default', 'x-scheme-handler/claude'],
+      { reject: false, shell: false },
+    );
+
+    await openDesktopUri('claude://code/new?folder=%2Ftmp%2Fworkspace', 'linux');
+    expect(execa).toHaveBeenCalledWith(
+      'xdg-open',
+      ['claude://code/new?folder=%2Ftmp%2Fworkspace'],
+      { shell: false },
+    );
+  });
+
+  it('does not advertise Codex Desktop on Linux', async () => {
+    await expect(hasDesktopProtocol({ scheme: 'codex', macAppNames: [] }, 'linux')).resolves.toBe(false);
+    expect(execa).not.toHaveBeenCalled();
   });
 
   it('returns unavailable targets with useful reasons', async () => {

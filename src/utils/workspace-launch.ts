@@ -110,6 +110,19 @@ export async function hasDesktopProtocol(
     return false;
   }
 
+  if (platform === 'linux' && definition.scheme === 'claude') {
+    try {
+      const result = await execa(
+        'xdg-mime',
+        ['query', 'default', 'x-scheme-handler/claude'],
+        { reject: false, shell: false },
+      );
+      return result.exitCode === 0 && Boolean(result.stdout?.trim());
+    } catch {
+      return false;
+    }
+  }
+
   return false;
 }
 
@@ -133,8 +146,8 @@ export async function detectWorkspaceLaunchTargets(): Promise<WorkspaceLaunchTar
       : unavailableTarget(
           base,
           'ai-app',
-          process.platform === 'linux'
-            ? 'Desktop launch is currently supported on Windows and macOS.'
+          process.platform === 'linux' && target.scheme === 'codex'
+            ? 'Codex Desktop launch is currently supported on Windows and macOS.'
             : `${target.name} is not installed or its link handler is unavailable.`,
         );
   });
@@ -154,7 +167,7 @@ export async function detectWorkspaceLaunchTargets(): Promise<WorkspaceLaunchTar
   return [...desktops, ...editors];
 }
 
-async function openDesktopUri(uri: string, platform = process.platform): Promise<void> {
+export async function openDesktopUri(uri: string, platform = process.platform): Promise<void> {
   if (platform === 'win32') {
     await execa('explorer.exe', [uri], { shell: false });
     return;
@@ -163,7 +176,11 @@ async function openDesktopUri(uri: string, platform = process.platform): Promise
     await execa('/usr/bin/open', [uri], { shell: false });
     return;
   }
-  throw new Error('Desktop app launching is currently supported on Windows and macOS.');
+  if (platform === 'linux') {
+    await execa('xdg-open', [uri], { shell: false });
+    return;
+  }
+  throw new Error('Desktop app launching is not supported on this platform.');
 }
 
 /** Launch one closed target at a validated absolute workspace directory. */

@@ -209,6 +209,17 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.error).toBe('Forbidden editor command');
     });
 
+    it('explicitly rejects legacy interactive terminal editors', async () => {
+      const response = await app.request('/api/open-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspacePath, command: 'nvim' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'Forbidden editor command' });
+    });
+
     it('should return 400 if workspace path does not exist', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
       vi.spyOn(fs, 'stat').mockRejectedValue(new Error('File not found'));
@@ -253,7 +264,11 @@ describe('Server API Endpoints Unit Tests', () => {
         isDirectory: () => true
       } as any);
       vi.spyOn(fs, 'access').mockRejectedValue(new Error('No generated workspace file'));
-      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'test-workspace' } as any);
+      vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+        id: 'test-workspace',
+        workspacePath,
+      } as any);
 
       vi.mocked(execa).mockImplementation((async (command: any, args?: readonly string[]): Promise<any> => ({
         exitCode: args?.[0] === '--version' && command === 'code-insiders' ? 0 : 1,
@@ -301,6 +316,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
     beforeEach(() => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
       vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
         id: 'safe-workspace',
         workspacePath,
@@ -330,6 +346,42 @@ describe('Server API Endpoints Unit Tests', () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({ error: 'Unknown workspace launch target.' });
+    });
+
+    it('rejects a workspace whose canonical path escapes through a symlink', async () => {
+      const outsidePath = path.resolve('outside-launch-workspace');
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) =>
+        path.resolve(String(candidate)) === workspacePath
+          ? outsidePath
+          : path.resolve(String(candidate)),
+      );
+
+      const response = await app.request('/api/workspace/safe-workspace/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: 'codex-desktop' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'Invalid workspace path' });
+      expect(execa).not.toHaveBeenCalled();
+    });
+
+    it('rejects a child path that only inherits a parent workspace manifest', async () => {
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'parent-workspace',
+        workspacePath: workspacesDir,
+      } as any);
+
+      const response = await app.request('/api/workspace/safe-workspace/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: 'codex-desktop' }),
+      });
+
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: 'Workspace configuration not found.' });
+      expect(execa).not.toHaveBeenCalled();
     });
 
     it('returns a conflict when the selected app is unavailable', async () => {

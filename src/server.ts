@@ -329,6 +329,34 @@ export function resolveWorkspacePath(workspacesDir: string, id: string): string 
   return assertWithin(workspacesDir, path.join(workspacesDir, id));
 }
 
+/**
+ * Resolve a launch path through the filesystem and require it to be the exact
+ * workspace declared by its manifest. This prevents symlink escapes and stops
+ * loadFeatureConfig's parent-directory fallback from authorizing a child path.
+ */
+async function resolveExactLaunchWorkspace(
+  workspacesDir: string,
+  candidatePath: string,
+): Promise<string | null> {
+  const lexicalPath = assertWithin(workspacesDir, candidatePath);
+  const [canonicalRoot, canonicalWorkspace] = await Promise.all([
+    fs.realpath(workspacesDir),
+    fs.realpath(lexicalPath),
+  ]);
+  const safeWorkspacePath = assertWithin(canonicalRoot, canonicalWorkspace);
+  const feature = await loadFeatureConfig(safeWorkspacePath);
+  if (!feature || typeof feature.workspacePath !== 'string') return null;
+
+  try {
+    const declaredWorkspace = await fs.realpath(path.resolve(feature.workspacePath));
+    return path.resolve(declaredWorkspace) === path.resolve(safeWorkspacePath)
+      ? safeWorkspacePath
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Safe sub-repo path for a repo name, contained within the workspace. */
 export function resolveRepoPath(workspacePath: string, repoName: string): string {
   return assertWithin(workspacePath, path.join(workspacePath, repoName));
@@ -1079,9 +1107,15 @@ app.post('/api/workspace/:id/launch', async (c) => {
     }
 
     const config = await loadConfig();
-    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const feature = await loadFeatureConfig(workspacePath);
-    if (!feature) {
+    const requestedWorkspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    let workspacePath: string | null;
+    try {
+      workspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, requestedWorkspacePath);
+    } catch (error) {
+      if (error instanceof PathAccessError) throw error;
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+    if (!workspacePath) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
@@ -1099,8 +1133,9 @@ app.post('/api/workspace/:id/launch', async (c) => {
   }
 });
 
-// 8b. Legacy editor route retained for older clients. New clients use a
-// workspace id and closed target id through /api/workspace/:id/launch.
+// 8b. Legacy editor route retained for older GUI clients using recognized
+// graphical editors. Interactive terminal editors are intentionally rejected:
+// a detached HTTP request cannot safely provide their required TTY.
 app.post('/api/open-editor', async (c) => {
   try {
     const { workspacePath, command } = await c.req.json() as {
@@ -1125,11 +1160,15 @@ app.post('/api/open-editor', async (c) => {
     } catch {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
-    if (!(await loadFeatureConfig(safeWorkspacePath))) {
+    const exactWorkspacePath = await resolveExactLaunchWorkspace(
+      config.workspacesDir,
+      safeWorkspacePath,
+    );
+    if (!exactWorkspacePath) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    await launchWorkspaceTarget(targetId, safeWorkspacePath);
+    await launchWorkspaceTarget(targetId, exactWorkspacePath);
 
     return c.json({ success: true });
   } catch (error) {

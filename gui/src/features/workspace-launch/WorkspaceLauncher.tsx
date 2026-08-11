@@ -78,11 +78,13 @@ function LauncherIcon({ icon }: { icon: WorkspaceLaunchIcon }) {
 
 function TargetButton({
   target,
+  busy,
   launching,
   preferred,
   onLaunch,
 }: {
   target: WorkspaceLaunchTarget;
+  busy: boolean;
   launching: boolean;
   preferred?: boolean;
   onLaunch: (target: WorkspaceLaunchTarget) => void;
@@ -90,7 +92,7 @@ function TargetButton({
   return (
     <button
       type="button"
-      disabled={!target.available || launching}
+      disabled={!target.available || busy}
       onClick={() => onLaunch(target)}
       aria-label={target.available ? `Open workspace in ${target.name}` : `${target.name} unavailable`}
       className={cn(
@@ -209,8 +211,9 @@ export function WorkspaceLauncher({
                 </h3>
                 <button
                   type="button"
+                  disabled={launchingId !== null}
                   onClick={openCurrentVsCode}
-                  className="flex min-h-20 w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-left outline-none transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex min-h-20 w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-left outline-none transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-65"
                 >
                   <LauncherIcon icon="vscode" />
                   <span>
@@ -237,7 +240,13 @@ export function WorkspaceLauncher({
                   </h3>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {aiApps.map((target) => (
-                      <TargetButton key={target.id} target={target} launching={launchingId === target.id} onLaunch={launch} />
+                      <TargetButton
+                        key={target.id}
+                        target={target}
+                        busy={launchingId !== null}
+                        launching={launchingId === target.id}
+                        onLaunch={launch}
+                      />
                     ))}
                   </div>
                 </section>
@@ -250,6 +259,7 @@ export function WorkspaceLauncher({
                       <TargetButton
                         key={target.id}
                         target={target}
+                        busy={launchingId !== null}
                         launching={launchingId === target.id}
                         preferred={target.id === preferredEditorId}
                         onLaunch={launch}
@@ -262,7 +272,7 @@ export function WorkspaceLauncher({
 
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="truncate font-mono text-[11px] text-muted-foreground" title={workspacePath}>{workspacePath}</p>
-              <Button size="sm" variant="ghost" onClick={() => void targets.refetch()} disabled={targets.isFetching}>
+              <Button size="sm" variant="ghost" onClick={() => void targets.refetch()} disabled={targets.isFetching || launchingId !== null}>
                 <RefreshCw className={targets.isFetching ? 'animate-spin' : ''} />
                 Recheck
               </Button>

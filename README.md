@@ -328,6 +328,8 @@ The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm s
 - **Logs panel** — real-time aggregated service log output
 - **Config panel** — edit NexusFlow settings from the browser
 
+The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
+
 The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serves a [React](https://react.dev) + [Vite](https://vite.dev) frontend.
 
 ## ⚙️ Configuration

@@ -281,11 +281,12 @@ export function StartWorkPage() {
           </p>
         )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
-        <div className="mt-6 flex gap-2">
+        <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
           {progress.status === 'completed' && progress.workspaceId && (
             <>
               {embeddedAssistant && (
                 <Button
+                  className="w-full min-w-0 whitespace-normal sm:w-auto"
                   onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`, {
                     state: {
                       chatLaunch: createChatLaunchIntent(embeddedAssistant, {
@@ -300,6 +301,7 @@ export function StartWorkPage() {
                 </Button>
               )}
               <Button
+                className="w-full min-w-0 whitespace-normal sm:w-auto"
                 variant={embeddedAssistant ? 'outline' : undefined}
                 onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}
               >
@@ -310,6 +312,7 @@ export function StartWorkPage() {
                   workspaceId={progress.workspaceId}
                   workspacePath={progress.workspacePath}
                   isVsCode={isVsCode}
+                  className="w-full min-w-0 whitespace-normal sm:w-auto"
                 />
               )}
             </>
