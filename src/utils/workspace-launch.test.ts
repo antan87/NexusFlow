@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execa } from 'execa';
+import * as path from 'node:path';
 
 import {
+  buildWorkspaceLaunchPrompt,
   detectWorkspaceLaunchTargets,
   hasDesktopProtocol,
   launchTargetIdForEditorCommand,
@@ -78,15 +80,75 @@ describe('workspace launch catalog', () => {
     vi.mocked(execa).mockImplementation((async (command: any): Promise<any> => ({
       exitCode: command === 'reg.exe' ? 0 : 0,
     })) as any);
-    const workspacePath = 'C:\\dev\\work spaces\\one & two';
+    const workspacePath = path.resolve('work spaces', 'one & two');
+    const prompt = buildWorkspaceLaunchPrompt({ description: 'Fix launch & resume' });
 
-    await launchWorkspaceTarget('codex-desktop', workspacePath);
+    await launchWorkspaceTarget('codex-desktop', workspacePath, { kind: 'new-workspace', prompt }, 'win32');
 
     expect(execa).toHaveBeenCalledWith(
       'explorer.exe',
-      [`codex://threads/new?path=${encodeURIComponent(workspacePath)}`],
+      [`codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`],
       { shell: false },
     );
+  });
+
+  it('builds a once-encoded Claude URI with the workspace kickoff', async () => {
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0, stdout: 'claude.desktop\n' } as any);
+    const workspacePath = path.resolve('work spaces', 'claude & nexusflow');
+    const prompt = buildWorkspaceLaunchPrompt({ description: 'Continue the integration' });
+
+    await launchWorkspaceTarget('claude-desktop', workspacePath, { kind: 'new-workspace', prompt }, 'linux');
+
+    expect(execa).toHaveBeenCalledWith(
+      'xdg-open',
+      [`claude://code/new?folder=${encodeURIComponent(workspacePath)}&q=${encodeURIComponent(prompt)}`],
+      { shell: false },
+    );
+  });
+
+  it('keeps a truncated emoji-bearing kickoff well-formed for URI encoding', () => {
+    const basePrompt = buildWorkspaceLaunchPrompt({ description: '' });
+    const marker = '\n\nWorkspace task: ';
+    const remaining = 1_600 - basePrompt.length - marker.length;
+    const description = `${'a'.repeat(remaining - 1)}😀tail`;
+
+    const prompt = buildWorkspaceLaunchPrompt({ description });
+
+    expect(prompt.length).toBeLessThanOrEqual(1_600);
+    expect(() => encodeURIComponent(prompt)).not.toThrow();
+    expect(prompt.endsWith('a')).toBe(true);
+  });
+
+  it('opens an existing Codex thread by its validated technical id', async () => {
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+    const workspacePath = path.resolve('workspace');
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+
+    await launchWorkspaceTarget(
+      'codex-desktop',
+      workspacePath,
+      { kind: 'resume-session', sessionId },
+      'win32',
+    );
+
+    expect(execa).toHaveBeenCalledWith(
+      'explorer.exe',
+      [`codex://threads/${sessionId}`],
+      { shell: false },
+    );
+  });
+
+  it('does not claim that Claude Desktop can resume a local Code session', async () => {
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0, stdout: 'claude.desktop\n' } as any);
+
+    await expect(launchWorkspaceTarget(
+      'claude-desktop',
+      path.resolve('workspace'),
+      { kind: 'resume-session', sessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
+      'linux',
+    )).rejects.toThrow(/does not support/i);
+
+    expect(execa).not.toHaveBeenCalledWith('xdg-open', expect.anything(), expect.anything());
   });
 
   it('never maps arbitrary commands to launch targets', () => {
@@ -95,7 +157,7 @@ describe('workspace launch catalog', () => {
   });
 
   it('rejects unknown targets before launching anything', async () => {
-    await expect(launchWorkspaceTarget('editor:../../calc', 'C:\\dev\\workspace')).rejects.toThrow(
+    await expect(launchWorkspaceTarget('editor:../../calc', path.resolve('workspace'))).rejects.toThrow(
       'Unknown workspace launch target',
     );
     expect(execa).not.toHaveBeenCalled();

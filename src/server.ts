@@ -33,11 +33,12 @@ import { generateContextFiles } from './generators/index.js';
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
 import {
+  buildWorkspaceLaunchPrompt,
   detectWorkspaceLaunchTargets,
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
 } from './utils/workspace-launch.js';
-import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import { canOpenCodexSessionInWorkspace, findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
@@ -1101,9 +1102,19 @@ app.get('/api/workspace-launch-targets', async (c) => {
 app.post('/api/workspace/:id/launch', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
-    const { targetId } = await c.req.json().catch(() => ({})) as { targetId?: unknown };
+    const { targetId, action = 'new', sessionId } = await c.req.json().catch(() => ({})) as {
+      targetId?: unknown;
+      action?: unknown;
+      sessionId?: unknown;
+    };
     if (typeof targetId !== 'string' || !targetId) {
       return c.json({ error: 'A workspace launch target is required.' }, 400);
+    }
+    if (action !== 'new' && action !== 'resume') {
+      return c.json({ error: 'Unknown workspace launch action.' }, 400);
+    }
+    if (action === 'new' && sessionId !== undefined) {
+      return c.json({ error: 'A new workspace launch cannot include a session id.' }, 400);
     }
 
     const config = await loadConfig();
@@ -1118,6 +1129,10 @@ app.post('/api/workspace/:id/launch', async (c) => {
     if (!workspacePath) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
+    const feature = await loadWorkspaceManifest(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
 
     const targets = await detectWorkspaceLaunchTargets();
     const target = targets.find((candidate) => candidate.id === targetId);
@@ -1126,8 +1141,30 @@ app.post('/api/workspace/:id/launch', async (c) => {
       return c.json({ error: target.unavailableReason ?? `${target.name} is unavailable.` }, 409);
     }
 
-    await launchWorkspaceTarget(targetId, workspacePath);
-    return c.json({ success: true, targetId });
+    if (action === 'resume') {
+      if (targetId !== 'codex-desktop') {
+        return c.json({ error: 'This app cannot open an existing coding session.' }, 400);
+      }
+      if (typeof sessionId !== 'string' || !isValidSessionUuid(sessionId)) {
+        return c.json({ error: 'A valid Codex session id is required.' }, 400);
+      }
+      const ownsSession = await canOpenCodexSessionInWorkspace(
+        workspacePath,
+        feature.repos,
+        sessionId,
+      );
+      if (!ownsSession) {
+        return c.json({ error: 'Codex session not found in this workspace.' }, 404);
+      }
+      await launchWorkspaceTarget(targetId, workspacePath, { kind: 'resume-session', sessionId });
+      return c.json({ success: true, targetId, action, sessionId });
+    }
+
+    await launchWorkspaceTarget(targetId, workspacePath, {
+      kind: 'new-workspace',
+      prompt: buildWorkspaceLaunchPrompt(feature),
+    });
+    return c.json({ success: true, targetId, action });
   } catch (error) {
     return errorResponse(c, error);
   }

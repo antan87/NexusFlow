@@ -194,7 +194,7 @@ export function WorkspaceLauncher({
           <DialogHeader>
             <DialogTitle>Open workspace with…</DialogTitle>
             <DialogDescription>
-              Choose a coding app or editor. NexusFlow opens this workspace locally and never sends its path to a hosted API.
+              Choose a local coding app or editor. AI apps receive the workspace path and an editable task kickoff; they may use their own online services.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-5">

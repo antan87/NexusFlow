@@ -14,6 +14,7 @@ import * as workflows from './utils/workflows.js';
 import * as detectAi from './utils/detect-ai.js';
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
+import * as sessionFinder from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 
@@ -319,6 +320,8 @@ describe('Server API Endpoints Unit Tests', () => {
       vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
       vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
         id: 'safe-workspace',
+        description: 'Improve the local Desktop handoff',
+        repos: [],
         workspacePath,
       } as any);
     });
@@ -395,26 +398,86 @@ describe('Server API Endpoints Unit Tests', () => {
       });
 
       expect(response.status).toBe(409);
-      expect((await response.json()).error).toMatch(/not installed|unavailable/i);
+      expect((await response.json()).error).toMatch(/not installed|unavailable|supported/i);
     });
 
     it('launches Codex with a once-encoded validated workspace path', async () => {
+      const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.mocked(execa).mockImplementation((async (command: any): Promise<any> => ({
         exitCode: command === 'reg.exe' || command === 'explorer.exe' ? 0 : 1,
       })) as any);
 
-      const response = await app.request('/api/workspace/safe-workspace/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetId: 'codex-desktop' }),
-      });
+      try {
+        const response = await app.request('/api/workspace/safe-workspace/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetId: 'codex-desktop' }),
+        });
 
-      expect(response.status).toBe(200);
-      expect(execa).toHaveBeenCalledWith(
-        'explorer.exe',
-        [`codex://threads/new?path=${encodeURIComponent(workspacePath)}`],
-        { shell: false },
-      );
+        expect(response.status).toBe(200);
+        const prompt = 'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.\n\nWorkspace task: Improve the local Desktop handoff';
+        expect(execa).toHaveBeenCalledWith(
+          'explorer.exe',
+          [`codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`],
+          { shell: false },
+        );
+      } finally {
+        platform.mockRestore();
+      }
+    });
+
+    it('opens only a Codex thread recorded for the selected workspace', async () => {
+      const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+      const authorizeSession = vi.spyOn(sessionFinder, 'canOpenCodexSessionInWorkspace')
+        .mockResolvedValue(true);
+      vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+
+      try {
+        const response = await app.request('/api/workspace/safe-workspace/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetId: 'codex-desktop', action: 'resume', sessionId }),
+        });
+
+        expect(response.status).toBe(200);
+        expect(execa).toHaveBeenCalledWith(
+          'explorer.exe',
+          [`codex://threads/${sessionId}`],
+          { shell: false },
+        );
+      } finally {
+        authorizeSession.mockRestore();
+        platform.mockRestore();
+      }
+    });
+
+    it('does not open a Codex thread owned by another workspace', async () => {
+      const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      const authorizeSession = vi.spyOn(sessionFinder, 'canOpenCodexSessionInWorkspace')
+        .mockResolvedValue(false);
+      vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+
+      try {
+        const response = await app.request('/api/workspace/safe-workspace/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetId: 'codex-desktop',
+            action: 'resume',
+            sessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53',
+          }),
+        });
+
+        expect(response.status).toBe(404);
+        await expect(response.json()).resolves.toEqual({
+          error: 'Codex session not found in this workspace.',
+        });
+        expect(execa).not.toHaveBeenCalledWith('explorer.exe', expect.anything(), expect.anything());
+      } finally {
+        authorizeSession.mockRestore();
+        platform.mockRestore();
+      }
     });
   });
 

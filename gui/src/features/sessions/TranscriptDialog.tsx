@@ -1,4 +1,5 @@
-import { Copy, Play } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Copy, ExternalLink, Play } from 'lucide-react';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Button } from '../../components/ui/button.js';
 import {
@@ -12,6 +13,7 @@ import {
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { findWorkspaceForSession } from '../../lib/status.js';
+import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
 import type { Feature } from '../../types.js';
 
 interface TranscriptDialogProps {
@@ -21,6 +23,7 @@ interface TranscriptDialogProps {
   setActiveSession: (session: any | null) => void;
   workspaces: Feature[];
   handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
+  handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -43,8 +46,40 @@ export function TranscriptDialog({
   setActiveSession,
   workspaces,
   handleResumeSession,
+  handleOpenDesktopSession,
   showToast,
 }: TranscriptDialogProps) {
+  const launchTargets = useWorkspaceLaunchTargets();
+  const codexDesktop = launchTargets.data?.find((target) => target.id === 'codex-desktop');
+  const codexDesktopAvailable = codexDesktop?.available === true;
+  const codexDesktopReason = launchTargets.isLoading
+    ? 'Checking whether Codex Desktop is available…'
+    : launchTargets.isError
+      ? 'Could not check whether Codex Desktop is available.'
+      : codexDesktop?.unavailableReason ?? 'Codex Desktop is not available on this computer.';
+  const openingDesktopRef = useRef(false);
+  const [openingDesktop, setOpeningDesktop] = useState(false);
+
+  const openCodexDesktop = async () => {
+    if (!codexDesktopAvailable || openingDesktopRef.current) return;
+    const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
+    if (!ws) {
+      showToast('Could not match this session to a workspace — it may have been removed.', 'error');
+      return;
+    }
+
+    openingDesktopRef.current = true;
+    setOpeningDesktop(true);
+    try {
+      if (await handleOpenDesktopSession(ws, activeSession.id, activeSession.assistant)) {
+        setActiveSession(null);
+      }
+    } finally {
+      openingDesktopRef.current = false;
+      setOpeningDesktop(false);
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => !open && setActiveSession(null)}>
       <DialogPopup className="h-[80vh] max-w-4xl">
@@ -129,7 +164,22 @@ export function TranscriptDialog({
                   setActiveSession(null);
                 }}
               >
-                <Play size={12} /> Resume in Chat
+                <Play size={12} /> Resume in NexusFlow
+              </Button>
+            )}
+            {activeSession.assistant === 'codex' && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!codexDesktopAvailable || openingDesktop}
+                title={codexDesktopAvailable ? 'Open this exact thread in Codex Desktop' : codexDesktopReason}
+                aria-label={codexDesktopAvailable
+                  ? 'Open in Codex Desktop'
+                  : `Codex Desktop unavailable: ${codexDesktopReason}`}
+                onClick={() => void openCodexDesktop()}
+              >
+                {openingDesktop ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
+                {openingDesktop ? 'Opening…' : 'Open in Codex Desktop'}
               </Button>
             )}
           </div>

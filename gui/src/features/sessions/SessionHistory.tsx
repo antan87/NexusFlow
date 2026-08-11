@@ -1,10 +1,11 @@
-import React from 'react';
-import { MessageSquareCode, MessageSquare, Play } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { ExternalLink, MessageSquareCode, MessageSquare, Play } from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../../components/ui/empty.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
+import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
 
 interface SessionHistoryProps {
   ws: Feature;
@@ -14,6 +15,7 @@ interface SessionHistoryProps {
   setTranscript: (val: any[]) => void;
   fetchSessionTranscript: (assistant: string, sessionId: string) => Promise<void>;
   handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
+  handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
 }
 
 const assistantLabel = (assistant: string) =>
@@ -41,7 +43,31 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   setTranscript,
   fetchSessionTranscript,
   handleResumeSession,
+  handleOpenDesktopSession,
 }) => {
+  const launchTargets = useWorkspaceLaunchTargets();
+  const codexDesktop = launchTargets.data?.find((target) => target.id === 'codex-desktop');
+  const codexDesktopAvailable = codexDesktop?.available === true;
+  const codexDesktopReason = launchTargets.isLoading
+    ? 'Checking whether Codex Desktop is available…'
+    : launchTargets.isError
+      ? 'Could not check whether Codex Desktop is available.'
+      : codexDesktop?.unavailableReason ?? 'Codex Desktop is not available on this computer.';
+  const openingDesktopRef = useRef<string | null>(null);
+  const [openingDesktopId, setOpeningDesktopId] = useState<string | null>(null);
+
+  const openCodexDesktop = async (sessionId: string) => {
+    if (!codexDesktopAvailable || openingDesktopRef.current) return;
+    openingDesktopRef.current = sessionId;
+    setOpeningDesktopId(sessionId);
+    try {
+      await handleOpenDesktopSession(ws, sessionId, 'codex');
+    } finally {
+      openingDesktopRef.current = null;
+      setOpeningDesktopId(null);
+    }
+  };
+
   return (
     <div>
       {sessionsLoading ? (
@@ -96,7 +122,22 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                     size="sm"
                     onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}
                   >
-                    <Play size={11} /> Resume in Chat
+                    <Play size={11} /> Resume in NexusFlow
+                  </Button>
+                )}
+                {sess.assistant === 'codex' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!codexDesktopAvailable || openingDesktopId !== null}
+                    title={codexDesktopAvailable ? 'Open this exact thread in Codex Desktop' : codexDesktopReason}
+                    aria-label={codexDesktopAvailable
+                      ? 'Open in Codex Desktop'
+                      : `Codex Desktop unavailable: ${codexDesktopReason}`}
+                    onClick={() => void openCodexDesktop(sess.id)}
+                  >
+                    {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
+                    {openingDesktopId === sess.id ? 'Opening…' : 'Open in Codex Desktop'}
                   </Button>
                 )}
               </div>

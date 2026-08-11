@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { getClaudeProjectFolderName, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
+import { canOpenCodexSessionInWorkspace, getClaudeProjectFolderName, isCanonicalPathWithin, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -87,6 +87,62 @@ describe('isCodexSessionId', () => {
     expect(isCodexSessionId('0199a213-81c0-7800-8aa1-bbab2a035a53')).toBe(true);
     expect(isCodexSessionId('53')).toBe(false);
     expect(isCodexSessionId('0199a213-81c0-7800-8aa1-bbab2a035a53; whoami')).toBe(false);
+  });
+});
+
+describe('Codex Desktop workspace authorization', () => {
+  const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+  let codexHome = '';
+  let workspacePath = '';
+  let previousCodexHome: string | undefined;
+
+  beforeEach(async () => {
+    previousCodexHome = process.env.CODEX_HOME;
+    codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-codex-authorization-'));
+    workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workspace-'));
+    process.env.CODEX_HOME = codexHome;
+    await fs.mkdir(path.join(codexHome, 'sessions'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    await fs.rm(codexHome, { recursive: true, force: true });
+    await fs.rm(workspacePath, { recursive: true, force: true });
+  });
+
+  it('requires a matching session_meta cwd inside the canonical workspace', async () => {
+    await fs.writeFile(
+      path.join(codexHome, 'sessions', 'rollout.jsonl'),
+      JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: workspacePath } }),
+    );
+
+    await expect(canOpenCodexSessionInWorkspace(workspacePath, [], sessionId)).resolves.toBe(true);
+  });
+
+  it('rejects a fuzzy transcript mention when session_meta has no cwd', async () => {
+    await fs.writeFile(
+      path.join(codexHome, 'sessions', 'old-rollout.jsonl'),
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: sessionId } }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: { type: 'message', role: 'user', content: workspacePath },
+        }),
+      ].join('\n'),
+    );
+
+    await expect(canOpenCodexSessionInWorkspace(workspacePath, [], sessionId)).resolves.toBe(false);
+  });
+
+  it('keeps POSIX path authorization case-sensitive', () => {
+    expect(isCanonicalPathWithin('/workspaces/NexusFlow', '/workspaces/nexusflow/repo', 'linux'))
+      .toBe(false);
+  });
+
+  it('matches Windows canonical paths case-insensitively', () => {
+    expect(isCanonicalPathWithin('C:\\Workspaces\\NexusFlow', 'c:\\workspaces\\nexusflow\\repo', 'win32'))
+      .toBe(true);
   });
 });
 

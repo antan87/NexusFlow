@@ -9,10 +9,12 @@ import { execa } from 'execa';
 import * as path from 'node:path';
 
 import type {
+  Feature,
   WorkspaceLaunchIcon,
   WorkspaceLaunchTarget,
   WorkspaceLaunchTargetKind,
 } from '../types.js';
+import { isValidSessionUuid } from '../agent/session.js';
 import { detectEditors } from './detect-editors.js';
 import { openInEditor } from './open-editor.js';
 
@@ -31,7 +33,37 @@ interface DesktopDefinition {
   icon: WorkspaceLaunchIcon;
   description: string;
   macAppNames: string[];
-  buildUri(workspacePath: string): string;
+  buildNewUri(workspacePath: string, prompt?: string): string;
+  buildResumeUri?(sessionId: string): string;
+}
+
+export type WorkspaceLaunchIntent =
+  | { kind: 'new-workspace'; prompt?: string }
+  | { kind: 'resume-session'; sessionId: string };
+
+const DESKTOP_PROMPT_MAX_LENGTH = 1_600;
+const DEFAULT_WORKSPACE_PROMPT =
+  'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.';
+
+function truncateWellFormed(value: string, maxCodeUnits: number): string {
+  let result = '';
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    const safeCharacter = codePoint >= 0xD800 && codePoint <= 0xDFFF ? '\uFFFD' : character;
+    if (result.length + safeCharacter.length > maxCodeUnits) break;
+    result += safeCharacter;
+  }
+  return result;
+}
+
+/** Build a concise, server-owned kickoff for a provider Desktop composer. */
+export function buildWorkspaceLaunchPrompt(feature: Pick<Feature, 'description'>): string {
+  const description = feature.description?.trim();
+  if (!description) return DEFAULT_WORKSPACE_PROMPT;
+
+  const prefix = `${DEFAULT_WORKSPACE_PROMPT}\n\nWorkspace task: `;
+  const remaining = Math.max(0, DESKTOP_PROMPT_MAX_LENGTH - prefix.length);
+  return `${prefix}${truncateWellFormed(description, remaining)}`;
 }
 
 const DESKTOP_TARGETS: readonly DesktopDefinition[] = [
@@ -42,8 +74,10 @@ const DESKTOP_TARGETS: readonly DesktopDefinition[] = [
     icon: 'codex',
     description: 'Start a new Codex chat with this folder as its workspace.',
     macAppNames: ['Codex', 'ChatGPT'],
-    buildUri: (workspacePath) =>
-      `codex://threads/new?path=${encodeURIComponent(workspacePath)}`,
+    buildNewUri: (workspacePath, prompt) =>
+      `codex://threads/new?path=${encodeURIComponent(workspacePath)}`
+      + (prompt ? `&prompt=${encodeURIComponent(prompt)}` : ''),
+    buildResumeUri: (sessionId) => `codex://threads/${encodeURIComponent(sessionId)}`,
   },
   {
     id: 'claude-desktop',
@@ -52,8 +86,9 @@ const DESKTOP_TARGETS: readonly DesktopDefinition[] = [
     icon: 'claude',
     description: 'Open Claude Code with this folder selected (Claude asks you to confirm it).',
     macAppNames: ['Claude'],
-    buildUri: (workspacePath) =>
-      `claude://code/new?folder=${encodeURIComponent(workspacePath)}`,
+    buildNewUri: (workspacePath, prompt) =>
+      `claude://code/new?folder=${encodeURIComponent(workspacePath)}`
+      + (prompt ? `&q=${encodeURIComponent(prompt)}` : ''),
   },
 ] as const;
 
@@ -127,9 +162,11 @@ export async function hasDesktopProtocol(
 }
 
 /** Return every known target so unavailable choices can be explained in the UI. */
-export async function detectWorkspaceLaunchTargets(): Promise<WorkspaceLaunchTarget[]> {
+export async function detectWorkspaceLaunchTargets(
+  platform = process.platform,
+): Promise<WorkspaceLaunchTarget[]> {
   const [desktopAvailability, detectedEditors] = await Promise.all([
-    Promise.all(DESKTOP_TARGETS.map((target) => hasDesktopProtocol(target))),
+    Promise.all(DESKTOP_TARGETS.map((target) => hasDesktopProtocol(target, platform))),
     detectEditors(),
   ]);
   const editorAvailability = new Map(detectedEditors.map((editor) => [editor.command, editor.detected]));
@@ -146,7 +183,7 @@ export async function detectWorkspaceLaunchTargets(): Promise<WorkspaceLaunchTar
       : unavailableTarget(
           base,
           'ai-app',
-          process.platform === 'linux' && target.scheme === 'codex'
+          platform === 'linux' && target.scheme === 'codex'
             ? 'Codex Desktop launch is currently supported on Windows and macOS.'
             : `${target.name} is not installed or its link handler is unavailable.`,
         );
@@ -184,7 +221,12 @@ export async function openDesktopUri(uri: string, platform = process.platform): 
 }
 
 /** Launch one closed target at a validated absolute workspace directory. */
-export async function launchWorkspaceTarget(targetId: string, workspacePath: string): Promise<void> {
+export async function launchWorkspaceTarget(
+  targetId: string,
+  workspacePath: string,
+  intent: WorkspaceLaunchIntent = { kind: 'new-workspace' },
+  platform = process.platform,
+): Promise<void> {
   const absolutePath = path.resolve(workspacePath);
   if (!path.isAbsolute(workspacePath)) {
     throw new Error('Workspace path must be an absolute directory.');
@@ -192,15 +234,28 @@ export async function launchWorkspaceTarget(targetId: string, workspacePath: str
 
   const desktop = DESKTOP_TARGETS.find((target) => target.id === targetId);
   if (desktop) {
-    if (!(await hasDesktopProtocol(desktop))) {
+    if (!(await hasDesktopProtocol(desktop, platform))) {
       throw new Error(`${desktop.name} is not available on this computer.`);
     }
-    await openDesktopUri(desktop.buildUri(absolutePath));
+    if (intent.kind === 'resume-session') {
+      if (!desktop.buildResumeUri) {
+        throw new Error(`${desktop.name} does not support opening an existing coding session.`);
+      }
+      if (!isValidSessionUuid(intent.sessionId)) {
+        throw new Error('Invalid desktop session id.');
+      }
+      await openDesktopUri(desktop.buildResumeUri(intent.sessionId), platform);
+      return;
+    }
+    await openDesktopUri(desktop.buildNewUri(absolutePath, intent.prompt), platform);
     return;
   }
 
   const editor = EDITOR_TARGETS.find((target) => target.id === targetId);
   if (!editor) throw new Error('Unknown workspace launch target.');
+  if (intent.kind === 'resume-session') {
+    throw new Error('Editors cannot resume an AI coding session.');
+  }
 
   const detected = await detectEditors();
   if (!detected.some((candidate) => candidate.command === editor.command && candidate.detected)) {
