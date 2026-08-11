@@ -120,7 +120,7 @@ test.describe('Claude and Codex embedded handoff', () => {
 
       await page.goto('/#/workspaces/feature-x/sessions');
       await page.getByPlaceholder(/Start the agent/).fill('Do not send this unrelated draft');
-      await page.getByRole('button', { name: 'Resume in Chat' }).click();
+      await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
 
       await expect(page.getByText('Inspection complete')).toBeVisible();
       await expect.poll(() => frames.length).toBeGreaterThanOrEqual(1);
@@ -143,6 +143,96 @@ test.describe('Claude and Codex embedded handoff', () => {
       expect(legacyRequests).toEqual([]);
     });
   }
+
+  test('opens a recorded Codex session as the exact Desktop thread', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    let launchBody: Record<string, unknown> | null = null;
+    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            id: sessionId,
+            assistant: 'codex',
+            title: 'Continue the Desktop handoff',
+            createdAt: '2026-08-09T00:00:00.000Z',
+            updatedAt: '2026-08-10T00:00:00.000Z',
+            messageCount: 4,
+            workspacePath: feature.workspacePath,
+          }],
+        }),
+      });
+    });
+    await page.route('**/api/workspace/feature-x/launch', async (route, request) => {
+      launchBody = request.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, ...launchBody }),
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x/sessions');
+    await page.getByRole('button', { name: 'Open in Codex Desktop' }).click();
+
+    await expect.poll(() => launchBody).toEqual({
+      targetId: 'codex-desktop',
+      action: 'resume',
+      sessionId,
+    });
+    await expect(page.getByText('Sent the existing session to Codex Desktop.')).toBeVisible();
+  });
+
+  test('disables Desktop resume when Codex Desktop is unavailable', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    const launchRequests: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.endsWith('/launch')) launchRequests.push(request.url());
+    });
+    await page.route('**/api/workspace-launch-targets', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{
+          id: 'codex-desktop',
+          name: 'Codex Desktop',
+          description: 'Start a new Codex chat with this folder as its workspace.',
+          kind: 'ai-app',
+          icon: 'codex',
+          available: false,
+          unavailableReason: 'Codex Desktop launch is supported on Windows and macOS.',
+        }]),
+      });
+    });
+    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            id: sessionId,
+            assistant: 'codex',
+            title: 'Desktop unavailable',
+            createdAt: '2026-08-09T00:00:00.000Z',
+            updatedAt: '2026-08-10T00:00:00.000Z',
+            messageCount: 2,
+            workspacePath: feature.workspacePath,
+          }],
+        }),
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x/sessions');
+
+    const desktopButton = page.getByRole('button', { name: /Codex Desktop unavailable/ });
+    await expect(desktopButton).toBeDisabled();
+    await expect(desktopButton).toHaveAttribute(
+      'title',
+      'Codex Desktop launch is supported on Windows and macOS.',
+    );
+    expect(launchRequests).toEqual([]);
+  });
 
   test('authorizes each Codex turn with the profile selected for that turn', async ({ page }) => {
     const frames: Array<Record<string, unknown>> = [];
@@ -422,7 +512,7 @@ test.describe('Claude and Codex embedded handoff', () => {
 
     await page.goto('/#/workspaces/feature-x/sessions');
     await expect(page.getByText('Keep this current chat')).toBeVisible();
-    await page.getByRole('button', { name: 'Resume in Chat' }).click();
+    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
 
     await expect(page.getByText('Keep this current chat')).toBeVisible();
     await expect(page.getByText(/current chat was preserved/i)).toBeVisible();
@@ -461,7 +551,7 @@ test.describe('Claude and Codex embedded handoff', () => {
     });
 
     await page.goto('/#/workspaces/feature-x/sessions');
-    await page.getByRole('button', { name: 'Resume in Chat' }).click();
+    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
 
     await expect(page.getByText(/Claude Code is not signed in/i).first()).toBeVisible();
     await expect(page.getByText('claude auth login')).toBeVisible();
@@ -566,7 +656,7 @@ test.describe('Claude and Codex embedded handoff', () => {
 
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByPlaceholder(/Start the agent/).fill('Keep this draft');
-    await page.getByRole('button', { name: 'Resume in Chat' }).click();
+    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
     await transcriptRequested;
     await expect(page.getByPlaceholder(/Start the agent/)).toBeDisabled();
 
@@ -669,12 +759,12 @@ test.describe('Claude and Codex embedded handoff', () => {
     });
 
     await page.goto('/#/workspaces/feature-x/sessions');
-    await expect(page.getByRole('button', { name: 'Resume in Chat' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Resume in NexusFlow' })).toHaveCount(0);
     await page.getByRole('button', { name: 'View Chat Log' }).first().click();
 
     await expect(page.getByText('Read-only history')).toBeVisible();
     await expect(page.getByText(/view-only transcript/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Resume in Chat' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Resume in NexusFlow' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Copy Resume Command' })).toBeVisible();
   });
 });

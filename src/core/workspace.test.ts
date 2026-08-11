@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { saveFeatureConfig, loadFeatureConfig } from './workspace.js';
+import { saveFeatureConfig, loadFeatureConfig, loadWorkspaceManifest } from './workspace.js';
 import type { Feature } from '../types.js';
 
 vi.mock('node:fs/promises');
@@ -46,5 +46,18 @@ describe('feature manifest persistence (A1.6)', () => {
 
     const loaded = await loadFeatureConfig(workspacePath);
     expect(loaded?.id).toBe('feat');
+  });
+
+  it('loads an exact workspace manifest without searching parent directories', async () => {
+    vi.mocked(fs.readFile).mockImplementation(async (p: any) => {
+      if (p === path.join(path.dirname(workspacePath), 'nexusflow.json')) {
+        return JSON.stringify({ ...feature, workspacePath: path.dirname(workspacePath) });
+      }
+      throw new Error('ENOENT');
+    });
+
+    await expect(loadWorkspaceManifest(workspacePath)).resolves.toBeNull();
+    expect(fs.readFile).toHaveBeenCalledTimes(1);
+    expect(fs.readFile).toHaveBeenCalledWith(manifestPath, 'utf-8');
   });
 });

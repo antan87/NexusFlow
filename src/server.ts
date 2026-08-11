@@ -25,14 +25,20 @@ import { createNewRepo } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
-import { createWorkspace, listWorkspaces, loadFeatureConfig, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
+import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
-import { findSessions, getSessionTranscript } from './utils/session-finder.js';
+import {
+  buildWorkspaceLaunchPrompt,
+  detectWorkspaceLaunchTargets,
+  launchTargetIdForEditorCommand,
+  launchWorkspaceTarget,
+} from './utils/workspace-launch.js';
+import { canOpenCodexSessionInWorkspace, findSessions, getSessionTranscript } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
@@ -322,6 +328,34 @@ function assertWithin(baseDir: string, target: string): string {
 /** Safe workspace directory for a route `:id`, contained within workspacesDir. */
 export function resolveWorkspacePath(workspacesDir: string, id: string): string {
   return assertWithin(workspacesDir, path.join(workspacesDir, id));
+}
+
+/**
+ * Resolve a launch path through the filesystem and require it to be the exact
+ * workspace declared by its manifest. This prevents symlink escapes and stops
+ * loadFeatureConfig's parent-directory fallback from authorizing a child path.
+ */
+async function resolveExactLaunchWorkspace(
+  workspacesDir: string,
+  candidatePath: string,
+): Promise<string | null> {
+  const lexicalPath = assertWithin(workspacesDir, candidatePath);
+  const [canonicalRoot, canonicalWorkspace] = await Promise.all([
+    fs.realpath(workspacesDir),
+    fs.realpath(lexicalPath),
+  ]);
+  const safeWorkspacePath = assertWithin(canonicalRoot, canonicalWorkspace);
+  const feature = await loadWorkspaceManifest(safeWorkspacePath);
+  if (!feature || typeof feature.workspacePath !== 'string') return null;
+
+  try {
+    const declaredWorkspace = await fs.realpath(path.resolve(feature.workspacePath));
+    return path.resolve(declaredWorkspace) === path.resolve(safeWorkspacePath)
+      ? safeWorkspacePath
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Safe sub-repo path for a repo name, contained within the workspace. */
@@ -1055,7 +1089,90 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
   }
 });
 
-// 8. Open workspace in editor
+// 8. List the closed, server-owned launch catalog.
+app.get('/api/workspace-launch-targets', async (c) => {
+  try {
+    return c.json(await detectWorkspaceLaunchTargets());
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 8a. Open a real NexusFlow workspace in a selected desktop app or editor.
+app.post('/api/workspace/:id/launch', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const { targetId, action = 'new', sessionId } = await c.req.json().catch(() => ({})) as {
+      targetId?: unknown;
+      action?: unknown;
+      sessionId?: unknown;
+    };
+    if (typeof targetId !== 'string' || !targetId) {
+      return c.json({ error: 'A workspace launch target is required.' }, 400);
+    }
+    if (action !== 'new' && action !== 'resume') {
+      return c.json({ error: 'Unknown workspace launch action.' }, 400);
+    }
+    if (action === 'new' && sessionId !== undefined) {
+      return c.json({ error: 'A new workspace launch cannot include a session id.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const requestedWorkspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    let workspacePath: string | null;
+    try {
+      workspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, requestedWorkspacePath);
+    } catch (error) {
+      if (error instanceof PathAccessError) throw error;
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+    if (!workspacePath) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+    const feature = await loadWorkspaceManifest(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const targets = await detectWorkspaceLaunchTargets();
+    const target = targets.find((candidate) => candidate.id === targetId);
+    if (!target) return c.json({ error: 'Unknown workspace launch target.' }, 400);
+    if (!target.available) {
+      return c.json({ error: target.unavailableReason ?? `${target.name} is unavailable.` }, 409);
+    }
+
+    if (action === 'resume') {
+      if (targetId !== 'codex-desktop') {
+        return c.json({ error: 'This app cannot open an existing coding session.' }, 400);
+      }
+      if (typeof sessionId !== 'string' || !isValidSessionUuid(sessionId)) {
+        return c.json({ error: 'A valid Codex session id is required.' }, 400);
+      }
+      const ownsSession = await canOpenCodexSessionInWorkspace(
+        workspacePath,
+        feature.repos,
+        sessionId,
+      );
+      if (!ownsSession) {
+        return c.json({ error: 'Codex session not found in this workspace.' }, 404);
+      }
+      await launchWorkspaceTarget(targetId, workspacePath, { kind: 'resume-session', sessionId });
+      return c.json({ success: true, targetId, action, sessionId });
+    }
+
+    await launchWorkspaceTarget(targetId, workspacePath, {
+      kind: 'new-workspace',
+      prompt: buildWorkspaceLaunchPrompt(feature),
+    });
+    return c.json({ success: true, targetId, action });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 8b. Legacy editor route retained for older GUI clients using recognized
+// graphical editors. Interactive terminal editors are intentionally rejected:
+// a detached HTTP request cannot safely provide their required TTY.
 app.post('/api/open-editor', async (c) => {
   try {
     const { workspacePath, command } = await c.req.json() as {
@@ -1063,32 +1180,32 @@ app.post('/api/open-editor', async (c) => {
       command: string;
     };
 
-    if (!ALLOWED_EDITORS.has(command)) {
+    const targetId = launchTargetIdForEditorCommand(command);
+    if (!ALLOWED_EDITORS.has(command) || !targetId) {
       return c.json({ error: 'Forbidden editor command' }, 400);
     }
 
-    // Validate path exists and is a directory
+    const config = await loadConfig();
+    const safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+
+    // Validate this is an existing NexusFlow workspace, not an arbitrary path.
     try {
-      const stats = await fs.stat(workspacePath);
+      const stats = await fs.stat(safeWorkspacePath);
       if (!stats.isDirectory()) {
         return c.json({ error: 'Workspace path is not a directory' }, 400);
       }
     } catch {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
+    const exactWorkspacePath = await resolveExactLaunchWorkspace(
+      config.workspacesDir,
+      safeWorkspacePath,
+    );
+    if (!exactWorkspacePath) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
 
-    // Spawn editor process
-    const isWin = process.platform === 'win32';
-    const child = execa(command, [workspacePath], {
-      detached: true,
-      stdio: 'ignore',
-      shell: isWin,
-      cleanup: false,
-    });
-    child.unref();
-    child.catch((err) => {
-      console.error(`Failed to launch editor ${command} for path ${workspacePath}:`, err);
-    });
+    await launchWorkspaceTarget(targetId, exactWorkspacePath);
 
     return c.json({ success: true });
   } catch (error) {

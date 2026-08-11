@@ -13,6 +13,12 @@ const EDITOR_CANDIDATES: ReadonlyArray<{ name: string; command: string }> = [
   { name: 'VS Code Insiders', command: 'code-insiders' },
   { name: 'Cursor', command: 'cursor' },
   { name: 'Antigravity', command: 'antigravity' },
+  { name: 'IntelliJ IDEA', command: 'idea' },
+  { name: 'WebStorm', command: 'webstorm' },
+  { name: 'PyCharm', command: 'charm' },
+  { name: 'Sublime Text', command: 'subl' },
+  { name: 'Zed', command: 'zed' },
+  { name: 'Windsurf', command: 'windsurf' },
 ];
 
 /**

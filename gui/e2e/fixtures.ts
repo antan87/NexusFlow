@@ -6,6 +6,7 @@ export type MockDataOptions = {
   workspacesData: any;
   workspacesStatusData: any;
   editorDetectData: any;
+  workspaceLaunchTargetsData: any;
   updateStatusData: any;
   projectsData: any;
   reposData: { data: any[] };
@@ -29,6 +30,30 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
   workspacesData: [[], { option: true }],
   workspacesStatusData: [{}, { option: true }],
   editorDetectData: [[], { option: true }],
+  workspaceLaunchTargetsData: [[
+    {
+      id: 'codex-desktop', name: 'Codex Desktop',
+      description: 'Start a new Codex chat with this folder as its workspace.',
+      kind: 'ai-app', icon: 'codex', available: true,
+    },
+    {
+      id: 'claude-desktop', name: 'Claude Desktop',
+      description: 'Open Claude Code with this folder selected.',
+      kind: 'ai-app', icon: 'claude', available: false,
+      unavailableReason: 'Claude Desktop is not installed.',
+    },
+    {
+      id: 'vscode', name: 'VS Code',
+      description: 'Open the generated VS Code workspace.',
+      kind: 'editor', icon: 'vscode', available: true,
+    },
+    {
+      id: 'vscode-insiders', name: 'VS Code Insiders',
+      description: 'Open the generated workspace in Insiders.',
+      kind: 'editor', icon: 'vscode-insiders', available: false,
+      unavailableReason: 'VS Code Insiders was not detected on PATH.',
+    },
+  ], { option: true }],
   updateStatusData: [{ currentVersion: '0.2.7', latestVersion: '0.2.7', updateAvailable: false }, { option: true }],
   projectsData: [{ data: [] }, { option: true }],
   reposData: [{ data: [] }, { option: true }],
@@ -43,6 +68,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     workspacesData,
     workspacesStatusData,
     editorDetectData,
+    workspaceLaunchTargetsData,
     updateStatusData,
     projectsData,
     reposData,
@@ -58,6 +84,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/workspaces', json(workspacesData));
     await page.route('**/api/workspaces/status', json(workspacesStatusData));
     await page.route('**/api/editor-detect', json(editorDetectData));
+    await page.route('**/api/workspace-launch-targets', json(workspaceLaunchTargetsData));
     await page.route('**/api/update-status', json(updateStatusData));
     await page.route('**/api/projects', json(projectsData?.data ?? projectsData));
     await page.route('**/api/repos', json(reposData?.data ?? reposData));

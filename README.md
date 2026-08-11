@@ -322,10 +322,13 @@ The dashboard integrates an **AI Strategy Analysis** inspector:
 The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). For the platform rationale (Electron vs Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
+- **Open with…** — launch the workspace directly in Codex Desktop, Claude Desktop, VS Code, VS Code Insiders, Cursor, JetBrains IDEs, or another detected editor; unavailable apps stay visible with a clear reason
 - **Chat tab** — use local CLI harnesses directly; Codex reuses `codex login` for workspace-write chat and GitHub Copilot reuses `copilot login` for read-only ACP chat, so NexusFlow does not need their API keys
 - **Sessions tab** — view past AI conversation transcripts and resume sessions
 - **Logs panel** — real-time aggregated service log output
 - **Config panel** — edit NexusFlow settings from the browser
+
+The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
 
 The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serves a [React](https://react.dev) + [Vite](https://vite.dev) frontend.
 

@@ -118,6 +118,83 @@ async function getFilesRecursively(dir: string, extension: string): Promise<stri
 }
 
 /**
+ * Compare already-canonical paths without weakening case rules on POSIX.
+ * Windows drive paths are case-insensitive; POSIX paths remain case-sensitive.
+ */
+export function isCanonicalPathWithin(
+  rootPath: string,
+  candidatePath: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const normalize = (value: string) => {
+    const resolved = pathApi.resolve(value);
+    return platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const root = normalize(rootPath);
+  const candidate = normalize(candidatePath);
+  const relative = pathApi.relative(root, candidate);
+  return relative === ''
+    || (relative !== '..'
+      && !relative.startsWith(`..${pathApi.sep}`)
+      && !pathApi.isAbsolute(relative));
+}
+
+/**
+ * Authorize a Codex Desktop handoff using only the rollout's recorded cwd.
+ * Discovery may use fuzzy matching for old files, but process-launch boundaries
+ * must never treat transcript text or a workspace basename as ownership proof.
+ */
+export async function canOpenCodexSessionInWorkspace(
+  workspacePath: string,
+  repoPaths: string[],
+  sessionId: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  if (!isCodexSessionId(sessionId)) return false;
+
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const roots = (await Promise.all(
+    [workspacePath, ...repoPaths].map(async (candidate) => {
+      try {
+        return await fs.realpath(candidate);
+      } catch {
+        return null;
+      }
+    }),
+  )).filter((candidate): candidate is string => candidate !== null);
+  if (roots.length === 0) return false;
+
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  const codexFiles = await getFilesRecursively(path.join(codexHome, 'sessions'), '.jsonl');
+  for (const file of codexFiles) {
+    try {
+      const content = await fs.readFile(file, 'utf-8');
+      for (const line of content.split('\n').filter(Boolean)) {
+        let record: any;
+        try { record = JSON.parse(line); } catch { continue; }
+        if (codexSessionId(record) !== sessionId) continue;
+        const recordedCwd = record?.payload?.cwd;
+        if (typeof recordedCwd !== 'string' || !pathApi.isAbsolute(recordedCwd)) continue;
+
+        let canonicalCwd: string;
+        try {
+          canonicalCwd = await fs.realpath(recordedCwd);
+        } catch {
+          continue;
+        }
+        if (roots.some((root) => isCanonicalPathWithin(root, canonicalCwd, platform))) {
+          return true;
+        }
+      }
+    } catch {
+      // Ignore unreadable or concurrently-rotated rollout files.
+    }
+  }
+  return false;
+}
+
+/**
  * Scans the local filesystem for conversation histories belonging to Claude, Antigravity,
  * Codex, and Copilot that relate to the specified workspace.
  *

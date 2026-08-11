@@ -153,22 +153,22 @@ export function SettingsPage({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-sm">Default Editor</Label>
+            <Label className="text-sm">Preferred Editor</Label>
             <Select
               value={config.defaultEditor || ''}
               onValueChange={(value) =>
                 typeof value === 'string' && setConfig({ ...config, defaultEditor: value || null })
               }
             >
-              <SelectTrigger aria-label="Default Editor">
+              <SelectTrigger aria-label="Preferred Editor">
                 <SelectValue>
                   {selectedEditor
                     ? `${selectedEditor.name} ${selectedEditor.detected ? '(Detected)' : '(Not found)'}`
-                    : 'None (Skip opening)'}
+                    : 'No preference'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup alignItemWithTrigger={false}>
-                <SelectItem value="">None (Skip opening)</SelectItem>
+                <SelectItem value="">No preference</SelectItem>
                 {editors.map((ed) => (
                   <SelectItem key={ed.command} value={ed.command}>
                     {ed.name} {ed.detected ? '(Detected)' : '(Not found)'}
@@ -176,7 +176,7 @@ export function SettingsPage({
                 ))}
               </SelectPopup>
             </Select>
-            <span className="text-xs text-muted-foreground">Your preferred code editor for opening workspaces.</span>
+            <span className="text-xs text-muted-foreground">Shown first in the “Open with…” workspace chooser.</span>
           </div>
 
           <div className="flex flex-col gap-4 md:col-span-2">

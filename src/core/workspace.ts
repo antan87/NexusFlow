@@ -363,14 +363,10 @@ export async function saveFeatureConfig(
 export async function loadFeatureConfig(
   workspacePath: string,
 ): Promise<Feature | null> {
-  const featureId = path.basename(workspacePath);
+  const localFeature = await loadWorkspaceManifest(workspacePath);
+  if (localFeature) return localFeature;
 
-  // 1. The manifest lives at the workspace root (see saveFeatureConfig).
-  const manifestPath = path.join(workspacePath, MANIFEST_FILE);
-  try {
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    return normalizeFeature(JSON.parse(raw) as Feature);
-  } catch {}
+  const featureId = path.basename(workspacePath);
 
   // 2. Legacy fallback: manifests written into the central vault before the
   //    manifest was pinned to the workspace root.
@@ -387,6 +383,22 @@ export async function loadFeatureConfig(
   }
 
   return null;
+}
+
+/**
+ * Load only the manifest stored directly in the supplied workspace root.
+ * Unlike loadFeatureConfig, this never searches a vault or parent directory,
+ * so it is suitable for boundaries that can launch local processes.
+ */
+export async function loadWorkspaceManifest(
+  workspacePath: string,
+): Promise<Feature | null> {
+  try {
+    const raw = await fs.readFile(path.join(workspacePath, MANIFEST_FILE), 'utf-8');
+    return normalizeFeature(JSON.parse(raw) as Feature);
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, CircleAlert, ExternalLink, FolderGit2, GitBranch, Sparkles, Zap } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap } from 'lucide-react';
 
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
@@ -20,7 +20,6 @@ import { repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import {
   useAiDetect,
-  useConfig,
   useCreateWorkspace,
   useProjects,
   useRepoBranches,
@@ -38,6 +37,7 @@ import {
 } from '../features/chat/chatLaunch.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
 import type { RepoInfo, WorkspaceMode } from '../types.js';
+import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
@@ -135,8 +135,6 @@ export function StartWorkPage() {
   const repos = useRepos();
   const aiDetect = useAiDetect();
   const templates = useWorkflowTemplates();
-  const configQuery = useConfig();
-  const config = configQuery.data?.config;
   const createWorkspace = useCreateWorkspace();
   const { progress, start } = useCreationStream();
 
@@ -158,7 +156,6 @@ export function StartWorkPage() {
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [openingEditor, setOpeningEditor] = useState(false);
 
   // Seed the assistant selection from detection exactly ONCE — a background
   // refetch must never overwrite a deliberately emptied selection.
@@ -249,36 +246,13 @@ export function StartWorkPage() {
     }
   };
 
-  // 'none' is a legacy persisted sentinel meaning "no editor configured".
-  const defaultEditor = config?.defaultEditor && config.defaultEditor !== 'none' ? config.defaultEditor : null;
   const embeddedAssistant = assistants.find(
     (assistant): assistant is EmbeddedHarnessAssistant => providerForAssistant(assistant) !== null,
   );
 
-  const openInEditor = async () => {
-    if (!progress.workspacePath) return;
-    if (isVsCode) {
-      window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath: progress.workspacePath }, '*');
-      return;
-    }
-    if (!defaultEditor) return;
-    setOpeningEditor(true);
-    try {
-      await apiFetch('/api/open-editor', {
-        method: 'POST',
-        body: JSON.stringify({ workspacePath: progress.workspacePath, command: defaultEditor }),
-      });
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setOpeningEditor(false);
-    }
-  };
-
   // ── Creation progress / result panel ─────────────────────────────────────
   if (progress.status !== 'idle') {
     const failedStep = progress.steps.find((s) => s.status === 'failed');
-    const canOpenEditor = isVsCode || Boolean(defaultEditor);
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
@@ -307,11 +281,12 @@ export function StartWorkPage() {
           </p>
         )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
-        <div className="mt-6 flex gap-2">
+        <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
           {progress.status === 'completed' && progress.workspaceId && (
             <>
               {embeddedAssistant && (
                 <Button
+                  className="w-full min-w-0 whitespace-normal sm:w-auto"
                   onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`, {
                     state: {
                       chatLaunch: createChatLaunchIntent(embeddedAssistant, {
@@ -326,16 +301,19 @@ export function StartWorkPage() {
                 </Button>
               )}
               <Button
+                className="w-full min-w-0 whitespace-normal sm:w-auto"
                 variant={embeddedAssistant ? 'outline' : undefined}
                 onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}
               >
                 Open workspace
               </Button>
-              {canOpenEditor && (
-                <Button variant="outline" onClick={openInEditor} disabled={openingEditor}>
-                  {openingEditor ? <Spinner /> : <ExternalLink />}
-                  Open in editor
-                </Button>
+              {progress.workspacePath && (
+                <WorkspaceLauncher
+                  workspaceId={progress.workspaceId}
+                  workspacePath={progress.workspacePath}
+                  isVsCode={isVsCode}
+                  className="w-full min-w-0 whitespace-normal sm:w-auto"
+                />
               )}
             </>
           )}

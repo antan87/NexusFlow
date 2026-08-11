@@ -75,6 +75,34 @@ export interface DetectedEditor {
   detected: boolean;
 }
 
+/** Stable launch targets exposed to the GUI. Executables and URIs stay server-owned. */
+export type WorkspaceLaunchTargetKind = 'ai-app' | 'editor';
+
+export type WorkspaceLaunchIcon =
+  | 'codex'
+  | 'claude'
+  | 'vscode'
+  | 'vscode-insiders'
+  | 'cursor'
+  | 'antigravity'
+  | 'intellij'
+  | 'webstorm'
+  | 'pycharm'
+  | 'sublime'
+  | 'zed'
+  | 'windsurf';
+
+export interface WorkspaceLaunchTarget {
+  /** Closed identifier accepted by the launch endpoint (never an executable name from the client). */
+  id: string;
+  name: string;
+  description: string;
+  kind: WorkspaceLaunchTargetKind;
+  icon: WorkspaceLaunchIcon;
+  available: boolean;
+  unavailableReason?: string;
+}
+
 /** Metadata about a discovered git repository. */
 export interface RepoInfo {
   /** Directory name of the repo. */

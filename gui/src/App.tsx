@@ -30,6 +30,7 @@ const GettingStartedPage = lazy(() =>
   import('./features/guide/GettingStartedPage.js').then((m) => ({ default: m.GettingStartedPage })),
 );
 import { API_BASE } from './lib/apiBase.js';
+import { apiFetch } from './lib/api/client.js';
 import {
   useAiDetect,
   useEditorDetect,
@@ -581,37 +582,30 @@ function AppInner() {
     }
   };
 
-  const handleOpenInEditor = async (workspacePath: string) => {
-    if (isVsCode) {
-      window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath }, '*');
-      return;
+  const handleOpenDesktopSession = async (
+    ws: Feature,
+    sessionId: string,
+    assistant: string,
+  ): Promise<boolean> => {
+    if (assistant !== 'codex') {
+      showToast('Claude Code sessions currently resume in NexusFlow; Desktop resume is not documented yet.', 'info');
+      return false;
     }
-    if (config?.defaultEditor === 'none') {
-      showToast('Your preferred editor is set to "None" (skip opening). You can change this in Settings.', 'info');
-      return;
-    }
-    let editor: DetectedEditor | null | undefined = null;
-    if (config?.defaultEditor) {
-      editor = editors.find((e) => e.command === config.defaultEditor);
-    }
-    if (!editor) {
-      editor = editors.find((e) => e.detected) || editors[0];
-    }
-    if (!editor) {
-      showToast('No detected editors available.', 'error');
-      return;
-    }
+
     try {
-      await fetch(`${API_BASE}/api/open-editor`, {
+      await apiFetch(`/api/workspace/${encodeURIComponent(ws.branchName)}/launch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          workspacePath,
-          command: editor.command,
+          targetId: 'codex-desktop',
+          action: 'resume',
+          sessionId,
         }),
       });
-    } catch (e) {
-      console.error(e);
+      showToast('Sent the existing session to Codex Desktop.', 'success');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+      return false;
     }
   };
 
@@ -871,13 +865,12 @@ Core Instructions:
       resumingWs={resumingWs}
       handleResumeSession={handleResumeSession}
       handleCopyPrompt={handleCopyPrompt}
-      handleOpenInEditor={handleOpenInEditor}
       handleDeleteWorkspace={handleDeleteWorkspace}
       deleteWsLoading={deleteWsLoading}
       repos={repos}
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
-      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession }}
+      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession, handleOpenDesktopSession }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
       knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
       planProps={{ planContent, planLoading }}
@@ -1032,6 +1025,7 @@ Core Instructions:
           setActiveSession={setActiveSession}
           workspaces={workspaces}
           handleResumeSession={handleResumeSession}
+          handleOpenDesktopSession={handleOpenDesktopSession}
           showToast={showToast}
         />
       )}
