@@ -404,7 +404,7 @@ describe('Server API Endpoints Unit Tests', () => {
     it('launches Codex with a once-encoded validated workspace path', async () => {
       const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
       vi.mocked(execa).mockImplementation((async (command: any): Promise<any> => ({
-        exitCode: command === 'reg.exe' || command === 'explorer.exe' ? 0 : 1,
+        exitCode: command === 'reg.exe' || command === 'cmd.exe' ? 0 : 1,
       })) as any);
 
       try {
@@ -417,9 +417,17 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(response.status).toBe(200);
         const prompt = 'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.\n\nWorkspace task: Improve the local Desktop handoff';
         expect(execa).toHaveBeenCalledWith(
-          'explorer.exe',
-          [`codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`],
-          { shell: false },
+          'cmd.exe',
+          ['/d', '/v:off', '/s', '/c', 'start "" "%NEXUSFLOW_DESKTOP_URI%"'],
+          {
+            env: {
+              NEXUSFLOW_DESKTOP_URI:
+                `codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`,
+            },
+            shell: false,
+            windowsHide: true,
+            windowsVerbatimArguments: true,
+          },
         );
       } finally {
         platform.mockRestore();
@@ -442,9 +450,14 @@ describe('Server API Endpoints Unit Tests', () => {
 
         expect(response.status).toBe(200);
         expect(execa).toHaveBeenCalledWith(
-          'explorer.exe',
-          [`codex://threads/${sessionId}`],
-          { shell: false },
+          'cmd.exe',
+          ['/d', '/v:off', '/s', '/c', 'start "" "%NEXUSFLOW_DESKTOP_URI%"'],
+          {
+            env: { NEXUSFLOW_DESKTOP_URI: `codex://threads/${sessionId}` },
+            shell: false,
+            windowsHide: true,
+            windowsVerbatimArguments: true,
+          },
         );
       } finally {
         authorizeSession.mockRestore();
@@ -473,7 +486,7 @@ describe('Server API Endpoints Unit Tests', () => {
         await expect(response.json()).resolves.toEqual({
           error: 'Codex session not found in this workspace.',
         });
-        expect(execa).not.toHaveBeenCalledWith('explorer.exe', expect.anything(), expect.anything());
+        expect(execa).not.toHaveBeenCalledWith('cmd.exe', expect.anything(), expect.anything());
       } finally {
         authorizeSession.mockRestore();
         platform.mockRestore();
