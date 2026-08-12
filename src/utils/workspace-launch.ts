@@ -42,6 +42,8 @@ export type WorkspaceLaunchIntent =
   | { kind: 'resume-session'; sessionId: string };
 
 const DESKTOP_PROMPT_MAX_LENGTH = 1_600;
+const WINDOWS_DESKTOP_URI_ENV = 'NEXUSFLOW_DESKTOP_URI';
+const WINDOWS_DESKTOP_URI_COMMAND = `start "" "%${WINDOWS_DESKTOP_URI_ENV}%"`;
 const DEFAULT_WORKSPACE_PROMPT =
   'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.';
 
@@ -206,7 +208,32 @@ export async function detectWorkspaceLaunchTargets(
 
 export async function openDesktopUri(uri: string, platform = process.platform): Promise<void> {
   if (platform === 'win32') {
-    await execa('explorer.exe', [uri], { shell: false });
+    const parsed = new URL(uri);
+    if (!['claude:', 'codex:'].includes(parsed.protocol) || /["\r\n\0]/.test(uri)) {
+      throw new Error('Unsupported desktop URI.');
+    }
+
+    // Anthropic documents `start "" "claude://..."` as the Windows launcher.
+    // Pass the URI through one environment expansion so cmd.exe cannot reinterpret
+    // its percent-encoded values as environment-variable references.
+    try {
+      await execa(
+        'cmd.exe',
+        ['/d', '/v:off', '/s', '/c', WINDOWS_DESKTOP_URI_COMMAND],
+        {
+          env: { [WINDOWS_DESKTOP_URI_ENV]: uri },
+          shell: false,
+          windowsHide: true,
+          windowsVerbatimArguments: true,
+        },
+      );
+    } catch {
+      // Do not return execa's command string: it contains the local workspace
+      // path and the task kickoff embedded in the deep link.
+      throw new Error(
+        'Windows could not open the selected desktop app. Update or reinstall the app, then try again.',
+      );
+    }
     return;
   }
   if (platform === 'darwin') {

@@ -86,10 +86,53 @@ describe('workspace launch catalog', () => {
     await launchWorkspaceTarget('codex-desktop', workspacePath, { kind: 'new-workspace', prompt }, 'win32');
 
     expect(execa).toHaveBeenCalledWith(
-      'explorer.exe',
-      [`codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`],
-      { shell: false },
+      'cmd.exe',
+      ['/d', '/v:off', '/s', '/c', 'start "" "%NEXUSFLOW_DESKTOP_URI%"'],
+      {
+        env: {
+          NEXUSFLOW_DESKTOP_URI:
+            `codex://threads/new?path=${encodeURIComponent(workspacePath)}&prompt=${encodeURIComponent(prompt)}`,
+        },
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
     );
+  });
+
+  it('uses the documented Windows URI dispatcher without reparsing encoded values', async () => {
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+    const uri = 'claude://code/new?folder=C%3A%5Cwork%5Cnexus&q=Fix%20one%20%26%20two';
+
+    await openDesktopUri(uri, 'win32');
+
+    expect(execa).toHaveBeenCalledWith(
+      'cmd.exe',
+      ['/d', '/v:off', '/s', '/c', 'start "" "%NEXUSFLOW_DESKTOP_URI%"'],
+      {
+        env: { NEXUSFLOW_DESKTOP_URI: uri },
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
+    );
+  });
+
+  it('rejects an unsafe Windows desktop URI before invoking cmd.exe', async () => {
+    await expect(openDesktopUri('https://example.com', 'win32')).rejects.toThrow(
+      'Unsupported desktop URI',
+    );
+    expect(execa).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a Windows desktop URI when activation fails', async () => {
+    const uri = 'claude://code/new?folder=C%3A%5Cprivate-workspace&q=Private%20task';
+    vi.mocked(execa).mockRejectedValue(new Error(`Command failed: cmd.exe ${uri}`));
+
+    const result = openDesktopUri(uri, 'win32');
+
+    await expect(result).rejects.toThrow('Windows could not open the selected desktop app');
+    await expect(result).rejects.not.toThrow(/claude:\/\/|private-workspace|Private%20task/);
   });
 
   it('builds a once-encoded Claude URI with the workspace kickoff', async () => {
@@ -132,9 +175,14 @@ describe('workspace launch catalog', () => {
     );
 
     expect(execa).toHaveBeenCalledWith(
-      'explorer.exe',
-      [`codex://threads/${sessionId}`],
-      { shell: false },
+      'cmd.exe',
+      ['/d', '/v:off', '/s', '/c', 'start "" "%NEXUSFLOW_DESKTOP_URI%"'],
+      {
+        env: { NEXUSFLOW_DESKTOP_URI: `codex://threads/${sessionId}` },
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
     );
   });
 
