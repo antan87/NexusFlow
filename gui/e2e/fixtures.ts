@@ -43,6 +43,11 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
       unavailableReason: 'Claude Desktop is not installed.',
     },
     {
+      id: 'cursor', name: 'Cursor',
+      description: 'Open the generated workspace in Cursor.',
+      kind: 'editor', icon: 'cursor', available: true,
+    },
+    {
       id: 'vscode', name: 'VS Code',
       description: 'Open the generated VS Code workspace.',
       kind: 'editor', icon: 'vscode', available: true,

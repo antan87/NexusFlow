@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  AppWindow,
   Code2,
   Orbit,
   RefreshCw,
@@ -18,6 +19,7 @@ import {
 } from 'react-icons/si';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 
+import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import {
   Dialog,
@@ -27,6 +29,13 @@ import {
   DialogPopup,
   DialogTitle,
 } from '../../components/ui/dialog.js';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '../../components/ui/empty.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
@@ -94,13 +103,11 @@ function TargetButton({
       type="button"
       disabled={!target.available || busy}
       onClick={() => onLaunch(target)}
-      aria-label={target.available ? `Open workspace in ${target.name}` : `${target.name} unavailable`}
+      aria-label={`Open workspace in ${target.name}`}
       className={cn(
         'flex min-h-20 w-full items-center gap-3 rounded-xl border p-3 text-left outline-none transition-colors',
         'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-        target.available
-          ? 'cursor-pointer border-border bg-card hover:border-primary/40 hover:bg-accent/60'
-          : 'cursor-not-allowed border-border/70 bg-muted/40 opacity-65',
+        'cursor-pointer border-border bg-card hover:border-primary/40 hover:bg-accent/60',
       )}
     >
       <LauncherIcon icon={target.icon} />
@@ -109,14 +116,12 @@ function TargetButton({
           <span className="font-medium text-foreground">{target.name}</span>
           {launching ? (
             <Spinner className="size-4" />
-          ) : (
-            <span className={cn('text-[11px]', target.available ? 'text-success-foreground' : 'text-muted-foreground')}>
-              {target.available ? (preferred ? 'Preferred · Available' : 'Available') : 'Not detected'}
-            </span>
-          )}
+          ) : preferred ? (
+            <Badge size="sm" variant="secondary">Preferred</Badge>
+          ) : null}
         </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          {target.available ? target.description : target.unavailableReason}
+          {target.description}
         </span>
       </span>
     </button>
@@ -140,7 +145,8 @@ export function WorkspaceLauncher({
   const targets = useWorkspaceLaunchTargets();
   const config = useConfig().data?.config;
 
-  const aiApps = targets.data?.filter((target) => target.kind === 'ai-app') ?? [];
+  const availableTargets = targets.data?.filter((target) => target.available) ?? [];
+  const aiApps = availableTargets.filter((target) => target.kind === 'ai-app');
   const preferredEditorId = config?.defaultEditor
     ? ({
         code: 'vscode',
@@ -155,8 +161,9 @@ export function WorkspaceLauncher({
         windsurf: 'windsurf',
       } as Record<string, string>)[config.defaultEditor]
     : undefined;
-  const editors = (targets.data?.filter((target) => target.kind === 'editor') ?? [])
+  const editors = availableTargets.filter((target) => target.kind === 'editor')
     .toSorted((left, right) => Number(right.id === preferredEditorId) - Number(left.id === preferredEditorId));
+  const hasLaunchOptions = isVsCode || availableTargets.length > 0;
 
   const launch = async (target: WorkspaceLaunchTarget) => {
     setError(null);
@@ -234,7 +241,7 @@ export function WorkspaceLauncher({
               </div>
             ) : (
               <>
-                <section aria-labelledby="ai-apps-heading">
+                {aiApps.length > 0 && <section aria-labelledby="ai-apps-heading">
                   <h3 id="ai-apps-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     AI coding apps
                   </h3>
@@ -249,8 +256,8 @@ export function WorkspaceLauncher({
                       />
                     ))}
                   </div>
-                </section>
-                <section aria-labelledby="editors-heading">
+                </section>}
+                {editors.length > 0 && <section aria-labelledby="editors-heading">
                   <h3 id="editors-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Code editors
                   </h3>
@@ -266,12 +273,25 @@ export function WorkspaceLauncher({
                       />
                     ))}
                   </div>
-                </section>
+                </section>}
+                {!hasLaunchOptions && (
+                  <Empty className="rounded-xl border border-dashed py-8 md:p-8">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon"><AppWindow /></EmptyMedia>
+                      <EmptyTitle className="text-base">No compatible apps detected</EmptyTitle>
+                      <EmptyDescription>
+                        Install a supported coding app or add its command to PATH, then recheck.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )}
               </>
             )}
 
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-              <p className="truncate font-mono text-[11px] text-muted-foreground" title={workspacePath}>{workspacePath}</p>
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {targets.isFetching ? 'Checking for apps on this computer…' : 'Can’t find your app? Recheck detection.'}
+              </p>
               <Button size="sm" variant="ghost" onClick={() => void targets.refetch()} disabled={targets.isFetching || launchingId !== null}>
                 <RefreshCw className={targets.isFetching ? 'animate-spin' : ''} />
                 Recheck
