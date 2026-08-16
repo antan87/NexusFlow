@@ -136,9 +136,25 @@ ProviderRegistry.register({
   name: 'Antigravity (Local CLI)',
   icon: 'Terminal',
   accessLabel: 'Harness-managed access',
-  capabilities: { transport: 'cli-print', sessionIdentity: 'none', workspaceAccess: 'harness-managed' },
+  executionProfiles: [
+    { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+    {
+      id: 'workspace-write',
+      label: 'Edit workspace',
+      description: 'Auto-accepts in-workspace file edits and common filesystem actions.',
+    },
+  ],
+  defaultExecutionProfile: 'review',
+  capabilities: {
+    transport: 'cli-print',
+    sessionIdentity: 'client-assigned',
+    workspaceAccess: 'harness-managed',
+    sessionIdFormat: 'uuid',
+  },
   isConfigured: () => antigravityCliStatus().usable,
   getStatusMessage: () => antigravityCliStatus().message,
+  getSetupHelp: () => setupHelp(antigravityCliStatus()),
+  invalidateStatus: () => antigravityCliStatus.invalidate(),
   createInstance: () => new AntigravityCliAdapter()
 });
 

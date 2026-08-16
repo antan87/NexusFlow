@@ -605,9 +605,8 @@ export function AgentChat({ ws }: AgentChatProps) {
       const startPayload: Record<string, unknown> = {
         type: 'start',
         command: providerId,
-        // Sessions always run in the workspace dir — that's where the
-        // generated context files live (see src/utils/feature.ts).
-        cwd: ws.workspacePath,
+        // Sessions run in the git repo worktree root if available, otherwise the workspace dir
+        cwd: ws.repos?.[0] || ws.workspacePath,
       };
       const nextSessions = { ...sessionsRef.current };
       if (options.resetSession) delete nextSessions[providerId];
@@ -812,7 +811,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.repos, ws.workspacePath]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
@@ -848,7 +847,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setPickerError(null);
     const providerId = providerForAssistant(session.assistant);
     if (!providerId) {
-      appendSystemNote('Only Claude Code and Codex sessions can resume in embedded chat.', 'error');
+      appendSystemNote('This session cannot resume in embedded chat.', 'error');
       finishSessionSwitch(requestId);
       return false;
     }

@@ -1,7 +1,7 @@
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 
-export type EmbeddedHarnessAssistant = 'claude' | 'codex';
-export type EmbeddedHarnessProvider = 'claude-cli' | 'codex-cli';
+export type EmbeddedHarnessAssistant = 'claude' | 'codex' | 'antigravity' | 'copilot';
+export type EmbeddedHarnessProvider = 'claude-cli' | 'codex-cli' | 'antigravity-cli' | 'copilot-cli';
 
 export interface ChatLaunchIntent {
   nonce: string;
@@ -17,14 +17,32 @@ export const WORKSPACE_KICKOFF =
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const HARNESS_PROVIDERS = new Set<EmbeddedHarnessProvider>([
+  'claude-cli',
+  'codex-cli',
+  'antigravity-cli',
+  'copilot-cli',
+]);
+
 export function providerForAssistant(assistant: unknown): EmbeddedHarnessProvider | null {
   if (assistant === 'claude') return 'claude-cli';
   if (assistant === 'codex') return 'codex-cli';
+  if (assistant === 'antigravity') return 'antigravity-cli';
+  if (assistant === 'copilot') return 'copilot-cli';
   return null;
 }
 
 export function assistantLabel(assistant: EmbeddedHarnessAssistant): string {
-  return assistant === 'claude' ? 'Claude' : 'Codex';
+  switch (assistant) {
+    case 'claude':
+      return 'Claude';
+    case 'codex':
+      return 'Codex';
+    case 'antigravity':
+      return 'Antigravity';
+    case 'copilot':
+      return 'Copilot';
+  }
 }
 
 export function createChatLaunchIntent(
@@ -41,7 +59,7 @@ export function createChatLaunchIntent(
 }
 
 /**
- * Router state is an untyped browser boundary. Only the two local CLI
+ * Router state is an untyped browser boundary. Only local CLI
  * providers may trigger a launch, and a resumable session must be a UUID owned
  * by the matching assistant. This prevents a stale or hand-authored history
  * entry from silently falling through to another provider.
@@ -53,7 +71,7 @@ export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
 
   const value = candidate as Partial<ChatLaunchIntent>;
   if (!UUID_RE.test(value.nonce ?? '')) return null;
-  if (value.providerId !== 'claude-cli' && value.providerId !== 'codex-cli') return null;
+  if (!value.providerId || !HARNESS_PROVIDERS.has(value.providerId as EmbeddedHarnessProvider)) return null;
   if (!isChatExecutionProfile(value.executionProfile)) return null;
   if (value.kickoff !== undefined && (typeof value.kickoff !== 'string' || value.kickoff.length > 2_000)) {
     return null;
@@ -67,3 +85,4 @@ export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
 
   return value as ChatLaunchIntent;
 }
+
