@@ -23,7 +23,9 @@ import { Spinner } from './components/ui/spinner.js';
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then((m) => ({ default: m.DashboardPage })));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage.js').then((m) => ({ default: m.ProjectsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then((m) => ({ default: m.SettingsPage })));
+const SkillsPage = lazy(() => import('./pages/SkillsPage.js').then((m) => ({ default: m.SkillsPage })));
 const StartWorkPage = lazy(() => import('./pages/StartWorkPage.js').then((m) => ({ default: m.StartWorkPage })));
+
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage.js').then((m) => ({ default: m.StrategiesPage })));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage.js').then((m) => ({ default: m.WorkspacesPage })));
 const GettingStartedPage = lazy(() =>
@@ -890,7 +892,10 @@ Core Instructions:
     />
   );
 
+  const skillsPage = <SkillsPage showToast={showToast} />;
+
   const settingsPage = config ? (
+
     <SettingsPage
       config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
@@ -1007,8 +1012,10 @@ Core Instructions:
                 <Route path="/workspaces" element={workspacesPage} />
                 <Route path="/workspaces/:workspaceId" element={workspacesPage} />
                 <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
+                <Route path="/skills" element={skillsPage} />
                 <Route path="/settings" element={settingsPage} />
                 <Route path="/workflows" element={workflowsPage} />
+
                 <Route path="/strategies" element={workflowsPage} />
                 <Route path="*" element={dashboardPage} />
               </Routes>

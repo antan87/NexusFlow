@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
+import fse from 'fs-extra';
+
 import { execa } from 'execa';
 import { AgentTurnGate, app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
@@ -11,7 +15,9 @@ import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
+import * as skillsCatalog from './utils/skills-catalog.js';
 import * as detectAi from './utils/detect-ai.js';
+
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
 import * as sessionFinder from './utils/session-finder.js';
@@ -28,11 +34,13 @@ vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
 vi.mock('./utils/workflows.js');
+vi.mock('./utils/skills-catalog.js');
 vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
 vi.mock('./core/new-repo.js');
 vi.mock('./orchestration/index.js');
+
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -1279,4 +1287,110 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  describe('Skills & Categories Endpoints', () => {
+    it('GET /api/skills/categories returns default categories', async () => {
+      vi.mocked(skillsCatalog.getSkillCategories).mockResolvedValue([
+        {
+          id: 'pull-requests',
+          name: 'Pull Requests & Review',
+          description: 'PR review skills',
+          icon: 'git-pull-request',
+          color: '#3b82f6',
+          custom: false,
+          isTemplate: true,
+        },
+      ]);
+
+      const response = await app.request('/api/skills/categories');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.categories).toBeDefined();
+      expect(data.categories.length).toBe(1);
+      expect(data.categories[0].id).toBe('pull-requests');
+      expect(data.categories[0].isTemplate).toBe(true);
+    });
+
+    it('POST /api/skills/categories creates a custom category', async () => {
+      vi.mocked(skillsCatalog.saveSkillCategory).mockResolvedValue({
+        id: 'serverless-workflows',
+        name: 'Serverless Workflows',
+        description: 'AWS Lambda and Cloudflare workers',
+        icon: 'zap',
+        color: '#ec4899',
+        custom: true,
+        isTemplate: false,
+      });
+
+      const response = await app.request('/api/skills/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Serverless Workflows',
+          description: 'AWS Lambda and Cloudflare workers',
+          icon: 'zap',
+          color: '#ec4899',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.category.id).toBe('serverless-workflows');
+      expect(data.category.custom).toBe(true);
+    });
+
+    it('GET /api/skills returns all skills', async () => {
+      vi.mocked(skillsCatalog.getAllSkills).mockResolvedValue([
+        {
+          id: 'pr-review-toolkit',
+          name: 'pr-review-toolkit',
+          title: 'PR Review Toolkit',
+          category: 'pull-requests',
+          description: 'Review pull requests',
+          custom: false,
+          content: '# PR Review',
+        },
+      ]);
+
+      const response = await app.request('/api/skills');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.skills).toBeDefined();
+      expect(data.skills.length).toBe(1);
+      expect(data.skills[0].id).toBe('pr-review-toolkit');
+    });
+
+    it('POST /api/skills creates a new skill package', async () => {
+      vi.mocked(skillsCatalog.saveSkill).mockResolvedValue({
+        id: 'graphql-linter',
+        name: 'graphql-linter',
+        title: 'GraphQL Schema Linter',
+        category: 'database-migrations',
+        description: 'Validates GraphQL schemas for deprecated fields',
+        custom: true,
+        content: '# GraphQL Schema Linter\n\nRun graphql-inspector validate.',
+      });
+
+      const response = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'graphql-linter',
+          title: 'GraphQL Schema Linter',
+          category: 'database-migrations',
+          description: 'Validates GraphQL schemas for deprecated fields',
+          content: '# GraphQL Schema Linter\n\nRun graphql-inspector validate.',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.skill.id).toBe('graphql-linter');
+      expect(data.skill.custom).toBe(true);
+    });
+  });
 });
+
+

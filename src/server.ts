@@ -79,6 +79,19 @@ import {
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
+import {
+
+
+  getSkillCategories,
+  saveSkillCategory,
+  deleteSkillCategory,
+  getAllSkills,
+  saveSkill,
+  deleteSkill,
+  getWorkspaceSkillsConfig,
+  saveWorkspaceSkillsConfig,
+} from './utils/skills-catalog.js';
+
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 
@@ -2088,7 +2101,117 @@ and suffix it with:
   }
 });
 
+// ─── Skills & Categories Catalog ──────────────────────────────────────────
+
+// Get all skill categories (built-in templates + user custom)
+app.get('/api/skills/categories', async (c) => {
+  try {
+    const categories = await getSkillCategories();
+    return c.json({ categories });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save or update a custom skill category
+app.post('/api/skills/categories', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!body.name) {
+      return c.json({ error: 'Category name is required.' }, 400);
+    }
+    const category = await saveSkillCategory(body);
+    return c.json({ success: true, category });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Delete a custom skill category
+app.delete('/api/skills/categories/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    await deleteSkillCategory(id);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Get all skills (templates + user + workspace)
+app.get('/api/skills', async (c) => {
+  try {
+    const workspaceId = c.req.query('workspace');
+    let wsPath: string | undefined;
+    if (workspaceId) {
+      const config = await loadConfig();
+      wsPath = resolveWorkspacePath(config.workspacesDir, workspaceId);
+    }
+    const skills = await getAllSkills(wsPath);
+    return c.json({ skills });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save or update a custom skill
+app.post('/api/skills', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!body.name || !body.content) {
+      return c.json({ error: 'Skill name and content are required.' }, 400);
+    }
+    const skill = await saveSkill(body);
+    return c.json({ success: true, skill });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Delete a custom skill
+app.delete('/api/skills/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    await deleteSkill(id);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Get workspace skills assignment config
+app.get('/api/skills/workspace/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const wsPath = resolveWorkspacePath(config.workspacesDir, id);
+    const skillsConfig = await getWorkspaceSkillsConfig(wsPath);
+    return c.json({ config: skillsConfig });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save workspace skills assignment config
+app.post('/api/skills/workspace/:id/assign', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json();
+    const config = await loadConfig();
+    const wsPath = resolveWorkspacePath(config.workspacesDir, id);
+    await saveWorkspaceSkillsConfig(wsPath, {
+      enabledSkills: Array.isArray(body.enabledSkills) ? body.enabledSkills : [],
+      enabledCategories: Array.isArray(body.enabledCategories) ? body.enabledCategories : [],
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+
 // ─── Schedules: recurring workspace jobs (sync/refresh) ─────────────────
+
 
 // List all scheduled jobs (with computed next-due time)
 app.get('/api/schedules', async (c) => {

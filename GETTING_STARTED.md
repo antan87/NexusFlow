@@ -115,7 +115,14 @@ You don't need to open five terminal windows to start your backend, frontend, da
   nexusflow stop
   ```
 
-### 6. Capture Learnings as You Go
+### 6. Equip Reusable Agent Skills & Category Boxes
+Equip your AI assistants with structured playbooks using the **Skills & Agents Hub**:
+- Navigate to the **Skills & Agents** tab in the Web Dashboard.
+- Browse built-in category templates (Pull Request review, Testing & QA, Cross-Repo package loop, Database migrations, Security audit).
+- Drag and drop cards to re-categorize skills, create custom categories, or author new skills with Markdown playbooks and auxiliary scripts.
+- Selectively enable or disable skills for your active workspace; when refreshed, NexusFlow automatically compiles and distributes them to `.agents/skills/`, `.claude/skills/`, `.cursor/rules/`, `.github/instructions/`, and `.codex/skills/`.
+
+### 7. Capture Learnings as You Go
 As you (or your AI assistant) make decisions and hit gotchas, record them so they aren't lost between sessions:
 ```bash
 nexusflow knowledge add -t decision -m "Switched auth to short-lived tokens"
@@ -123,13 +130,14 @@ nexusflow knowledge add -t gotcha   -m "The worker needs REDIS_URL set locally"
 ```
 Entries are filed under the right section of `nexusflow-knowledge.md` automatically. Your AI assistant can do the same through the `add_knowledge` MCP tool.
 
-### 7. Finish the Feature
+### 8. Finish the Feature
 When the work is done, close the loop in one command:
 ```bash
 nexusflow finish --dry-run          # preview: what will be committed / pushed
 nexusflow finish -m "Ship feature"  # commit + push every repo, print PR links
 ```
 `finish` shows a per-repo status table, commits and pushes each repo, and prints ready-to-open PR/compare links for each remote. In isolated worktree workspaces it uses the feature branches NexusFlow created; in-place workspaces use each repo's current branch and only offer PR/compare links when that branch differs from the default branch. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
+
 
 ---
 
