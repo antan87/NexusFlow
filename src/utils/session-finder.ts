@@ -195,6 +195,65 @@ export async function canOpenCodexSessionInWorkspace(
 }
 
 /**
+ * Verify that a Claude transcript can be handed from the CLI to Desktop.
+ * Claude project folder names are lossy, so the folder and filename alone are
+ * never enough: the exact UUID and a canonical recorded cwd must both match.
+ */
+export async function canTransferClaudeSessionInWorkspace(
+  workspacePath: string,
+  repoPaths: string[],
+  sessionId: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  if (!isCodexSessionId(sessionId)) return false;
+
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const candidatePaths = [workspacePath, ...repoPaths];
+  const roots = (await Promise.all(candidatePaths.map(async (candidate) => {
+    try {
+      return await fs.realpath(candidate);
+    } catch {
+      return null;
+    }
+  }))).filter((candidate): candidate is string => candidate !== null);
+  if (roots.length === 0) return false;
+
+  const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const candidateFiles = [...new Set(candidatePaths.map((candidate) => path.join(
+    claudeConfigDir,
+    'projects',
+    getClaudeProjectFolderName(candidate),
+    `${sessionId}.jsonl`,
+  )))];
+
+  for (const file of candidateFiles) {
+    try {
+      const content = await fs.readFile(file, 'utf-8');
+      for (const line of content.split('\n').filter(Boolean)) {
+        let record: any;
+        try { record = JSON.parse(line); } catch { continue; }
+        if (record?.sessionId !== sessionId) continue;
+        const recordedCwd = record?.cwd;
+        if (typeof recordedCwd !== 'string' || !pathApi.isAbsolute(recordedCwd)) continue;
+
+        let canonicalCwd: string;
+        try {
+          canonicalCwd = await fs.realpath(recordedCwd);
+        } catch {
+          continue;
+        }
+        if (roots.some((root) => isCanonicalPathWithin(root, canonicalCwd, platform))) {
+          return true;
+        }
+      }
+    } catch {
+      // Ignore missing or concurrently-rotated transcript files.
+    }
+  }
+  return false;
+}
+
+/**
  * Scans the local filesystem for conversation histories belonging to Claude, Antigravity,
  * Codex, and Copilot that relate to the specified workspace.
  *

@@ -95,6 +95,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/repos', json(reposData?.data ?? reposData));
     await page.route('**/api/ai-detect', json(aiDetectData));
     await page.route('**/api/workflows/templates', json(workflowsTemplatesData));
+    await page.route('**/api/workspace/*/sessions?*', json({ sessions: [] }));
 
     // Service log routes — register the more specific /stream matcher first so
     // it wins over the backfill route.

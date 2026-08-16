@@ -66,6 +66,104 @@ test.describe('Claude and Codex embedded handoff', () => {
     },
   });
 
+  test('continues recent Codex work from the primary launcher', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    let launchBody: Record<string, unknown> | null = null;
+    await page.route('**/api/workspace/feature-x/sessions?*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            id: sessionId,
+            assistant: 'codex',
+            title: 'Finish the Desktop handoff',
+            createdAt: '2026-08-15T00:00:00.000Z',
+            updatedAt: '2026-08-16T00:00:00.000Z',
+            messageCount: 6,
+            workspacePath: feature.workspacePath,
+            desktopHandoff: { targetId: 'codex-desktop', method: 'direct' },
+          }],
+        }),
+      });
+    });
+    await page.route('**/api/workspace/feature-x/launch', async (route, request) => {
+      launchBody = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await page.getByRole('button', { name: 'Open with…' }).click();
+    await expect(page.getByRole('region', { name: 'Continue recent work' })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume Finish the Desktop handoff in Codex Desktop' }).click();
+
+    await expect.poll(() => launchBody).toEqual({
+      targetId: 'codex-desktop',
+      action: 'resume',
+      sessionId,
+    });
+    await expect(page.getByRole('heading', { name: 'Open workspace with…' })).not.toBeVisible();
+  });
+
+  test('uses Claude’s documented CLI-to-Desktop transfer without a guessed deep link', async ({ page }) => {
+    const sessionId = '123e4567-e89b-42d3-a456-426614174000';
+    const launchRequests: Record<string, unknown>[] = [];
+    await page.addInitScript(() => {
+      (window as any).__copiedText = '';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: async (value: string) => { (window as any).__copiedText = value; } },
+      });
+    });
+    await page.route('**/api/workspace-launch-targets', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'codex-desktop', name: 'Codex Desktop', kind: 'ai-app', icon: 'codex',
+            description: 'Start a new Codex chat with this folder as its workspace.', available: true,
+          },
+          {
+            id: 'claude-desktop', name: 'Claude Desktop', kind: 'ai-app', icon: 'claude',
+            description: 'Open Claude Code with this folder selected.', available: true,
+          },
+        ]),
+      });
+    });
+    await page.route('**/api/workspace/feature-x/sessions?*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            id: sessionId,
+            assistant: 'claude',
+            title: 'Continue the UX audit',
+            createdAt: '2026-08-15T00:00:00.000Z',
+            updatedAt: '2026-08-16T00:00:00.000Z',
+            messageCount: 5,
+            workspacePath: feature.workspacePath,
+            desktopHandoff: { targetId: 'claude-desktop', method: 'guided' },
+          }],
+        }),
+      });
+    });
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.endsWith('/launch')) {
+        launchRequests.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await page.getByRole('button', { name: 'Open with…' }).click();
+    await page.getByRole('button', { name: 'Move Continue the UX audit to Claude Desktop' }).click();
+
+    await expect(page.getByRole('status')).toContainText('type /desktop in Claude');
+    await expect.poll(() => page.evaluate(() => (window as any).__copiedText)).toBe(`claude --resume ${sessionId}`);
+    expect(launchRequests).toEqual([]);
+  });
+
   for (const scenario of [
     { assistant: 'claude' as const, id: '123e4567-e89b-42d3-a456-426614174000' },
     { assistant: 'codex' as const, id: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
