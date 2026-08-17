@@ -31,6 +31,8 @@ class TestAntigravityCliAdapter extends AntigravityCliAdapter {
 describe('buildAntigravityTurnArgs', () => {
   it('builds first turn arguments without session', () => {
     expect(buildAntigravityTurnArgs(true, 'hello world')).toEqual([
+      '--mode',
+      'plan',
       '-p',
       'hello world',
     ]);
@@ -39,15 +41,17 @@ describe('buildAntigravityTurnArgs', () => {
   it('builds subsequent turn arguments without session', () => {
     expect(buildAntigravityTurnArgs(false, 'next prompt')).toEqual([
       '-c',
+      '--mode',
+      'plan',
       '-p',
       'next prompt',
     ]);
   });
 
-  it('builds first turn arguments with client-assigned session ID', () => {
+  it('does not treat a caller-provided ID as a new Antigravity conversation', () => {
     expect(buildAntigravityTurnArgs(true, 'hello world', { id: SESSION_ID, resume: false })).toEqual([
-      '--conversation',
-      SESSION_ID,
+      '--mode',
+      'plan',
       '-p',
       'hello world',
     ]);
@@ -57,6 +61,8 @@ describe('buildAntigravityTurnArgs', () => {
     expect(buildAntigravityTurnArgs(true, 'resumed prompt', { id: SESSION_ID, resume: true })).toEqual([
       '--conversation',
       SESSION_ID,
+      '--mode',
+      'plan',
       '-p',
       'resumed prompt',
     ]);
@@ -67,7 +73,7 @@ describe('buildAntigravityTurnArgs', () => {
       buildAntigravityTurnArgs(
         true,
         'edit prompt',
-        { id: SESSION_ID, resume: false },
+        { id: SESSION_ID, resume: true },
         'workspace-write',
       ),
     ).toEqual([
@@ -113,15 +119,17 @@ describe('buildAntigravityTurnArgs', () => {
 });
 
 describe('AntigravityCliAdapter lifecycle', () => {
-  it('emits session event when session ID is provided and passes args to spawnProcess', async () => {
+  it('resumes an existing provider-assigned session', async () => {
     const adapter = new TestAntigravityCliAdapter();
     const sessionEvents: string[] = [];
     adapter.on('session', (id) => sessionEvents.push(id));
 
-    await adapter.start('/workspace', { id: SESSION_ID, resume: false });
+    await adapter.start('/workspace', { id: SESSION_ID, resume: true });
     await adapter.send('first message', 'workspace-write');
 
-    expect(sessionEvents).toEqual([SESSION_ID]);
+    // Plain-text print mode does not expose the id of a newly created
+    // conversation. The requested resume id remains frontend-owned.
+    expect(sessionEvents).toHaveLength(0);
     expect(adapter.processes).toHaveLength(1);
     expect(adapter.processes[0].args).toEqual([
       '--conversation',
@@ -133,6 +141,18 @@ describe('AntigravityCliAdapter lifecycle', () => {
     ]);
   });
 
+  it('starts a new conversation when a non-resume identity is supplied', async () => {
+    const adapter = new TestAntigravityCliAdapter();
+    const sessionEvents: string[] = [];
+    adapter.on('session', (id) => sessionEvents.push(id));
+
+    await adapter.start('/workspace', { id: SESSION_ID, resume: false });
+    await adapter.send('first message');
+
+    expect(sessionEvents).toHaveLength(0);
+    expect(adapter.processes[0].args).toEqual(['--mode', 'plan', '-p', 'first message']);
+  });
+
   it('does not emit session event if no session is provided', async () => {
     const adapter = new TestAntigravityCliAdapter();
     const sessionEvents: string[] = [];
@@ -142,13 +162,13 @@ describe('AntigravityCliAdapter lifecycle', () => {
     await adapter.send('first message');
 
     expect(sessionEvents).toHaveLength(0);
-    expect(adapter.processes[0].args).toEqual(['-p', 'first message']);
+    expect(adapter.processes[0].args).toEqual(['--mode', 'plan', '-p', 'first message']);
 
     // Complete the first turn so the adapter is ready for the second turn
     adapter.processes[0].child.emit('close', 0);
 
     // Second turn uses -c
     await adapter.send('second message');
-    expect(adapter.processes[1].args).toEqual(['-c', '-p', 'second message']);
+    expect(adapter.processes[1].args).toEqual(['-c', '--mode', 'plan', '-p', 'second message']);
   });
 });

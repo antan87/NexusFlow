@@ -580,7 +580,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     wsUrl += '/ws';
 
     endedNoteRef.current = false;
-      let dispatched = false;
+    let dispatched = false;
     let failureReported = false;
     let socket: WebSocket;
 
@@ -605,8 +605,9 @@ export function AgentChat({ ws }: AgentChatProps) {
       const startPayload: Record<string, unknown> = {
         type: 'start',
         command: providerId,
-        // Sessions run in the git repo worktree root if available, otherwise the workspace dir
-        cwd: ws.repos?.[0] || ws.workspacePath,
+        // Run the harness in the active git worktree so repository-aware tools
+        // and commands target source instead of the outer coordination folder.
+        cwd: ws.repos[0] || ws.workspacePath,
       };
       const nextSessions = { ...sessionsRef.current };
       if (options.resetSession) delete nextSessions[providerId];

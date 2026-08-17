@@ -562,7 +562,7 @@ function AppInner() {
     setResumingWs(ws.branchName);
     try {
       if (assistant && !providerForAssistant(assistant)) {
-        showToast('Only Claude Code and Codex sessions can resume in embedded chat.', 'error');
+        showToast('This assistant cannot resume in embedded chat.', 'error');
         return;
       }
       const selectedAssistant = assistant
@@ -570,7 +570,7 @@ function AppInner() {
         : ws.assistants.find((candidate): candidate is EmbeddedHarnessAssistant => providerForAssistant(candidate) !== null);
 
       if (!selectedAssistant) {
-        showToast('Select Claude Code or Codex for this workspace to continue in embedded chat.', 'error');
+        showToast('Select a supported local harness for this workspace to continue in embedded chat.', 'error');
         return;
       }
 

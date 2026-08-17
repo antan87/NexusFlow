@@ -6,6 +6,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '..
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
+import { providerForAssistant } from '../chat/chatLaunch.js';
 
 interface SessionHistoryProps {
   ws: Feature;
@@ -117,7 +118,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                 >
                   <MessageSquare size={13} /> View Chat Log
                 </Button>
-                {(sess.assistant === 'claude' || sess.assistant === 'codex') && (
+                {providerForAssistant(sess.assistant) && (
                   <Button
                     size="sm"
                     onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}

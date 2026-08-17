@@ -108,38 +108,55 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       if (saved === 'cockpit' || saved === 'split' || saved === 'chat-only' || saved === 'inspector-only') {
         return saved;
       }
-    } catch {}
+    } catch {
+      // Storage can be unavailable in hardened or private browser contexts.
+    }
     return 'cockpit';
   });
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('nexusflow:workspaces:sidebarCollapsed') === 'true';
-    } catch {}
+    } catch {
+      // Fall back to the expanded sidebar when storage is unavailable.
+    }
     return false;
   });
 
   useEffect(() => {
     try {
       localStorage.setItem('nexusflow:workspaces:layoutMode', layoutMode);
-    } catch {}
+    } catch {
+      // The in-memory layout still works when persistence is unavailable.
+    }
   }, [layoutMode]);
 
   useEffect(() => {
     try {
       localStorage.setItem('nexusflow:workspaces:sidebarCollapsed', String(sidebarCollapsed));
-    } catch {}
+    } catch {
+      // The in-memory sidebar state still works without persistence.
+    }
   }, [sidebarCollapsed]);
 
-  // Keyboard shortcut handler: Ctrl+\ / Cmd+\ to cycle modes, Ctrl+J / Cmd+J for chat, Ctrl+B / Cmd+B for sidebar
+  // Ctrl/Cmd shortcuts only apply outside text-editing controls.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target;
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable)
+      ) return;
+
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
       if (isCmdOrCtrl && e.key === '\\') {
         e.preventDefault();
         setLayoutMode((prev) => {
           if (prev === 'cockpit') return 'split';
           if (prev === 'split') return 'chat-only';
+          if (prev === 'chat-only') return 'inspector-only';
           return 'cockpit';
         });
       } else if (isCmdOrCtrl && (e.key === 'j' || e.key === 'J')) {
@@ -386,7 +403,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
         <div className="flex items-center gap-2">
           {/* View Mode Switcher Toolbar */}
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/60 p-1">
+          <div
+            role="group"
+            aria-label="Workspace layout"
+            className="flex items-center gap-1 rounded-lg border border-border bg-muted/60 p-1"
+          >
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className={cn(
@@ -397,12 +418,15 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               )}
               title={sidebarCollapsed ? 'Show workspaces sidebar (Ctrl+B)' : 'Hide workspaces sidebar (Ctrl+B)'}
               aria-label="Toggle sidebar"
+              aria-expanded={!sidebarCollapsed}
             >
               <PanelLeft size={15} />
             </button>
             <div className="h-3.5 w-px bg-border my-auto mx-0.5" />
             <button
               onClick={() => setLayoutMode('cockpit')}
+              aria-label="Cockpit layout"
+              aria-pressed={layoutMode === 'cockpit'}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
                 layoutMode === 'cockpit'
@@ -416,6 +440,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </button>
             <button
               onClick={() => setLayoutMode('split')}
+              aria-label="Split layout"
+              aria-pressed={layoutMode === 'split'}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
                 layoutMode === 'split'
@@ -429,6 +455,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </button>
             <button
               onClick={() => setLayoutMode('chat-only')}
+              aria-label="Chat-only layout"
+              aria-pressed={layoutMode === 'chat-only'}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
                 layoutMode === 'chat-only'
@@ -442,6 +470,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </button>
             <button
               onClick={() => setLayoutMode('inspector-only')}
+              aria-label="Inspector-only layout"
+              aria-pressed={layoutMode === 'inspector-only'}
               className={cn(
                 'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
                 layoutMode === 'inspector-only'
@@ -475,6 +505,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
+                  aria-pressed={filter === f}
                   className={cn(
                     'flex-1 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors cursor-pointer text-center',
                     filter === f ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
@@ -548,50 +579,45 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex min-w-0 h-full overflow-hidden">
-            {/* Mode A: Cockpit Mode (Centered spacious chat canvas + synchronized Contextual Inspector) */}
-            {layoutMode === 'cockpit' && (
-              <div className="flex-1 flex gap-4 min-w-0 h-full overflow-hidden">
-                {/* Chat Canvas (flexible 600px - 1000px) */}
-                <div className="flex-1 min-w-[440px] max-w-[960px] flex flex-col h-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                  {renderChat()}
-                </div>
-                {/* Contextual Inspector */}
-                <div className="flex-[2] min-w-[380px] max-w-[640px] flex flex-col h-full overflow-y-auto pr-1">
-                  {renderInspector()}
-                </div>
-              </div>
+          <div
+            className={cn(
+              'flex-1 min-w-0 h-full gap-4',
+              (layoutMode === 'cockpit' || layoutMode === 'split')
+                && 'flex flex-col overflow-y-auto xl:grid xl:overflow-hidden',
+              layoutMode === 'cockpit'
+                && 'xl:grid-cols-[minmax(440px,960px)_minmax(380px,640px)]',
+              layoutMode === 'split' && 'xl:grid-cols-2',
+              layoutMode === 'chat-only' && 'flex justify-center overflow-hidden',
+              layoutMode === 'inspector-only' && 'overflow-y-auto pr-1',
             )}
+          >
+            {/* Keep one AgentChat mounted while layout classes change. Unmounting
+                it closes the active WebSocket and interrupts the current turn. */}
+            <div
+              className={cn(
+                'min-w-0 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm',
+                (layoutMode === 'cockpit' || layoutMode === 'split')
+                  && 'w-full min-h-[420px] flex-none xl:h-full xl:min-h-0',
+                layoutMode === 'chat-only' && 'w-full max-w-5xl h-full',
+                layoutMode === 'inspector-only' && 'hidden',
+              )}
+            >
+              {renderChat()}
+            </div>
 
-            {/* Mode B: Dual-Split (50/50 side-by-side view) */}
-            {layoutMode === 'split' && (
-              <div className="flex-1 flex gap-4 min-w-0 h-full overflow-hidden">
-                <div className="flex-1 min-w-[360px] flex flex-col h-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                  {renderChat()}
-                </div>
-                <div className="flex-1 min-w-[360px] flex flex-col h-full overflow-y-auto pr-1">
-                  {renderInspector()}
-                </div>
+            <div
+              className={cn(
+                'min-w-0',
+                (layoutMode === 'cockpit' || layoutMode === 'split')
+                  && 'w-full flex-none overflow-visible xl:h-full xl:overflow-y-auto xl:pr-1',
+                layoutMode === 'chat-only' && 'hidden',
+                layoutMode === 'inspector-only' && 'h-full overflow-y-auto',
+              )}
+            >
+              <div className={cn(layoutMode === 'inspector-only' && 'mx-auto flex w-full max-w-6xl flex-col')}>
+                {renderInspector()}
               </div>
-            )}
-
-            {/* Mode C: Chat Focus (Full width chat) */}
-            {layoutMode === 'chat-only' && (
-              <div className="flex-1 flex justify-center min-w-0 h-full overflow-hidden">
-                <div className="w-full max-w-5xl flex flex-col h-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                  {renderChat()}
-                </div>
-              </div>
-            )}
-
-            {/* Mode D: Inspector Focus (Full width inspector) */}
-            {layoutMode === 'inspector-only' && (
-              <div className="flex-1 min-w-0 h-full overflow-y-auto pr-1">
-                <div className="w-full max-w-6xl mx-auto flex flex-col">
-                  {renderInspector()}
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
       </div>

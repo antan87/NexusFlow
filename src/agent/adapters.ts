@@ -147,7 +147,9 @@ ProviderRegistry.register({
   defaultExecutionProfile: 'review',
   capabilities: {
     transport: 'cli-print',
-    sessionIdentity: 'client-assigned',
+    // agy assigns ids for new conversations; --conversation only resumes an
+    // id that already exists in the provider's workspace-scoped history.
+    sessionIdentity: 'provider-assigned',
     workspaceAccess: 'harness-managed',
     sessionIdFormat: 'uuid',
   },

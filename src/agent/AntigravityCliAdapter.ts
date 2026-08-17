@@ -1,24 +1,26 @@
 import { CliAdapterBase } from './CliAdapterBase.js';
-import { type AgentSession, isValidSessionUuid } from './session.js';
+import type { AgentSession } from './session.js';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 export function buildAntigravityTurnArgs(
   isFirstTurn: boolean,
   prompt: string,
   session?: AgentSession,
-  executionProfile?: AgentExecutionProfile,
+  executionProfile: AgentExecutionProfile = 'review',
 ): string[] {
   const args: string[] = [];
 
-  if (session?.id) {
+  // --conversation only loads an existing provider-owned conversation. It is
+  // not a caller-assigned session id, so a new chat must let agy create one.
+  if (session?.resume) {
     args.push('--conversation', session.id);
   } else if (!isFirstTurn) {
     args.push('-c');
   }
 
-  if (executionProfile === 'workspace-write') {
-    args.push('--mode', 'accept-edits');
-  }
+  // Never inherit agy's persisted global mode. The profile selected for this
+  // turn is the authority for whether the harness may edit the workspace.
+  args.push('--mode', executionProfile === 'workspace-write' ? 'accept-edits' : 'plan');
 
   args.push('-p', prompt);
   return args;
@@ -31,20 +33,9 @@ export class AntigravityCliAdapter extends CliAdapterBase {
   // (argv is passed literally, so multi-word prompts are safe without quoting).
 
   private session?: AgentSession;
-  private sessionEmitted = false;
-
   public async start(cwd: string, session?: AgentSession): Promise<void> {
-    await super.start(cwd);
     this.session = session;
-    this.sessionEmitted = false;
-  }
-
-  public override async send(data: string, executionProfile?: AgentExecutionProfile): Promise<void> {
-    if (this.session?.id && !this.sessionEmitted && isValidSessionUuid(this.session.id)) {
-      this.sessionEmitted = true;
-      this.emit('session', this.session.id);
-    }
-    return super.send(data, executionProfile);
+    await super.start(cwd);
   }
 
   protected buildArgs(
@@ -55,4 +46,3 @@ export class AntigravityCliAdapter extends CliAdapterBase {
     return buildAntigravityTurnArgs(isFirstTurn, prompt, this.session, executionProfile);
   }
 }
-
