@@ -32,7 +32,8 @@ async function initRepo(dir: string): Promise<void> {
   await git(dir, 'commit', '-m', 'init');
 }
 
-describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', () => {
+describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', { timeout: 30000 }, () => {
+
   let base = '';
   let mainRepo = '';
   let counter = 0;

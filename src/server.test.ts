@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
+import fse from 'fs-extra';
+
 import { execa } from 'execa';
 import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
@@ -11,7 +15,11 @@ import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
+import * as skillsCatalog from './utils/skills-catalog.js';
+import * as agentsCatalog from './resources/agents-catalog.js';
+import * as resourceService from './resources/service.js';
 import * as detectAi from './utils/detect-ai.js';
+
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
 import * as sessionFinder from './utils/session-finder.js';
@@ -28,11 +36,22 @@ vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
 vi.mock('./generators/index.js');
 vi.mock('./utils/workflows.js');
+vi.mock('./utils/skills-catalog.js');
+vi.mock('./resources/agents-catalog.js');
+vi.mock('./resources/service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./resources/service.js')>();
+  return {
+    ...actual,
+    withResourceAdministrationLock: vi.fn((operation: () => Promise<unknown>) => operation()),
+    validateResourceSelections: vi.fn().mockResolvedValue(undefined),
+  };
+});
 vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
 vi.mock('./core/new-repo.js');
 vi.mock('./orchestration/index.js');
+
 
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
@@ -1401,4 +1420,263 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  describe('Skills & Categories Endpoints', () => {
+    it('GET /api/skills/categories returns default categories', async () => {
+      vi.mocked(skillsCatalog.getSkillCategories).mockResolvedValue([
+        {
+          id: 'pull-requests',
+          name: 'Pull Requests & Review',
+          description: 'PR review skills',
+          icon: 'git-pull-request',
+          color: '#3b82f6',
+          custom: false,
+          isTemplate: true,
+        },
+      ]);
+
+      const response = await app.request('/api/skills/categories');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.categories).toBeDefined();
+      expect(data.categories.length).toBe(1);
+      expect(data.categories[0].id).toBe('pull-requests');
+      expect(data.categories[0].isTemplate).toBe(true);
+    });
+
+    it('POST /api/skills/categories creates a custom category', async () => {
+      vi.mocked(skillsCatalog.saveSkillCategory).mockResolvedValue({
+        id: 'serverless-workflows',
+        name: 'Serverless Workflows',
+        description: 'AWS Lambda and Cloudflare workers',
+        icon: 'zap',
+        color: '#ec4899',
+        custom: true,
+        isTemplate: false,
+      });
+
+      const response = await app.request('/api/skills/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Serverless Workflows',
+          description: 'AWS Lambda and Cloudflare workers',
+          icon: 'zap',
+          color: '#ec4899',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.category.id).toBe('serverless-workflows');
+      expect(data.category.custom).toBe(true);
+    });
+
+    it('GET /api/skills returns all skills', async () => {
+      vi.mocked(skillsCatalog.getAllSkills).mockResolvedValue([
+        {
+          id: 'pr-review-toolkit',
+          name: 'pr-review-toolkit',
+          title: 'PR Review Toolkit',
+          category: 'pull-requests',
+          description: 'Review pull requests',
+          custom: false,
+          content: '# PR Review',
+        },
+      ]);
+
+      const response = await app.request('/api/skills');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.skills).toBeDefined();
+      expect(data.skills.length).toBe(1);
+      expect(data.skills[0].id).toBe('pr-review-toolkit');
+    });
+
+    it('POST /api/skills creates a new skill package', async () => {
+      vi.mocked(skillsCatalog.saveSkill).mockResolvedValue({
+        id: 'graphql-linter',
+        name: 'graphql-linter',
+        title: 'GraphQL Schema Linter',
+        category: 'database-migrations',
+        description: 'Validates GraphQL schemas for deprecated fields',
+        custom: true,
+        content: '# GraphQL Schema Linter\n\nRun graphql-inspector validate.',
+      });
+
+      const response = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'graphql-linter',
+          title: 'GraphQL Schema Linter',
+          category: 'database-migrations',
+          description: 'Validates GraphQL schemas for deprecated fields',
+          content: '# GraphQL Schema Linter\n\nRun graphql-inspector validate.',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.skill.id).toBe('graphql-linter');
+      expect(data.skill.custom).toBe(true);
+    });
+
+    it('GET and POST /api/agents administer Codex-native agents', async () => {
+      const agent = {
+        id: 'reviewer',
+        name: 'reviewer',
+        category: 'general',
+        description: 'Review a fixed diff.',
+        developerInstructions: 'Review correctness and security.',
+        sandboxMode: 'read-only' as const,
+        custom: true,
+      };
+      vi.mocked(agentsCatalog.getAllAgents).mockResolvedValue([agent]);
+      vi.mocked(agentsCatalog.saveAgent).mockResolvedValue(agent);
+
+      const listResponse = await app.request('/api/agents');
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual({ agents: [agent] });
+
+      const saveResponse = await app.request('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agent),
+      });
+      expect(saveResponse.status).toBe(200);
+      expect(agentsCatalog.saveAgent).toHaveBeenCalledWith(agent);
+    });
+
+    it('blocks deleting resources that are still assigned to a workspace', async () => {
+      const workspacePath = path.resolve('/workspaces/example');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([{ id: 'example', workspacePath }] as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      vi.mocked(skillsCatalog.getWorkspaceSkillsConfig).mockResolvedValue({
+        schemaVersion: 1,
+        revision: 1,
+        enabledSkills: ['pr-review-toolkit'],
+        enabledAgents: ['reviewer'],
+        enabledCategories: [],
+      });
+
+      const skillResponse = await app.request('/api/skills/pr-review-toolkit', { method: 'DELETE' });
+      expect(skillResponse.status).toBe(409);
+      await expect(skillResponse.json()).resolves.toMatchObject({ workspaces: ['example'] });
+      expect(skillsCatalog.deleteSkill).not.toHaveBeenCalled();
+
+      const agentResponse = await app.request('/api/agents/reviewer', { method: 'DELETE' });
+      expect(agentResponse.status).toBe(409);
+      await expect(agentResponse.json()).resolves.toMatchObject({ workspaces: ['example'] });
+      expect(agentsCatalog.deleteAgent).not.toHaveBeenCalled();
+    });
+
+    it('requires an exact existing workspace before reading resource assignments', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => {
+        if (String(candidate).endsWith('missing')) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        return String(candidate);
+      });
+
+      const response = await app.request('/api/skills/workspace/missing');
+      expect(response.status).toBe(404);
+      expect(skillsCatalog.getWorkspaceSkillsConfig).not.toHaveBeenCalled();
+    });
+
+    it('saves versioned skill and agent assignments for an exact workspace', async () => {
+      const workspacePath = path.resolve('/workspaces/example');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      vi.mocked(skillsCatalog.saveWorkspaceSkillsConfig).mockResolvedValue({
+        schemaVersion: 1,
+        revision: 4,
+        enabledSkills: ['pr-review-toolkit'],
+        enabledAgents: ['reviewer'],
+        enabledCategories: [],
+      });
+
+      const response = await app.request('/api/skills/workspace/example/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 3,
+          enabledSkills: ['pr-review-toolkit'],
+          enabledAgents: ['reviewer'],
+          enabledCategories: [],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(skillsCatalog.saveWorkspaceSkillsConfig).toHaveBeenCalledWith(
+        workspacePath,
+        expect.objectContaining({ enabledSkills: ['pr-review-toolkit'], enabledAgents: ['reviewer'] }),
+        3,
+      );
+    });
+
+    it('rejects workspace assignments that reference missing catalog resources', async () => {
+      const workspacePath = path.resolve('/workspaces/example');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      vi.mocked(resourceService.validateResourceSelections).mockRejectedValueOnce(
+        new resourceService.ResourceSelectionError(['missing-skill'], ['missing_agent']),
+      );
+
+      const response = await app.request('/api/skills/workspace/example/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 0,
+          enabledSkills: ['missing-skill'],
+          enabledAgents: ['missing_agent'],
+          enabledCategories: [],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        missingSkills: ['missing-skill'],
+        missingAgents: ['missing_agent'],
+      });
+      expect(skillsCatalog.saveWorkspaceSkillsConfig).not.toHaveBeenCalled();
+    });
+
+    it('requires an assignment revision and maps stale revisions to a conflict', async () => {
+      const missingRevision = await app.request('/api/skills/workspace/example/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledSkills: [], enabledAgents: [] }),
+      });
+      expect(missingRevision.status).toBe(400);
+      expect(config.loadConfig).not.toHaveBeenCalled();
+
+      const workspacePath = path.resolve('/workspaces/example');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      const revisionError = new skillsCatalog.WorkspaceResourceRevisionError(2, 3);
+      revisionError.message = 'Workspace resource configuration changed (expected revision 2, current 3).';
+      vi.mocked(skillsCatalog.saveWorkspaceSkillsConfig).mockRejectedValueOnce(revisionError);
+
+      const staleRevision = await app.request('/api/skills/workspace/example/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: 2, enabledSkills: [], enabledAgents: [] }),
+      });
+      expect(staleRevision.status).toBe(409);
+      await expect(staleRevision.json()).resolves.toMatchObject({
+        error: expect.stringContaining('expected revision 2, current 3'),
+      });
+    });
+  });
 });
+
+

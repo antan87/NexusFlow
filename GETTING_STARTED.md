@@ -115,7 +115,16 @@ You don't need to open five terminal windows to start your backend, frontend, da
   nexusflow stop
   ```
 
-### 6. Capture Learnings as You Go
+### 6. Equip Reusable Skills and Codex Agents
+Equip your AI assistants with reusable resources using the **Resource Library**:
+- Navigate to the **Resource Library** in the Web Dashboard and choose Skills or Codex Agents.
+- Browse built-in category templates (Pull Request review, Testing & QA, Cross-Repo package loop, Database migrations, Security audit).
+- Drag and drop cards to re-categorize skills, create custom categories, or author new skills with Markdown playbooks and auxiliary scripts.
+- Create or import basic Codex custom-agent TOML definitions and reuse them across workspaces.
+- Save a workspace selection, then refresh. Portable skills are installed to `.agents/skills/` (and `.claude/skills/` for Claude); Codex agents are installed to `.codex/agents/`.
+- NexusFlow records owned output hashes in `.nexusflow/resources.lock.json`, refuses unmanaged collisions, and never removes a locally modified managed file.
+
+### 7. Capture Learnings as You Go
 As you (or your AI assistant) make decisions and hit gotchas, record them so they aren't lost between sessions:
 ```bash
 nexusflow knowledge add -t decision -m "Switched auth to short-lived tokens"
@@ -123,13 +132,14 @@ nexusflow knowledge add -t gotcha   -m "The worker needs REDIS_URL set locally"
 ```
 Entries are filed under the right section of `nexusflow-knowledge.md` automatically. Your AI assistant can do the same through the `add_knowledge` MCP tool.
 
-### 7. Finish the Feature
+### 8. Finish the Feature
 When the work is done, close the loop in one command:
 ```bash
 nexusflow finish --dry-run          # preview: what will be committed / pushed
 nexusflow finish -m "Ship feature"  # commit + push every repo, print PR links
 ```
 `finish` shows a per-repo status table, commits and pushes each repo, and prints ready-to-open PR/compare links for each remote. In isolated worktree workspaces it uses the feature branches NexusFlow created; in-place workspaces use each repo's current branch and only offer PR/compare links when that branch differs from the default branch. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
+
 
 ---
 

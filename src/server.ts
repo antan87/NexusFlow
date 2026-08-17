@@ -84,6 +84,32 @@ import {
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
+import {
+
+
+  getSkillCategories,
+  saveSkillCategory,
+  deleteSkillCategory,
+  getAllSkills,
+  saveSkill,
+  deleteSkill,
+  getWorkspaceSkillsConfig,
+  saveWorkspaceSkillsConfig,
+  WorkspaceResourceRevisionError,
+} from './utils/skills-catalog.js';
+import {
+  deleteAgent,
+  getAllAgents,
+  importAgentToml,
+  saveAgent,
+} from './resources/agents-catalog.js';
+import { ResourceConflictError } from './resources/materializer.js';
+import {
+  ResourceSelectionError,
+  validateResourceSelections,
+  withResourceAdministrationLock,
+} from './resources/service.js';
+
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 
@@ -401,8 +427,51 @@ function errorResponse(c: any, error: unknown) {
   if (error instanceof PathAccessError) {
     return c.json({ error: error.message }, 400);
   }
+  if (error instanceof ResourceConflictError || error instanceof WorkspaceResourceRevisionError) {
+    return c.json({
+      error: error.message,
+      conflicts: error instanceof ResourceConflictError ? error.conflicts : undefined,
+    }, 409);
+  }
+  if (error instanceof ResourceSelectionError) {
+    return c.json({
+      error: error.message,
+      missingSkills: error.missingSkills,
+      missingAgents: error.missingAgents,
+    }, 400);
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return c.json({ error: msg }, 500);
+}
+
+async function resolveExactWorkspaceById(workspacesDir: string, id: string): Promise<string | null> {
+  const candidate = resolveWorkspacePath(workspacesDir, id);
+  try {
+    return await resolveExactLaunchWorkspace(workspacesDir, candidate);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as NodeJS.ErrnoException).code)
+        : undefined;
+    if (code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function findResourceAssignments(
+  workspacesDir: string,
+  resourceId: string,
+  kind: 'skill' | 'agent',
+): Promise<string[]> {
+  const assignments: string[] = [];
+  for (const workspace of await listWorkspaces(workspacesDir)) {
+    const workspacePath = await resolveExactWorkspaceById(workspacesDir, workspace.id);
+    if (!workspacePath) continue;
+    const selection = await getWorkspaceSkillsConfig(workspacePath);
+    const enabled = kind === 'skill' ? selection.enabledSkills : selection.enabledAgents ?? [];
+    if (enabled.includes(resourceId)) assignments.push(workspace.id);
+  }
+  return assignments;
 }
 
 /**
@@ -2178,7 +2247,195 @@ and suffix it with:
   }
 });
 
+// ─── Skills & Categories Catalog ──────────────────────────────────────────
+
+// Get all skill categories (built-in templates + user custom)
+app.get('/api/skills/categories', async (c) => {
+  try {
+    const categories = await getSkillCategories();
+    return c.json({ categories });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save or update a custom skill category
+app.post('/api/skills/categories', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!body.name) {
+      return c.json({ error: 'Category name is required.' }, 400);
+    }
+    const category = await saveSkillCategory(body);
+    return c.json({ success: true, category });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Delete a custom skill category
+app.delete('/api/skills/categories/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    await deleteSkillCategory(id);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Get authoritative skills (built-ins + personal catalog). Workspace
+// materializations are deliberately never treated as catalog sources.
+app.get('/api/skills', async (c) => {
+  try {
+    const skills = await getAllSkills();
+    return c.json({ skills });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save or update a custom skill
+app.post('/api/skills', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!body.name || !body.content) {
+      return c.json({ error: 'Skill name and content are required.' }, 400);
+    }
+    const skill = await saveSkill(body);
+    return c.json({ success: true, skill });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+});
+
+// Delete a custom skill
+app.delete('/api/skills/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const assignments = await withResourceAdministrationLock(async () => {
+      const currentAssignments = await findResourceAssignments(config.workspacesDir, id, 'skill');
+      if (!currentAssignments.length) await deleteSkill(id);
+      return currentAssignments;
+    });
+    if (assignments.length) {
+      return c.json({
+        error: `Unassign the skill from these workspaces before deleting it: ${assignments.join(', ')}`,
+        workspaces: assignments,
+      }, 409);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Codex-native custom-agent catalog. Other harness agent formats are not
+// translated because their configuration and permission models are different.
+app.get('/api/agents', async (c) => {
+  try {
+    return c.json({ agents: await getAllAgents() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/agents', async (c) => {
+  try {
+    const agent = await saveAgent(await c.req.json());
+    return c.json({ success: true, agent });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.post('/api/agents/import', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (typeof body.toml !== 'string') {
+      return c.json({ error: 'A TOML string is required.' }, 400);
+    }
+    const agent = await importAgentToml(body.toml, typeof body.category === 'string' ? body.category : 'general');
+    return c.json({ success: true, agent });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.delete('/api/agents/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const assignments = await withResourceAdministrationLock(async () => {
+      const currentAssignments = await findResourceAssignments(config.workspacesDir, id, 'agent');
+      if (!currentAssignments.length) await deleteAgent(id);
+      return currentAssignments;
+    });
+    if (assignments.length) {
+      return c.json({
+        error: `Unassign the agent from these workspaces before deleting it: ${assignments.join(', ')}`,
+        workspaces: assignments,
+      }, 409);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Get workspace skills assignment config
+app.get('/api/skills/workspace/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const skillsConfig = await getWorkspaceSkillsConfig(wsPath);
+    return c.json({ config: skillsConfig });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Save workspace skills assignment config
+app.post('/api/skills/workspace/:id/assign', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json();
+    if (!Array.isArray(body.enabledSkills) || !Array.isArray(body.enabledAgents)) {
+      return c.json({ error: 'enabledSkills and enabledAgents arrays are required.' }, 400);
+    }
+    if (!Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
+      return c.json({ error: 'A nonnegative integer expectedRevision is required.' }, 400);
+    }
+    const config = await loadConfig();
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const saved = await withResourceAdministrationLock(async () => {
+      await validateResourceSelections(body.enabledSkills, body.enabledAgents);
+      return saveWorkspaceSkillsConfig(
+        wsPath,
+        {
+          enabledSkills: body.enabledSkills,
+          enabledAgents: body.enabledAgents,
+          enabledCategories: Array.isArray(body.enabledCategories) ? body.enabledCategories : [],
+        },
+        body.expectedRevision,
+      );
+    });
+    return c.json({ success: true, config: saved });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+
 // ─── Schedules: recurring workspace jobs (sync/refresh) ─────────────────
+
 
 // List all scheduled jobs (with computed next-due time)
 app.get('/api/schedules', async (c) => {

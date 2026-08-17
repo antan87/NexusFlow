@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderGit2, Workflow, Settings as SettingsIcon, BookOpen, Plus, Sun, Moon, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FolderGit2, Workflow, Boxes, Settings as SettingsIcon, BookOpen, Plus, Sun, Moon, type LucideIcon } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { useTheme } from './ThemeProvider.js';
@@ -14,9 +14,11 @@ const ITEMS: NavItem[] = [
   { label: 'Overview', to: '/', icon: LayoutDashboard, match: (p) => p === '/' },
   { label: 'Projects', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
   { label: 'Workspaces', to: '/workspaces', icon: FolderGit2, match: (p) => p.startsWith('/workspaces') },
+  { label: 'Resource Library', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') || p.startsWith('/agents') },
   { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
 ];
+
 
 export function AppSidebar({ appVersion }: { appVersion: string }) {
   const { pathname } = useLocation();

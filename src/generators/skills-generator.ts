@@ -1,12 +1,16 @@
 /**
  * @module generators/skills-generator
- * Generates harness-specific agent skills/rules (e.g. for Claude, Cursor, Copilot, Codex)
- * dynamically based on workspace analysis.
+ * Generates harness-specific agent skills/rules (e.g. for Claude, Antigravity, Cursor, Copilot, Codex)
+ * dynamically based on workspace analysis and workspace skills configuration.
  */
 
-import fse from 'fs-extra';
-import * as path from 'node:path';
-import type { AIAssistant, WorkspaceContext, ProjectAnalysis } from '../types.js';
+import type { AIAssistant, WorkspaceContext, ProjectAnalysis, SkillItem } from '../types.js';
+import {
+  getAllSkills,
+  getWorkspaceSkillsConfig,
+} from '../utils/skills-catalog.js';
+import { getAllAgents } from '../resources/agents-catalog.js';
+import { reconcileWorkspaceResources } from '../resources/materializer.js';
 
 /**
  * Checks if the workspace has cross-repo package dependencies.
@@ -14,17 +18,27 @@ import type { AIAssistant, WorkspaceContext, ProjectAnalysis } from '../types.js
 function hasCrossRepoDependencies(analysis: Map<string, ProjectAnalysis>): boolean {
   const produced = new Set<string>();
   for (const [, a] of analysis) {
-    if (a.produces) {
+    if (a.produces && Array.isArray(a.produces)) {
       for (const p of a.produces) {
-        produced.add(p.name.toLowerCase());
+        if (p && p.name) {
+          produced.add(p.name.toLowerCase());
+        }
       }
     }
   }
 
   for (const [, a] of analysis) {
-    for (const dep of a.dependencies) {
-      if (produced.has(dep.name.toLowerCase())) {
-        return true;
+    if (Array.isArray(a.dependencies)) {
+      for (const dep of a.dependencies) {
+        if (dep && dep.name && produced.has(dep.name.toLowerCase())) {
+          return true;
+        }
+      }
+    } else if (a.dependencies && typeof a.dependencies === 'object') {
+      for (const depName of Object.keys(a.dependencies)) {
+        if (produced.has(depName.toLowerCase())) {
+          return true;
+        }
       }
     }
   }
@@ -35,7 +49,7 @@ function hasCrossRepoDependencies(analysis: Map<string, ProjectAnalysis>): boole
  * Checks if any workspace project produces packages that have consumer repos.
  */
 function hasProducedPackagesWithConsumers(analysis: Map<string, ProjectAnalysis>): boolean {
-  return hasCrossRepoDependencies(analysis); // Same logic: at least one consumer depends on a producer
+  return hasCrossRepoDependencies(analysis);
 }
 
 /**
@@ -43,8 +57,13 @@ function hasProducedPackagesWithConsumers(analysis: Map<string, ProjectAnalysis>
  */
 function getLocalPackageLoopSkill(analysis: Map<string, ProjectAnalysis>): string {
   let pkgManagerInfo = '';
-  const hasNuget = Array.from(analysis.values()).some(a => a.techStack.languages.includes('csharp'));
-  const hasNpm = Array.from(analysis.values()).some(a => a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript'));
+  const hasNuget = Array.from(analysis.values()).some((a) =>
+    a.techStack?.languages?.includes('csharp'),
+  );
+  const hasNpm = Array.from(analysis.values()).some(
+    (a) =>
+      a.techStack?.languages?.includes('typescript') || a.techStack?.languages?.includes('javascript'),
+  );
 
   if (hasNuget) {
     pkgManagerInfo += `### NuGet / C# local loop:
@@ -72,7 +91,6 @@ This skill guides the AI assistant through local package testing across reposito
 When modifying a shared package in one repository, you must test its effect on downstream consumer repositories before pushing.
 
 ${pkgManagerInfo}
-
 ## Guidelines
 - **Leave a TODO comment**: Always write a \`// TODO: Revert local package loop reference\` comment in the consumer code so you don't commit temporary local reference modifications.
 - **Do not commit local-packages**: The \`local-packages/\` folder is workspace-local and must not be committed to Git.
@@ -88,17 +106,19 @@ function getReleaseOrderingSkill(ctx: WorkspaceContext): string {
 
   lines.push('# Release and Merge Ordering Guidelines');
   lines.push('');
-  lines.push('This guideline answers what repositories must be merged and released in what order when cross-repo dependencies are modified.');
+  lines.push(
+    'This guideline answers what repositories must be merged and released in what order when cross-repo dependencies are modified.',
+  );
   lines.push('');
   lines.push('## Dependency Chains');
 
   if (analysis) {
-    for (const [path, a] of analysis) {
+    for (const [pathKey, a] of analysis) {
       if (a.produces && a.produces.length > 0) {
         for (const p of a.produces) {
           const consumers: string[] = [];
           for (const [otherPath, otherA] of analysis) {
-            if (otherPath === path) continue;
+            if (otherPath === pathKey) continue;
             for (const dep of otherA.dependencies) {
               if (dep.name.toLowerCase() === p.name.toLowerCase()) {
                 consumers.push(otherA.name);
@@ -108,7 +128,9 @@ function getReleaseOrderingSkill(ctx: WorkspaceContext): string {
           if (consumers.length > 0) {
             lines.push(`- **Product**: \`${p.name}\``);
             lines.push(`  - **Producer**: \`${a.name}\` (Must build and release first)`);
-            lines.push(`  - **Consumers**: ${consumers.map(c => `\`${c}\``).join(', ')} (Must be bumped and released after the producer)`);
+            lines.push(
+              `  - **Consumers**: ${consumers.map((c) => `\`${c}\``).join(', ')} (Must be bumped and released after the producer)`,
+            );
           }
         }
       }
@@ -117,7 +139,9 @@ function getReleaseOrderingSkill(ctx: WorkspaceContext): string {
 
   lines.push('');
   lines.push('## Reversion Check');
-  lines.push('- Before merging a consumer branch, verify that all local package loop references are replaced by official versions.');
+  lines.push(
+    '- Before merging a consumer branch, verify that all local package loop references are replaced by official versions.',
+  );
 
   return lines.join('\n');
 }
@@ -154,54 +178,11 @@ function getVerifierSkill(ctx: WorkspaceContext): string {
   lines.push('## Verification Recipe');
   lines.push('1. **Check local ports**: Ensure target ports do not conflict.');
   lines.push('2. **Run mocks**: Spin up local databases/caches before starting services.');
-  lines.push('3. **Watch out for shared staging environment**: Never publish messages or write data to staging infrastructure while testing locally unless explicitly requested.');
+  lines.push(
+    '3. **Watch out for shared staging environment**: Never publish messages or write data to staging infrastructure while testing locally unless explicitly requested.',
+  );
 
   return lines.join('\n');
-}
-
-/**
- * Deploys skills files to the specified harness's directory structure.
- */
-async function deploySkill(
-  workspacePath: string,
-  assistant: AIAssistant,
-  skillName: string,
-  content: string,
-): Promise<void> {
-  const titleMap: Record<string, string> = {
-    'nexusflow-local-package-loop': 'Local Package Development Loop',
-    'nexusflow-release-ordering': 'Release and Merge Ordering',
-    'verifier-workspace': 'Local Runtime Verifier',
-  };
-  const title = titleMap[skillName] || skillName;
-
-  if (assistant === 'claude') {
-    const skillDir = path.join(workspacePath, '.claude', 'skills', skillName);
-    await fse.ensureDir(skillDir);
-    await fse.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
-  } else if (assistant === 'antigravity') {
-    const skillDir = path.join(workspacePath, '.agents', 'skills', skillName);
-    await fse.ensureDir(skillDir);
-    await fse.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
-  } else if (assistant === 'cursor') {
-    const ruleDir = path.join(workspacePath, '.cursor', 'rules');
-    await fse.ensureDir(ruleDir);
-    const mdcContent = `---
-description: "Guidelines and instructions for ${title}"
-alwaysApply: false
----
-
-${content}`;
-    await fse.writeFile(path.join(ruleDir, `${skillName}.mdc`), mdcContent, 'utf-8');
-  } else if (assistant === 'copilot') {
-    const copilotDir = path.join(workspacePath, '.github', 'instructions');
-    await fse.ensureDir(copilotDir);
-    await fse.writeFile(path.join(copilotDir, `${skillName}.instructions.md`), content, 'utf-8');
-  } else if (assistant === 'codex') {
-    const codexDir = path.join(workspacePath, '.codex', 'skills', skillName);
-    await fse.ensureDir(codexDir);
-    await fse.writeFile(path.join(codexDir, 'SKILL.md'), content, 'utf-8');
-  }
 }
 
 /**
@@ -217,43 +198,76 @@ export async function generateSkills(
   workspacePath: string,
 ): Promise<void> {
   const { analysis } = ctx;
-  if (!analysis) return;
 
-  const hasDeps = hasCrossRepoDependencies(analysis);
-  const hasProds = hasProducedPackagesWithConsumers(analysis);
-  const hasRunConfig = Array.from(analysis.values()).some(a => a.runConfig && a.runConfig.entryPoints.length > 0);
+  // 1. Get enabled skills config and catalog
+  const wsConfig = await getWorkspaceSkillsConfig(workspacePath);
+  const [catalogSkills, catalogAgents] = await Promise.all([getAllSkills(), getAllAgents()]);
+  const skillMap = new Map<string, SkillItem>();
 
-  const skillsToDeploy: { name: string; content: string }[] = [];
-
-  if (hasDeps) {
-    skillsToDeploy.push({
-      name: 'nexusflow-local-package-loop',
-      content: getLocalPackageLoopSkill(analysis),
-    });
+  for (const s of catalogSkills) {
+    skillMap.set(s.id, s);
   }
 
-  if (hasProds) {
-    skillsToDeploy.push({
-      name: 'nexusflow-release-ordering',
-      content: getReleaseOrderingSkill(ctx),
-    });
-  }
+  // 2. Add or update dynamic skills based on codebase analysis
+  if (analysis) {
+    const hasDeps = hasCrossRepoDependencies(analysis);
+    const hasProds = hasProducedPackagesWithConsumers(analysis);
+    const hasRunConfig = Array.from(analysis.values()).some(
+      (a) => a.runConfig && a.runConfig.entryPoints.length > 0,
+    );
 
-  if (hasRunConfig) {
-    skillsToDeploy.push({
-      name: 'verifier-workspace',
-      content: getVerifierSkill(ctx),
-    });
-  }
+    if (hasDeps) {
+      skillMap.set('nexusflow-local-package-loop', {
+        id: 'nexusflow-local-package-loop',
+        name: 'nexusflow-local-package-loop',
+        title: 'Local Package Development Loop',
+        category: 'cross-repo-release',
+        description: 'Guides testing cross-repo package dependencies locally without publishing.',
+        content: getLocalPackageLoopSkill(analysis),
+        custom: false,
+      });
+    }
 
-  for (const assistant of assistants) {
-    for (const skill of skillsToDeploy) {
-      try {
-        await deploySkill(workspacePath, assistant, skill.name, skill.content);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`  ✖ Failed to deploy skill ${skill.name} for ${assistant}: ${msg}`);
-      }
+    if (hasProds) {
+      skillMap.set('nexusflow-release-ordering', {
+        id: 'nexusflow-release-ordering',
+        name: 'nexusflow-release-ordering',
+        title: 'Release and Merge Ordering Guidelines',
+        category: 'cross-repo-release',
+        description: 'Answers what repositories must be merged and released in what order.',
+        content: getReleaseOrderingSkill(ctx),
+        custom: false,
+      });
+    }
+
+    if (hasRunConfig) {
+      skillMap.set('verifier-workspace', {
+        id: 'verifier-workspace',
+        name: 'verifier-workspace',
+        title: 'Local Runtime Verifier',
+        category: 'testing-qa',
+        description: 'Guidelines to safely launch, mock, and verify services locally.',
+        content: getVerifierSkill(ctx),
+        custom: false,
+      });
     }
   }
+
+  // 3. Determine which skills to deploy
+  const enabledSet = new Set(wsConfig.enabledSkills);
+  const missingSkills = [...enabledSet].filter((id) => !skillMap.has(id));
+  if (missingSkills.length) {
+    throw new Error(`Selected skills are no longer available: ${missingSkills.join(', ')}`);
+  }
+  const skillsToDeploy = [...enabledSet].map((id) => skillMap.get(id)!);
+
+  const agentMap = new Map(catalogAgents.map((agent) => [agent.id, agent]));
+  const enabledAgentIds = new Set(wsConfig.enabledAgents ?? []);
+  const missingAgents = [...enabledAgentIds].filter((id) => !agentMap.has(id));
+  if (missingAgents.length) {
+    throw new Error(`Selected agents are no longer available: ${missingAgents.join(', ')}`);
+  }
+  const agentsToDeploy = [...enabledAgentIds].map((id) => agentMap.get(id)!);
+
+  await reconcileWorkspaceResources(workspacePath, assistants, skillsToDeploy, agentsToDeploy);
 }

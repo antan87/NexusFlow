@@ -545,3 +545,110 @@ export interface DependencyNode {
 
 /** The full dependency graph for a workspace. */
 export type DependencyGraph = Map<string, DependencyNode>;
+
+// ─── Skills & Agents Types ────────────────────────────────────────────────
+
+/** A skill category (built-in template or user-customized). */
+export interface SkillCategory {
+  /** Slug identifier (e.g. 'pull-requests', 'testing-qa'). */
+  id: string;
+  /** Human-readable title (e.g. 'Pull Requests & Review'). */
+  name: string;
+  /** Description of the category domain. */
+  description: string;
+  /** Lucide icon identifier or emoji. */
+  icon?: string;
+  /** Hex color or badge theme class. */
+  color?: string;
+  /** Whether this is a user-created/customized category. */
+  custom?: boolean;
+  /** Whether this is a default template category. */
+  isTemplate?: boolean;
+  /** IDs of skills belonging to this category. */
+  skills?: string[];
+}
+
+/** Parameter definition for a skill. */
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'array';
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+}
+
+/** Supporting reference document or script in a skill package. */
+export interface SkillSupportingFile {
+  name: string;
+  relativePath: string;
+  content?: string;
+}
+
+/** An agent skill item. */
+export interface SkillItem {
+  /** Unique skill identifier (slug, e.g. 'pr-review-toolkit'). */
+  id: string;
+  /** Normalized name. */
+  name: string;
+  /** Human-readable display title. */
+  title?: string;
+  /** Category ID or Name this skill belongs to. */
+  category: string;
+  /** Trigger description and instructions overview. */
+  description: string;
+  /** Tags / Keywords for discovery. */
+  tags?: string[];
+  /** Allowed / required tool primitives. */
+  allowedTools?: string[];
+  /** Typed arguments / parameters. */
+  parameters?: SkillParameter[];
+  /** Main markdown content (playbook instructions). */
+  content: string;
+  /** Whether this is a user-created or customized skill. */
+  custom: boolean;
+  /** Absolute source directory path if loaded from disk. */
+  sourcePath?: string;
+  /** Subordinate reference docs inside `references/`. */
+  references?: SkillSupportingFile[];
+  /** Helper scripts inside `scripts/`. */
+  scripts?: SkillSupportingFile[];
+}
+
+/** A reusable Codex custom-agent definition. */
+export interface CodexAgentItem {
+  /** Unique catalog identifier (lowercase slug). */
+  id: string;
+  /** Native Codex agent name. */
+  name: string;
+  /** Category ID used only for NexusFlow organization. */
+  category: string;
+  /** Human-facing guidance for when Codex should use the agent. */
+  description: string;
+  /** Optional model override. Omit to inherit Codex session settings. */
+  model?: string;
+  /** Optional Codex reasoning-effort override. */
+  modelReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  /** Optional sandbox default. Parent live overrides can still take precedence. */
+  sandboxMode?: 'read-only' | 'workspace-write';
+  /** Native Codex developer instructions. */
+  developerInstructions: string;
+  /** Whether this is a user-created agent. */
+  custom: boolean;
+  /** Absolute catalog source path when loaded from disk. */
+  sourcePath?: string;
+}
+
+/** Workspace skill assignments state. */
+export interface WorkspaceSkillsConfig {
+  /** Persisted contract version. */
+  schemaVersion?: 1;
+  /** Optimistic concurrency token for assignment edits. */
+  revision?: number;
+  /** Active enabled skill IDs. */
+  enabledSkills: string[];
+  /** Active Codex custom-agent IDs. */
+  enabledAgents?: string[];
+  /** Active enabled category IDs. */
+  enabledCategories?: string[];
+}
+

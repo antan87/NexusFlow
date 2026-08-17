@@ -19,6 +19,10 @@ import type {
   RunningOrchestrator,
   RunningService,
   ServiceConfig,
+  SkillCategory,
+  SkillItem,
+  CodexAgentItem,
+  WorkspaceSkillsConfig,
   WorkspaceMode,
   WorkspaceLaunchTarget,
   WorkspaceStatus,
@@ -284,3 +288,156 @@ export function useOrchestratorAction(wsId: string) {
     },
   });
 }
+
+// ─── Skills & Categories ──────────────────────────────────────────────────
+
+export type { SkillCategory, SkillItem, CodexAgentItem, WorkspaceSkillsConfig } from '../../types.js';
+
+export function useSkillCategories() {
+  return useQuery({
+    queryKey: ['skill-categories'],
+    queryFn: async () => {
+      const data = await apiFetch<{ categories: SkillCategory[] }>('/api/skills/categories');
+      return data.categories;
+    },
+  });
+}
+
+export function useSaveSkillCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (category: Partial<SkillCategory> & { name: string }) =>
+      apiFetch<{ success: boolean; category: SkillCategory }>('/api/skills/categories', {
+        method: 'POST',
+        body: JSON.stringify(category),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skill-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+}
+
+export function useDeleteSkillCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/skills/categories/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skill-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+}
+
+export function useSkills(workspaceId?: string) {
+  return useQuery({
+    queryKey: ['skills', workspaceId],
+    queryFn: async () => {
+      const url = workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills';
+      const data = await apiFetch<{ skills: SkillItem[] }>(url);
+      return data.skills;
+    },
+  });
+}
+
+export function useSaveSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (skill: Partial<SkillItem> & { name: string; content: string }) =>
+      apiFetch<{ success: boolean; skill: SkillItem }>('/api/skills', {
+        method: 'POST',
+        body: JSON.stringify(skill),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+      queryClient.invalidateQueries({ queryKey: ['skill-categories'] });
+    },
+  });
+}
+
+export function useDeleteSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/skills/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+}
+
+export function useAgents() {
+  return useQuery({
+    queryKey: ['codex-agents'],
+    queryFn: async () => {
+      const data = await apiFetch<{ agents: CodexAgentItem[] }>('/api/agents');
+      return data.agents;
+    },
+  });
+}
+
+export function useSaveAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (agent: Omit<CodexAgentItem, 'custom' | 'sourcePath'>) =>
+      apiFetch<{ success: boolean; agent: CodexAgentItem }>('/api/agents', {
+        method: 'POST',
+        body: JSON.stringify(agent),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
+export function useImportAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ toml, category }: { toml: string; category?: string }) =>
+      apiFetch<{ success: boolean; agent: CodexAgentItem }>('/api/agents/import', {
+        method: 'POST',
+        body: JSON.stringify({ toml, category }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
+export function useDeleteAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
+export function useWorkspaceSkills(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-skills', wsId],
+    queryFn: async () => {
+      const data = await apiFetch<{ config: WorkspaceSkillsConfig }>(`/api/skills/workspace/${encodeURIComponent(wsId!)}`);
+      return data.config;
+    },
+    enabled: !!wsId,
+  });
+}
+
+export function useAssignWorkspaceSkills() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workspaceId, expectedRevision, ...config }: WorkspaceSkillsConfig & { workspaceId: string; expectedRevision?: number }) =>
+      apiFetch<{ success: boolean; config: WorkspaceSkillsConfig }>(`/api/skills/workspace/${encodeURIComponent(workspaceId)}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ ...config, expectedRevision }),
+      }),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(['workspace-skills', variables.workspaceId], data.config);
+      queryClient.invalidateQueries({ queryKey: ['skills'] });
+    },
+  });
+}
+
+

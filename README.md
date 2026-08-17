@@ -23,8 +23,11 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
 - **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
+- **Resource Library** — create and administer reusable Agent Skill folders and Codex-native custom agents, then assign them to workspaces
+- **Owned Resource Deployment** — installs portable skills to native discovery folders and Codex agents to `.codex/agents/`, refusing unmanaged collisions and preserving locally modified files
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
+
 - **Incremental, token-efficient refresh** — an analysis cache fingerprints each repo (HEAD + dirty files), so `refresh`/`sync` only re-analyze repos that changed and unchanged maps stay byte-identical (keeping your AI assistant's prompt cache warm)
 - **Scheduled workspace jobs** — recurring `sync`/`refresh` per workspace (e.g. every 2h) that run while the dashboard server is up, so context files stay fresh without manual runs
 - **Service orchestration** — start, stop, and tail logs for all services in a workspace with a single command
@@ -122,21 +125,29 @@ In isolated worktree mode:
 
 ```
 ~/dev/workspaces/feature/user-auth/
-├── CLAUDE.md                         # Context for Claude / Antigravity
-├── AGENTS.md                         # Context for OpenAI Codex
+├── CLAUDE.md                         # Context for Claude Code
+├── AGENTS.md                         # Canonical context for Antigravity, Codex & agents
+├── .agents/
+│   └── skills/                       # Skills for Google Antigravity (SKILL.md + assets)
+├── .claude/
+│   └── skills/                       # Skills for Claude Code (SKILL.md + assets)
+├── .codex/
+│   └── skills/                       # Skills for OpenAI Codex (SKILL.md + assets)
 ├── .github/
-│   └── copilot-instructions.md       # Context for GitHub Copilot
+│   ├── copilot-instructions.md       # Context for GitHub Copilot
+│   └── instructions/                 # Scoped skill instructions for Copilot
 ├── .cursor/
-│   └── rules/nexusflow.mdc           # Context for Cursor
+│   └── rules/                        # Context & rules for Cursor (.mdc)
 ├── nexusflow.json                    # Feature config (branch, repos, etc.)
 ├── nexusflow-overview.md             # AI-generated workspace analysis
+├── nexusflow-knowledge.md            # Persistent workspace memory (decisions & gotchas)
 ├── my-api/                           # ← Git worktree on feature branch
 └── my-frontend/                      # ← Git worktree on feature branch
 ```
 
-In-place workspaces keep the manifest and generated AI context files in the workspace directory while the code stays in the source repositories.
+In-place workspaces keep the manifest, skills, and generated AI context files in the workspace directory while the code stays in the source repositories.
 
-Open this folder in your editor → your AI assistant picks up the context → it understands *all* your repos.
+Open this folder in your editor → your AI assistant picks up the context and skills → it understands *all* your repos.
 
 ## 🖥️ Commands
 
@@ -173,14 +184,16 @@ Open this folder in your editor → your AI assistant picks up the context → i
 
 ## 🤖 Supported AI Assistants
 
-NexusFlow auto-detects which assistants are available on your machine and generates the right context files for each:
+NexusFlow auto-detects which assistants are available on your machine and generates the right context files and skills for each:
 
-| Assistant | Config File | How It's Detected |
+| Assistant | Config File & Skills Target | How It's Detected |
 |:---|:---|:---|
-| **Claude Code / Antigravity** | `CLAUDE.md` | `claude` or `antigravity` in PATH |
-| **OpenAI Codex** | `AGENTS.md` | `codex` in PATH |
-| **GitHub Copilot** | `.github/copilot-instructions.md` | Always available |
-| **Cursor** | `.cursor/rules/nexusflow.mdc` | `cursor` in PATH |
+| **Google Antigravity** | `AGENTS.md` & `.agents/skills/` | `antigravity` in PATH |
+| **Claude Code** | `CLAUDE.md` & `.claude/skills/` | `claude` in PATH |
+| **OpenAI Codex** | `AGENTS.md`, `.agents/skills/` & `.codex/agents/` | `codex` in PATH |
+| **GitHub Copilot** | `.github/copilot-instructions.md` & `.agents/skills/` | Always available |
+| **Cursor** | `.cursor/rules/nexusflow.mdc` & `.agents/skills/` | `cursor` in PATH |
+
 
 ## 🔁 The Feature Loop: create → work → learn → finish
 
@@ -298,6 +311,45 @@ Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow 
 
 Scheduled runs are **token-efficient by design**: they use the same analysis cache as `nexusflow refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
+## 🧩 Resource Library
+
+NexusFlow provides separate libraries for portable Agent Skills and Codex-native custom agents. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
+
+Skills bundle metadata triggers (for AI autonomous discovery) with full Markdown execution playbooks, auxiliary reference runbooks (`references/`), and automation scripts (`scripts/`).
+
+### Category Boxes & Visual Drag-and-Drop
+
+Skills are grouped into clear visual accordion boxes by category. You can drag and drop skill cards between category boxes to re-categorize them, or use the quick menu on touch and mobile devices.
+
+#### Built-in Category Templates & Skills:
+- 🔀 **Pull Requests & Review**: `pr-review-toolkit`, `pr-description-gen`, `merge-conflict-resolver`
+- 🧪 **Testing & Quality Assurance**: `verifier-workspace`, `e2e-runner`, `unit-test-coverage`
+- 📦 **Cross-Repo & Release Ordering**: `nexusflow-local-package-loop`, `nexusflow-release-ordering`
+- 🗄️ **Database & Migrations**: `schema-migration-validator`, `sql-fluff-linter`
+- 🛡️ **Security & Auditing**: `secret-scanner`, `security-auditor`
+
+#### Custom Categories & Workspace Scoping
+- **Custom Categories**: Users can create, customize (colors, icons, descriptions), or delete custom categories. Custom overrides to built-in templates can be deleted at any time to restore default values.
+- **Workspace Scoping**: Switch the scope dropdown to a feature workspace, edit a local draft, and save the complete selection with an optimistic revision check. Refresh the workspace to reconcile the saved selection.
+
+### Codex Agent Administration
+
+The Codex Agent Library supports creating, editing, importing, and deleting basic native agents with `name`, `description`, and `developer_instructions`, plus optional model, reasoning, and sandbox defaults. Selected agents are installed at `.codex/agents/<name>.toml`. Provider-neutral agent translation, agent teams, and collaboration kits are intentionally outside this feature.
+
+### Cross-Harness Deployment
+
+When a workspace is refreshed, NexusFlow reconciles enabled resources through `.nexusflow/resources.lock.json`. It refuses unmanaged target collisions, removes only unchanged NexusFlow-owned outputs, and reports modified-file conflicts instead of overwriting them.
+
+| Assistant Harness | Deployment Path | Format |
+|:---|:---|:---|
+| **Google Antigravity** | `.agents/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
+| **Claude Code** | `.claude/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
+| **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+| **Cursor** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+| **GitHub Copilot** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+
+Codex custom agents are separate resources and deploy to `.codex/agents/<name>.toml`.
+
 ## 👥 Teamwork Strategy Workflows
 
 NexusFlow allows you to predefine orchestration workflows and cooperation rules that govern how multiple AI subagents coordinate when solving complex, multi-repo software engineering tasks.
@@ -322,11 +374,14 @@ The dashboard integrates an **AI Strategy Analysis** inspector:
 The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). For the platform rationale (Electron vs Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
+- **Skills & Agents tab** — manage reusable skills, categories, drag-and-drop boxes, and workspace skill assignments
+- **Team Strategies tab** — inspect and author coordination workflows and multi-agent roles
 - **Open with…** — launch the workspace directly in a detected Codex Desktop, Claude Desktop, VS Code, VS Code Insiders, Cursor, JetBrains IDE, or other supported editor; unavailable apps stay out of the primary picker
 - **Chat tab** — use local CLI harnesses directly; Codex reuses `codex login` for workspace-write chat and GitHub Copilot reuses `copilot login` for read-only ACP chat, so NexusFlow does not need their API keys
 - **Sessions tab** — view past AI conversation transcripts and resume sessions
 - **Logs panel** — real-time aggregated service log output
 - **Config panel** — edit NexusFlow settings from the browser
+
 
 The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
 
@@ -385,14 +440,17 @@ NexusFlow/
 │   │   ├── detect-deps.ts    #   Dependency analysis
 │   │   ├── detect-existing.ts#   Existing AI config detection
 │   │   └── readme-summarizer.ts# README content extraction
-│   ├── generators/           # AI context file generators
+│   ├── generators/           # AI context file & skill generators
 │   │   ├── base.ts           #   Shared context builder
 │   │   ├── claude.ts         #   CLAUDE.md generator
-│   │   ├── codex.ts          #   AGENTS.md generator
+│   │   ├── antigravity.ts    #   Antigravity AGENTS.md generator
+│   │   ├── codex.ts          #   Codex AGENTS.md generator
 │   │   ├── copilot.ts        #   copilot-instructions.md generator
-│   │   └── cursor.ts         #   nexusflow.mdc generator
+│   │   ├── cursor.ts         #   nexusflow.mdc generator
+│   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude, .cursor, .codex)
 │   ├── orchestration/        # Service start/stop/log management
 │   └── utils/                # Helper utilities
+│       ├── skills-catalog.ts #   Skills & Categories catalog manager (~/.nexusflow/)
 │       ├── git.ts            #   Git operations
 │       ├── detect-ai.ts      #   AI assistant detection
 │       ├── detect-editors.ts #   Editor detection
@@ -400,10 +458,15 @@ NexusFlow/
 │       └── prompts.ts        #   Interactive prompts
 ├── gui/                      # React + Vite Web Dashboard
 │   └── src/
-│       └── App.tsx           #   Main dashboard component
+│       ├── pages/
+│       │   ├── WorkspacesPage.tsx # Workspaces & launch targets
+│       │   ├── SkillsPage.tsx     # Skills & Agents categorized drag-and-drop hub
+│       │   └── StrategiesPage.tsx # Teamwork strategy inspector
+│       └── App.tsx           # Main application routing & layout
 ├── package.json
 └── tsconfig.json
 ```
+
 
 ## 🤝 Contributing
 

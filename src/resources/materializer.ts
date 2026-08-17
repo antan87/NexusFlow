@@ -1,0 +1,497 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import fse from 'fs-extra';
+
+import type { AIAssistant, CodexAgentItem, SkillItem } from '../types.js';
+import { acquireLock, createMutationQueue } from '../core/locks.js';
+import { parseSkillMarkdown, serializeSkillMarkdown } from '../utils/skills-catalog.js';
+import { serializeCodexAgentToml } from './codex-agent.js';
+import {
+  formatValidationError,
+  codexAgentNameSchema,
+  resourceIdSchema,
+  resourceLockSchema,
+  skillFrontmatterSchema,
+  type ManagedOutput,
+  type ResourceLock,
+} from './contracts.js';
+import {
+  assertNoLinkedPathComponents,
+  assertPathIsNotLink,
+  assertPathWithin,
+  atomicWriteJson,
+} from './fs-safety.js';
+
+const LOCK_FILE = path.join('.nexusflow', 'resources.lock.json');
+const runMaterialization = createMutationQueue();
+const PORTABLE_SKILL_ASSISTANTS = new Set<AIAssistant>(['codex', 'antigravity', 'cursor', 'copilot']);
+const ALLOWED_SKILL_ROOT_ENTRIES = new Set(['SKILL.md', 'scripts', 'references', 'assets', 'agents']);
+
+type DesiredFile = ManagedOutput & {
+  bytes: Uint8Array;
+  resourceRoot: string;
+};
+
+export interface ResourceReconcileResult {
+  installed: string[];
+  updated: string[];
+  removed: string[];
+  unchanged: string[];
+}
+
+export interface ResourceMaterializerOptions {
+  rename?: typeof fs.rename;
+}
+
+export class ResourceConflictError extends Error {
+  public readonly conflicts: string[];
+
+  constructor(conflicts: string[]) {
+    super(`Resource materialization conflicts:\n- ${conflicts.join('\n- ')}`);
+    this.name = 'ResourceConflictError';
+    this.conflicts = conflicts;
+  }
+}
+
+function toPosix(relativePath: string): string {
+  return relativePath.split(path.sep).join('/');
+}
+
+function hashBytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function errorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : undefined;
+}
+
+async function hashFile(filePath: string): Promise<string> {
+  return hashBytes(await fs.readFile(filePath));
+}
+
+function portableMode(mode: number): number | undefined {
+  return process.platform === 'win32' ? undefined : mode & 0o777;
+}
+
+async function fileMatchesOutput(filePath: string, output: Pick<ManagedOutput, 'hash' | 'mode'>): Promise<boolean> {
+  if ((await hashFile(filePath)) !== output.hash) return false;
+  if (output.mode === undefined) return true;
+  return portableMode((await fs.stat(filePath)).mode) === output.mode;
+}
+
+function normalizeManagedPath(relativePath: string): string {
+  if (path.isAbsolute(relativePath)) throw new Error(`Managed path must be relative: ${relativePath}`);
+  const normalized = path.normalize(relativePath);
+  if (normalized === '..' || normalized.startsWith(`..${path.sep}`)) {
+    throw new Error(`Managed path escapes the workspace: ${relativePath}`);
+  }
+  return toPosix(normalized);
+}
+
+async function walkSkillFiles(skill: SkillItem): Promise<Array<{ relativePath: string; bytes: Uint8Array; mode?: number }>> {
+  if (!skill.sourcePath) {
+    const metadata: Record<string, unknown> = {
+      name: skill.id,
+      description: skill.description,
+      metadata: {
+        nexusflow: {
+          title: skill.title || skill.name,
+          category: skill.category,
+          tags: skill.tags || [],
+        },
+      },
+    };
+    return [{
+      relativePath: 'SKILL.md',
+      bytes: Buffer.from(serializeSkillMarkdown(metadata, skill.content), 'utf-8'),
+      mode: process.platform === 'win32' ? undefined : 0o644,
+    }];
+  }
+
+  const sourceRoot = path.resolve(skill.sourcePath);
+  await assertPathIsNotLink(sourceRoot);
+  const entries = await fs.readdir(sourceRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!ALLOWED_SKILL_ROOT_ENTRIES.has(entry.name)) {
+      throw new Error(`Unsupported top-level entry in skill "${skill.id}": ${entry.name}`);
+    }
+  }
+
+  const files: Array<{ relativePath: string; bytes: Uint8Array; mode?: number }> = [];
+  async function walk(directory: string): Promise<void> {
+    await assertNoLinkedPathComponents(sourceRoot, directory);
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Linked files are not allowed in managed skills: ${entry.name}`);
+      }
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute);
+      } else if (entry.isFile()) {
+        const relativePath = toPosix(path.relative(sourceRoot, absolute));
+        let bytes = await fs.readFile(absolute);
+        if (relativePath === 'SKILL.md') {
+          const parsed = parseSkillMarkdown(bytes.toString('utf-8'));
+          const validated = skillFrontmatterSchema.safeParse(parsed.metadata);
+          if (!validated.success) {
+            throw new Error(`Invalid SKILL.md for "${skill.id}": ${formatValidationError(validated.error)}`);
+          }
+          const portableMetadata: Record<string, unknown> = {
+            name: validated.data.name,
+            description: validated.data.description,
+          };
+          if (validated.data.license) portableMetadata.license = validated.data.license;
+          if (validated.data.compatibility) portableMetadata.compatibility = validated.data.compatibility;
+          if (validated.data.metadata) portableMetadata.metadata = validated.data.metadata;
+          if (validated.data['allowed-tools']) portableMetadata['allowed-tools'] = validated.data['allowed-tools'];
+          bytes = Buffer.from(serializeSkillMarkdown(portableMetadata, parsed.content), 'utf-8');
+        }
+        files.push({ relativePath, bytes, mode: portableMode((await fs.stat(absolute)).mode) });
+      }
+    }
+  }
+  await walk(sourceRoot);
+  if (!files.some((file) => file.relativePath === 'SKILL.md')) {
+    throw new Error(`Skill "${skill.id}" is missing SKILL.md.`);
+  }
+  return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
+async function buildDesiredFiles(
+  assistants: AIAssistant[],
+  skills: SkillItem[],
+  agents: CodexAgentItem[],
+): Promise<DesiredFile[]> {
+  const desired = new Map<string, DesiredFile>();
+
+  for (const skill of skills) {
+    const skillId = resourceIdSchema.safeParse(skill.id);
+    if (!skillId.success || skillId.data !== skill.name) {
+      throw new Error(
+        skillId.success
+          ? `Skill id and name must match: ${skill.id}`
+          : `Invalid skill identity: ${formatValidationError(skillId.error)}`,
+      );
+    }
+    const sourceFiles = await walkSkillFiles(skill);
+    const roots = new Map<string, 'agent-skill-v1' | 'claude-skill-v1'>();
+    if (assistants.some((assistant) => PORTABLE_SKILL_ASSISTANTS.has(assistant))) {
+      roots.set(path.join('.agents', 'skills', skill.id), 'agent-skill-v1');
+    }
+    if (assistants.includes('claude')) {
+      roots.set(path.join('.claude', 'skills', skill.id), 'claude-skill-v1');
+    }
+
+    for (const [root, adapter] of roots) {
+      for (const sourceFile of sourceFiles) {
+        const outputPath = normalizeManagedPath(path.join(root, sourceFile.relativePath));
+        const item: DesiredFile = {
+          kind: 'skill',
+          resourceId: skill.id,
+          adapter,
+          path: outputPath,
+          hash: hashBytes(sourceFile.bytes),
+          mode: sourceFile.mode,
+          bytes: sourceFile.bytes,
+          resourceRoot: normalizeManagedPath(root),
+        };
+        const existing = desired.get(outputPath);
+        if (existing && existing.hash !== item.hash) {
+          throw new Error(`Multiple resources produce different content for ${outputPath}.`);
+        }
+        desired.set(outputPath, item);
+      }
+    }
+  }
+
+  if (assistants.includes('codex')) {
+    for (const agent of agents) {
+      const agentId = codexAgentNameSchema.safeParse(agent.id);
+      if (!agentId.success || agentId.data !== agent.name) {
+        throw new Error(
+          agentId.success
+            ? `Agent id and name must match: ${agent.id}`
+            : `Invalid agent identity: ${formatValidationError(agentId.error)}`,
+        );
+      }
+      const bytes = Buffer.from(serializeCodexAgentToml(agent), 'utf-8');
+      const outputPath = normalizeManagedPath(path.join('.codex', 'agents', `${agent.id}.toml`));
+      desired.set(outputPath, {
+        kind: 'codex-agent',
+        resourceId: agent.id,
+        adapter: 'codex-agent-v1',
+        path: outputPath,
+        hash: hashBytes(bytes),
+        mode: process.platform === 'win32' ? undefined : 0o644,
+        bytes,
+        resourceRoot: outputPath,
+      });
+    }
+  }
+
+  return [...desired.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function loadLock(workspacePath: string): Promise<ResourceLock> {
+  const lockPath = path.join(workspacePath, LOCK_FILE);
+  if (!(await fse.pathExists(lockPath))) return { schemaVersion: 1, outputs: [] };
+  const parsed = resourceLockSchema.safeParse(JSON.parse(await fs.readFile(lockPath, 'utf-8')) as unknown);
+  if (!parsed.success) throw new Error(`Invalid workspace resource ownership lock: ${parsed.error.message}`);
+  for (const output of parsed.data.outputs) {
+    const normalizedPath = normalizeManagedPath(output.path);
+    const expectedRoot = managedResourceRoot(output);
+    const isValidPath = output.kind === 'codex-agent'
+      ? normalizedPath === expectedRoot
+      : normalizedPath.startsWith(`${expectedRoot}/`) && normalizedPath.length > expectedRoot.length + 1;
+    if (!isValidPath) {
+      throw new Error(`Invalid workspace resource ownership path: ${output.path}`);
+    }
+  }
+  return parsed.data;
+}
+
+function managedResourceRoot(output: ManagedOutput): string {
+  if (output.kind === 'skill' && output.adapter === 'agent-skill-v1') {
+    return `.agents/skills/${output.resourceId}`;
+  }
+  if (output.kind === 'skill' && output.adapter === 'claude-skill-v1') {
+    return `.claude/skills/${output.resourceId}`;
+  }
+  if (output.kind === 'codex-agent' && output.adapter === 'codex-agent-v1') {
+    return `.codex/agents/${output.resourceId}.toml`;
+  }
+  throw new Error(`Invalid resource kind/adapter combination for ${output.path}.`);
+}
+
+function managedOutputDirectories(output: ManagedOutput): string[] {
+  if (output.kind !== 'skill') return [];
+  const root = managedResourceRoot(output);
+  const directories: string[] = [];
+  let current = path.posix.dirname(normalizeManagedPath(output.path));
+  while (current === root || current.startsWith(`${root}/`)) {
+    directories.push(current);
+    if (current === root) break;
+    current = path.posix.dirname(current);
+  }
+  return directories;
+}
+
+async function listExistingTree(root: string): Promise<{ files: string[]; directories: string[] }> {
+  const files: string[] = [];
+  const directories: string[] = [];
+  const stat = await fs.lstat(root);
+  if (stat.isSymbolicLink()) throw new Error(`Linked managed resource roots are not allowed: ${root}`);
+  if (stat.isFile()) return { files: [root], directories };
+  if (!stat.isDirectory()) throw new Error(`Unsupported managed resource entry: ${root}`);
+  directories.push(root);
+
+  async function walk(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Linked files are not allowed in managed resource roots: ${absolute}`);
+      }
+      if (entry.isDirectory()) {
+        directories.push(absolute);
+        await walk(absolute);
+      }
+      else if (entry.isFile()) files.push(absolute);
+      else throw new Error(`Unsupported managed resource entry: ${absolute}`);
+    }
+  }
+  await walk(root);
+  return { files, directories };
+}
+
+function oldOutputOwnsRoot(oldOutputs: Map<string, ManagedOutput>, root: string): boolean {
+  const prefix = `${root.replaceAll('\\', '/')}/`;
+  return [...oldOutputs.keys()].some((item) => item === root || item.startsWith(prefix));
+}
+
+async function preflight(
+  workspacePath: string,
+  oldLock: ResourceLock,
+  desiredFiles: DesiredFile[],
+): Promise<void> {
+  const conflicts: string[] = [];
+  const oldOutputs = new Map(oldLock.outputs.map((output) => [normalizeManagedPath(output.path), output]));
+  const oldOwnedDirectories = new Set(oldLock.outputs.flatMap(managedOutputDirectories));
+
+  for (const root of new Set(oldLock.outputs.map(managedResourceRoot))) {
+    const absoluteRoot = assertPathWithin(workspacePath, path.join(workspacePath, root));
+    await assertNoLinkedPathComponents(workspacePath, absoluteRoot);
+    if (!(await fse.pathExists(absoluteRoot))) continue;
+    const existingTree = await listExistingTree(absoluteRoot);
+    for (const existingFile of existingTree.files) {
+      const relativePath = normalizeManagedPath(path.relative(workspacePath, existingFile));
+      if (!oldOutputs.has(relativePath)) {
+        conflicts.push(`${relativePath} exists inside a NexusFlow-managed resource but is not owned by NexusFlow`);
+      }
+    }
+    for (const existingDirectory of existingTree.directories) {
+      const relativePath = normalizeManagedPath(path.relative(workspacePath, existingDirectory));
+      if (!oldOwnedDirectories.has(relativePath)) {
+        conflicts.push(`${relativePath} exists inside a NexusFlow-managed resource but is not owned by NexusFlow`);
+      }
+    }
+  }
+
+  for (const root of new Set(desiredFiles.map((file) => file.resourceRoot))) {
+    const absoluteRoot = assertPathWithin(workspacePath, path.join(workspacePath, root));
+    await assertNoLinkedPathComponents(workspacePath, absoluteRoot);
+    if ((await fse.pathExists(absoluteRoot)) && !oldOutputOwnsRoot(oldOutputs, root)) {
+      conflicts.push(`${root} already exists and is not owned by NexusFlow`);
+    }
+  }
+
+  for (const desired of desiredFiles) {
+    const absolute = assertPathWithin(workspacePath, path.join(workspacePath, desired.path));
+    await assertNoLinkedPathComponents(workspacePath, absolute);
+    if (!(await fse.pathExists(absolute))) continue;
+    const old = oldOutputs.get(desired.path);
+    if (!old) {
+      conflicts.push(`${desired.path} already exists and is not owned by NexusFlow`);
+      continue;
+    }
+    if (!(await fileMatchesOutput(absolute, old))) {
+      conflicts.push(`${desired.path} was modified after NexusFlow installed it`);
+    }
+  }
+
+  const desiredPaths = new Set(desiredFiles.map((file) => file.path));
+  for (const old of oldLock.outputs) {
+    const oldPath = normalizeManagedPath(old.path);
+    if (desiredPaths.has(oldPath)) continue;
+    const absolute = assertPathWithin(workspacePath, path.join(workspacePath, oldPath));
+    await assertNoLinkedPathComponents(workspacePath, absolute);
+    if ((await fse.pathExists(absolute)) && !(await fileMatchesOutput(absolute, old))) {
+      conflicts.push(`${oldPath} was modified and cannot be removed safely`);
+    }
+  }
+
+  if (conflicts.length) throw new ResourceConflictError([...new Set(conflicts)]);
+}
+
+export async function reconcileWorkspaceResources(
+  workspacePath: string,
+  assistants: AIAssistant[],
+  skills: SkillItem[],
+  agents: CodexAgentItem[],
+  options: ResourceMaterializerOptions = {},
+): Promise<ResourceReconcileResult> {
+  return runMaterialization(async () => {
+    const canonicalWorkspace = await fs.realpath(workspacePath);
+    const nexusflowDir = path.join(canonicalWorkspace, '.nexusflow');
+    if (await fse.pathExists(nexusflowDir)) {
+      await assertNoLinkedPathComponents(canonicalWorkspace, nexusflowDir);
+    } else {
+      await fse.ensureDir(nexusflowDir);
+    }
+    await assertPathIsNotLink(nexusflowDir);
+
+    const release = await acquireLock(path.join(nexusflowDir, 'resource-materialization.lock'), {
+      staleMs: 120_000,
+      timeoutMs: 30_000,
+      timeoutMessage: 'Timed out waiting for workspace resource materialization.',
+    });
+    try {
+      const oldLock = await loadLock(canonicalWorkspace);
+      const desiredFiles = await buildDesiredFiles(assistants, skills, agents);
+      await preflight(canonicalWorkspace, oldLock, desiredFiles);
+
+      const oldOutputs = new Map(oldLock.outputs.map((output) => [normalizeManagedPath(output.path), output]));
+      const desiredPaths = new Set(desiredFiles.map((file) => file.path));
+      const operationRoot = path.join(nexusflowDir, `resource-staging-${randomUUID()}`);
+      const stagedRoot = path.join(operationRoot, 'staged');
+      const backupRoot = path.join(operationRoot, 'backup');
+      await fse.ensureDir(stagedRoot);
+
+      const writes: DesiredFile[] = [];
+      const unchanged: string[] = [];
+      for (const desired of desiredFiles) {
+        const absolute = path.join(canonicalWorkspace, desired.path);
+        if ((await fse.pathExists(absolute)) && (await fileMatchesOutput(absolute, desired))) {
+          unchanged.push(desired.path);
+          continue;
+        }
+        const staged = path.join(stagedRoot, desired.path);
+        await fse.ensureDir(path.dirname(staged));
+        await fs.writeFile(staged, desired.bytes);
+        if (desired.mode !== undefined) await fs.chmod(staged, desired.mode);
+        writes.push(desired);
+      }
+
+      const removals = oldLock.outputs.filter((old) => !desiredPaths.has(normalizeManagedPath(old.path)));
+      const committed: Array<{ target: string; backup?: string; wasRemoval: boolean }> = [];
+      const rename = options.rename ?? fs.rename;
+      try {
+        for (const desired of writes) {
+          const target = path.join(canonicalWorkspace, desired.path);
+          await assertNoLinkedPathComponents(canonicalWorkspace, path.dirname(target));
+          await fse.ensureDir(path.dirname(target));
+          await assertNoLinkedPathComponents(canonicalWorkspace, path.dirname(target));
+          let backup: string | undefined;
+          if (await fse.pathExists(target)) {
+            backup = path.join(backupRoot, desired.path);
+            await fse.ensureDir(path.dirname(backup));
+            await rename(target, backup);
+          }
+          committed.push({ target, backup, wasRemoval: false });
+          await rename(path.join(stagedRoot, desired.path), target);
+        }
+
+        for (const removal of removals) {
+          const target = path.join(canonicalWorkspace, normalizeManagedPath(removal.path));
+          if (!(await fse.pathExists(target))) continue;
+          const backup = path.join(backupRoot, normalizeManagedPath(removal.path));
+          await fse.ensureDir(path.dirname(backup));
+          await rename(target, backup);
+          committed.push({ target, backup, wasRemoval: true });
+        }
+
+        const removableDirectories = new Set(removals.flatMap(managedOutputDirectories));
+        for (const directory of [...removableDirectories].sort((a, b) => b.length - a.length)) {
+          const absolute = assertPathWithin(canonicalWorkspace, path.join(canonicalWorkspace, directory));
+          try {
+            await fs.rmdir(absolute);
+          } catch (error) {
+            if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(errorCode(error) ?? '')) throw error;
+          }
+        }
+
+        const newLock: ResourceLock = {
+          schemaVersion: 1,
+          outputs: desiredFiles.map(({ bytes: _bytes, resourceRoot: _root, ...output }) => output),
+        };
+        await atomicWriteJson(path.join(canonicalWorkspace, LOCK_FILE), newLock);
+      } catch (error) {
+        for (const item of committed.reverse()) {
+          if (!item.wasRemoval && (await fse.pathExists(item.target))) {
+            await fse.remove(item.target).catch(() => {});
+          }
+          if (item.backup && (await fse.pathExists(item.backup))) {
+            await fse.ensureDir(path.dirname(item.target));
+            await rename(item.backup, item.target).catch(() => {});
+          }
+        }
+        throw error;
+      } finally {
+        await fse.remove(operationRoot).catch(() => {});
+      }
+
+      const installed = writes.filter((file) => !oldOutputs.has(file.path)).map((file) => file.path);
+      const updated = writes.filter((file) => oldOutputs.has(file.path)).map((file) => file.path);
+      return {
+        installed,
+        updated,
+        removed: removals.map((output) => normalizeManagedPath(output.path)),
+        unchanged,
+      };
+    } finally {
+      await release();
+    }
+  });
+}

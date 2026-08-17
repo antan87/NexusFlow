@@ -41,6 +41,18 @@ function openBrowser(url: string): void {
   });
 }
 
+export async function findAvailablePort(startPort: number): Promise<number> {
+  let p = startPort;
+  while (p < startPort + 100) {
+    const active = await isPortActive(p);
+    if (!active) {
+      return p;
+    }
+    p++;
+  }
+  return startPort;
+}
+
 /**
  * Starts the local dashboard server. Pass `open: true` to also launch the
  * default browser. `serverOnly` is deprecated (server-only is the default)
@@ -49,28 +61,30 @@ function openBrowser(url: string): void {
  * @param options - CLI options, including optional port, daemon, and open.
  */
 export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }): Promise<void> {
-  const port = options.port ? parseInt(options.port, 10) : 3000;
-  const url = `http://localhost:${port}`;
+  const requestedPort = options.port ? parseInt(options.port, 10) : 3000;
 
   console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Web Dashboard\n'));
 
-  // Check if port is already active
-  const active = await isPortActive(port);
-  if (active) {
-    console.log(chalk.green(`  ✔ Dashboard is already active at: ${chalk.bold(url)}`));
-    if (options.open) {
-      console.log(chalk.dim('  Opening browser...'));
-      openBrowser(url);
+  let targetPort = requestedPort;
+  const isRequestedPortActive = await isPortActive(requestedPort);
+
+  if (isRequestedPortActive) {
+    if (options.strictPort) {
+      console.error(chalk.red(`  ✖ Port ${requestedPort} is already in use (strictPort mode).`));
+      return;
     }
-    return;
+    targetPort = await findAvailablePort(requestedPort + 1);
+    console.log(chalk.yellow(`  ℹ Port ${requestedPort} is currently in use. Selecting next available port: ${chalk.bold(targetPort)}`));
   }
+
+  const url = `http://localhost:${targetPort}`;
 
   // Handle Daemon mode (runs detached in the background)
   if (options.daemon) {
     console.log(chalk.dim('  Starting server in the background...'));
     try {
       const serverScript = fileURLToPath(new URL('../index.js', import.meta.url));
-      const daemonArgs = [serverScript, 'ui', '--port', String(port), '--server-only'];
+      const daemonArgs = [serverScript, 'ui', '--port', String(targetPort), '--server-only'];
       if (options.strictPort) daemonArgs.push('--strict-port');
       const child = spawn(process.execPath, daemonArgs, {
         detached: true,
@@ -78,7 +92,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
       });
       child.unref();
 
-      console.log(chalk.green(`  ✔ Dashboard daemon successfully spawned.`));
+      console.log(chalk.green(`  ✔ Dashboard daemon successfully spawned on port ${chalk.bold(targetPort)}.`));
       if (options.open) {
         console.log(chalk.dim('  Opening browser...'));
         // Give the background process a brief moment to start listening
@@ -98,7 +112,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
   // Standard foreground blocking mode
   console.log(chalk.dim('  Starting local server...'));
   try {
-    const { port: actualPort } = await startServer(port, { strictPort: options.strictPort });
+    const { port: actualPort } = await startServer(targetPort, { strictPort: options.strictPort });
     const actualUrl = `http://localhost:${actualPort}`;
 
     console.log(chalk.green(`  ✔ Dashboard running at: ${chalk.bold(actualUrl)}`));
@@ -115,4 +129,5 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
     console.error(chalk.red(`  ✖ Failed to start dashboard: ${msg}`));
   }
 }
+
 

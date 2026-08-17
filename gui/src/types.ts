@@ -170,3 +170,68 @@ export interface RunningOrchestrator {
   logName?: string;
   startedAt: string;
 }
+
+// ─── Skills & Categories Types ─────────────────────────────────────────────
+
+export interface SkillCategory {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+  color?: string;
+  custom?: boolean;
+  isTemplate?: boolean;
+  skills?: string[];
+}
+
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'array';
+  description?: string;
+  required?: boolean;
+  default?: any;
+}
+
+export interface SkillSupportingFile {
+  name: string;
+  relativePath: string;
+  content?: string;
+}
+
+export interface SkillItem {
+  id: string;
+  name: string;
+  title?: string;
+  category: string;
+  description: string;
+  tags?: string[];
+  allowedTools?: string[];
+  parameters?: SkillParameter[];
+  content: string;
+  custom: boolean;
+  sourcePath?: string;
+  references?: SkillSupportingFile[];
+  scripts?: SkillSupportingFile[];
+}
+
+export interface CodexAgentItem {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  model?: string;
+  modelReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  sandboxMode?: 'read-only' | 'workspace-write';
+  developerInstructions: string;
+  custom: boolean;
+  sourcePath?: string;
+}
+
+export interface WorkspaceSkillsConfig {
+  schemaVersion?: 1;
+  revision?: number;
+  enabledSkills: string[];
+  enabledAgents?: string[];
+  enabledCategories?: string[];
+}
+
