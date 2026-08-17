@@ -1,26 +1,39 @@
-import { test, expect, type Page } from './fixtures';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 const feature = {
   id: 'feature-x',
   branchName: 'feature-x',
   description: 'Improve the local harness handoff',
   repos: ['C:/dev/nexusflow'],
-  assistants: ['claude', 'codex'],
+  assistants: ['claude', 'codex', 'antigravity', 'copilot'],
   workspacePath: 'C:/ws/feature-x',
   createdAt: '2026-08-10T00:00:00.000Z',
 };
 
-const provider = (assistant: 'claude' | 'codex', isConfigured = true) => {
-  const recoveryCommand = assistant === 'claude' ? 'claude auth login' : 'codex login';
+const provider = (assistant: 'claude' | 'codex' | 'antigravity' | 'copilot', isConfigured = true) => {
+  const recoveryCommand = {
+    claude: 'claude auth login',
+    codex: 'codex login',
+    antigravity: 'agy',
+    copilot: 'copilot',
+  }[assistant];
+  const supportsExecutionProfiles = assistant !== 'copilot';
+  const displayName = {
+    claude: 'Claude Code',
+    codex: 'Codex',
+    antigravity: 'Antigravity',
+    copilot: 'GitHub Copilot',
+  }[assistant];
   return {
     id: `${assistant}-cli`,
-    name: assistant === 'claude' ? 'Claude Code (Local CLI)' : 'Codex (Local CLI)',
+    name: `${displayName} (Local CLI)`,
     isConfigured,
-    message: isConfigured ? undefined : `${assistant === 'claude' ? 'Claude Code' : 'Codex'} is not signed in. No API key is required.`,
+    message: isConfigured ? undefined : `${displayName} is not signed in. No API key is required.`,
     setupIssue: isConfigured ? undefined : 'signed-out',
     recoveryCommand: isConfigured ? undefined : recoveryCommand,
     recoveryLabel: isConfigured ? undefined : 'Copy sign-in command',
-    executionProfiles: [
+    executionProfiles: supportsExecutionProfiles ? [
       { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
       {
         id: 'workspace-write',
@@ -29,12 +42,16 @@ const provider = (assistant: 'claude' | 'codex', isConfigured = true) => {
           ? 'Auto-accepts in-workspace file edits and common filesystem actions; other approval-requiring commands are unavailable in embedded chat.'
           : 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
       },
-    ],
-    defaultExecutionProfile: 'review',
+    ] : undefined,
+    defaultExecutionProfile: supportsExecutionProfiles ? 'review' : undefined,
     capabilities: {
-      transport: 'cli-print',
+      transport: assistant === 'copilot' ? 'acp' : 'cli-print',
       sessionIdentity: assistant === 'claude' ? 'client-assigned' : 'provider-assigned',
-      workspaceAccess: 'workspace-write',
+      workspaceAccess: assistant === 'copilot'
+        ? 'read-only'
+        : assistant === 'codex'
+          ? 'workspace-write'
+          : 'harness-managed',
       sessionIdFormat: 'uuid',
     },
   };
@@ -50,7 +67,7 @@ async function mockProviderStatus(page: Page, providers: unknown[]) {
   });
 }
 
-test.describe('Claude and Codex embedded handoff', () => {
+test.describe('embedded harness handoff', () => {
   test.use({
     workspacesData: [feature],
     workspacesStatusData: {
@@ -167,6 +184,8 @@ test.describe('Claude and Codex embedded handoff', () => {
   for (const scenario of [
     { assistant: 'claude' as const, id: '123e4567-e89b-42d3-a456-426614174000' },
     { assistant: 'codex' as const, id: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
+    { assistant: 'antigravity' as const, id: '223e4567-e89b-42d3-a456-426614174000' },
+    { assistant: 'copilot' as const, id: '323e4567-e89b-42d3-a456-426614174000' },
   ]) {
     test(`resumes a ${scenario.assistant} session directly in chat`, async ({ page }) => {
       const frames: Array<Record<string, unknown>> = [];
@@ -177,7 +196,12 @@ test.describe('Claude and Codex embedded handoff', () => {
         }
       });
 
-      await mockProviderStatus(page, [provider('claude'), provider('codex')]);
+      await mockProviderStatus(page, [
+        provider('claude'),
+        provider('codex'),
+        provider('antigravity'),
+        provider('copilot'),
+      ]);
       await page.route('**/api/workspace/feature-x/sessions', async (route) => {
         await route.fulfill({
           status: 200,
@@ -236,7 +260,9 @@ test.describe('Claude and Codex embedded handoff', () => {
       await composer.press('Enter');
       await expect.poll(() => frames.filter((frame) => frame.type === 'input').length).toBe(1);
       expect(frames.filter((frame) => frame.type === 'input')).toMatchObject([
-        { type: 'input', input: 'Continue from there', executionProfile: 'review' },
+        scenario.assistant === 'copilot'
+          ? { type: 'input', input: 'Continue from there' }
+          : { type: 'input', input: 'Continue from there', executionProfile: 'review' },
       ]);
       expect(legacyRequests).toEqual([]);
     });
@@ -375,6 +401,82 @@ test.describe('Claude and Codex embedded handoff', () => {
     await page.getByLabel('Select Provider').click();
     await page.getByRole('menuitem', { name: /Codex/ }).click();
     await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
+  });
+
+  test('keeps the active chat connected while workspace layouts change', async ({ page }) => {
+    const frames: Array<Record<string, unknown>> = [];
+    let connectionCount = 0;
+    let sendServerFrame: ((frame: Record<string, unknown>) => void) | undefined;
+    await mockProviderStatus(page, [provider('codex')]);
+    await page.routeWebSocket('**/ws', (socket) => {
+      connectionCount += 1;
+      sendServerFrame = (frame) => socket.send(JSON.stringify(frame));
+      socket.onMessage((message) => {
+        const frame = JSON.parse(String(message)) as Record<string, unknown>;
+        frames.push(frame);
+        if (frame.type === 'input' && frames.filter(candidate => candidate.type === 'input').length === 1) {
+          socket.send(JSON.stringify({ type: 'status', state: 'busy' }));
+          socket.send(JSON.stringify({ type: 'stream', text: 'Before layouts.' }));
+        }
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
+    await page.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await expect(page.getByText('Before layouts.')).toBeVisible();
+    expect(sendServerFrame).toBeDefined();
+
+    await page.getByRole('button', { name: 'Split layout' }).click();
+    sendServerFrame!({ type: 'stream', text: ' Split.' });
+    await expect(page.getByText('Before layouts. Split.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await page.getByRole('button', { name: 'Inspector-only layout' }).click();
+    sendServerFrame!({ type: 'stream', text: ' Inspector.' });
+    await page.getByRole('button', { name: 'Chat-only layout' }).click();
+    sendServerFrame!({ type: 'stream', text: ' Chat.' });
+    await expect(page.getByText('Before layouts. Split. Inspector. Chat.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    sendServerFrame!({ type: 'status', state: 'idle' });
+
+    await page.getByPlaceholder(/Message the agent/).fill('Continue in the same chat');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(2);
+    expect(frames.filter(frame => frame.type === 'start')).toHaveLength(1);
+    expect(connectionCount).toBe(1);
+  });
+
+  test('does not trigger workspace shortcuts from editable controls', async ({ page }) => {
+    await mockProviderStatus(page, [provider('codex')]);
+    await page.goto('/#/workspaces/feature-x');
+
+    for (const kind of ['input', 'textarea', 'select', 'contenteditable']) {
+      await page.evaluate((editableKind) => {
+        const element = editableKind === 'contenteditable'
+          ? document.createElement('div')
+          : document.createElement(editableKind);
+        element.setAttribute('data-shortcut-test', editableKind);
+        if (editableKind === 'contenteditable') {
+          element.contentEditable = 'true';
+          element.tabIndex = 0;
+        }
+        document.body.appendChild(element);
+        element.focus();
+        for (const key of ['\\', 'j', 'b']) {
+          element.dispatchEvent(new KeyboardEvent('keydown', {
+            key,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          }));
+        }
+      }, kind);
+
+      await expect(page.getByRole('button', { name: 'Cockpit layout' })).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toHaveAttribute('aria-expanded', 'true');
+    }
   });
 
   test('only resumes a new Claude session after the provider acknowledges its id', async ({ page }) => {
@@ -820,49 +922,49 @@ test.describe('Claude and Codex embedded handoff', () => {
     });
   });
 
-  test('keeps unsupported sessions view-only', async ({ page }) => {
-    await mockProviderStatus(page, [provider('claude'), provider('codex')]);
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [
-            {
-              id: 'copilot-session',
-              assistant: 'copilot',
-              title: 'Copilot transcript',
-              createdAt: '2026-08-09T00:00:00.000Z',
-              updatedAt: '2026-08-10T00:00:00.000Z',
-              messageCount: 1,
-            },
-            {
-              id: 'antigravity-session',
-              assistant: 'antigravity',
-              title: 'Antigravity transcript',
-              createdAt: '2026-08-09T00:00:00.000Z',
-              updatedAt: '2026-08-10T00:00:00.000Z',
-              messageCount: 1,
-            },
-          ],
-        }),
-      });
-    });
-    await page.route('**/api/session/copilot/copilot-session/transcript', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ messages: [{ role: 'assistant', content: 'Read-only history' }] }),
+});
+
+test.describe('workspace root fallback', () => {
+  const workspaceOnlyFeature = {
+    ...feature,
+    id: 'workspace-only',
+    branchName: 'workspace-only',
+    repos: [],
+    workspacePath: 'C:/ws/workspace-only',
+  };
+
+  test.use({
+    workspacesData: [workspaceOnlyFeature],
+    workspacesStatusData: {
+      'workspace-only': {
+        id: 'workspace-only',
+        branchName: 'workspace-only',
+        changedFiles: 0,
+        dirtyRepos: 0,
+        runningServices: 0,
+        syncStatus: 'up-to-date',
+        pendingValidation: false,
+      },
+    },
+  });
+
+  test('starts the harness in the workspace root when no repository is present', async ({ page }) => {
+    const frames: Array<Record<string, unknown>> = [];
+    await mockProviderStatus(page, [provider('codex')]);
+    await page.routeWebSocket('**/ws', (socket) => {
+      socket.onMessage((message) => {
+        frames.push(JSON.parse(String(message)) as Record<string, unknown>);
       });
     });
 
-    await page.goto('/#/workspaces/feature-x/sessions');
-    await expect(page.getByRole('button', { name: 'Resume in NexusFlow' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'View Chat Log' }).first().click();
+    await page.goto('/#/workspaces/workspace-only');
+    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
+    await page.getByRole('button', { name: 'Start' }).click();
 
-    await expect(page.getByText('Read-only history')).toBeVisible();
-    await expect(page.getByText(/view-only transcript/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Resume in NexusFlow' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Copy Resume Command' })).toBeVisible();
+    await expect.poll(() => frames.filter(frame => frame.type === 'start').length).toBe(1);
+    expect(frames.find(frame => frame.type === 'start')).toMatchObject({
+      command: 'codex-cli',
+      cwd: 'C:/ws/workspace-only',
+    });
   });
 });

@@ -15,6 +15,7 @@ import { StatusBadge } from '../../components/ui/status-badge.js';
 import { findWorkspaceForSession } from '../../lib/status.js';
 import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
 import type { Feature } from '../../types.js';
+import { providerForAssistant } from '../chat/chatLaunch.js';
 
 interface TranscriptDialogProps {
   activeSession: any;
@@ -130,8 +131,8 @@ export function TranscriptDialog({
         {/* Modal Footer */}
         <DialogFooter className="sm:justify-between">
           <span className="text-[11px] text-muted-foreground">
-            {activeSession.assistant === 'claude' || activeSession.assistant === 'codex'
-              ? 'Claude Code and Codex sessions resume directly in NexusFlow chat.'
+            {providerForAssistant(activeSession.assistant)
+              ? 'This session can resume directly in NexusFlow chat.'
               : 'This provider remains available as a view-only transcript.'}
           </span>
           <div className="flex gap-2">
@@ -149,7 +150,7 @@ export function TranscriptDialog({
             >
               <Copy size={13} /> Copy Resume Command
             </Button>
-            {(activeSession.assistant === 'claude' || activeSession.assistant === 'codex') && (
+            {providerForAssistant(activeSession.assistant) && (
               <Button
                 size="sm"
                 onClick={() => {

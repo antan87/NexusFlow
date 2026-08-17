@@ -44,13 +44,31 @@ export function SessionPicker({ open, onClose, ws, onPick, error, pending = fals
       .then(res => res.json())
       .then(data => {
         const resumableSessions = (data.sessions || []).filter(
-          (s: PickableSession) => s.assistant === 'claude' || s.assistant === 'codex',
+          (s: PickableSession) =>
+            s.assistant === 'claude'
+            || s.assistant === 'codex'
+            || s.assistant === 'antigravity'
+            || s.assistant === 'copilot',
         );
         setSessions(resumableSessions);
       })
       .catch(() => setFetchError('Failed to load sessions.'))
       .finally(() => setLoading(false));
   }, [open, ws.branchName]);
+
+  const assistantBadge = (assistant: string) => {
+    switch (assistant) {
+      case 'codex':
+        return 'Codex';
+      case 'antigravity':
+        return 'Antigravity';
+      case 'copilot':
+        return 'Copilot';
+      case 'claude':
+      default:
+        return 'Claude';
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -77,7 +95,7 @@ export function SessionPicker({ open, onClose, ws, onPick, error, pending = fals
                 <History />
               </EmptyMedia>
               <EmptyTitle>No resumable sessions found</EmptyTitle>
-              <EmptyDescription>Past Claude Code and Codex conversations for this workspace will show up here.</EmptyDescription>
+              <EmptyDescription>Past conversations for this workspace will show up here.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -90,7 +108,7 @@ export function SessionPicker({ open, onClose, ws, onPick, error, pending = fals
             >
               <div className="flex items-center gap-2">
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
-                  {s.assistant === 'codex' ? 'Codex' : 'Claude'}
+                  {assistantBadge(s.assistant)}
                 </span>
                 <div className="truncate text-sm font-medium text-foreground" title={s.title}>{s.title}</div>
               </div>

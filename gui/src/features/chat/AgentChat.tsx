@@ -580,7 +580,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     wsUrl += '/ws';
 
     endedNoteRef.current = false;
-      let dispatched = false;
+    let dispatched = false;
     let failureReported = false;
     let socket: WebSocket;
 
@@ -812,7 +812,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.repos, ws.workspacePath]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
@@ -848,7 +848,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setPickerError(null);
     const providerId = providerForAssistant(session.assistant);
     if (!providerId) {
-      appendSystemNote('Only Claude Code and Codex sessions can resume in embedded chat.', 'error');
+      appendSystemNote('This session cannot resume in embedded chat.', 'error');
       finishSessionSwitch(requestId);
       return false;
     }
