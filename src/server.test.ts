@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import fse from 'fs-extra';
 
 import { execa } from 'execa';
-import { AgentTurnGate, app, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
+import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -510,6 +510,128 @@ describe('Server API Endpoints Unit Tests', () => {
         authorizeSession.mockRestore();
         platform.mockRestore();
       }
+    });
+  });
+
+  describe('workspace recent session handoffs', () => {
+    const workspacesDir = path.resolve('session-workspaces');
+    const workspacePath = path.join(workspacesDir, 'safe-workspace');
+    const codexId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    const claudeId = '0199a213-81c0-7800-8aa1-bbab2a035a54';
+    const unauthorizedCodexId = '0199a213-81c0-7800-8aa1-bbab2a035a55';
+
+    it('returns only server-authorized Desktop handoff capabilities', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({
+        id: 'safe-workspace',
+        repos: [path.join(workspacePath, 'repo')],
+        workspacePath,
+      } as any);
+      const find = vi.spyOn(sessionFinder, 'findSessions').mockResolvedValue([
+        {
+          id: 'copilot-session', assistant: 'copilot', title: 'Newer Copilot task',
+          createdAt: '2026-08-16T03:00:00.000Z', updatedAt: '2026-08-16T03:00:00.000Z',
+          messageCount: 2, workspacePath,
+        },
+        {
+          id: 'antigravity-session', assistant: 'antigravity', title: 'Newer Antigravity task',
+          createdAt: '2026-08-16T02:00:00.000Z', updatedAt: '2026-08-16T02:00:00.000Z',
+          messageCount: 2, workspacePath,
+        },
+        {
+          id: unauthorizedCodexId, assistant: 'codex', title: 'Fuzzy Codex task',
+          createdAt: '2026-08-16T01:00:00.000Z', updatedAt: '2026-08-16T01:00:00.000Z',
+          messageCount: 2, workspacePath,
+        },
+        {
+          id: codexId, assistant: 'codex', title: 'Codex task',
+          createdAt: '2026-08-15T00:00:00.000Z', updatedAt: '2026-08-16T00:00:00.000Z',
+          messageCount: 4, workspacePath,
+        },
+        {
+          id: claudeId, assistant: 'claude', title: 'Claude task',
+          createdAt: '2026-08-14T00:00:00.000Z', updatedAt: '2026-08-15T00:00:00.000Z',
+          messageCount: 2, workspacePath,
+        },
+      ] as any);
+      const codexAuth = vi.spyOn(sessionFinder, 'canOpenCodexSessionInWorkspace')
+        .mockImplementation(async (_workspace, _repos, sessionId) => sessionId === codexId);
+      const claudeAuth = vi.spyOn(sessionFinder, 'canTransferClaudeSessionInWorkspace').mockResolvedValue(true);
+      const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      const architecture = vi.spyOn(process, 'arch', 'get').mockReturnValue('x64');
+      vi.stubEnv('ANTHROPIC_API_KEY', '');
+      vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '');
+      vi.stubEnv('CLAUDE_CODE_USE_BEDROCK', '');
+      vi.stubEnv('CLAUDE_CODE_USE_VERTEX', '');
+      vi.stubEnv('CLAUDE_CODE_USE_FOUNDRY', '');
+      const provider = vi.spyOn(ProviderRegistry, 'getProvider').mockReturnValue({
+        isConfigured: () => true,
+      } as any);
+
+      try {
+        const response = await app.request(
+          '/api/workspace/safe-workspace/sessions?limit=2&desktopHandoffOnly=true',
+        );
+        const body = await response.json() as any;
+
+        expect(response.status).toBe(200);
+        expect(body.sessions).toHaveLength(2);
+        expect(body.sessions[0].desktopHandoff).toEqual({ targetId: 'codex-desktop', method: 'direct' });
+        expect(body.sessions[1].desktopHandoff).toEqual({ targetId: 'claude-desktop', method: 'guided' });
+        expect(codexAuth).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], codexId);
+        expect(claudeAuth).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], claudeId);
+      } finally {
+        find.mockRestore();
+        codexAuth.mockRestore();
+        claudeAuth.mockRestore();
+        provider.mockRestore();
+        platform.mockRestore();
+        architecture.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('omits a discovered session when strong authorization fails', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({
+        id: 'safe-workspace', repos: [], workspacePath,
+      } as any);
+      const find = vi.spyOn(sessionFinder, 'findSessions').mockResolvedValue([{
+        id: codexId, assistant: 'codex', title: 'Fuzzy match only',
+        createdAt: '2026-08-15T00:00:00.000Z', updatedAt: '2026-08-16T00:00:00.000Z',
+        messageCount: 2, workspacePath,
+      }] as any);
+      const codexAuth = vi.spyOn(sessionFinder, 'canOpenCodexSessionInWorkspace').mockResolvedValue(false);
+
+      try {
+        const response = await app.request(
+          '/api/workspace/safe-workspace/sessions?limit=3&desktopHandoffOnly=true',
+        );
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({ sessions: [] });
+      } finally {
+        find.mockRestore();
+        codexAuth.mockRestore();
+      }
+    });
+
+    it('rejects an excessive recent-session limit', async () => {
+      const response = await app.request('/api/workspace/safe-workspace/sessions?limit=200');
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'Session limit must be an integer from 1 to 20.' });
+    });
+
+    it('gates Claude Desktop transfer to supported subscription CLI environments', () => {
+      const configured = () => true;
+
+      expect(canOfferClaudeDesktopTransfer('win32', 'x64', {}, configured)).toBe(true);
+      expect(canOfferClaudeDesktopTransfer('darwin', 'arm64', {}, configured)).toBe(true);
+      expect(canOfferClaudeDesktopTransfer('linux', 'x64', {}, configured)).toBe(false);
+      expect(canOfferClaudeDesktopTransfer('win32', 'arm64', {}, configured)).toBe(false);
+      expect(canOfferClaudeDesktopTransfer('win32', 'x64', { ANTHROPIC_API_KEY: 'configured' }, configured)).toBe(false);
+      expect(canOfferClaudeDesktopTransfer('win32', 'x64', {}, () => false)).toBe(false);
     });
   });
 

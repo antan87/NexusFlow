@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { canOpenCodexSessionInWorkspace, getClaudeProjectFolderName, isCanonicalPathWithin, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
+import { canOpenCodexSessionInWorkspace, canTransferClaudeSessionInWorkspace, getClaudeProjectFolderName, isCanonicalPathWithin, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -143,6 +143,53 @@ describe('Codex Desktop workspace authorization', () => {
   it('matches Windows canonical paths case-insensitively', () => {
     expect(isCanonicalPathWithin('C:\\Workspaces\\NexusFlow', 'c:\\workspaces\\nexusflow\\repo', 'win32'))
       .toBe(true);
+  });
+});
+
+describe('Claude Desktop transfer authorization', () => {
+  const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+  let claudeConfigDir = '';
+  let workspacePath = '';
+  let outsidePath = '';
+  let previousClaudeConfigDir: string | undefined;
+
+  beforeEach(async () => {
+    previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    claudeConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-claude-authorization-'));
+    workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workspace-'));
+    outsidePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-outside-'));
+    process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+    await fs.mkdir(
+      path.join(claudeConfigDir, 'projects', getClaudeProjectFolderName(workspacePath)),
+      { recursive: true },
+    );
+  });
+
+  afterEach(async () => {
+    if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
+    await fs.rm(claudeConfigDir, { recursive: true, force: true });
+    await fs.rm(workspacePath, { recursive: true, force: true });
+    await fs.rm(outsidePath, { recursive: true, force: true });
+  });
+
+  it('requires the exact UUID and a canonical recorded cwd in the workspace', async () => {
+    await fs.writeFile(
+      path.join(claudeConfigDir, 'projects', getClaudeProjectFolderName(workspacePath), `${sessionId}.jsonl`),
+      JSON.stringify({ type: 'user', sessionId, cwd: workspacePath }),
+    );
+
+    await expect(canTransferClaudeSessionInWorkspace(workspacePath, [], sessionId)).resolves.toBe(true);
+  });
+
+  it('rejects a lossy-folder collision whose recorded cwd is outside the workspace', async () => {
+    await fs.writeFile(
+      path.join(claudeConfigDir, 'projects', getClaudeProjectFolderName(workspacePath), `${sessionId}.jsonl`),
+      JSON.stringify({ type: 'user', sessionId, cwd: outsidePath }),
+    );
+
+    await expect(canTransferClaudeSessionInWorkspace(workspacePath, [], sessionId)).resolves.toBe(false);
+    await expect(canTransferClaudeSessionInWorkspace(workspacePath, [], `${sessionId}; whoami`)).resolves.toBe(false);
   });
 });
 

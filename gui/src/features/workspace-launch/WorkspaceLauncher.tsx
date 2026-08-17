@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
+  AppWindow,
   Code2,
+  Copy,
+  ExternalLink,
   Orbit,
   RefreshCw,
   Rocket,
@@ -18,6 +21,7 @@ import {
 } from 'react-icons/si';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 
+import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import {
   Dialog,
@@ -27,12 +31,21 @@ import {
   DialogPopup,
   DialogTitle,
 } from '../../components/ui/dialog.js';
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '../../components/ui/empty.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { apiFetch } from '../../lib/api/client.js';
-import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
+import { useWorkspaceLaunchTargets, useWorkspaceRecentSessions } from '../../lib/api/queries.js';
 import { useConfig } from '../../lib/api/queries.js';
 import { cn } from '../../lib/utils.js';
-import type { WorkspaceLaunchIcon, WorkspaceLaunchTarget } from '../../types.js';
+import type { AISession, WorkspaceLaunchIcon, WorkspaceLaunchTarget } from '../../types.js';
+
+const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ICONS: Record<WorkspaceLaunchIcon, React.ComponentType<{ className?: string }>> = {
   codex: BsOpenai,
@@ -94,13 +107,11 @@ function TargetButton({
       type="button"
       disabled={!target.available || busy}
       onClick={() => onLaunch(target)}
-      aria-label={target.available ? `Open workspace in ${target.name}` : `${target.name} unavailable`}
+      aria-label={`Open workspace in ${target.name}`}
       className={cn(
         'flex min-h-20 w-full items-center gap-3 rounded-xl border p-3 text-left outline-none transition-colors',
         'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-        target.available
-          ? 'cursor-pointer border-border bg-card hover:border-primary/40 hover:bg-accent/60'
-          : 'cursor-not-allowed border-border/70 bg-muted/40 opacity-65',
+        'cursor-pointer border-border bg-card hover:border-primary/40 hover:bg-accent/60',
       )}
     >
       <LauncherIcon icon={target.icon} />
@@ -109,14 +120,62 @@ function TargetButton({
           <span className="font-medium text-foreground">{target.name}</span>
           {launching ? (
             <Spinner className="size-4" />
-          ) : (
-            <span className={cn('text-[11px]', target.available ? 'text-success-foreground' : 'text-muted-foreground')}>
-              {target.available ? (preferred ? 'Preferred · Available' : 'Available') : 'Not detected'}
-            </span>
-          )}
+          ) : preferred ? (
+            <Badge size="sm" variant="secondary">Preferred</Badge>
+          ) : null}
         </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          {target.available ? target.description : target.unavailableReason}
+          {target.description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function RecentSessionButton({
+  session,
+  busy,
+  launching,
+  onResume,
+}: {
+  session: AISession;
+  busy: boolean;
+  launching: boolean;
+  onResume: (session: AISession) => void;
+}) {
+  const handoff = session.desktopHandoff!;
+  const direct = handoff.method === 'direct';
+  const appName = direct ? 'Codex Desktop' : 'Claude Desktop';
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => onResume(session)}
+      aria-label={direct
+        ? `Resume ${session.title} in Codex Desktop`
+        : `Move ${session.title} to Claude Desktop`}
+      className={cn(
+        'flex min-h-20 w-full cursor-pointer items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 p-3 text-left outline-none transition-colors',
+        'hover:border-primary/45 hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:cursor-not-allowed disabled:opacity-65',
+      )}
+    >
+      <LauncherIcon icon={direct ? 'codex' : 'claude'} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between gap-2">
+          <span className="truncate font-medium text-foreground" title={session.title}>{session.title}</span>
+          {launching
+            ? <Spinner className="size-4 shrink-0" />
+            : direct
+              ? <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+              : <Copy className="size-4 shrink-0 text-muted-foreground" />}
+        </span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+          {direct
+            ? `Open this existing task in ${appName}`
+            : 'Resume in Claude Code, then type /desktop'}
+          {' · '}{new Date(session.updatedAt).toLocaleString()}
         </span>
       </span>
     </button>
@@ -137,10 +196,14 @@ export function WorkspaceLauncher({
   const [open, setOpen] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
+  const launchInFlight = useRef(false);
   const targets = useWorkspaceLaunchTargets();
+  const recentSessions = useWorkspaceRecentSessions(workspaceId, open);
   const config = useConfig().data?.config;
 
-  const aiApps = targets.data?.filter((target) => target.kind === 'ai-app') ?? [];
+  const availableTargets = targets.data?.filter((target) => target.available) ?? [];
+  const aiApps = availableTargets.filter((target) => target.kind === 'ai-app');
   const preferredEditorId = config?.defaultEditor
     ? ({
         code: 'vscode',
@@ -155,11 +218,18 @@ export function WorkspaceLauncher({
         windsurf: 'windsurf',
       } as Record<string, string>)[config.defaultEditor]
     : undefined;
-  const editors = (targets.data?.filter((target) => target.kind === 'editor') ?? [])
+  const editors = availableTargets.filter((target) => target.kind === 'editor')
     .toSorted((left, right) => Number(right.id === preferredEditorId) - Number(left.id === preferredEditorId));
+  const availableTargetIds = new Set(availableTargets.map((target) => target.id));
+  const resumableSessions = (recentSessions.data ?? []).filter((session) =>
+    session.desktopHandoff && availableTargetIds.has(session.desktopHandoff.targetId));
+  const hasLaunchOptions = isVsCode || availableTargets.length > 0;
 
   const launch = async (target: WorkspaceLaunchTarget) => {
+    if (launchInFlight.current) return;
+    launchInFlight.current = true;
     setError(null);
+    setHandoffNotice(null);
     setLaunchingId(target.id);
     try {
       await apiFetch(`/api/workspace/${encodeURIComponent(workspaceId)}/launch`, {
@@ -172,6 +242,38 @@ export function WorkspaceLauncher({
       await targets.refetch();
     } finally {
       setLaunchingId(null);
+      launchInFlight.current = false;
+    }
+  };
+
+  const resumeSession = async (session: AISession) => {
+    if (launchInFlight.current || !session.desktopHandoff || !SESSION_UUID.test(session.id)) return;
+    launchInFlight.current = true;
+    setError(null);
+    setHandoffNotice(null);
+    setLaunchingId(`session:${session.id}`);
+    try {
+      if (session.desktopHandoff.method === 'guided') {
+        await navigator.clipboard.writeText(`claude --resume ${session.id}`);
+        setHandoffNotice('Claude resume command copied. With a Claude subscription login, run it in this workspace, then type /desktop in Claude to move the session into Claude Desktop.');
+        return;
+      }
+
+      await apiFetch(`/api/workspace/${encodeURIComponent(workspaceId)}/launch`, {
+        method: 'POST',
+        body: JSON.stringify({
+          targetId: session.desktopHandoff.targetId,
+          action: 'resume',
+          sessionId: session.id,
+        }),
+      });
+      setOpen(false);
+    } catch (resumeError) {
+      setError(resumeError instanceof Error ? resumeError.message : String(resumeError));
+      await Promise.all([targets.refetch(), recentSessions.refetch()]);
+    } finally {
+      setLaunchingId(null);
+      launchInFlight.current = false;
     }
   };
 
@@ -179,6 +281,9 @@ export function WorkspaceLauncher({
     window.parent.postMessage({ type: 'openWorkspaceFolder', workspacePath }, '*');
     setOpen(false);
   };
+
+  const recheck = () => Promise.all([targets.refetch(), recentSessions.refetch()]);
+  const isRechecking = targets.isFetching || recentSessions.isFetching;
 
   return (
     <>
@@ -188,13 +293,16 @@ export function WorkspaceLauncher({
       </Button>
       <Dialog open={open} onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
-        if (!nextOpen) setError(null);
+        if (!nextOpen) {
+          setError(null);
+          setHandoffNotice(null);
+        }
       }}>
         <DialogPopup className="max-w-2xl" aria-busy={launchingId !== null}>
           <DialogHeader>
             <DialogTitle>Open workspace with…</DialogTitle>
             <DialogDescription>
-              Choose a local coding app or editor. AI apps receive the workspace path and an editable task kickoff; they may use their own online services.
+              Continue recent AI work or start in an installed coding app or editor. AI apps may use their own online services.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-5">
@@ -203,6 +311,36 @@ export function WorkspaceLauncher({
                 {error}
               </div>
             )}
+            {handoffNotice && (
+              <div role="status" className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-foreground">
+                {handoffNotice}
+              </div>
+            )}
+
+            {recentSessions.isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+                <Spinner className="size-4" /> Checking recent sessions…
+              </div>
+            ) : resumableSessions.length > 0 ? (
+              <section aria-labelledby="recent-sessions-heading">
+                <h3 id="recent-sessions-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Continue recent work
+                </h3>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {resumableSessions.map((session) => (
+                    <RecentSessionButton
+                      key={`${session.assistant}:${session.id}`}
+                      session={session}
+                      busy={launchingId !== null}
+                      launching={launchingId === `session:${session.id}`}
+                      onResume={resumeSession}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : recentSessions.isError ? (
+              <p className="text-xs text-muted-foreground">Recent sessions could not be checked. Starting new work is still available.</p>
+            ) : null}
 
             {isVsCode && (
               <section aria-labelledby="current-editor-heading">
@@ -234,7 +372,7 @@ export function WorkspaceLauncher({
               </div>
             ) : (
               <>
-                <section aria-labelledby="ai-apps-heading">
+                {aiApps.length > 0 && <section aria-labelledby="ai-apps-heading">
                   <h3 id="ai-apps-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     AI coding apps
                   </h3>
@@ -249,8 +387,8 @@ export function WorkspaceLauncher({
                       />
                     ))}
                   </div>
-                </section>
-                <section aria-labelledby="editors-heading">
+                </section>}
+                {editors.length > 0 && <section aria-labelledby="editors-heading">
                   <h3 id="editors-heading" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Code editors
                   </h3>
@@ -266,14 +404,27 @@ export function WorkspaceLauncher({
                       />
                     ))}
                   </div>
-                </section>
+                </section>}
+                {!hasLaunchOptions && (
+                  <Empty className="rounded-xl border border-dashed py-8 md:p-8">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon"><AppWindow /></EmptyMedia>
+                      <EmptyTitle className="text-base">No compatible apps detected</EmptyTitle>
+                      <EmptyDescription>
+                        Install a supported coding app or add its command to PATH, then recheck.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )}
               </>
             )}
 
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-              <p className="truncate font-mono text-[11px] text-muted-foreground" title={workspacePath}>{workspacePath}</p>
-              <Button size="sm" variant="ghost" onClick={() => void targets.refetch()} disabled={targets.isFetching || launchingId !== null}>
-                <RefreshCw className={targets.isFetching ? 'animate-spin' : ''} />
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {isRechecking ? 'Checking recent sessions and apps…' : 'Can’t find your app or session? Recheck detection.'}
+              </p>
+              <Button size="sm" variant="ghost" onClick={() => void recheck()} disabled={isRechecking || launchingId !== null}>
+                <RefreshCw className={isRechecking ? 'animate-spin' : ''} />
                 Recheck
               </Button>
             </div>

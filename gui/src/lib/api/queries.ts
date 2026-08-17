@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './client.js';
 import type {
+  AISession,
   DetectedAI,
   DetectedEditor,
   Feature,
@@ -192,6 +193,21 @@ export function useWorkspaceLaunchTargets() {
     queryKey: ['workspace-launch-targets'],
     queryFn: () => apiFetch<WorkspaceLaunchTarget[]>('/api/workspace-launch-targets'),
     staleTime: 60_000,
+  });
+}
+
+export function useWorkspaceRecentSessions(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['workspace-recent-sessions', workspaceId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: '3', desktopHandoffOnly: 'true' });
+      const data = await apiFetch<{ sessions: AISession[] }>(
+        `/api/workspace/${encodeURIComponent(workspaceId)}/sessions?${params}`,
+      );
+      return data.sessions;
+    },
+    enabled,
+    staleTime: 30_000,
   });
 }
 

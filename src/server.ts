@@ -38,7 +38,12 @@ import {
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
 } from './utils/workspace-launch.js';
-import { canOpenCodexSessionInWorkspace, findSessions, getSessionTranscript } from './utils/session-finder.js';
+import {
+  canOpenCodexSessionInWorkspace,
+  canTransferClaudeSessionInWorkspace,
+  findSessions,
+  getSessionTranscript,
+} from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
@@ -354,6 +359,34 @@ function assertWithin(baseDir: string, target: string): string {
 /** Safe workspace directory for a route `:id`, contained within workspacesDir. */
 export function resolveWorkspacePath(workspacesDir: string, id: string): string {
   return assertWithin(workspacesDir, path.join(workspacesDir, id));
+}
+
+const DESKTOP_HANDOFF_SCAN_LIMIT = 20;
+
+/**
+ * Claude's documented `/desktop` transfer is narrower than its URI handler:
+ * it requires macOS or x64 Windows, a subscription login, and a usable CLI.
+ */
+export function canOfferClaudeDesktopTransfer(
+  platform: NodeJS.Platform = process.platform,
+  architecture: NodeJS.Architecture = process.arch,
+  env: NodeJS.ProcessEnv = process.env,
+  isCliConfigured: () => boolean = () => ProviderRegistry.getProvider('claude-cli')?.isConfigured() === true,
+): boolean {
+  const supportedPlatform = platform === 'darwin' || (platform === 'win32' && architecture === 'x64');
+  const usesUnsupportedAuth = Boolean(
+    env.ANTHROPIC_API_KEY
+    || env.ANTHROPIC_AUTH_TOKEN
+    || env.CLAUDE_CODE_USE_BEDROCK === '1'
+    || env.CLAUDE_CODE_USE_VERTEX === '1'
+    || env.CLAUDE_CODE_USE_FOUNDRY === '1',
+  );
+  if (!supportedPlatform || usesUnsupportedAuth) return false;
+  try {
+    return isCliConfigured();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1865,15 +1898,72 @@ app.post('/api/workspace/:id/resume', async (c) => {
 app.get('/api/workspace/:id/sessions', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
+    const limitParam = c.req.query('limit');
+    const desktopHandoffOnly = c.req.query('desktopHandoffOnly') === 'true';
+    let limit: number | undefined;
+    if (limitParam !== undefined) {
+      limit = Number(limitParam);
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+        return c.json({ error: 'Session limit must be an integer from 1 to 20.' }, 400);
+      }
+    }
     const config = await loadConfig();
-    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-
-    const feature = await loadFeatureConfig(workspacePath);
+    const requestedWorkspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    let workspacePath = requestedWorkspacePath;
+    let feature;
+    if (desktopHandoffOnly) {
+      try {
+        const exactWorkspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, requestedWorkspacePath);
+        if (!exactWorkspacePath) {
+          return c.json({ error: 'Workspace configuration not found.' }, 404);
+        }
+        workspacePath = exactWorkspacePath;
+      } catch (error) {
+        if (error instanceof PathAccessError) throw error;
+        return c.json({ error: 'Workspace configuration not found.' }, 404);
+      }
+      feature = await loadWorkspaceManifest(workspacePath);
+    } else {
+      feature = await loadFeatureConfig(workspacePath);
+    }
     if (!feature) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    const sessions = await findSessions(workspacePath, feature.repos);
+    const discoveredSessions = await findSessions(workspacePath, feature.repos);
+    if (!desktopHandoffOnly) {
+      return c.json({ sessions: limit === undefined ? discoveredSessions : discoveredSessions.slice(0, limit) });
+    }
+
+    const requestedCount = limit ?? 3;
+    const candidates = discoveredSessions
+      .filter((session) => session.assistant === 'codex' || session.assistant === 'claude')
+      .slice(0, DESKTOP_HANDOFF_SCAN_LIMIT);
+    const sessions = [];
+    const claudeTransferAvailable = candidates.some((session) => session.assistant === 'claude')
+      && canOfferClaudeDesktopTransfer();
+    for (const session of candidates) {
+      if (session.assistant === 'codex' && await canOpenCodexSessionInWorkspace(
+        workspacePath,
+        feature.repos,
+        session.id,
+      )) {
+        sessions.push({
+          ...session,
+          desktopHandoff: { targetId: 'codex-desktop' as const, method: 'direct' as const },
+        });
+      } else if (
+        session.assistant === 'claude'
+        && claudeTransferAvailable
+        && await canTransferClaudeSessionInWorkspace(workspacePath, feature.repos, session.id)
+      ) {
+        sessions.push({
+          ...session,
+          desktopHandoff: { targetId: 'claude-desktop' as const, method: 'guided' as const },
+        });
+      }
+      if (sessions.length === requestedCount) break;
+    }
     return c.json({ sessions });
   } catch (error) {
     return errorResponse(c, error);

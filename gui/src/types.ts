@@ -58,6 +58,23 @@ export interface WorkspaceLaunchTarget {
   unavailableReason?: string;
 }
 
+export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+
+/** Metadata about a local AI session (mirrors src/types.ts). */
+export interface AISession {
+  id: string;
+  assistant: AIAssistant;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  workspacePath: string;
+  desktopHandoff?: {
+    targetId: 'codex-desktop' | 'claude-desktop';
+    method: 'direct' | 'guided';
+  };
+}
+
 export interface RepoInfo {
   name: string;
   path: string;
