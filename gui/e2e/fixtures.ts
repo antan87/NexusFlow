@@ -43,6 +43,11 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
       unavailableReason: 'Claude Desktop is not installed.',
     },
     {
+      id: 'cursor', name: 'Cursor',
+      description: 'Open the generated workspace in Cursor.',
+      kind: 'editor', icon: 'cursor', available: true,
+    },
+    {
       id: 'vscode', name: 'VS Code',
       description: 'Open the generated VS Code workspace.',
       kind: 'editor', icon: 'vscode', available: true,
@@ -90,6 +95,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/repos', json(reposData?.data ?? reposData));
     await page.route('**/api/ai-detect', json(aiDetectData));
     await page.route('**/api/workflows/templates', json(workflowsTemplatesData));
+    await page.route('**/api/workspace/*/sessions?*', json({ sessions: [] }));
 
     // Service log routes — register the more specific /stream matcher first so
     // it wins over the backfill route.

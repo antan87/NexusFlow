@@ -133,6 +133,15 @@ export interface AISession {
   updatedAt: string;
   messageCount: number;
   workspacePath: string;
+  /**
+   * Server-verified way to continue this exact local session in a Desktop app.
+   * `direct` opens the existing task by provider deep link. `guided` uses the
+   * provider's documented CLI-to-Desktop transfer because no direct link exists.
+   */
+  desktopHandoff?: {
+    targetId: 'codex-desktop' | 'claude-desktop';
+    method: 'direct' | 'guided';
+  };
 }
 
 /** A single chat message in a session transcript. */

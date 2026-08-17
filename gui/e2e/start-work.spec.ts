@@ -42,6 +42,17 @@ async function mockCompletedCreationStream(page: Page) {
 
 test.describe('NexusFlow E2E GUI Tests', () => {
   test.use({
+    configData: {
+      exists: true,
+      config: {
+        version: '0.2.7',
+        devDir: 'C:\\mock-dev',
+        workspacesDir: 'C:\\mock-dev\\workspaces',
+        defaultAssistant: 'ANTIGRAVITY',
+        defaultEditor: 'code',
+        scanDepth: 2,
+      },
+    },
     reposData: [
       { name: 'nexus-frontend', path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' },
     ],
@@ -227,9 +238,16 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('button', { name: 'Open with…' }).click();
     await expect(page.getByRole('heading', { name: 'Open workspace with…' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open workspace in Codex Desktop' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Claude Desktop unavailable' })).toBeDisabled();
+    await expect(page.getByText('Claude Desktop')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open workspace in VS Code' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'VS Code Insiders unavailable' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Open workspace in Cursor' })).toBeEnabled();
+    await expect(page.getByText('VS Code Insiders')).toHaveCount(0);
+    await expect(page.getByText('Not detected')).toHaveCount(0);
+    const editorSection = page.getByRole('region', { name: 'Code editors' });
+    await expect(editorSection.getByRole('button').first()).toHaveAccessibleName('Open workspace in VS Code');
+    await expect(editorSection.getByText('Preferred')).toHaveCount(1);
+    const launcherDialog = page.getByRole('dialog');
+    expect(await launcherDialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const codexButton = page.getByRole('button', { name: 'Open workspace in Codex Desktop' });
     await codexButton.click();
     await expect(codexButton).toBeDisabled();
@@ -256,6 +274,65 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       },
     ]);
     expect(legacyRequests).toEqual([]);
+  });
+
+  test('shows a generic launcher empty state without naming unavailable apps', async ({ page }) => {
+    await page.route('**/api/workspace-launch-targets', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'claude-desktop', name: 'Claude Desktop', kind: 'ai-app', icon: 'claude',
+            description: 'Open Claude Code with this folder selected.', available: false,
+            unavailableReason: 'Claude Desktop is not installed.',
+          },
+          {
+            id: 'vscode-insiders', name: 'VS Code Insiders', kind: 'editor', icon: 'vscode-insiders',
+            description: 'Open the generated workspace in Insiders.', available: false,
+            unavailableReason: 'VS Code Insiders was not detected on PATH.',
+          },
+        ]),
+      });
+    });
+    await page.route('**/api/projects', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{
+          id: 'demo',
+          name: 'Demo',
+          description: 'Demo project',
+          repos: [{ path: 'C:\\mock-dev\\nexus-frontend', defaultBranch: 'main' }],
+          createdAt: '2026-07-15T00:00:00.000Z',
+          updatedAt: '2026-07-15T00:00:00.000Z',
+        }]),
+      });
+    });
+    await page.route('**/api/workspace', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, jobId: 'no-apps' }),
+      });
+    });
+    await mockCompletedCreationStream(page);
+
+    await page.goto('/#/new?project=demo');
+    await page.getByRole('radio', { name: /Isolated worktrees/ }).click();
+    await page.getByLabel('Feature branch').fill('feature/no-apps');
+    await page.getByLabel('What are you building?').fill('Test the empty launcher');
+    await page.getByRole('button', { name: 'Create workspace' }).click();
+    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open with…' }).click();
+
+    await expect(page.getByText('No compatible apps detected')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Recheck' })).toBeVisible();
+    await expect(page.getByText('Claude Desktop')).toHaveCount(0);
+    await expect(page.getByText('VS Code Insiders')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'AI coding apps' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Code editors' })).toHaveCount(0);
+    expect(await page.getByRole('dialog').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 
   test('refreshes CLI availability and preserves prior chat across explicit kickoff retries', async ({ page }) => {
