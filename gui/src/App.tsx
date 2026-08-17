@@ -24,6 +24,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then((m) => 
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage.js').then((m) => ({ default: m.ProjectsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then((m) => ({ default: m.SettingsPage })));
 const SkillsPage = lazy(() => import('./pages/SkillsPage.js').then((m) => ({ default: m.SkillsPage })));
+const AgentsPage = lazy(() => import('./pages/AgentsPage.js').then((m) => ({ default: m.AgentsPage })));
 const StartWorkPage = lazy(() => import('./pages/StartWorkPage.js').then((m) => ({ default: m.StartWorkPage })));
 
 const StrategiesPage = lazy(() => import('./pages/StrategiesPage.js').then((m) => ({ default: m.StrategiesPage })));
@@ -893,6 +894,7 @@ Core Instructions:
   );
 
   const skillsPage = <SkillsPage showToast={showToast} />;
+  const agentsPage = <AgentsPage showToast={showToast} />;
 
   const settingsPage = config ? (
 
@@ -1013,6 +1015,7 @@ Core Instructions:
                 <Route path="/workspaces/:workspaceId" element={workspacesPage} />
                 <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
                 <Route path="/skills" element={skillsPage} />
+                <Route path="/agents" element={agentsPage} />
                 <Route path="/settings" element={settingsPage} />
                 <Route path="/workflows" element={workflowsPage} />
 

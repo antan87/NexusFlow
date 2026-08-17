@@ -10,6 +10,7 @@ import {
   saveWorkspaceSkillsConfig,
   getWorkspaceSkillsConfig,
   getAllSkills,
+  DEFAULT_SKILLS,
 } from '../utils/skills-catalog.js';
 import type { WorkspaceContext, AIAssistant, ProjectAnalysis } from '../types.js';
 
@@ -96,6 +97,10 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
       analysis: mockAnalysis,
     };
 
+    await saveWorkspaceSkillsConfig(tempWorkspace, {
+      enabledSkills: DEFAULT_SKILLS.map((skill) => skill.id),
+    });
+
     // 1. Run the workspace generation pipeline
     await generateContextFiles(ctx, assistants, tempWorkspace);
 
@@ -104,7 +109,7 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     expect(await fse.pathExists(agyPrSkill)).toBe(true);
     const agyContent = await fs.readFile(agyPrSkill, 'utf-8');
     expect(agyContent).toContain('name: pr-review-toolkit');
-    expect(agyContent).toContain('allowed-tools:');
+    expect(agyContent).not.toContain('allowed-tools:');
     expect(agyContent).toContain('# Pull Request Review Toolkit');
 
     // Dynamic cross-repo skills for Antigravity
@@ -118,20 +123,11 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     expect(await fse.pathExists(claudeSkill)).toBe(true);
     expect(await fse.pathExists(path.join(tempWorkspace, 'CLAUDE.md'))).toBe(true);
 
-    // 4. Verify Cursor rules (.cursor/rules/*.mdc)
-    const cursorRule = path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc');
-    expect(await fse.pathExists(cursorRule)).toBe(true);
-    const cursorContent = await fs.readFile(cursorRule, 'utf-8');
-    expect(cursorContent).toContain('description:');
-    expect(cursorContent).toContain('alwaysApply: false');
-
-    // 5. Verify GitHub Copilot instructions (.github/instructions/*.instructions.md)
-    const copilotInstr = path.join(tempWorkspace, '.github', 'instructions', 'pr-review-toolkit.instructions.md');
-    expect(await fse.pathExists(copilotInstr)).toBe(true);
-
-    // 6. Verify Codex tooling (.codex/skills/)
-    const codexSkill = path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md');
-    expect(await fse.pathExists(codexSkill)).toBe(true);
+    // Cursor, Copilot, Codex, and Antigravity share the complete portable
+    // package instead of receiving lossy rules or instruction-file conversions.
+    expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'instructions', 'pr-review-toolkit.instructions.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit'))).toBe(false);
   });
 
   it('supports custom user skills with auxiliary references/scripts and workspace assignment filtering', async () => {
@@ -189,9 +185,7 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     const claudeK8sRef = path.join(tempWorkspace, '.claude', 'skills', 'k8s-deployer', 'references', 'values-local.yaml');
     expect(await fse.pathExists(claudeK8sRef)).toBe(true);
 
-    // Codex
-    const codexK8sScript = path.join(tempWorkspace, '.codex', 'skills', 'k8s-deployer', 'scripts', 'deploy.sh');
-    expect(await fse.pathExists(codexK8sScript)).toBe(true);
+    // Codex uses the same .agents/skills package verified above.
 
     // Verify un-enabled template skill was NOT deployed
     const unEnabledSkill = path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit');

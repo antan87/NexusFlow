@@ -197,20 +197,24 @@ export interface SkillItem {
   scripts?: SkillSupportingFile[];
 }
 
-export interface AgentPersona {
+export interface CodexAgentItem {
   id: string;
   name: string;
   category: string;
   description: string;
   model?: string;
-  permissionMode?: 'plan' | 'default' | 'strict';
-  tools?: string[];
-  systemPrompt: string;
+  modelReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  sandboxMode?: 'read-only' | 'workspace-write';
+  developerInstructions: string;
   custom: boolean;
+  sourcePath?: string;
 }
 
 export interface WorkspaceSkillsConfig {
+  schemaVersion?: 1;
+  revision?: number;
   enabledSkills: string[];
+  enabledAgents?: string[];
   enabledCategories?: string[];
 }
 

@@ -14,7 +14,7 @@ const ITEMS: NavItem[] = [
   { label: 'Overview', to: '/', icon: LayoutDashboard, match: (p) => p === '/' },
   { label: 'Projects', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
   { label: 'Workspaces', to: '/workspaces', icon: FolderGit2, match: (p) => p.startsWith('/workspaces') },
-  { label: 'Skills & Agents', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') },
+  { label: 'Resource Library', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') || p.startsWith('/agents') },
   { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
 ];

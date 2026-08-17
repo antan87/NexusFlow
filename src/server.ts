@@ -90,7 +90,20 @@ import {
   deleteSkill,
   getWorkspaceSkillsConfig,
   saveWorkspaceSkillsConfig,
+  WorkspaceResourceRevisionError,
 } from './utils/skills-catalog.js';
+import {
+  deleteAgent,
+  getAllAgents,
+  importAgentToml,
+  saveAgent,
+} from './resources/agents-catalog.js';
+import { ResourceConflictError } from './resources/materializer.js';
+import {
+  ResourceSelectionError,
+  validateResourceSelections,
+  withResourceAdministrationLock,
+} from './resources/service.js';
 
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
@@ -381,8 +394,51 @@ function errorResponse(c: any, error: unknown) {
   if (error instanceof PathAccessError) {
     return c.json({ error: error.message }, 400);
   }
+  if (error instanceof ResourceConflictError || error instanceof WorkspaceResourceRevisionError) {
+    return c.json({
+      error: error.message,
+      conflicts: error instanceof ResourceConflictError ? error.conflicts : undefined,
+    }, 409);
+  }
+  if (error instanceof ResourceSelectionError) {
+    return c.json({
+      error: error.message,
+      missingSkills: error.missingSkills,
+      missingAgents: error.missingAgents,
+    }, 400);
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return c.json({ error: msg }, 500);
+}
+
+async function resolveExactWorkspaceById(workspacesDir: string, id: string): Promise<string | null> {
+  const candidate = resolveWorkspacePath(workspacesDir, id);
+  try {
+    return await resolveExactLaunchWorkspace(workspacesDir, candidate);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as NodeJS.ErrnoException).code)
+        : undefined;
+    if (code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function findResourceAssignments(
+  workspacesDir: string,
+  resourceId: string,
+  kind: 'skill' | 'agent',
+): Promise<string[]> {
+  const assignments: string[] = [];
+  for (const workspace of await listWorkspaces(workspacesDir)) {
+    const workspacePath = await resolveExactWorkspaceById(workspacesDir, workspace.id);
+    if (!workspacePath) continue;
+    const selection = await getWorkspaceSkillsConfig(workspacePath);
+    const enabled = kind === 'skill' ? selection.enabledSkills : selection.enabledAgents ?? [];
+    if (enabled.includes(resourceId)) assignments.push(workspace.id);
+  }
+  return assignments;
 }
 
 /**
@@ -2138,16 +2194,11 @@ app.delete('/api/skills/categories/:id', async (c) => {
   }
 });
 
-// Get all skills (templates + user + workspace)
+// Get authoritative skills (built-ins + personal catalog). Workspace
+// materializations are deliberately never treated as catalog sources.
 app.get('/api/skills', async (c) => {
   try {
-    const workspaceId = c.req.query('workspace');
-    let wsPath: string | undefined;
-    if (workspaceId) {
-      const config = await loadConfig();
-      wsPath = resolveWorkspacePath(config.workspacesDir, workspaceId);
-    }
-    const skills = await getAllSkills(wsPath);
+    const skills = await getAllSkills();
     return c.json({ skills });
   } catch (error) {
     return errorResponse(c, error);
@@ -2164,7 +2215,8 @@ app.post('/api/skills', async (c) => {
     const skill = await saveSkill(body);
     return c.json({ success: true, skill });
   } catch (error) {
-    return errorResponse(c, error);
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
   }
 });
 
@@ -2172,7 +2224,73 @@ app.post('/api/skills', async (c) => {
 app.delete('/api/skills/:id', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
-    await deleteSkill(id);
+    const config = await loadConfig();
+    const assignments = await withResourceAdministrationLock(async () => {
+      const currentAssignments = await findResourceAssignments(config.workspacesDir, id, 'skill');
+      if (!currentAssignments.length) await deleteSkill(id);
+      return currentAssignments;
+    });
+    if (assignments.length) {
+      return c.json({
+        error: `Unassign the skill from these workspaces before deleting it: ${assignments.join(', ')}`,
+        workspaces: assignments,
+      }, 409);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Codex-native custom-agent catalog. Other harness agent formats are not
+// translated because their configuration and permission models are different.
+app.get('/api/agents', async (c) => {
+  try {
+    return c.json({ agents: await getAllAgents() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/agents', async (c) => {
+  try {
+    const agent = await saveAgent(await c.req.json());
+    return c.json({ success: true, agent });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.post('/api/agents/import', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (typeof body.toml !== 'string') {
+      return c.json({ error: 'A TOML string is required.' }, 400);
+    }
+    const agent = await importAgentToml(body.toml, typeof body.category === 'string' ? body.category : 'general');
+    return c.json({ success: true, agent });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.delete('/api/agents/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const assignments = await withResourceAdministrationLock(async () => {
+      const currentAssignments = await findResourceAssignments(config.workspacesDir, id, 'agent');
+      if (!currentAssignments.length) await deleteAgent(id);
+      return currentAssignments;
+    });
+    if (assignments.length) {
+      return c.json({
+        error: `Unassign the agent from these workspaces before deleting it: ${assignments.join(', ')}`,
+        workspaces: assignments,
+      }, 409);
+    }
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
@@ -2184,7 +2302,8 @@ app.get('/api/skills/workspace/:id', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
-    const wsPath = resolveWorkspacePath(config.workspacesDir, id);
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
     const skillsConfig = await getWorkspaceSkillsConfig(wsPath);
     return c.json({ config: skillsConfig });
   } catch (error) {
@@ -2197,13 +2316,28 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const body = await c.req.json();
+    if (!Array.isArray(body.enabledSkills) || !Array.isArray(body.enabledAgents)) {
+      return c.json({ error: 'enabledSkills and enabledAgents arrays are required.' }, 400);
+    }
+    if (!Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
+      return c.json({ error: 'A nonnegative integer expectedRevision is required.' }, 400);
+    }
     const config = await loadConfig();
-    const wsPath = resolveWorkspacePath(config.workspacesDir, id);
-    await saveWorkspaceSkillsConfig(wsPath, {
-      enabledSkills: Array.isArray(body.enabledSkills) ? body.enabledSkills : [],
-      enabledCategories: Array.isArray(body.enabledCategories) ? body.enabledCategories : [],
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const saved = await withResourceAdministrationLock(async () => {
+      await validateResourceSelections(body.enabledSkills, body.enabledAgents);
+      return saveWorkspaceSkillsConfig(
+        wsPath,
+        {
+          enabledSkills: body.enabledSkills,
+          enabledAgents: body.enabledAgents,
+          enabledCategories: Array.isArray(body.enabledCategories) ? body.enabledCategories : [],
+        },
+        body.expectedRevision,
+      );
     });
-    return c.json({ success: true });
+    return c.json({ success: true, config: saved });
   } catch (error) {
     return errorResponse(c, error);
   }

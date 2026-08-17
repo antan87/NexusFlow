@@ -23,8 +23,8 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
 - **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
-- **Skills & Agents Hub** — manage and assign reusable agent skills (`SKILL.md`) grouped into customizable category boxes with visual drag-and-drop
-- **Cross-Harness Skill Deployment** — automatically compiles and deploys skills to Claude Code (`.claude/skills/`), Google Antigravity (`.agents/skills/`), Cursor (`.cursor/rules/`), GitHub Copilot (`.github/instructions/`), and Codex (`.codex/skills/`)
+- **Resource Library** — create and administer reusable Agent Skill folders and Codex-native custom agents, then assign them to workspaces
+- **Owned Resource Deployment** — installs portable skills to native discovery folders and Codex agents to `.codex/agents/`, refusing unmanaged collisions and preserving locally modified files
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
 
@@ -190,9 +190,9 @@ NexusFlow auto-detects which assistants are available on your machine and genera
 |:---|:---|:---|
 | **Google Antigravity** | `AGENTS.md` & `.agents/skills/` | `antigravity` in PATH |
 | **Claude Code** | `CLAUDE.md` & `.claude/skills/` | `claude` in PATH |
-| **OpenAI Codex** | `AGENTS.md` & `.codex/skills/` | `codex` in PATH |
-| **GitHub Copilot** | `.github/copilot-instructions.md` & `.github/instructions/` | Always available |
-| **Cursor** | `.cursor/rules/*.mdc` | `cursor` in PATH |
+| **OpenAI Codex** | `AGENTS.md`, `.agents/skills/` & `.codex/agents/` | `codex` in PATH |
+| **GitHub Copilot** | `.github/copilot-instructions.md` & `.agents/skills/` | Always available |
+| **Cursor** | `.cursor/rules/nexusflow.mdc` & `.agents/skills/` | `cursor` in PATH |
 
 
 ## 🔁 The Feature Loop: create → work → learn → finish
@@ -311,9 +311,9 @@ Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow 
 
 Scheduled runs are **token-efficient by design**: they use the same analysis cache as `nexusflow refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
-## 🧩 Skills & Agents Hub
+## 🧩 Resource Library
 
-NexusFlow provides a central hub to manage, author, and assign reusable agent procedural skills adhering to the open **`SKILL.md` Progressive Disclosure standard**.
+NexusFlow provides separate libraries for portable Agent Skills and Codex-native custom agents. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
 
 Skills bundle metadata triggers (for AI autonomous discovery) with full Markdown execution playbooks, auxiliary reference runbooks (`references/`), and automation scripts (`scripts/`).
 
@@ -330,19 +330,25 @@ Skills are grouped into clear visual accordion boxes by category. You can drag a
 
 #### Custom Categories & Workspace Scoping
 - **Custom Categories**: Users can create, customize (colors, icons, descriptions), or delete custom categories. Custom overrides to built-in templates can be deleted at any time to restore default values.
-- **Workspace Scoping**: Switch the scope dropdown to any feature workspace to selectively enable or disable individual skills or entire categories with one-click batch toggles.
+- **Workspace Scoping**: Switch the scope dropdown to a feature workspace, edit a local draft, and save the complete selection with an optimistic revision check. Refresh the workspace to reconcile the saved selection.
+
+### Codex Agent Administration
+
+The Codex Agent Library supports creating, editing, importing, and deleting basic native agents with `name`, `description`, and `developer_instructions`, plus optional model, reasoning, and sandbox defaults. Selected agents are installed at `.codex/agents/<name>.toml`. Provider-neutral agent translation, agent teams, and collaboration kits are intentionally outside this feature.
 
 ### Cross-Harness Deployment
 
-When a workspace is created or refreshed, NexusFlow automatically compiles and deploys enabled skills to the appropriate structure for each active assistant:
+When a workspace is refreshed, NexusFlow reconciles enabled resources through `.nexusflow/resources.lock.json`. It refuses unmanaged target collisions, removes only unchanged NexusFlow-owned outputs, and reports modified-file conflicts instead of overwriting them.
 
 | Assistant Harness | Deployment Path | Format |
 |:---|:---|:---|
 | **Google Antigravity** | `.agents/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
 | **Claude Code** | `.claude/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
-| **OpenAI Codex** | `.codex/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
-| **Cursor** | `.cursor/rules/<name>.mdc` | MDC rules format with `alwaysApply: false` |
-| **GitHub Copilot** | `.github/instructions/<name>.instructions.md` | Scoped instruction format |
+| **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+| **Cursor** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+| **GitHub Copilot** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
+
+Codex custom agents are separate resources and deploy to `.codex/agents/<name>.toml`.
 
 ## 👥 Teamwork Strategy Workflows
 

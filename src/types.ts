@@ -605,32 +605,40 @@ export interface SkillItem {
   scripts?: SkillSupportingFile[];
 }
 
-/** Specialized Subagent Persona specification. */
-export interface AgentPersona {
-  /** Unique persona identifier (slug). */
+/** A reusable Codex custom-agent definition. */
+export interface CodexAgentItem {
+  /** Unique catalog identifier (lowercase slug). */
   id: string;
-  /** Name of the persona. */
+  /** Native Codex agent name. */
   name: string;
-  /** Category ID this agent is grouped under. */
+  /** Category ID used only for NexusFlow organization. */
   category: string;
-  /** Description of what this agent does and when to invoke it. */
+  /** Human-facing guidance for when Codex should use the agent. */
   description: string;
-  /** Preferred model routing (e.g. 'pro', 'flash', 'sonnet', 'inherit'). */
+  /** Optional model override. Omit to inherit Codex session settings. */
   model?: string;
-  /** Permission / sandbox mode ('plan' | 'default' | 'strict'). */
-  permissionMode?: 'plan' | 'default' | 'strict';
-  /** Whitelisted tools available to this subagent. */
-  tools?: string[];
-  /** System prompt / instructions. */
-  systemPrompt: string;
-  /** Whether this is a user-custom agent. */
+  /** Optional Codex reasoning-effort override. */
+  modelReasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  /** Optional sandbox default. Parent live overrides can still take precedence. */
+  sandboxMode?: 'read-only' | 'workspace-write';
+  /** Native Codex developer instructions. */
+  developerInstructions: string;
+  /** Whether this is a user-created agent. */
   custom: boolean;
+  /** Absolute catalog source path when loaded from disk. */
+  sourcePath?: string;
 }
 
 /** Workspace skill assignments state. */
 export interface WorkspaceSkillsConfig {
+  /** Persisted contract version. */
+  schemaVersion?: 1;
+  /** Optimistic concurrency token for assignment edits. */
+  revision?: number;
   /** Active enabled skill IDs. */
   enabledSkills: string[];
+  /** Active Codex custom-agent IDs. */
+  enabledAgents?: string[];
   /** Active enabled category IDs. */
   enabledCategories?: string[];
 }

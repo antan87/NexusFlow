@@ -18,6 +18,10 @@ import type {
   RunningOrchestrator,
   RunningService,
   ServiceConfig,
+  SkillCategory,
+  SkillItem,
+  CodexAgentItem,
+  WorkspaceSkillsConfig,
   WorkspaceMode,
   WorkspaceLaunchTarget,
   WorkspaceStatus,
@@ -271,35 +275,7 @@ export function useOrchestratorAction(wsId: string) {
 
 // ─── Skills & Categories ──────────────────────────────────────────────────
 
-export interface SkillCategory {
-  id: string;
-  name: string;
-  description: string;
-  icon?: string;
-  color?: string;
-  custom?: boolean;
-  isTemplate?: boolean;
-  skills?: string[];
-}
-
-export interface SkillItem {
-  id: string;
-  name: string;
-  title?: string;
-  category: string;
-  description: string;
-  tags?: string[];
-  allowedTools?: string[];
-  parameters?: any[];
-  content: string;
-  custom: boolean;
-  sourcePath?: string;
-}
-
-export interface WorkspaceSkillsConfig {
-  enabledSkills: string[];
-  enabledCategories?: string[];
-}
+export type { SkillCategory, SkillItem, CodexAgentItem, WorkspaceSkillsConfig } from '../../types.js';
 
 export function useSkillCategories() {
   return useQuery({
@@ -379,6 +355,49 @@ export function useDeleteSkill() {
   });
 }
 
+export function useAgents() {
+  return useQuery({
+    queryKey: ['codex-agents'],
+    queryFn: async () => {
+      const data = await apiFetch<{ agents: CodexAgentItem[] }>('/api/agents');
+      return data.agents;
+    },
+  });
+}
+
+export function useSaveAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (agent: Omit<CodexAgentItem, 'custom' | 'sourcePath'>) =>
+      apiFetch<{ success: boolean; agent: CodexAgentItem }>('/api/agents', {
+        method: 'POST',
+        body: JSON.stringify(agent),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
+export function useImportAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ toml, category }: { toml: string; category?: string }) =>
+      apiFetch<{ success: boolean; agent: CodexAgentItem }>('/api/agents/import', {
+        method: 'POST',
+        body: JSON.stringify({ toml, category }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
+export function useDeleteAgent() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codex-agents'] }),
+  });
+}
+
 export function useWorkspaceSkills(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-skills', wsId],
@@ -393,13 +412,13 @@ export function useWorkspaceSkills(wsId: string | null) {
 export function useAssignWorkspaceSkills() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ workspaceId, ...config }: WorkspaceSkillsConfig & { workspaceId: string }) =>
-      apiFetch<{ success: boolean }>(`/api/skills/workspace/${encodeURIComponent(workspaceId)}/assign`, {
+    mutationFn: ({ workspaceId, expectedRevision, ...config }: WorkspaceSkillsConfig & { workspaceId: string; expectedRevision?: number }) =>
+      apiFetch<{ success: boolean; config: WorkspaceSkillsConfig }>(`/api/skills/workspace/${encodeURIComponent(workspaceId)}/assign`, {
         method: 'POST',
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, expectedRevision }),
       }),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['workspace-skills', variables.workspaceId] });
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(['workspace-skills', variables.workspaceId], data.config);
       queryClient.invalidateQueries({ queryKey: ['skills'] });
     },
   });

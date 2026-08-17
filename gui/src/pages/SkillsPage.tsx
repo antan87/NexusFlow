@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Boxes,
   Plus,
@@ -120,9 +121,14 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
     selectedWorkspace !== 'global' ? selectedWorkspace : undefined,
   );
   const { data: workspaces = [] } = useWorkspaces();
-  const { data: workspaceSkillsConfig } = useWorkspaceSkills(
+  const {
+    data: workspaceSkillsConfig,
+    isLoading: loadingWorkspaceConfig,
+    isError: workspaceConfigError,
+  } = useWorkspaceSkills(
     selectedWorkspace !== 'global' ? selectedWorkspace : '',
   );
+  const [draftEnabledSkills, setDraftEnabledSkills] = useState<string[] | null>(null);
 
   const saveCategoryMutation = useSaveSkillCategory();
   const deleteCategoryMutation = useDeleteSkillCategory();
@@ -131,7 +137,17 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
   const assignSkillsMutation = useAssignWorkspaceSkills();
 
   const isWorkspaceView = selectedWorkspace !== 'global';
-  const enabledSkillIds = new Set(workspaceSkillsConfig?.enabledSkills || []);
+  const enabledSkillIds = new Set(draftEnabledSkills ?? workspaceSkillsConfig?.enabledSkills ?? []);
+  const workspaceAssignmentReady =
+    !isWorkspaceView || (!loadingWorkspaceConfig && !workspaceConfigError && !!workspaceSkillsConfig);
+
+  useEffect(() => {
+    if (!isWorkspaceView) {
+      setDraftEnabledSkills(null);
+      return;
+    }
+    if (workspaceSkillsConfig) setDraftEnabledSkills([...workspaceSkillsConfig.enabledSkills]);
+  }, [isWorkspaceView, selectedWorkspace, workspaceSkillsConfig]);
 
   const toggleCategoryCollapse = (catId: string) => {
     setCollapsedCategories((prev) => ({ ...prev, [catId]: !prev[catId] }));
@@ -210,7 +226,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         category: defaultCatId || (categories[0]?.id ?? 'pull-requests'),
         description: '',
         tags: [],
-        allowedTools: ['run_command', 'view_file', 'grep_search'],
+        allowedTools: [],
         content: '# Skill Title\n\nInstructions and playbook for the AI assistant.\n',
         custom: true,
       },
@@ -233,8 +249,13 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
   };
 
   const handleSaveSkill = async () => {
-    if (!editingSkill || !editingSkill.name?.trim() || !editingSkill.content?.trim()) {
-      showToast?.('Skill name and content are required', 'error');
+    if (
+      !editingSkill ||
+      !editingSkill.name?.trim() ||
+      !editingSkill.description?.trim() ||
+      !editingSkill.content?.trim()
+    ) {
+      showToast?.('Skill name, trigger description, and content are required', 'error');
       return;
     }
     try {
@@ -283,26 +304,38 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
   // ─── Workspace Assignment Toggles ─────────────────────────────────────────
 
-  const handleToggleWorkspaceSkill = async (skillId: string) => {
-    if (!isWorkspaceView || !selectedWorkspace) return;
-    const current = new Set(workspaceSkillsConfig?.enabledSkills || []);
+  const handleToggleWorkspaceSkill = (skillId: string) => {
+    if (!isWorkspaceView || !workspaceAssignmentReady || draftEnabledSkills === null) return;
+    const current = new Set(draftEnabledSkills);
     if (current.has(skillId)) {
       current.delete(skillId);
     } else {
       current.add(skillId);
     }
-    await assignSkillsMutation.mutateAsync({
-      workspaceId: selectedWorkspace,
-      enabledSkills: Array.from(current),
-      enabledCategories: categories.map((c) => c.id),
-    });
-    showToast?.('Workspace skills updated', 'info', 1500);
+    setDraftEnabledSkills(Array.from(current));
   };
 
-  const handleToggleCategoryAll = async (catId: string, enable: boolean) => {
-    if (!isWorkspaceView || !selectedWorkspace) return;
+  const handleCopyBuiltInSkill = () => {
+    if (!editingSkill || editingSkill.custom !== false) return;
+    const copyName = `${editingSkill.name}-copy`;
+    setEditingSkill({
+      ...editingSkill,
+      id: undefined,
+      name: copyName,
+      title: `${editingSkill.title || editingSkill.name} Copy`,
+      allowedTools: [],
+      custom: true,
+      sourcePath: undefined,
+      references: undefined,
+      scripts: undefined,
+    });
+    setSlugManuallyEdited(true);
+  };
+
+  const handleToggleCategoryAll = (catId: string, enable: boolean) => {
+    if (!isWorkspaceView || !workspaceAssignmentReady || draftEnabledSkills === null) return;
     const catSkills = skillsByCategory[catId] || [];
-    const current = new Set(workspaceSkillsConfig?.enabledSkills || []);
+    const current = new Set(draftEnabledSkills);
     for (const s of catSkills) {
       if (enable) {
         current.add(s.id);
@@ -310,12 +343,23 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         current.delete(s.id);
       }
     }
-    await assignSkillsMutation.mutateAsync({
-      workspaceId: selectedWorkspace,
-      enabledSkills: Array.from(current),
-      enabledCategories: categories.map((c) => c.id),
-    });
-    showToast?.(enable ? 'Enabled category skills' : 'Disabled category skills', 'info', 1500);
+    setDraftEnabledSkills(Array.from(current));
+  };
+
+  const handleApplyWorkspaceSkills = async () => {
+    if (!workspaceSkillsConfig || draftEnabledSkills === null || !isWorkspaceView) return;
+    try {
+      await assignSkillsMutation.mutateAsync({
+        workspaceId: selectedWorkspace,
+        expectedRevision: workspaceSkillsConfig.revision ?? 0,
+        enabledSkills: draftEnabledSkills,
+        enabledAgents: workspaceSkillsConfig.enabledAgents ?? [],
+        enabledCategories: categories.map((category) => category.id),
+      });
+      showToast?.('Skill selection saved. Refresh the workspace to apply it.', 'success');
+    } catch (error) {
+      showToast?.(error instanceof Error ? error.message : 'Failed to save skill selection', 'error');
+    }
   };
 
   // ─── Drag & Drop and Move to Category ─────────────────────────────────────
@@ -346,10 +390,16 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
     if (!skillId) return;
 
     const skill = skills.find((s) => s.id === skillId);
-    if (!skill || skill.category === targetCatId) return;
+    if (!skill || !skill.custom || isWorkspaceView || skill.category === targetCatId) return;
 
     await saveSkillMutation.mutateAsync({
-      ...skill,
+      id: skill.id,
+      name: skill.name,
+      title: skill.title,
+      description: skill.description,
+      tags: skill.tags,
+      allowedTools: skill.allowedTools,
+      content: skill.content,
       category: targetCatId,
     });
     showToast?.('Skill re-categorized', 'success');
@@ -368,7 +418,13 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
       return;
     }
     await saveSkillMutation.mutateAsync({
-      ...skillToMove,
+      id: skillToMove.id,
+      name: skillToMove.name,
+      title: skillToMove.title,
+      description: skillToMove.description,
+      tags: skillToMove.tags,
+      allowedTools: skillToMove.allowedTools,
+      content: skillToMove.content,
       category: targetCatId,
     });
     showToast?.('Skill moved to category', 'success');
@@ -387,9 +443,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
               <Boxes className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">Skills & Agents Hub</h1>
+              <h1 className="text-xl font-bold tracking-tight">Skill Library</h1>
               <p className="text-sm text-muted-foreground">
-                Manage reusable agent skills, playbooks, and category boxes with drag-and-drop.
+                Create, organize, and assign reusable Agent Skill packages.
               </p>
             </div>
           </div>
@@ -397,11 +453,13 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
         {/* Action Controls */}
         <div className="flex items-center gap-3 flex-wrap">
+          <Button render={<Link to="/agents" />} variant="outline" size="sm">Codex Agents</Button>
           {/* Workspace Scoping Selector */}
           <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5 border border-border">
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">Scope:</span>
+            <Label htmlFor="skill-scope" className="text-xs font-medium text-muted-foreground">Scope:</Label>
             <select
+              id="skill-scope"
               value={selectedWorkspace}
               onChange={(e) => setSelectedWorkspace(e.target.value)}
               className="bg-transparent text-xs font-semibold focus:outline-none cursor-pointer text-foreground"
@@ -418,25 +476,39 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             </select>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleOpenCategoryModal()}
-            className="flex items-center gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>New Category</span>
-          </Button>
+          {isWorkspaceView && (
+            <Button
+              size="sm"
+              onClick={handleApplyWorkspaceSkills}
+              disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending || draftEnabledSkills === null}
+            >
+              {assignSkillsMutation.isPending ? 'Saving…' : 'Save selection'}
+            </Button>
+          )}
 
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => handleOpenSkillModal()}
-            className="flex items-center gap-1.5"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>New Skill</span>
-          </Button>
+          {!isWorkspaceView && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleOpenCategoryModal()}
+                className="flex items-center gap-1.5"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>New Category</span>
+              </Button>
+
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => handleOpenSkillModal()}
+                className="flex items-center gap-1.5"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>New Skill</span>
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -475,11 +547,18 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
       {/* Main Content Area */}
       <ScrollArea className="flex-1 p-6">
-        {loadingCategories || loadingSkills ? (
+        {loadingCategories || loadingSkills || (isWorkspaceView && loadingWorkspaceConfig) ? (
           <div className="flex items-center justify-center p-12 gap-3 text-muted-foreground">
             <Spinner />
             <span className="text-sm">Loading skills catalog...</span>
           </div>
+        ) : isWorkspaceView && workspaceConfigError ? (
+          <Empty className="py-12 border border-dashed rounded-xl">
+            <EmptyHeader>
+              <EmptyTitle>Workspace resources could not be loaded</EmptyTitle>
+              <EmptyDescription>Assignment controls are disabled so an existing selection cannot be overwritten.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : filteredSkills.length === 0 && searchQuery ? (
           <Empty className="py-12 border border-dashed rounded-xl">
             <EmptyMedia>
@@ -574,25 +653,29 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                         </Button>
                       )}
 
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => handleOpenSkillModal(undefined, category.id)}
-                        title="Add skill to this category"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
+                      {!isWorkspaceView && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleOpenSkillModal(undefined, category.id)}
+                          title="Add skill to this category"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
 
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => handleOpenCategoryModal(category)}
-                        title="Edit category"
-                      >
-                        <Edit2 className="h-3 w-3" />
-                      </Button>
+                      {!isWorkspaceView && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleOpenCategoryModal(category)}
+                          title="Edit category"
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </Button>
+                      )}
 
-                      {category.custom && (
+                      {!isWorkspaceView && category.custom && (
                         <Button
                           variant="ghost"
                           size="icon-xs"
@@ -619,13 +702,17 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                     <div className="p-4 bg-background/50">
                       {catSkills.length === 0 ? (
                         <div className="border border-dashed border-border/80 rounded-lg p-6 text-center text-xs text-muted-foreground">
-                          No skills in this category. Drag and drop skills here, or click{' '}
-                          <button
-                            onClick={() => handleOpenSkillModal(undefined, category.id)}
-                            className="text-primary underline font-medium"
-                          >
-                            + Add Skill
-                          </button>
+                           No skills in this category.
+                           {!isWorkspaceView && (
+                             <>{' '}Drag a custom skill here, or click{' '}
+                               <button
+                                 onClick={() => handleOpenSkillModal(undefined, category.id)}
+                                 className="text-primary underline font-medium"
+                               >
+                                 + Add Skill
+                               </button>
+                             </>
+                           )}
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -634,9 +721,19 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                             return (
                               <Card
                                 key={skill.id}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, skill.id)}
+                                draggable={!isWorkspaceView && !!skill.custom}
+                                onDragStart={(e) => {
+                                  if (!isWorkspaceView && skill.custom) handleDragStart(e, skill.id);
+                                }}
                                 onClick={() => handleOpenSkillModal(skill)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    handleOpenSkillModal(skill);
+                                  }
+                                }}
                                 className={cn(
                                   'group relative cursor-pointer hover:border-primary/60 transition-all p-3.5 flex flex-col justify-between select-none shadow-sm',
                                   isWorkspaceView && !isEnabledInWs && 'opacity-60 bg-muted/20',
@@ -665,6 +762,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                           e.stopPropagation();
                                           handleToggleWorkspaceSkill(skill.id);
                                         }}
+                                        disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
                                         className={cn(
                                           'h-5 px-2 rounded-md flex items-center gap-1 text-[10px] font-semibold transition-colors',
                                           isEnabledInWs
@@ -709,17 +807,19 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
                                   {/* Card Quick Actions */}
                                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      onClick={(e) => handleOpenMoveModal(skill, e)}
-                                      title="Move to another category"
-                                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                                    >
-                                      <ArrowRightLeft className="h-3 w-3" />
-                                    </Button>
+                                    {!isWorkspaceView && skill.custom && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={(e) => handleOpenMoveModal(skill, e)}
+                                        title="Move to another category"
+                                        className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                      >
+                                        <ArrowRightLeft className="h-3 w-3" />
+                                      </Button>
+                                    )}
 
-                                    {skill.custom && (
+                                    {!isWorkspaceView && skill.custom && (
                                       <Button
                                         variant="ghost"
                                         size="icon-xs"
@@ -760,9 +860,32 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                     <Card
                       key={skill.id}
                       onClick={() => handleOpenSkillModal(skill)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleOpenSkillModal(skill);
+                        }
+                      }}
                       className="p-3.5 cursor-pointer hover:border-primary/60"
                     >
-                      <div className="font-mono text-xs font-bold mb-1">{skill.title || skill.name}</div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <div className="font-mono text-xs font-bold">{skill.title || skill.name}</div>
+                        {isWorkspaceView && (
+                          <Button
+                            size="xs"
+                            variant={enabledSkillIds.has(skill.id) ? 'default' : 'outline'}
+                            disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleToggleWorkspaceSkill(skill.id);
+                            }}
+                          >
+                            {enabledSkillIds.has(skill.id) ? 'Enabled' : 'Disabled'}
+                          </Button>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground line-clamp-2">{skill.description}</p>
                     </Card>
                   ))}
@@ -1027,47 +1150,6 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                   />
                 </div>
 
-                {/* Allowed Tools Selection */}
-                <div>
-                  <Label className="text-xs font-medium">Allowed Tools / Permissions</Label>
-                  <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                    {[
-                      'run_command',
-                      'view_file',
-                      'write_to_file',
-                      'replace_file_content',
-                      'grep_search',
-                      'schedule',
-                    ].map((tool) => {
-                      const active = editingSkill?.allowedTools?.includes(tool);
-                      return (
-                        <button
-                          key={tool}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => {
-                            const current = new Set(editingSkill?.allowedTools || []);
-                            if (active) current.delete(tool);
-                            else current.add(tool);
-                            setEditingSkill((prev) =>
-                              prev ? { ...prev, allowedTools: Array.from(current) } : null,
-                            );
-                          }}
-                          className={cn(
-                            'text-xs font-mono px-2.5 py-1 rounded-md border transition-colors flex items-center gap-1',
-                            active
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted',
-                          )}
-                        >
-                          <Wrench className="h-3 w-3" />
-                          <span>{tool}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {/* SKILL.md Playbook Content */}
                 <div>
                   <Label htmlFor="skill-content" className="text-xs font-medium">
@@ -1105,10 +1187,14 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             <Button
               variant="default"
               size="sm"
-              onClick={handleSaveSkill}
-              disabled={!editingSkill?.name?.trim() || !editingSkill?.content?.trim()}
+              onClick={editingSkill?.custom === false ? handleCopyBuiltInSkill : handleSaveSkill}
+              disabled={
+                !editingSkill?.name?.trim() ||
+                !editingSkill?.description?.trim() ||
+                !editingSkill?.content?.trim()
+              }
             >
-              Save Skill
+              {editingSkill?.custom === false ? 'Create editable copy' : 'Save Skill'}
             </Button>
           </DialogFooter>
         </DialogContent>

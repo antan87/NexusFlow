@@ -4,14 +4,13 @@
  * dynamically based on workspace analysis and workspace skills configuration.
  */
 
-import fse from 'fs-extra';
-import * as path from 'node:path';
 import type { AIAssistant, WorkspaceContext, ProjectAnalysis, SkillItem } from '../types.js';
 import {
   getAllSkills,
   getWorkspaceSkillsConfig,
-  serializeSkillMarkdown,
 } from '../utils/skills-catalog.js';
+import { getAllAgents } from '../resources/agents-catalog.js';
+import { reconcileWorkspaceResources } from '../resources/materializer.js';
 
 /**
  * Checks if the workspace has cross-repo package dependencies.
@@ -187,110 +186,6 @@ function getVerifierSkill(ctx: WorkspaceContext): string {
 }
 
 /**
- * Copies or writes supporting references and scripts for a deployed skill.
- */
-async function copySkillSupportingFiles(
-  targetSkillDir: string,
-  skill: SkillItem,
-): Promise<void> {
-  if (skill.references && skill.references.length > 0) {
-    const refDir = path.join(targetSkillDir, 'references');
-    await fse.ensureDir(refDir);
-    for (const r of skill.references) {
-      if (r.name) {
-        if (r.content !== undefined) {
-          await fse.writeFile(path.join(refDir, r.name), r.content, 'utf-8');
-        } else if (skill.sourcePath) {
-          const srcFile = path.join(skill.sourcePath, 'references', r.name);
-          if (await fse.pathExists(srcFile)) {
-            await fse.copy(srcFile, path.join(refDir, r.name));
-          }
-        }
-      }
-    }
-  }
-
-  if (skill.scripts && skill.scripts.length > 0) {
-    const scDir = path.join(targetSkillDir, 'scripts');
-    await fse.ensureDir(scDir);
-    for (const s of skill.scripts) {
-      if (s.name) {
-        if (s.content !== undefined) {
-          await fse.writeFile(path.join(scDir, s.name), s.content, 'utf-8');
-        } else if (skill.sourcePath) {
-          const srcFile = path.join(skill.sourcePath, 'scripts', s.name);
-          if (await fse.pathExists(srcFile)) {
-            await fse.copy(srcFile, path.join(scDir, s.name));
-          }
-        }
-      }
-    }
-  }
-}
-
-/**
- * Deploys an individual skill to a specific assistant's expected directory.
- */
-export async function deploySkillItem(
-  workspacePath: string,
-  assistant: AIAssistant,
-  skill: SkillItem,
-): Promise<void> {
-  const skillName = skill.name || skill.id;
-  const title = skill.title || skillName;
-
-  const metadata: Record<string, unknown> = {
-    name: skillName,
-    title,
-    category: skill.category || 'general',
-    description: skill.description || `Guidelines for ${title}`,
-  };
-  if (skill.tags && skill.tags.length > 0) {
-    metadata.tags = skill.tags;
-  }
-  if (skill.allowedTools && skill.allowedTools.length > 0) {
-    metadata['allowed-tools'] = skill.allowedTools;
-  }
-
-  const fullMarkdownWithFrontmatter = serializeSkillMarkdown(metadata, skill.content);
-
-  if (assistant === 'claude') {
-    const skillDir = path.join(workspacePath, '.claude', 'skills', skillName);
-    await fse.ensureDir(skillDir);
-    await fse.writeFile(path.join(skillDir, 'SKILL.md'), fullMarkdownWithFrontmatter, 'utf-8');
-    await copySkillSupportingFiles(skillDir, skill);
-  } else if (assistant === 'antigravity') {
-    const skillDir = path.join(workspacePath, '.agents', 'skills', skillName);
-    await fse.ensureDir(skillDir);
-    await fse.writeFile(path.join(skillDir, 'SKILL.md'), fullMarkdownWithFrontmatter, 'utf-8');
-    await copySkillSupportingFiles(skillDir, skill);
-  } else if (assistant === 'cursor') {
-    const ruleDir = path.join(workspacePath, '.cursor', 'rules');
-    await fse.ensureDir(ruleDir);
-    const mdcContent = `---
-description: "${skill.description.replace(/"/g, '\\"') || `Guidelines for ${title}`}"
-alwaysApply: false
----
-
-${skill.content}`;
-    await fse.writeFile(path.join(ruleDir, `${skillName}.mdc`), mdcContent, 'utf-8');
-  } else if (assistant === 'copilot') {
-    const copilotDir = path.join(workspacePath, '.github', 'instructions');
-    await fse.ensureDir(copilotDir);
-    await fse.writeFile(
-      path.join(copilotDir, `${skillName}.instructions.md`),
-      skill.content,
-      'utf-8',
-    );
-  } else if (assistant === 'codex') {
-    const skillDir = path.join(workspacePath, '.codex', 'skills', skillName);
-    await fse.ensureDir(skillDir);
-    await fse.writeFile(path.join(skillDir, 'SKILL.md'), fullMarkdownWithFrontmatter, 'utf-8');
-    await copySkillSupportingFiles(skillDir, skill);
-  }
-}
-
-/**
  * Generates custom skills/rules for each selected AI assistant.
  *
  * @param ctx           - The workspace context.
@@ -306,7 +201,7 @@ export async function generateSkills(
 
   // 1. Get enabled skills config and catalog
   const wsConfig = await getWorkspaceSkillsConfig(workspacePath);
-  const catalogSkills = await getAllSkills(workspacePath);
+  const [catalogSkills, catalogAgents] = await Promise.all([getAllSkills(), getAllAgents()]);
   const skillMap = new Map<string, SkillItem>();
 
   for (const s of catalogSkills) {
@@ -359,25 +254,20 @@ export async function generateSkills(
   }
 
   // 3. Determine which skills to deploy
-  const skillsToDeploy: SkillItem[] = [];
   const enabledSet = new Set(wsConfig.enabledSkills);
-
-  for (const [id, skill] of skillMap.entries()) {
-    if (enabledSet.has(id)) {
-      skillsToDeploy.push(skill);
-    }
+  const missingSkills = [...enabledSet].filter((id) => !skillMap.has(id));
+  if (missingSkills.length) {
+    throw new Error(`Selected skills are no longer available: ${missingSkills.join(', ')}`);
   }
+  const skillsToDeploy = [...enabledSet].map((id) => skillMap.get(id)!);
 
-
-  // 4. Deploy to each target assistant
-  for (const assistant of assistants) {
-    for (const skill of skillsToDeploy) {
-      try {
-        await deploySkillItem(workspacePath, assistant, skill);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`  ✖ Failed to deploy skill ${skill.id} for ${assistant}: ${msg}`);
-      }
-    }
+  const agentMap = new Map(catalogAgents.map((agent) => [agent.id, agent]));
+  const enabledAgentIds = new Set(wsConfig.enabledAgents ?? []);
+  const missingAgents = [...enabledAgentIds].filter((id) => !agentMap.has(id));
+  if (missingAgents.length) {
+    throw new Error(`Selected agents are no longer available: ${missingAgents.join(', ')}`);
   }
+  const agentsToDeploy = [...enabledAgentIds].map((id) => agentMap.get(id)!);
+
+  await reconcileWorkspaceResources(workspacePath, assistants, skillsToDeploy, agentsToDeploy);
 }

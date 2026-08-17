@@ -1,0 +1,207 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import fse from 'fs-extra';
+
+import type { CodexAgentItem, SkillItem } from '../types.js';
+import { reconcileWorkspaceResources, ResourceConflictError } from './materializer.js';
+
+const skill: SkillItem = {
+  id: 'portable-skill',
+  name: 'portable-skill',
+  title: 'Portable Skill',
+  category: 'general',
+  description: 'Use when testing portable skill materialization.',
+  content: '# Portable skill\n\nFollow the test instructions.',
+  custom: false,
+};
+
+const agent: CodexAgentItem = {
+  id: 'code_reviewer',
+  name: 'code_reviewer',
+  category: 'general',
+  description: 'Use when reviewing a fixed diff.',
+  developerInstructions: 'Review correctness and security.',
+  sandboxMode: 'read-only',
+  custom: true,
+};
+
+describe('workspace resource materializer', () => {
+  let workspace: string;
+
+  beforeEach(async () => {
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-materializer-'));
+  });
+
+  afterEach(async () => {
+    await fse.remove(workspace);
+  });
+
+  it('installs portable skills and Codex agents idempotently', async () => {
+    const first = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
+    expect(first.installed).toContain('.agents/skills/portable-skill/SKILL.md');
+    expect(first.installed).toContain('.claude/skills/portable-skill/SKILL.md');
+    expect(first.installed).toContain('.codex/agents/code_reviewer.toml');
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills'))).toBe(false);
+    expect(await fs.readFile(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'), 'utf-8')).toContain('developer_instructions');
+
+    const second = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
+    expect(second.installed).toEqual([]);
+    expect(second.updated).toEqual([]);
+    expect(second.unchanged).toHaveLength(3);
+  });
+
+  it('removes only unchanged owned packages and permits reassignment', async () => {
+    await reconcileWorkspaceResources(workspace, ['codex'], [skill], [agent]);
+    const result = await reconcileWorkspaceResources(workspace, ['codex'], [], []);
+    expect(result.removed).toEqual(expect.arrayContaining([
+      '.agents/skills/portable-skill/SKILL.md',
+      '.codex/agents/code_reviewer.toml',
+    ]));
+    expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'))).toBe(false);
+
+    const reassigned = await reconcileWorkspaceResources(workspace, ['codex'], [skill], [agent]);
+    expect(reassigned.installed).toEqual(expect.arrayContaining([
+      '.agents/skills/portable-skill/SKILL.md',
+      '.codex/agents/code_reviewer.toml',
+    ]));
+  });
+
+  it('preserves modified managed files and reports drift before mutating anything', async () => {
+    await reconcileWorkspaceResources(workspace, ['codex'], [skill], [agent]);
+    const skillPath = path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md');
+    const agentPath = path.join(workspace, '.codex', 'agents', 'code_reviewer.toml');
+    await fs.writeFile(skillPath, 'user edit', 'utf-8');
+
+    await expect(reconcileWorkspaceResources(workspace, ['codex'], [], [])).rejects.toBeInstanceOf(ResourceConflictError);
+    expect(await fs.readFile(skillPath, 'utf-8')).toBe('user edit');
+    expect(await fse.pathExists(agentPath)).toBe(true);
+  });
+
+  it('restores the old target and lock when installing a staged replacement fails', async () => {
+    await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
+    const target = path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md');
+    const lockPath = path.join(workspace, '.nexusflow', 'resources.lock.json');
+    const beforeTarget = await fs.readFile(target, 'utf-8');
+    const beforeLock = await fs.readFile(lockPath, 'utf-8');
+    let renameCall = 0;
+
+    await expect(reconcileWorkspaceResources(
+      workspace,
+      ['codex'],
+      [{ ...skill, content: '# Changed\n\nNew instructions.' }],
+      [],
+      {
+        rename: async (source, destination) => {
+          renameCall += 1;
+          if (renameCall === 2) throw Object.assign(new Error('injected staged rename failure'), { code: 'EACCES' });
+          await fs.rename(source, destination);
+        },
+      },
+    )).rejects.toThrow(/injected staged rename failure/i);
+
+    expect(await fs.readFile(target, 'utf-8')).toBe(beforeTarget);
+    expect(await fs.readFile(lockPath, 'utf-8')).toBe(beforeLock);
+  });
+
+  it('rejects unmanaged files added inside an owned skill package', async () => {
+    await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
+    const extra = path.join(workspace, '.agents', 'skills', 'portable-skill', 'scripts', 'extra.sh');
+    await fse.ensureDir(path.dirname(extra));
+    await fs.writeFile(extra, 'echo unmanaged', 'utf-8');
+
+    await expect(reconcileWorkspaceResources(workspace, ['codex'], [skill], [])).rejects.toMatchObject({
+      conflicts: expect.arrayContaining([expect.stringContaining('is not owned by NexusFlow')]),
+    });
+    expect(await fs.readFile(extra, 'utf-8')).toBe('echo unmanaged');
+  });
+
+  it('rejects unmanaged collisions with zero target mutations', async () => {
+    const target = path.join(workspace, '.agents', 'skills', 'portable-skill');
+    await fse.ensureDir(target);
+    await fs.writeFile(path.join(target, 'README.md'), 'user owned', 'utf-8');
+
+    await expect(reconcileWorkspaceResources(workspace, ['codex'], [skill], [])).rejects.toBeInstanceOf(ResourceConflictError);
+    expect(await fs.readFile(path.join(target, 'README.md'), 'utf-8')).toBe('user owned');
+    expect(await fse.pathExists(path.join(target, 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.nexusflow', 'resources.lock.json'))).toBe(false);
+  });
+
+  it('rejects invalid identities before writing targets', async () => {
+    await expect(reconcileWorkspaceResources(
+      workspace,
+      ['codex'],
+      [{ ...skill, id: '../../escape', name: '../../escape' }],
+      [],
+    )).rejects.toThrow(/invalid skill identity/i);
+    expect(await fse.pathExists(path.join(workspace, 'escape'))).toBe(false);
+  });
+
+  it('normalizes legacy NexusFlow frontmatter without dropping package files', async () => {
+    const source = path.join(workspace, 'source-skill');
+    await fse.ensureDir(path.join(source, 'assets'));
+    await fs.writeFile(
+      path.join(source, 'SKILL.md'),
+      '---\nname: portable-skill\ndescription: Use when testing.\ntitle: Legacy title\ncategory: general\ntags: [test]\nmetadata:\n  owner: team\n---\n\n# Instructions\n',
+      'utf-8',
+    );
+    await fs.writeFile(path.join(source, 'assets', 'fixture.txt'), 'fixture', 'utf-8');
+
+    await reconcileWorkspaceResources(workspace, ['codex'], [{ ...skill, sourcePath: source }], []);
+
+    const installed = await fs.readFile(
+      path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(installed).not.toContain('title: Legacy title');
+    expect(installed).not.toContain('category: general');
+    expect(installed).toContain('owner: team');
+    expect(await fs.readFile(
+      path.join(workspace, '.agents', 'skills', 'portable-skill', 'assets', 'fixture.txt'),
+      'utf-8',
+    )).toBe('fixture');
+  });
+
+  it.skipIf(process.platform === 'win32')('preserves executable script modes and detects permission drift', async () => {
+    const source = path.join(workspace, 'executable-skill');
+    const sourceScript = path.join(source, 'scripts', 'check.sh');
+    await fse.ensureDir(path.dirname(sourceScript));
+    await fs.writeFile(
+      path.join(source, 'SKILL.md'),
+      '---\nname: portable-skill\ndescription: Use when checking executable scripts.\n---\n\n# Check\n',
+      'utf-8',
+    );
+    await fs.writeFile(sourceScript, '#!/bin/sh\necho ok\n', 'utf-8');
+    await fs.chmod(sourceScript, 0o755);
+
+    await reconcileWorkspaceResources(workspace, ['codex'], [{ ...skill, sourcePath: source }], []);
+    const targetScript = path.join(workspace, '.agents', 'skills', 'portable-skill', 'scripts', 'check.sh');
+    expect((await fs.stat(targetScript)).mode & 0o777).toBe(0o755);
+
+    await fs.chmod(targetScript, 0o644);
+    await expect(
+      reconcileWorkspaceResources(workspace, ['codex'], [{ ...skill, sourcePath: source }], []),
+    ).rejects.toBeInstanceOf(ResourceConflictError);
+  });
+
+  it('never trusts a tampered ownership lock to delete an arbitrary workspace file', async () => {
+    await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
+    const victim = path.join(workspace, 'victim.txt');
+    await fs.writeFile(victim, 'keep me', 'utf-8');
+    const lockPath = path.join(workspace, '.nexusflow', 'resources.lock.json');
+    const lock = JSON.parse(await fs.readFile(lockPath, 'utf-8')) as {
+      outputs: Array<{ path: string; hash: string }>;
+    };
+    lock.outputs[0].path = 'victim.txt';
+    lock.outputs[0].hash = '6cc7d5a6f9f85c209a8e18e5426de33f0db1df6d2a223c90a4a4e0e08e64b341';
+    await fs.writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, 'utf-8');
+
+    await expect(reconcileWorkspaceResources(workspace, ['codex'], [], [])).rejects.toThrow(
+      /invalid workspace resource ownership path/i,
+    );
+    expect(await fs.readFile(victim, 'utf-8')).toBe('keep me');
+  });
+});

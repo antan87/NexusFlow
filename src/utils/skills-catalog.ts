@@ -7,15 +7,29 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import fse from 'fs-extra';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 
 import { slugify } from './slug.js';
+import { acquireLock, createMutationQueue } from '../core/locks.js';
+import {
+  formatValidationError,
+  resourceIdSchema,
+  skillCategorySchema,
+  skillFrontmatterSchema,
+  workspaceResourcesConfigSchema,
+} from '../resources/contracts.js';
+import {
+  assertNoLinkedPathComponents,
+  assertPathWithin,
+  assertPathIsNotLink,
+  atomicWriteJson,
+} from '../resources/fs-safety.js';
 import type {
   SkillCategory,
   SkillItem,
   SkillParameter,
-  AgentPersona,
   WorkspaceSkillsConfig,
 } from '../types.js';
 
@@ -89,12 +103,29 @@ export function serializeSkillMarkdown(
 
 // ─── Security Helpers ─────────────────────────────────────────────────────
 
-function assertWithinRoot(rootDir: string, targetPath: string): void {
-  const resolvedRoot = path.resolve(rootDir);
-  const resolvedTarget = path.resolve(targetPath);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(resolvedRoot + path.sep)) {
-    throw new Error(`Security Violation: Path "${targetPath}" is outside allowed root directory.`);
+const runCatalogMutation = createMutationQueue();
+const runWorkspaceConfigMutation = createMutationQueue();
+
+export class WorkspaceResourceRevisionError extends Error {
+  constructor(expected: number, current: number) {
+    super(`Workspace resource configuration changed (expected revision ${expected}, current ${current}).`);
+    this.name = 'WorkspaceResourceRevisionError';
   }
+}
+
+async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
+  return runCatalogMutation(async () => {
+    const release = await acquireLock(path.join(getNexusFlowHome(), '.locks', 'resource-catalog.lock'), {
+      staleMs: 60_000,
+      timeoutMs: 10_000,
+      timeoutMessage: 'Timed out waiting for the resource catalog lock.',
+    });
+    try {
+      return await operation();
+    } finally {
+      await release();
+    }
+  });
 }
 
 // ─── Default Template Categories & Skills ─────────────────────────────────
@@ -397,16 +428,16 @@ Proactively prevents committing confidential credentials to version control.
   {
     id: 'security-auditor',
     name: 'security-auditor',
-    title: 'Security Auditor Subagent',
+    title: 'Security Audit Playbook',
     category: 'security-auditing',
     description:
-      'Specialized security auditor subagent specification that evaluates code for OWASP Top 10 vulnerabilities.',
+      'Use when auditing code for OWASP Top 10 vulnerabilities, access-control gaps, injection, or cryptographic failures.',
     tags: ['security', 'audit', 'owasp'],
     allowedTools: ['view_file', 'grep_search'],
     custom: false,
-    content: `# Security Auditor Subagent
+    content: `# Security Audit Playbook
 
-Persona and instructions for conducting deep application security audits.
+Instructions for conducting deep application security audits.
 
 ## Focus Areas
 1. **Injection Vectors**: SQL, Command, LDAP, and XSS vulnerabilities.
@@ -434,6 +465,48 @@ export function getUserSkillsDir(): string {
   return path.join(getNexusFlowHome(), 'skills');
 }
 
+const PORTABLE_SKILL_SUPPORT_DIRECTORIES = new Set(['scripts', 'references', 'assets', 'agents']);
+
+async function copySkillSupportTree(sourceDir: string, targetDir: string): Promise<void> {
+  await fse.ensureDir(targetDir);
+  for (const entry of await fs.readdir(sourceDir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Linked skill support files are not allowed: ${entry.name}`);
+    }
+    const source = path.join(sourceDir, entry.name);
+    const target = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      await copySkillSupportTree(source, target);
+    } else if (entry.isFile()) {
+      await fs.copyFile(source, target);
+    } else {
+      throw new Error(`Unsupported skill support entry: ${entry.name}`);
+    }
+  }
+}
+
+async function readUserSkillCategories(userPath: string): Promise<SkillCategory[]> {
+  if (!(await fse.pathExists(userPath))) {
+    return [];
+  }
+
+  const data: unknown = await fse.readJson(userPath);
+  if (!Array.isArray(data)) {
+    throw new Error('Custom skill categories must be stored as an array.');
+  }
+
+  const categories: SkillCategory[] = [];
+  for (const item of data) {
+    const parsed = skillCategorySchema.safeParse(item);
+    if (!parsed.success) {
+      console.warn(`Ignoring invalid custom skill category: ${formatValidationError(parsed.error)}`);
+      continue;
+    }
+    categories.push(parsed.data);
+  }
+  return categories;
+}
+
 
 /**
  * Loads all skill categories (merging built-in templates and user custom categories).
@@ -450,17 +523,13 @@ export async function getSkillCategories(): Promise<SkillCategory[]> {
   try {
     const userPath = getUserCategoriesPath();
     if (await fse.pathExists(userPath)) {
-      const data = await fse.readJson(userPath);
-      if (Array.isArray(data)) {
-        for (const item of data) {
-          if (item && item.id) {
-            categoryMap.set(item.id, {
-              ...item,
-              custom: item.custom !== undefined ? item.custom : true,
-              isTemplate: item.isTemplate !== undefined ? item.isTemplate : false,
-            });
-          }
-        }
+      const data = await readUserSkillCategories(userPath);
+      for (const item of data) {
+        categoryMap.set(item.id, {
+          ...item,
+          custom: item.custom !== undefined ? item.custom : true,
+          isTemplate: item.isTemplate !== undefined ? item.isTemplate : false,
+        });
       }
     }
   } catch (err) {
@@ -482,39 +551,33 @@ export async function saveSkillCategory(
     throw new Error('Category name cannot be empty');
   }
 
-  const existingCategories = await getSkillCategories();
-  const existing = existingCategories.find((c) => c.id === id);
+  return withCatalogLock(async () => {
+    const userPath = getUserCategoriesPath();
+    await fse.ensureDir(path.dirname(userPath));
+    const userItems = await readUserSkillCategories(userPath);
+    const existing = userItems.find((item) => item.id === id)
+      ?? DEFAULT_CATEGORIES.find((item) => item.id === id);
 
-  const updated: SkillCategory = {
-    id,
-    name: category.name.trim(),
-    description: category.description?.trim() || '',
-    icon: category.icon || existing?.icon || 'folder',
-    color: category.color || existing?.color || '#3b82f6',
-    custom: true,
-    isTemplate: existing?.isTemplate || false,
-    skills: category.skills || existing?.skills || [],
-  };
-
-  const userPath = getUserCategoriesPath();
-  await fse.ensureDir(path.dirname(userPath));
-
-  // Read existing custom items
-  let userItems: SkillCategory[] = [];
-  try {
-    if (await fse.pathExists(userPath)) {
-      const parsed = await fse.readJson(userPath);
-      if (Array.isArray(parsed)) {
-        userItems = parsed;
-      }
+    const candidate: SkillCategory = {
+      id,
+      name: category.name.trim(),
+      description: category.description?.trim() || '',
+      icon: category.icon || existing?.icon || 'folder',
+      color: category.color || existing?.color || '#3b82f6',
+      custom: true,
+      isTemplate: existing?.isTemplate || false,
+      skills: category.skills || existing?.skills || [],
+    };
+    const parsed = skillCategorySchema.safeParse(candidate);
+    if (!parsed.success) {
+      throw new Error(`Invalid skill category: ${formatValidationError(parsed.error)}`);
     }
-  } catch {}
 
-  const filtered = userItems.filter((c) => c.id !== id);
-  filtered.push(updated);
-
-  await fse.writeJson(userPath, filtered, { spaces: 2 });
-  return updated;
+    const filtered = userItems.filter((item) => item.id !== id);
+    filtered.push(parsed.data);
+    await atomicWriteJson(userPath, filtered);
+    return parsed.data;
+  });
 }
 
 /**
@@ -526,31 +589,24 @@ export async function deleteSkillCategory(id: string): Promise<void> {
     throw new Error('Invalid category ID');
   }
 
-  const userPath = getUserCategoriesPath();
-  let userItems: SkillCategory[] = [];
-  try {
-    if (await fse.pathExists(userPath)) {
-      const parsed = await fse.readJson(userPath);
-      if (Array.isArray(parsed)) {
-        userItems = parsed;
-      }
+  await withCatalogLock(async () => {
+    const userPath = getUserCategoriesPath();
+    const userItems = await readUserSkillCategories(userPath);
+    const isCustomized = userItems.some((item) => item.id === sanitizedId);
+    const defaultTemplate = DEFAULT_CATEGORIES.find((item) => item.id === sanitizedId);
+
+    if (!isCustomized && defaultTemplate) {
+      throw new Error('Cannot delete built-in template categories');
     }
-  } catch {}
 
-  const isCustomized = userItems.some((c) => c.id === sanitizedId);
-  const defaultTemplate = DEFAULT_CATEGORIES.find((c) => c.id === sanitizedId);
+    if (!isCustomized && !defaultTemplate) {
+      throw new Error('Category not found');
+    }
 
-  if (!isCustomized && defaultTemplate) {
-    throw new Error('Cannot delete built-in template categories');
-  }
-
-  if (!isCustomized && !defaultTemplate) {
-    throw new Error('Category not found');
-  }
-
-  // Remove from custom file (if it was an override, this resets it back to built-in default)
-  const filtered = userItems.filter((c) => c.id !== sanitizedId);
-  await fse.writeJson(userPath, filtered, { spaces: 2 });
+    // Removing an override resets it back to the built-in category.
+    const filtered = userItems.filter((item) => item.id !== sanitizedId);
+    await atomicWriteJson(userPath, filtered);
+  });
 }
 
 // ─── Skills Management ────────────────────────────────────────────────────
@@ -558,7 +614,12 @@ export async function deleteSkillCategory(id: string): Promise<void> {
 /**
  * Reads a skill package from a directory containing SKILL.md.
  */
-async function loadSkillFromDir(skillDir: string, custom: boolean): Promise<SkillItem | null> {
+async function loadSkillFromDir(
+  skillDir: string,
+  custom: boolean,
+  catalogRoot = path.dirname(skillDir),
+): Promise<SkillItem | null> {
+  await assertNoLinkedPathComponents(catalogRoot, skillDir);
   const skillFile = path.join(skillDir, 'SKILL.md');
   if (!(await fse.pathExists(skillFile))) {
     return null;
@@ -566,19 +627,45 @@ async function loadSkillFromDir(skillDir: string, custom: boolean): Promise<Skil
 
   const raw = await fs.readFile(skillFile, 'utf-8');
   const { metadata, content } = parseSkillMarkdown(raw);
-  const id = (metadata.name as string) || path.basename(skillDir);
+  const parsedMetadata = skillFrontmatterSchema.safeParse(metadata);
+  if (!parsedMetadata.success) {
+    throw new Error(`Invalid SKILL.md: ${formatValidationError(parsedMetadata.error)}`);
+  }
+  const id = parsedMetadata.data.name;
+  const directoryId = path.basename(skillDir);
+  if (id !== directoryId) {
+    throw new Error(`Skill name "${id}" must match directory identity "${directoryId}".`);
+  }
   const name = id;
+  const nexusflowMetadata =
+    parsedMetadata.data.metadata &&
+    typeof parsedMetadata.data.metadata.nexusflow === 'object' &&
+    parsedMetadata.data.metadata.nexusflow !== null
+      ? (parsedMetadata.data.metadata.nexusflow as Record<string, unknown>)
+      : {};
   const title =
-    (metadata.title as string) ||
+    parsedMetadata.data.title ||
+    (typeof nexusflowMetadata.title === 'string' ? nexusflowMetadata.title : undefined) ||
     name
       .split('-')
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
-  const category = (metadata.category as string) || 'general';
-  const description = (metadata.description as string) || '';
-  const tags = (metadata.tags as string[]) || [];
-  const allowedTools =
-    (metadata['allowed-tools'] as string[]) || (metadata.allowedTools as string[]) || [];
+  const category =
+    parsedMetadata.data.category ||
+    (typeof nexusflowMetadata.category === 'string' ? nexusflowMetadata.category : undefined) ||
+    'general';
+  const description = parsedMetadata.data.description;
+  const tags =
+    parsedMetadata.data.tags ||
+    (Array.isArray(nexusflowMetadata.tags)
+      ? nexusflowMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
+      : []);
+  const rawAllowedTools = parsedMetadata.data['allowed-tools'];
+  const allowedTools = Array.isArray(rawAllowedTools)
+    ? rawAllowedTools
+    : rawAllowedTools
+      ? rawAllowedTools.split(/\s+/).filter(Boolean)
+      : [];
 
   // Inspect references/ and scripts/ if present
   const referencesDir = path.join(skillDir, 'references');
@@ -589,20 +676,32 @@ async function loadSkillFromDir(skillDir: string, custom: boolean): Promise<Skil
 
   if (await fse.pathExists(referencesDir)) {
     try {
-      const files = await fs.readdir(referencesDir);
-      for (const f of files) {
-        references.push({ name: f, relativePath: path.join('references', f) });
+      await assertNoLinkedPathComponents(skillDir, referencesDir);
+      const files = await fs.readdir(referencesDir, { withFileTypes: true });
+      for (const file of files) {
+        if (file.isSymbolicLink()) throw new Error(`Linked skill files are not allowed: ${file.name}`);
+        if (file.isFile()) {
+          references.push({ name: file.name, relativePath: path.join('references', file.name) });
+        }
       }
-    } catch {}
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Linked skill files')) throw error;
+    }
   }
 
   if (await fse.pathExists(scriptsDir)) {
     try {
-      const files = await fs.readdir(scriptsDir);
-      for (const f of files) {
-        scripts.push({ name: f, relativePath: path.join('scripts', f) });
+      await assertNoLinkedPathComponents(skillDir, scriptsDir);
+      const files = await fs.readdir(scriptsDir, { withFileTypes: true });
+      for (const file of files) {
+        if (file.isSymbolicLink()) throw new Error(`Linked skill files are not allowed: ${file.name}`);
+        if (file.isFile()) {
+          scripts.push({ name: file.name, relativePath: path.join('scripts', file.name) });
+        }
       }
-    } catch {}
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Linked skill files')) throw error;
+    }
   }
 
   return {
@@ -624,7 +723,7 @@ async function loadSkillFromDir(skillDir: string, custom: boolean): Promise<Skil
 /**
  * Retrieves all available skills (built-in templates + user directory + optional workspace directory).
  */
-export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]> {
+export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]> {
   const skillMap = new Map<string, SkillItem>();
 
   // 1. Built-in template skills
@@ -636,50 +735,30 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
   const userSkillsDir = getUserSkillsDir();
   if (await fse.pathExists(userSkillsDir)) {
     try {
+      await assertPathIsNotLink(userSkillsDir);
       const entries = await fs.readdir(userSkillsDir, { withFileTypes: true });
       if (Array.isArray(entries)) {
         for (const entry of entries) {
           const isDir = typeof entry === 'string' ? true : entry.isDirectory ? entry.isDirectory() : true;
           const entryName = typeof entry === 'string' ? entry : entry.name;
           if (isDir) {
-            const loaded = await loadSkillFromDir(path.join(userSkillsDir, entryName), true);
-            if (loaded) {
-              skillMap.set(loaded.id, loaded);
+            try {
+              const loaded = await loadSkillFromDir(path.join(userSkillsDir, entryName), true, userSkillsDir);
+              if (loaded) {
+                if (skillMap.has(loaded.id)) {
+                  throw new Error(`A resource named "${loaded.id}" already exists in the built-in catalog.`);
+                }
+                skillMap.set(loaded.id, loaded);
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              console.warn(`Skipping invalid skill "${entryName}": ${message}`);
             }
           }
         }
       }
     } catch (err) {
       console.error('Failed to load user skills:', err);
-    }
-  }
-
-  // 3. Workspace skills (.agents/skills/, .claude/skills/, .codex/skills/)
-  if (workspacePath) {
-    const candidateDirs = [
-      path.join(workspacePath, '.agents', 'skills'),
-      path.join(workspacePath, '.claude', 'skills'),
-      path.join(workspacePath, '.codex', 'skills'),
-    ];
-    for (const cDir of candidateDirs) {
-      if (await fse.pathExists(cDir)) {
-        try {
-          const entries = await fs.readdir(cDir, { withFileTypes: true });
-          if (Array.isArray(entries)) {
-            for (const entry of entries) {
-              const isDir = typeof entry === 'string' ? true : entry.isDirectory ? entry.isDirectory() : true;
-              const entryName = typeof entry === 'string' ? entry : entry.name;
-              if (isDir) {
-                const isDefault = DEFAULT_SKILLS.some((ds) => ds.id === entryName);
-                const loaded = await loadSkillFromDir(path.join(cDir, entryName), !isDefault);
-                if (loaded) {
-                  skillMap.set(loaded.id, loaded);
-                }
-              }
-            }
-          }
-        } catch {}
-      }
     }
   }
 
@@ -691,110 +770,140 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
  */
 export async function saveSkill(skill: Partial<SkillItem> & { name: string; content: string }): Promise<SkillItem> {
   const rawId = skill.id || skill.name;
-  if (!rawId || rawId.includes('/') || rawId.includes('\\') || rawId.includes('..')) {
-    throw new Error('Invalid skill ID format.');
+  const idResult = resourceIdSchema.safeParse(rawId);
+  if (!idResult.success) {
+    throw new Error(`Invalid skill ID: ${formatValidationError(idResult.error)}`);
   }
-  const id = slugify(rawId);
-  if (!id) {
-    throw new Error('Skill name cannot be empty');
+  if (idResult.data !== rawId) throw new Error('Invalid skill ID format.');
+  const id = idResult.data;
+  const nameResult = resourceIdSchema.safeParse(skill.name);
+  if (!nameResult.success || nameResult.data !== skill.name || nameResult.data !== id) {
+    throw new Error('Skill id and name must match.');
   }
-
-  const userSkillsDir = path.resolve(getUserSkillsDir());
-  await fse.ensureDir(userSkillsDir);
-
-  const targetDir = path.resolve(userSkillsDir, id);
-  assertWithinRoot(userSkillsDir, targetDir);
-  await fse.ensureDir(targetDir);
-
-
-  const metadata: Record<string, unknown> = {
-    name: id,
-    title: skill.title || id,
-    category: skill.category || 'general',
-    description: skill.description || '',
-  };
-
-  if (skill.tags && skill.tags.length > 0) {
-    metadata.tags = skill.tags;
+  if (DEFAULT_SKILLS.some((builtIn) => builtIn.id === id)) {
+    throw new Error('Built-in skills cannot be overwritten. Create a custom skill with a new identifier.');
   }
-  if (skill.allowedTools && skill.allowedTools.length > 0) {
-    metadata['allowed-tools'] = skill.allowedTools;
-  }
-  if (skill.parameters && skill.parameters.length > 0) {
-    metadata.parameters = skill.parameters;
-  }
+  const description = skill.description?.trim();
+  if (!description) throw new Error('Skill description is required.');
+  if (!skill.content.trim()) throw new Error('Skill content is required.');
 
-  const rawFile = serializeSkillMarkdown(metadata, skill.content);
-  await fs.writeFile(path.join(targetDir, 'SKILL.md'), rawFile, 'utf-8');
+  return withCatalogLock(async () => {
+    const userSkillsDir = path.resolve(getUserSkillsDir());
+    await fse.ensureDir(userSkillsDir);
+    await assertPathIsNotLink(userSkillsDir);
+    const targetDir = assertPathWithin(userSkillsDir, path.join(userSkillsDir, id));
+    await assertNoLinkedPathComponents(userSkillsDir, targetDir);
 
-  // Handle supporting references/scripts with basename path validation
-  if (skill.references && Array.isArray(skill.references)) {
-    const refDir = path.join(targetDir, 'references');
-    await fse.ensureDir(refDir);
-    for (const ref of skill.references) {
-      if (ref.name && ref.content !== undefined) {
-        const safeName = path.basename(ref.name);
-        if (safeName) {
-          const filePath = path.join(refDir, safeName);
-          assertWithinRoot(refDir, filePath);
-          await fs.writeFile(filePath, ref.content, 'utf-8');
+    const stagingDir = await fs.mkdtemp(path.join(userSkillsDir, `.staging-${id}-`));
+    const backupDir = path.join(userSkillsDir, `.backup-${id}-${randomUUID()}`);
+    let movedExisting = false;
+    try {
+      let existingFrontmatter: ReturnType<typeof skillFrontmatterSchema.parse> | undefined;
+      if (await fse.pathExists(targetDir)) {
+        await assertNoLinkedPathComponents(userSkillsDir, targetDir);
+        for (const entry of await fs.readdir(targetDir, { withFileTypes: true })) {
+          if (entry.isSymbolicLink()) {
+            throw new Error(`Linked skill package entries are not allowed: ${entry.name}`);
+          }
+          if (entry.name === 'SKILL.md') continue;
+          if (!entry.isDirectory() || !PORTABLE_SKILL_SUPPORT_DIRECTORIES.has(entry.name)) {
+            throw new Error(`Unsupported top-level skill package entry: ${entry.name}`);
+          }
+          await copySkillSupportTree(path.join(targetDir, entry.name), path.join(stagingDir, entry.name));
+        }
+        const currentSkillMarkdown = parseSkillMarkdown(
+          await fs.readFile(path.join(targetDir, 'SKILL.md'), 'utf-8'),
+        );
+        const parsedCurrentFrontmatter = skillFrontmatterSchema.safeParse(currentSkillMarkdown.metadata);
+        if (parsedCurrentFrontmatter.success) existingFrontmatter = parsedCurrentFrontmatter.data;
+      }
+
+      const existingNexusFlowMetadata =
+        existingFrontmatter?.metadata &&
+        typeof existingFrontmatter.metadata.nexusflow === 'object' &&
+        existingFrontmatter.metadata.nexusflow !== null
+          ? existingFrontmatter.metadata.nexusflow as Record<string, unknown>
+          : {};
+      const metadata: Record<string, unknown> = {
+        name: id,
+        description,
+        license: existingFrontmatter?.license,
+        compatibility: existingFrontmatter?.compatibility,
+        metadata: {
+          ...(existingFrontmatter?.metadata ?? {}),
+          nexusflow: {
+            ...existingNexusFlowMetadata,
+            title: skill.title || id,
+            category: skill.category || 'general',
+            tags: skill.tags || [],
+          },
+        },
+      };
+      const allowedTools = skill.allowedTools === undefined
+        ? existingFrontmatter?.['allowed-tools']
+        : skill.allowedTools;
+      if (allowedTools?.length) metadata['allowed-tools'] = allowedTools;
+      await fs.writeFile(
+        path.join(stagingDir, 'SKILL.md'),
+        serializeSkillMarkdown(metadata, skill.content),
+        'utf-8',
+      );
+
+      for (const [directory, files] of [
+        ['references', skill.references],
+        ['scripts', skill.scripts],
+      ] as const) {
+        if (files === undefined) continue;
+        const supportDir = path.join(stagingDir, directory);
+        await fse.remove(supportDir);
+        if (!files.length) continue;
+        await fse.ensureDir(supportDir);
+        for (const file of files) {
+          if (!file.name || path.basename(file.name) !== file.name || file.content === undefined) {
+            throw new Error(`Invalid ${directory} file name: ${file.name || '(empty)'}`);
+          }
+          await fs.writeFile(path.join(supportDir, file.name), file.content, 'utf-8');
         }
       }
-    }
-  }
 
-  if (skill.scripts && Array.isArray(skill.scripts)) {
-    const scriptsDir = path.join(targetDir, 'scripts');
-    await fse.ensureDir(scriptsDir);
-    for (const sc of skill.scripts) {
-      if (sc.name && sc.content !== undefined) {
-        const safeName = path.basename(sc.name);
-        if (safeName) {
-          const filePath = path.join(scriptsDir, safeName);
-          assertWithinRoot(scriptsDir, filePath);
-          await fs.writeFile(filePath, sc.content, 'utf-8');
-        }
+      if (await fse.pathExists(targetDir)) {
+        await assertNoLinkedPathComponents(userSkillsDir, targetDir);
+        await fs.rename(targetDir, backupDir);
+        movedExisting = true;
       }
+      await fs.rename(stagingDir, targetDir);
+      if (movedExisting) await fse.remove(backupDir).catch(() => {});
+    } catch (error) {
+      await fse.remove(stagingDir).catch(() => {});
+      if (movedExisting && !(await fse.pathExists(targetDir)) && (await fse.pathExists(backupDir))) {
+        await fs.rename(backupDir, targetDir).catch(() => {});
+      }
+      throw error;
     }
-  }
 
-  const loaded = await loadSkillFromDir(targetDir, true);
-  return (
-    loaded || {
-      id,
-      name: id,
-      title: (metadata.title as string) || id,
-      category: (metadata.category as string) || 'general',
-      description: (metadata.description as string) || '',
-      tags: skill.tags,
-      allowedTools: skill.allowedTools,
-      content: skill.content,
-      custom: true,
-      sourcePath: targetDir,
-    }
-  );
+    const loaded = await loadSkillFromDir(targetDir, true, userSkillsDir);
+    if (!loaded) throw new Error('Saved skill could not be loaded.');
+    return loaded;
+  });
 }
 
 /**
  * Deletes a user custom skill safely.
  */
 export async function deleteSkill(id: string): Promise<void> {
-  if (!id || id.includes('/') || id.includes('\\') || id.includes('..')) {
+  const idResult = resourceIdSchema.safeParse(id);
+  if (!idResult.success || idResult.data !== id) {
     throw new Error('Invalid skill ID format.');
   }
-  const sanitizedId = slugify(id);
-  if (!sanitizedId || sanitizedId !== id) {
-    throw new Error('Invalid skill ID format.');
-  }
-
-  const userSkillsDir = path.resolve(getUserSkillsDir());
-  const targetDir = path.resolve(userSkillsDir, sanitizedId);
-  assertWithinRoot(userSkillsDir, targetDir);
-
-
-  if (await fse.pathExists(targetDir)) {
+  await withCatalogLock(async () => {
+    const userSkillsDir = path.resolve(getUserSkillsDir());
+    await fse.ensureDir(userSkillsDir);
+    await assertPathIsNotLink(userSkillsDir);
+    const targetDir = assertPathWithin(userSkillsDir, path.join(userSkillsDir, id));
+    if (!(await fse.pathExists(targetDir))) throw new Error('Skill not found.');
+    await assertNoLinkedPathComponents(userSkillsDir, targetDir);
     await fse.remove(targetDir);
-  }
+  });
 }
 
 // ─── Workspace Skills Assignment Config ────────────────────────────────────
@@ -803,21 +912,28 @@ export async function deleteSkill(id: string): Promise<void> {
  * Loads workspace skills assignment config from `.nexusflow/skills.json` or returns defaults.
  */
 export async function getWorkspaceSkillsConfig(workspacePath: string): Promise<WorkspaceSkillsConfig> {
-  const configFile = path.join(workspacePath, '.nexusflow', 'skills.json');
+  const canonicalWorkspace = await fs.realpath(workspacePath);
+  const configFile = path.join(canonicalWorkspace, '.nexusflow', 'skills.json');
   if (await fse.pathExists(configFile)) {
-    try {
-      const data = await fse.readJson(configFile);
-      return {
-        enabledSkills: Array.isArray(data.enabledSkills) ? data.enabledSkills : [],
-        enabledCategories: Array.isArray(data.enabledCategories) ? data.enabledCategories : [],
-      };
-    } catch {}
+    await assertNoLinkedPathComponents(canonicalWorkspace, configFile);
+    const rawData = await fse.readJson(configFile) as unknown;
+    const legacyData =
+      typeof rawData === 'object' && rawData !== null && !('schemaVersion' in rawData)
+        ? { schemaVersion: 1, revision: 0, ...rawData }
+        : rawData;
+    const result = workspaceResourcesConfigSchema.safeParse(legacyData);
+    if (!result.success) {
+      throw new Error(`Invalid workspace resource configuration: ${formatValidationError(result.error)}`);
+    }
+    return result.data;
   }
 
-  // Default: enable all template skills
   return {
-    enabledSkills: DEFAULT_SKILLS.map((s) => s.id),
-    enabledCategories: DEFAULT_CATEGORIES.map((c) => c.id),
+    schemaVersion: 1,
+    revision: 0,
+    enabledSkills: [],
+    enabledAgents: [],
+    enabledCategories: [],
   };
 }
 
@@ -827,8 +943,40 @@ export async function getWorkspaceSkillsConfig(workspacePath: string): Promise<W
 export async function saveWorkspaceSkillsConfig(
   workspacePath: string,
   config: WorkspaceSkillsConfig,
-): Promise<void> {
-  const configDir = path.join(workspacePath, '.nexusflow');
-  await fse.ensureDir(configDir);
-  await fse.writeJson(path.join(configDir, 'skills.json'), config, { spaces: 2 });
+  expectedRevision?: number,
+): Promise<WorkspaceSkillsConfig> {
+  return runWorkspaceConfigMutation(async () => {
+    const canonicalWorkspace = await fs.realpath(workspacePath);
+    const configDir = path.join(canonicalWorkspace, '.nexusflow');
+    await fse.ensureDir(configDir);
+    await assertNoLinkedPathComponents(canonicalWorkspace, configDir);
+    await assertPathIsNotLink(configDir);
+
+    const release = await acquireLock(path.join(configDir, 'resource-config.lock'), {
+      staleMs: 60_000,
+      timeoutMs: 10_000,
+      timeoutMessage: 'Timed out waiting for the workspace resource configuration lock.',
+    });
+    try {
+      const current = await getWorkspaceSkillsConfig(canonicalWorkspace);
+      const currentRevision = current.revision ?? 0;
+      if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+        throw new WorkspaceResourceRevisionError(expectedRevision, currentRevision);
+      }
+      const parsed = workspaceResourcesConfigSchema.safeParse({
+        schemaVersion: 1,
+        revision: currentRevision + 1,
+        enabledSkills: config.enabledSkills,
+        enabledAgents: config.enabledAgents ?? current.enabledAgents ?? [],
+        enabledCategories: config.enabledCategories ?? [],
+      });
+      if (!parsed.success) {
+        throw new Error(`Invalid workspace resource configuration: ${formatValidationError(parsed.error)}`);
+      }
+      await atomicWriteJson(path.join(configDir, 'skills.json'), parsed.data);
+      return parsed.data;
+    } finally {
+      await release();
+    }
+  });
 }

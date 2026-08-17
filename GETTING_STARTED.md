@@ -115,12 +115,14 @@ You don't need to open five terminal windows to start your backend, frontend, da
   nexusflow stop
   ```
 
-### 6. Equip Reusable Agent Skills & Category Boxes
-Equip your AI assistants with structured playbooks using the **Skills & Agents Hub**:
-- Navigate to the **Skills & Agents** tab in the Web Dashboard.
+### 6. Equip Reusable Skills and Codex Agents
+Equip your AI assistants with reusable resources using the **Resource Library**:
+- Navigate to the **Resource Library** in the Web Dashboard and choose Skills or Codex Agents.
 - Browse built-in category templates (Pull Request review, Testing & QA, Cross-Repo package loop, Database migrations, Security audit).
 - Drag and drop cards to re-categorize skills, create custom categories, or author new skills with Markdown playbooks and auxiliary scripts.
-- Selectively enable or disable skills for your active workspace; when refreshed, NexusFlow automatically compiles and distributes them to `.agents/skills/`, `.claude/skills/`, `.cursor/rules/`, `.github/instructions/`, and `.codex/skills/`.
+- Create or import basic Codex custom-agent TOML definitions and reuse them across workspaces.
+- Save a workspace selection, then refresh. Portable skills are installed to `.agents/skills/` (and `.claude/skills/` for Claude); Codex agents are installed to `.codex/agents/`.
+- NexusFlow records owned output hashes in `.nexusflow/resources.lock.json`, refuses unmanaged collisions, and never removes a locally modified managed file.
 
 ### 7. Capture Learnings as You Go
 As you (or your AI assistant) make decisions and hit gotchas, record them so they aren't lost between sessions:

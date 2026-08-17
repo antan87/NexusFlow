@@ -5,7 +5,8 @@
  * `tsc` emits only JS, so `resources/` is copied into `dist/` by
  * `scripts/copy-resources.mjs` at build time. That means the directory's position
  * relative to a module differs depending on how the code is running: from
- * `dist/utils` it is one level up, but from `src/utils` under vitest it is two.
+ * `dist/utils` it is one level up under `static-resources`, but from `src/utils`
+ * under vitest it is two levels up under the source `resources` directory.
  * Resolving a single hard-coded relative path therefore works in one context and
  * silently finds nothing in the other — and because the loaders treat a missing
  * directory as "no resources", the failure is invisible.
@@ -50,9 +51,9 @@ export function resourcePathCandidates(moduleDir: string, ...segments: string[])
     path.resolve(moduleDir, '..', '..', 'resources', ...segments),
     // Three levels up, for a module one directory deeper, e.g. src/core/foo.
     path.resolve(moduleDir, '..', '..', '..', 'resources', ...segments),
-    // One level up. From dist/utils this is `dist/resources/`, the copy that
+    // One level up. From dist/utils this is `dist/static-resources/`, the copy that
     // `scripts/copy-resources.mjs` makes — reached only when the package root has
     // no `resources/`, so it is a fallback rather than the primary path.
-    path.resolve(moduleDir, '..', 'resources', ...segments),
+    path.resolve(moduleDir, '..', 'static-resources', ...segments),
   ];
 }

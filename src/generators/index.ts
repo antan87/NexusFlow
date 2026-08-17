@@ -299,16 +299,10 @@ export async function generateContextFiles(
     );
   }
 
-  // Generate skills files for selected assistants
-  try {
-    await generateSkills(ctx, assistants, workspacePath);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(
-      chalk.red('  ✖'),
-      `Failed to generate skills: ${message}`,
-    );
-  }
+  // Resource materialization is transactional and owns assistant-discovered
+  // files. Propagate failures so callers never report a partially applied
+  // workspace as successful.
+  await generateSkills(ctx, assistants, workspacePath);
 }
 
 // Re-export individual generators for direct use
