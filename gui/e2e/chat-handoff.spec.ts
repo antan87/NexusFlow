@@ -249,7 +249,7 @@ test.describe('embedded harness handoff', () => {
       expect(frames[0]).toEqual({
         type: 'start',
         command: `${scenario.assistant}-cli`,
-        cwd: 'C:/dev/nexusflow',
+        cwd: 'C:/ws/feature-x',
         sessionId: scenario.id,
         resume: true,
       });
@@ -622,7 +622,7 @@ test.describe('embedded harness handoff', () => {
     expect(frames.filter(frame => frame.type === 'start')).toEqual([{
       type: 'start',
       command: 'codex-cli',
-      cwd: 'C:/dev/nexusflow',
+      cwd: 'C:/ws/feature-x',
       sessionId,
       resume: true,
     }]);
@@ -914,7 +914,7 @@ test.describe('embedded harness handoff', () => {
     await page.waitForTimeout(100);
 
     await expect(page.getByLabel('Select Provider')).toContainText('Codex');
-    expect(frames[0]).toMatchObject({ command: 'codex-cli', cwd: 'C:/dev/nexusflow' });
+    expect(frames[0]).toMatchObject({ command: 'codex-cli', cwd: 'C:/ws/feature-x' });
     expect(frames[1]).toMatchObject({
       type: 'input',
       input: 'Use the bound provider',

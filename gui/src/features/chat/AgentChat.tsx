@@ -605,9 +605,9 @@ export function AgentChat({ ws }: AgentChatProps) {
       const startPayload: Record<string, unknown> = {
         type: 'start',
         command: providerId,
-        // Run the harness in the active git worktree so repository-aware tools
-        // and commands target source instead of the outer coordination folder.
-        cwd: ws.repos[0] || ws.workspacePath,
+        // Sessions always run in the workspace dir — that's where the
+        // generated context files live (see src/utils/feature.ts).
+        cwd: ws.workspacePath,
       };
       const nextSessions = { ...sessionsRef.current };
       if (options.resetSession) delete nextSessions[providerId];
