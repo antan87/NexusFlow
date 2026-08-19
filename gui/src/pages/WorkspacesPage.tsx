@@ -402,14 +402,16 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                 sessionProps.setTranscript([]);
                                 sessionProps.fetchSessionTranscript(sess.assistant, sess.id);
                               }}
+                              title="Inspect read-only transcript log"
                             >
                               <MessageSquare size={12} />
-                              <span>Chat</span>
+                              <span>Transcript</span>
                             </Button>
                             <Button
-                              variant="secondary"
+                              variant="default"
                               size="sm"
                               onClick={() => void launchHarnessTerminal(sess.assistant)}
+                              title="Resume in terminal"
                             >
                               <Terminal size={12} />
                               <span>Resume</span>

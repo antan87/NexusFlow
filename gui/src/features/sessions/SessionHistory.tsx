@@ -7,7 +7,6 @@ import {
   MessageSquare,
   Terminal,
   Plus,
-  Check,
   Sparkles,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
@@ -30,7 +29,7 @@ interface SessionHistoryProps {
   setTranscript: (val: TranscriptMessage[]) => void;
   fetchSessionTranscript: (assistant: string, sessionId: string) => Promise<void>;
   handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
 }
 
 export const getResumeCliCommand = (assistant: string, sessionId: string): string => {
@@ -73,7 +72,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const [openingDesktopId, setOpeningDesktopId] = useState<string | null>(null);
   const [resumingTerminalId, setResumingTerminalId] = useState<string | null>(null);
   const [launchingNewAssistant, setLaunchingNewAssistant] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [launchedInfo, setLaunchedInfo] = useState<{ assistant: string; cmd: string; timestamp: Date } | null>(null);
 
   // Collapsed / expanded state per harness (default to expanded if it has sessions or is configured)
   const [expandedHarnesses, setExpandedHarnesses] = useState<Record<string, boolean>>({
@@ -88,13 +87,6 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
   const resumingTerminalRef = useRef(false);
   const openingDesktopRef = useRef<string | null>(null);
-  const copyTimeoutRef = useRef<number | null>(null);
-
-  React.useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-    };
-  }, []);
 
   const openAppTarget = async (targetId: string) => {
     try {
@@ -120,9 +112,11 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         assistant,
       });
       await safeCopyToClipboard(cmd);
-      showToast?.(`Launched new ${assistant} session in terminal. Command '${cmd}' copied to clipboard.`, 'success');
+      setLaunchedInfo({ assistant, cmd, timestamp: new Date() });
+      showToast?.(`Launched ${assistant} in terminal window (command '${cmd}' copied to clipboard).`, 'success');
     } catch (err) {
       const copied = await safeCopyToClipboard(cmd);
+      setLaunchedInfo({ assistant, cmd, timestamp: new Date() });
       if (copied) {
         showToast?.(`Could not spawn terminal window automatically. Copied '${cmd}' to clipboard.`, 'info');
       } else {
@@ -146,33 +140,19 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         sessionId,
       });
       await safeCopyToClipboard(cmd);
-      showToast?.(`Resumed ${assistant} session in terminal. Command copied to clipboard.`, 'success');
+      setLaunchedInfo({ assistant, cmd, timestamp: new Date() });
+      showToast?.(`Resumed ${assistant} in terminal window (command copied to clipboard).`, 'success');
     } catch (err) {
       const copied = await safeCopyToClipboard(cmd);
+      setLaunchedInfo({ assistant, cmd, timestamp: new Date() });
       if (copied) {
-        setCopiedId(sessionId);
-        if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-        copyTimeoutRef.current = window.setTimeout(() => setCopiedId(null), 2500);
-        showToast?.(`Could not launch terminal automatically. Copied resume command to clipboard:\n\n${cmd}`, 'info');
+        showToast?.(`Copied resume command to clipboard:\n\n${cmd}`, 'info');
       } else {
-        showToast?.(`Could not launch terminal automatically (${err instanceof Error ? err.message : 'Error'}). Run manually:\n\n${cmd}`, 'error');
+        showToast?.(`Could not launch terminal (${err instanceof Error ? err.message : 'Error'}). Run manually:\n\n${cmd}`, 'error');
       }
     } finally {
       setResumingTerminalId(null);
       resumingTerminalRef.current = false;
-    }
-  };
-
-  const copyResumeCommand = async (assistant: string, sessionId: string) => {
-    const cmd = getResumeCliCommand(assistant, sessionId);
-    const copied = await safeCopyToClipboard(cmd);
-    if (copied) {
-      setCopiedId(sessionId);
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = window.setTimeout(() => setCopiedId(null), 2500);
-      showToast?.(`Copied resume command to clipboard:\n\n${cmd}`, 'success');
-    } else {
-      showToast?.(`Could not copy to clipboard. Run manually:\n\n${cmd}`, 'error');
     }
   };
 
@@ -265,6 +245,41 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
           </span>
         )}
       </div>
+
+      {/* Live Session HUD Banner */}
+      {launchedInfo && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs animate-fade-in">
+          <div className="flex items-center gap-2 text-foreground min-w-0">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="truncate">
+              <strong>Active in terminal:</strong>{' '}
+              <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded text-emerald-400">
+                {launchedInfo.cmd}
+              </code>
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={async () => {
+                await safeCopyToClipboard(launchedInfo.cmd);
+                showToast?.('Command copied to clipboard!', 'success');
+              }}
+            >
+              <Copy size={11} /> Copy Command
+            </Button>
+            <button
+              type="button"
+              onClick={() => setLaunchedInfo(null)}
+              className="text-muted-foreground hover:text-foreground cursor-pointer text-xs px-1"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* If no harnesses are detected at all */}
       {installedHarnesses.length === 0 ? (
@@ -384,7 +399,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">•</span>
                                 <span className="text-[10px] font-medium text-muted-foreground">
-                                  {sess.messageCount} {sess.messageCount === 1 ? 'msg' : 'msgs'}
+                                  {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
                                 </span>
                               </div>
                               <p className="text-xs font-medium text-foreground truncate" title={sess.title}>
@@ -394,22 +409,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
                             <div className="flex items-center gap-1.5 shrink-0">
                               <Button
-                                variant="outline"
                                 size="sm"
-                                onClick={() => {
-                                  setActiveSession(sess);
-                                  setTranscript([]);
-                                  fetchSessionTranscript(sess.assistant, sess.id);
-                                }}
-                                title="Inspect chat history (opens at latest message)"
-                              >
-                                <MessageSquare size={12} />
-                                <span>Chat</span>
-                              </Button>
-
-                              <Button
-                                size="sm"
-                                variant="secondary"
+                                variant="default"
                                 disabled={resumingTerminalId === sess.id}
                                 onClick={() => void resumeInTerminal(sess.assistant, sess.id)}
                                 title={`Resume session in terminal (${sess.id})`}
@@ -421,11 +422,15 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => void copyResumeCommand(sess.assistant, sess.id)}
-                                title="Copy resume CLI command"
+                                onClick={() => {
+                                  setActiveSession(sess);
+                                  setTranscript([]);
+                                  fetchSessionTranscript(sess.assistant, sess.id);
+                                }}
+                                title="Inspect read-only transcript log"
                               >
-                                {copiedId === sess.id ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                                <span>{copiedId === sess.id ? 'Copied' : 'Copy'}</span>
+                                <MessageSquare size={12} />
+                                <span>Transcript</span>
                               </Button>
 
                               {sess.assistant === 'codex' && hasCodexDesktop && (

@@ -69,7 +69,7 @@ describe('terminal-launch utility', () => {
 
       expect(res.success).toBe(true);
       expect(res.command).toBe('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921');
-      const expectedScript = "Set-Location -LiteralPath 'C:\\workspaces\\bob''s-app'; agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921";
+      const expectedScript = "$wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; Set-Location -LiteralPath 'C:\\workspaces\\bob''s-app'; agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921";
       const expectedEncoded = Buffer.from(expectedScript, 'utf16le').toString('base64');
       expect(execa).toHaveBeenCalledWith(
         'cmd.exe',

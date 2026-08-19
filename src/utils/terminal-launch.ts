@@ -119,12 +119,14 @@ export async function launchWorkspaceTerminal(
 
   if (platform === 'win32') {
     // Launch interactive PowerShell in a visible new window using cmd.exe start
+    // Self-activating script: activates its own window on startup so it never opens behind other apps
     const winTitle = (options.title || 'NexusFlow Terminal').replace(/[^a-zA-Z0-9 _-]/g, '') || 'NexusFlow Terminal';
     const escapedWs = escapePsSingleQuote(workspacePath);
     const shellBin = isBinaryOnPath('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
+    const focusPrefix = '$wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; ';
     const psScript = cmdToRun
-      ? `Set-Location -LiteralPath '${escapedWs}'; ${cmdToRun}`
-      : `Set-Location -LiteralPath '${escapedWs}'`;
+      ? `${focusPrefix}Set-Location -LiteralPath '${escapedWs}'; ${cmdToRun}`
+      : `${focusPrefix}Set-Location -LiteralPath '${escapedWs}'`;
     const encodedCmd = Buffer.from(psScript, 'utf16le').toString('base64');
 
     try {

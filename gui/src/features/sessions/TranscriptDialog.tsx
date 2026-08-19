@@ -152,13 +152,16 @@ export function TranscriptDialog({
               <StatusBadge tone={assistantTone(activeSession.assistant)}>
                 {assistantLabel(activeSession.assistant)}
               </StatusBadge>
-              <span className="text-[10px] text-muted-foreground">Session: {activeSession.id}</span>
+              <span className="text-[10px] font-mono bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded">
+                Read-Only Transcript · {transcript.length} turns
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono">ID: {activeSession.id.slice(0, 8)}</span>
             </div>
             <DialogTitle className="max-w-xl truncate text-sm" title={activeSession.title}>
               {activeSession.title}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Interactive transcript log and resume options for session {activeSession.id}
+              Read-only transcript log and resume options for session {activeSession.id}
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -197,7 +200,7 @@ export function TranscriptDialog({
         {/* Modal Footer */}
         <DialogFooter className="sm:justify-between">
           <span className="text-[11px] text-muted-foreground">
-            Historical transcript inspection. Resume directly in your preferred environment.
+            Read-only transcript. Interactive coding happens in your terminal or IDE.
           </span>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -209,11 +212,11 @@ export function TranscriptDialog({
                 showToast(`Copied run command to clipboard:\n\n${cmd}`, 'success');
               }}
             >
-              <Copy size={13} /> Copy Resume Command
+              <Copy size={13} /> Copy CLI Command
             </Button>
             <Button
               size="sm"
-              variant="secondary"
+              variant="default"
               disabled={resumingTerminal}
               onClick={() => void resumeInTerminal()}
             >
