@@ -65,7 +65,14 @@ export async function openCommand(): Promise<void> {
   // ── Start AI Assistant Session ──────────────────────────────────────
   const loadedFeature = workspaces.find((ws) => ws.workspacePath === selected);
   if (loadedFeature && loadedFeature.assistants.length > 0) {
-    const assistant = loadedFeature.assistants[0];
+    let assistant = loadedFeature.assistants[0];
+    if (loadedFeature.assistants.length > 1) {
+      assistant = await select({
+        message: 'Which assistant would you like to run in this workspace?',
+        choices: loadedFeature.assistants.map((a) => ({ name: a, value: a })),
+      });
+    }
+
     const confirmStart = await confirm({
       message: `Do you want to start a session with ${assistant} inside the workspace now?`,
       default: true,
@@ -84,38 +91,78 @@ export async function openCommand(): Promise<void> {
         cmdName = 'codex';
       } else if (assistant === 'copilot') {
         cmdName = 'copilot';
+      } else if (assistant === 'cursor') {
+        cmdName = 'cursor-agent';
       }
 
-      if (sessions.length > 0 && sessions[0].assistant === assistant) {
-        const latestSessionId = sessions[0].id;
+      const matchingSessions = sessions.filter((s) => s.assistant === assistant);
+      let targetSessionId: string | undefined;
+
+      if (matchingSessions.length === 1) {
+        const sessionChoice = await select({
+          message: `Found 1 past ${assistant} session: "${matchingSessions[0].title}". What would you like to do?`,
+          choices: [
+            {
+              name: `Resume session (${chalk.dim(new Date(matchingSessions[0].updatedAt).toLocaleString())})`,
+              value: matchingSessions[0].id,
+            },
+            {
+              name: 'Start a new session instead',
+              value: '__new__',
+            },
+          ],
+        });
+        if (sessionChoice !== '__new__') {
+          targetSessionId = sessionChoice;
+        }
+      } else if (matchingSessions.length > 1) {
+        const sessionChoice = await select({
+          message: `Found ${matchingSessions.length} past ${assistant} sessions. Which one would you like to resume?`,
+          choices: [
+            ...matchingSessions.map((s) => ({
+              name: `${s.title} (${chalk.dim(new Date(s.updatedAt).toLocaleString())})`,
+              value: s.id,
+            })),
+            {
+              name: 'Start a new session instead',
+              value: '__new__',
+            },
+          ],
+        });
+        if (sessionChoice !== '__new__') {
+          targetSessionId = sessionChoice;
+        }
+      }
+
+      if (targetSessionId) {
         if (assistant === 'antigravity') {
-          cmdArgs = ['--conversation', latestSessionId];
+          cmdArgs = ['--conversation', targetSessionId];
         } else if (assistant === 'claude') {
-          cmdArgs = ['--resume', latestSessionId];
+          cmdArgs = ['--resume', targetSessionId];
         } else if (assistant === 'codex') {
-          cmdArgs = ['resume', latestSessionId];
+          cmdArgs = ['resume', targetSessionId];
         } else if (assistant === 'copilot') {
-          cmdArgs = ['--resume', latestSessionId];
+          cmdArgs = ['--resume', targetSessionId];
+        } else if (assistant === 'cursor') {
+          cmdArgs = ['--resume', targetSessionId];
         }
       } else {
-        if (assistant === 'antigravity') {
-          cmdArgs = ['--continue'];
-        } else if (assistant === 'claude') {
-          cmdArgs = ['--resume'];
-        } else if (assistant === 'codex') {
-          cmdArgs = ['resume'];
-        } else if (assistant === 'copilot') {
-          cmdArgs = ['--resume'];
-        }
+        // No existing session for this assistant (or user chose new session): start fresh
+        cmdArgs = [];
       }
 
       try {
-        await execa(cmdName, cmdArgs, {
+        const result = await execa(cmdName, cmdArgs, {
           cwd: selected,
           stdio: 'inherit',
           shell: process.platform === 'win32',
+          reject: false,
         });
-        console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
+        if (result.exitCode === 0 || result.exitCode === 130 || result.exitCode === null) {
+          console.log(chalk.green(`\n👋 Exited ${assistant} session.`));
+        } else {
+          console.log(chalk.yellow(`\n⚠️  ${assistant} exited with code ${result.exitCode}.`));
+        }
       } catch {
         const fullCmd = [cmdName, ...cmdArgs].join(' ');
         console.log(

@@ -58,10 +58,10 @@ describe('Server API Endpoints Unit Tests', () => {
     vi.clearAllMocks();
   });
 
-  it('rejects an invalid Codex transcript id at the HTTP boundary', async () => {
+  it('rejects an invalid transcript session id at the HTTP boundary', async () => {
     const response = await app.request('/api/session/codex/53/transcript');
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: 'Invalid Codex session id.' });
+    await expect(response.json()).resolves.toEqual({ error: 'Invalid session UUID format.' });
   });
 
   describe('embedded turn admission', () => {
@@ -213,6 +213,20 @@ describe('Server API Endpoints Unit Tests', () => {
   describe('POST /api/open-editor', () => {
     const workspacesDir = path.resolve('mock-workspaces');
     const workspacePath = path.join(workspacesDir, 'test-workspace');
+
+    it('rejects cross-origin requests to open-editor', async () => {
+      const response = await app.request('/api/open-editor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://malicious-site.example.com',
+        },
+        body: JSON.stringify({ workspacePath, command: 'code' }),
+      });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({ error: 'Forbidden cross-origin request.' });
+    });
 
     it('should return 400 for forbidden editor commands', async () => {
       const response = await app.request('/api/open-editor', {
@@ -511,6 +525,101 @@ describe('Server API Endpoints Unit Tests', () => {
         platform.mockRestore();
       }
     });
+
+    it('launches a terminal for a valid workspace', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({
+        id: 'safe-workspace',
+        repos: [path.join(workspacePath, 'repo')],
+        workspacePath,
+      } as any);
+
+      const response = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'claude',
+          sessionId: '0199a213-81c0-7800-8aa1-bbab2a035a54',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.command).toBe('claude --resume 0199a213-81c0-7800-8aa1-bbab2a035a54');
+    });
+
+    it('rejects cross-origin requests to terminal launch', async () => {
+      const response = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://malicious-site.example.com',
+        },
+        body: JSON.stringify({
+          assistant: 'claude',
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const data = await response.json();
+      expect(data.error).toBe('Forbidden cross-origin request.');
+    });
+
+    it('rejects cross-origin requests to workspace launch', async () => {
+      const response = await app.request('/api/workspace/safe-workspace/launch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://malicious-site.example.com',
+        },
+        body: JSON.stringify({ targetId: 'codex-desktop' }),
+      });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({ error: 'Forbidden cross-origin request.' });
+    });
+
+    it('rejects invalid assistant and malformed session UUID', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({
+        id: 'safe-workspace',
+        repos: [path.join(workspacePath, 'repo')],
+        workspacePath,
+      } as any);
+
+      const invalidAssistantRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'unknown-harness-name',
+        }),
+      });
+      expect(invalidAssistantRes.status).toBe(400);
+
+      const invalidUuidRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'claude',
+          sessionId: 'not-a-valid-uuid',
+        }),
+      });
+      expect(invalidUuidRes.status).toBe(400);
+
+      const invalidTitleRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'claude',
+          title: 12345,
+        }),
+      });
+      expect(invalidTitleRes.status).toBe(400);
+      await expect(invalidTitleRes.json()).resolves.toEqual({ error: 'Title must be a string.' });
+    });
   });
 
   describe('workspace recent session handoffs', () => {
@@ -633,9 +742,53 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(canOfferClaudeDesktopTransfer('win32', 'x64', { ANTHROPIC_API_KEY: 'configured' }, configured)).toBe(false);
       expect(canOfferClaudeDesktopTransfer('win32', 'x64', {}, () => false)).toBe(false);
     });
+
+    it('falls back gracefully when ProviderRegistry has no claude-cli', () => {
+      const getProvider = vi.spyOn(ProviderRegistry, 'getProvider').mockReturnValue(undefined);
+      try {
+        expect(canOfferClaudeDesktopTransfer('win32', 'x64', {})).toBe(false);
+      } finally {
+        getProvider.mockRestore();
+      }
+    });
   });
 
   describe('POST /api/workspace/:id/resume', () => {
+    it('rejects cross-origin requests to resume', async () => {
+      const response = await app.request('/api/workspace/test-ws/resume', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://malicious-site.example.com',
+        },
+        body: JSON.stringify({ assistant: 'antigravity' }),
+      });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({ error: 'Forbidden cross-origin request.' });
+    });
+
+    it('rejects invalid sessionId UUID on resume', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+        id: 'test-ws',
+        repos: [],
+        assistants: ['antigravity'],
+      } as any);
+
+      const response = await app.request('/api/workspace/test-ws/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'antigravity',
+          sessionId: 'malicious-uuid-attempt',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'Invalid session UUID format.' });
+    });
+
     it('should fail with 400 if command is forbidden', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
         workspacesDir: '/mock/workspaces'
@@ -691,13 +844,9 @@ describe('Server API Endpoints Unit Tests', () => {
 
       const isWin = process.platform === 'win32';
       expect(execa).toHaveBeenCalledWith('code', [expect.any(String)], {
-        detached: true,
         stdio: 'ignore',
         shell: isWin,
-        cleanup: false
       });
-      expect(dummyChild.unref).toHaveBeenCalled();
-      expect(dummyChild.catch).toHaveBeenCalled();
     });
   });
 

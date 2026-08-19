@@ -66,6 +66,13 @@ function createWindow() {
   delete backendEnv.NODE_OPTIONS;
   delete backendEnv.ELECTRON_RUN_AS_NODE;
 
+  if (process.platform === 'darwin') {
+    const home = process.env.HOME || '';
+    const extraPaths = ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local', 'bin'), path.join(home, '.cargo', 'bin')];
+    const currentPaths = (backendEnv.PATH || '').split(':');
+    backendEnv.PATH = [...new Set([...extraPaths, ...currentPaths])].filter(Boolean).join(':');
+  }
+
   // Run the minimal server entry (dist/desktop-server.js), not the full CLI —
   // the CLI pulls in commander/pm2/inquirer, and under Electron-as-Node its
   // commander import can resolve to pm2's ancient nested copy and crash.

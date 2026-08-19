@@ -42,6 +42,7 @@ import { Spinner } from '../../components/ui/spinner.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { useWorkspaceLaunchTargets, useWorkspaceRecentSessions } from '../../lib/api/queries.js';
 import { useConfig } from '../../lib/api/queries.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { cn } from '../../lib/utils.js';
 import type { AISession, WorkspaceLaunchIcon, WorkspaceLaunchTarget } from '../../types.js';
 
@@ -254,7 +255,7 @@ export function WorkspaceLauncher({
     setLaunchingId(`session:${session.id}`);
     try {
       if (session.desktopHandoff.method === 'guided') {
-        await navigator.clipboard.writeText(`claude --resume ${session.id}`);
+        await safeCopyToClipboard(`claude --resume ${session.id}`);
         setHandoffNotice('Claude resume command copied. With a Claude subscription login, run it in this workspace, then type /desktop in Claude to move the session into Claude Desktop.');
         return;
       }

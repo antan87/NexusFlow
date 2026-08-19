@@ -13,7 +13,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 /** Editors that understand a `.code-workspace` file. */
-const WORKSPACE_FILE_EDITORS = new Set(['code', 'code-insiders', 'cursor']);
+const WORKSPACE_FILE_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'windsurf']);
 
 /**
  * Resolves what to actually open: the generated `.code-workspace` file for

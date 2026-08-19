@@ -28,13 +28,6 @@ import {
   type CreateWorkspacePayload,
 } from '../lib/api/queries.js';
 import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
-import {
-  WORKSPACE_KICKOFF,
-  assistantLabel,
-  createChatLaunchIntent,
-  providerForAssistant,
-  type EmbeddedHarnessAssistant,
-} from '../features/chat/chatLaunch.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
 import type { RepoInfo, WorkspaceMode } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
@@ -167,6 +160,13 @@ export function StartWorkPage() {
     }
   }, [aiDetect.data]);
 
+  // Navigate straight to the workspace overview as soon as creation succeeds
+  useEffect(() => {
+    if (progress.status === 'completed' && progress.workspaceId) {
+      navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
+    }
+  }, [progress.status, progress.workspaceId, navigate]);
+
 
 
   const selectedProject = useMemo(
@@ -223,7 +223,11 @@ export function StartWorkPage() {
     }
   };
 
+  const submittingRef = useRef(false);
+
   const submit = async () => {
+    if (submittingRef.current || createWorkspace.isPending || !formValid) return;
+    submittingRef.current = true;
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
       mode,
@@ -243,12 +247,10 @@ export function StartWorkPage() {
       start(jobId);
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      submittingRef.current = false;
     }
   };
-
-  const embeddedAssistant = assistants.find(
-    (assistant): assistant is EmbeddedHarnessAssistant => providerForAssistant(assistant) !== null,
-  );
 
   // ── Creation progress / result panel ─────────────────────────────────────
   if (progress.status !== 'idle') {
@@ -262,7 +264,11 @@ export function StartWorkPage() {
               ? 'Workspace ready'
               : 'Workspace creation failed'}
         </h1>
-        <ul className="mt-6 divide-y divide-border rounded-xl border border-border bg-card px-4">
+        <ul
+          aria-live="polite"
+          aria-relevant="additions text"
+          className="mt-6 divide-y divide-border rounded-xl border border-border bg-card px-4"
+        >
           {progress.steps.map((step) => (
             <StepRow key={step.id} step={step} />
           ))}
@@ -275,34 +281,12 @@ export function StartWorkPage() {
         {progress.status === 'completed' && progress.workspacePath && (
           <p className="mt-4 truncate font-mono text-xs text-muted-foreground">{progress.workspacePath}</p>
         )}
-        {progress.status === 'completed' && embeddedAssistant && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Embedded start allows edits inside this workspace; you can switch to Review only in chat.
-          </p>
-        )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
           {progress.status === 'completed' && progress.workspaceId && (
             <>
-              {embeddedAssistant && (
-                <Button
-                  className="w-full min-w-0 whitespace-normal sm:w-auto"
-                  onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`, {
-                    state: {
-                      chatLaunch: createChatLaunchIntent(embeddedAssistant, {
-                        kickoff: WORKSPACE_KICKOFF,
-                        executionProfile: 'workspace-write',
-                      }),
-                    },
-                  })}
-                >
-                  <Sparkles />
-                  Start editing with {assistantLabel(embeddedAssistant)}
-                </Button>
-              )}
               <Button
                 className="w-full min-w-0 whitespace-normal sm:w-auto"
-                variant={embeddedAssistant ? 'outline' : undefined}
                 onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}
               >
                 Open workspace

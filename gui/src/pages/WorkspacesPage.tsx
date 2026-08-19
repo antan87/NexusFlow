@@ -1,17 +1,14 @@
-import { useMemo, useState, useEffect, type ComponentProps } from 'react';
+import { useMemo, useState, useEffect, useRef, type ComponentProps } from 'react';
 import {
   RefreshCw,
-  Play,
   MoreVertical,
   Copy,
   Trash2,
   Search,
   FolderGit2,
-  Columns2,
-  LayoutTemplate,
-  LayoutDashboard,
-  MessageSquare,
+  Terminal,
   PanelLeft,
+  MessageSquare,
 } from 'lucide-react';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
 import { Button } from '../components/ui/button.js';
@@ -20,10 +17,12 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '..
 import { Input } from '../components/ui/input.js';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '../components/ui/menu.js';
 import { Skeleton } from '../components/ui/skeleton.js';
+import { Spinner } from '../components/ui/spinner.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
-import { useWorkspaceServices } from '../lib/api/queries.js';
+import { useWorkspaceServices, useLaunchTerminal, useAiDetect } from '../lib/api/queries.js';
+import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
@@ -31,10 +30,7 @@ import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
-import { AgentChat } from '../features/chat/AgentChat.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
-
-export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
 type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan';
 
@@ -61,8 +57,6 @@ interface WorkspacesPageProps {
   subTab: SubTab;
   onSelect: (id: string) => void;
   onSelectTab: (id: string, tab: SubTab) => void;
-  resumingWs: string | null;
-  handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
   handleCopyPrompt: (ws: Feature) => void;
   handleDeleteWorkspace: (wsName: string) => Promise<void>;
   deleteWsLoading: string | null;
@@ -73,6 +67,7 @@ interface WorkspacesPageProps {
   changesProps: Omit<ComponentProps<typeof ChangesViewer>, 'ws'>;
   knowledgeProps: Omit<ComponentProps<typeof KnowledgeBase>, 'ws'>;
   planProps: ComponentProps<typeof ImplementationPlan>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export function WorkspacesPage(props: WorkspacesPageProps) {
@@ -85,8 +80,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     subTab,
     onSelect,
     onSelectTab,
-    resumingWs,
-    handleResumeSession,
     handleCopyPrompt,
     handleDeleteWorkspace,
     deleteWsLoading,
@@ -97,49 +90,37 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     changesProps,
     knowledgeProps,
     planProps,
+    showToast,
   } = props;
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [launchingHarness, setLaunchingHarness] = useState<string | null>(null);
+  const launchInFlightRef = useRef(false);
 
-  const [layoutMode, setLayoutMode] = useState<WorkspaceLayoutMode>(() => {
-    try {
-      const saved = localStorage.getItem('nexusflow:workspaces:layoutMode');
-      if (saved === 'cockpit' || saved === 'split' || saved === 'chat-only' || saved === 'inspector-only') {
-        return saved;
-      }
-    } catch {
-      // Storage can be unavailable in hardened or private browser contexts.
-    }
-    return 'cockpit';
-  });
+  const launchTerminalMutation = useLaunchTerminal();
+  const aiDetect = useAiDetect();
+  const isClaudeDetected = aiDetect.data?.find((a) => a.name === 'claude')?.detected ?? false;
+  const isCodexDetected = aiDetect.data?.find((a) => a.name === 'codex')?.detected ?? false;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('nexusflow:workspaces:sidebarCollapsed') === 'true';
     } catch {
-      // Fall back to the expanded sidebar when storage is unavailable.
+      // Fall back to expanded sidebar
     }
     return false;
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem('nexusflow:workspaces:layoutMode', layoutMode);
-    } catch {
-      // The in-memory layout still works when persistence is unavailable.
-    }
-  }, [layoutMode]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem('nexusflow:workspaces:sidebarCollapsed', String(sidebarCollapsed));
     } catch {
-      // The in-memory sidebar state still works without persistence.
+      // Storage unavailable
     }
   }, [sidebarCollapsed]);
 
-  // Ctrl/Cmd shortcuts only apply outside text-editing controls.
+  // Ctrl/Cmd+B shortcut toggles sidebar (guarded against active modals)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target;
@@ -148,21 +129,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         || target instanceof HTMLTextAreaElement
         || target instanceof HTMLSelectElement
         || (target instanceof HTMLElement && target.isContentEditable)
+        || document.querySelector('[role="dialog"]') !== null
       ) return;
 
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
-      if (isCmdOrCtrl && e.key === '\\') {
-        e.preventDefault();
-        setLayoutMode((prev) => {
-          if (prev === 'cockpit') return 'split';
-          if (prev === 'split') return 'chat-only';
-          if (prev === 'chat-only') return 'inspector-only';
-          return 'cockpit';
-        });
-      } else if (isCmdOrCtrl && (e.key === 'j' || e.key === 'J')) {
-        e.preventDefault();
-        setLayoutMode((prev) => (prev === 'chat-only' ? 'cockpit' : 'chat-only'));
-      } else if (isCmdOrCtrl && (e.key === 'b' || e.key === 'B')) {
+      if (isCmdOrCtrl && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         setSidebarCollapsed((prev) => !prev);
       }
@@ -201,15 +172,49 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const availableRepos = selected ? repos.filter((r) => !selected.repos.includes(r.path)) : [];
 
+  const launchHarnessTerminal = async (assistant: string) => {
+    if (!selected || launchInFlightRef.current) return;
+    if (assistant === 'codex' && !isCodexDetected) {
+      showToast?.('OpenAI Codex CLI is not installed on your system.', 'info');
+      return;
+    }
+    if (assistant === 'claude' && !isClaudeDetected) {
+      showToast?.('Claude CLI is not installed on your system. Run: npm install -g @anthropic-ai/claude-code', 'info');
+      return;
+    }
+    launchInFlightRef.current = true;
+    setLaunchingHarness(`term:${assistant}`);
+    try {
+      await launchTerminalMutation.mutateAsync({
+        workspaceId: selected.branchName,
+        assistant,
+      });
+      showToast?.(`Launched interactive ${assistant} session in terminal.`, 'success');
+    } catch (err) {
+      console.error(`Failed to launch terminal for ${assistant}:`, err);
+      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'claude' ? 'claude' : assistant === 'codex' ? 'codex' : 'copilot';
+      const copied = await safeCopyToClipboard(cmd);
+      if (copied) {
+        showToast?.(`Could not launch terminal automatically. Copied command to clipboard:\n\n${cmd}`, 'info');
+      } else {
+        showToast?.(`Could not launch terminal automatically. Run manually:\n\n${cmd}`, 'error');
+      }
+    } finally {
+      setLaunchingHarness(null);
+      launchInFlightRef.current = false;
+    }
+  };
+
   const renderInspector = () => {
     if (!selected) return null;
     return (
-      <div className="flex flex-col gap-4">
-        <Card className="p-5">
-          <div className="flex flex-col items-start gap-4">
+      <div className="flex flex-col gap-3.5">
+        {/* Workspace Summary Header Card */}
+        <Card className="p-3.5 sm:p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <h2 className="truncate text-xl font-bold text-foreground" title={selected.branchName}>
+                <h2 className="truncate text-lg sm:text-xl font-bold text-foreground" title={selected.branchName}>
                   {selected.branchName}
                 </h2>
                 <StatusBadge tone={selectedMode}>
@@ -219,31 +224,34 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
                 <span>·</span>
-                <span>{selected.repos.length} repos</span>
+                <span>{selected.repos.length} {selected.repos.length === 1 ? 'repo' : 'repos'}</span>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                disabled={resumingWs === selected.branchName}
-                onClick={() => handleResumeSession(selected)}
-              >
-                <Play size={13} className={resumingWs === selected.branchName ? 'animate-spin' : ''} />
-                {resumingWs === selected.branchName ? 'Opening…' : 'Continue in Chat'}
-              </Button>
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
               <WorkspaceLauncher
                 workspaceId={selected.branchName}
                 workspacePath={selected.workspacePath}
                 isVsCode={isVsCode}
               />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={Boolean(launchingHarness?.startsWith('term:'))}
+                onClick={() => launchHarnessTerminal(selected.assistants[0] || 'antigravity')}
+                title="Launch terminal shell in workspace"
+              >
+                {launchingHarness?.startsWith('term:') ? <Spinner className="size-3.5" /> : <Terminal size={13} />}
+                Terminal
+              </Button>
               <Menu>
                 <MenuTrigger
                   aria-label="More actions"
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
                 >
-                  <MoreVertical size={16} />
+                  <MoreVertical size={15} />
                 </MenuTrigger>
                 <MenuPopup align="end">
-                  <MenuItem onClick={() => handleCopyPrompt(selected)}>
+                  <MenuItem onClick={() => handleCopyPrompt(selected)} className="cursor-pointer">
                     <Copy size={14} /> Copy AI Context
                   </MenuItem>
                   <MenuSeparator />
@@ -251,6 +259,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     variant="destructive"
                     disabled={deleteWsLoading === selected.branchName}
                     onClick={() => void handleDeleteWorkspace(selected.branchName)}
+                    className="cursor-pointer"
                   >
                     <Trash2 size={14} />
                     {deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}
@@ -297,6 +306,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           </div>
         </Card>
 
+        {/* Tab Navigation */}
         <Tabs
           value={subTab}
           onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}
@@ -305,13 +315,109 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           <TabsList className="max-w-full overflow-x-auto">
             {TABS.map((tab) => (
               <TabsTab key={tab.value} value={tab.value}>
-                {tab.label}
+                {tab.value === 'sessions' ? 'AI & Sessions' : tab.label}
               </TabsTab>
             ))}
           </TabsList>
           <TabsPanel value={subTab} className="animate-fade-in pt-3">
             {subTab === 'overview' && (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3.5">
+                {/* Configured AI Assistant Banner */}
+                <Card className="p-3.5 sm:p-4 bg-gradient-to-r from-card to-card/60">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-9 place-items-center rounded-xl bg-violet-600 text-white font-bold text-xs shadow-sm">
+                        {selected.assistants[0] === 'claude' ? 'C' : selected.assistants[0] === 'codex' ? 'O' : 'A'}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-foreground capitalize">
+                            {selected.assistants[0] || 'Antigravity'}
+                          </h3>
+                          <StatusBadge tone="running">Configured AI</StatusBadge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Context and instructions generated for this workspace.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => onSelectTab(selected.branchName, 'sessions')}
+                    >
+                      AI Sessions & Harnesses →
+                    </Button>
+                  </div>
+                </Card>
+
+                {/* Recent AI Sessions Quick Panel (if any sessions exist) */}
+                {sessionProps.sessions.length > 0 && (
+                  <Card className="p-3.5 sm:p-4">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-foreground">Recent Sessions</h3>
+                        <span className="text-xs text-muted-foreground">({sessionProps.sessions.length})</span>
+                      </div>
+                      <button
+                        onClick={() => onSelectTab(selected.branchName, 'sessions')}
+                        className="text-xs font-medium text-primary hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        View all sessions →
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {sessionProps.sessions.slice(0, 2).map((sess) => (
+                        <div
+                          key={sess.id}
+                          className="flex flex-col gap-2 rounded-lg border border-border bg-card/50 p-2.5 transition-colors hover:border-foreground/15 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <StatusBadge tone={sess.assistant === 'claude' ? 'warning' : 'running'}>
+                                {sess.assistant}
+                              </StatusBadge>
+                              <span className="text-[11px] text-muted-foreground">
+                                {new Date(sess.updatedAt).toLocaleDateString()}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">•</span>
+                              <span className="text-[11px] font-medium text-muted-foreground">
+                                {sess.messageCount} msgs
+                              </span>
+                            </div>
+                            <p className="text-xs font-medium text-foreground truncate" title={sess.title}>
+                              {sess.title}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                sessionProps.setActiveSession(sess);
+                                sessionProps.setTranscript([]);
+                                sessionProps.fetchSessionTranscript(sess.assistant, sess.id);
+                              }}
+                            >
+                              <MessageSquare size={12} />
+                              <span>Chat</span>
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => void launchHarnessTerminal(sess.assistant)}
+                            >
+                              <Terminal size={12} />
+                              <span>Resume</span>
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Description Card */}
                 <Card className="p-5">
                   <h3 className="mb-2 text-sm font-semibold text-foreground">Description</h3>
                   {selected.description ? (
@@ -320,6 +426,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     <p className="text-sm text-muted-foreground">No description provided.</p>
                   )}
                 </Card>
+
+                {/* Repositories Card */}
                 <Card className="p-5">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <h3 className="text-sm font-semibold text-foreground">
@@ -369,7 +477,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 </Card>
               </div>
             )}
-            {subTab === 'sessions' && <SessionHistory ws={selected} {...sessionProps} />}
+            {subTab === 'sessions' && <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />}
             {subTab === 'services' && <ServiceConsole ws={selected} />}
             {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
             {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
@@ -380,122 +488,39 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     );
   };
 
-  const renderChat = () => {
-    if (!selected) {
-      return (
-        <div className="flex-1 flex items-center justify-center p-10 text-center text-sm text-muted-foreground">
-          Select a workspace to start chatting.
-        </div>
-      );
-    }
-    return <AgentChat key={selected.branchName} ws={selected} />;
-  };
-
   return (
     <div className="flex flex-col h-full animate-fade-in">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Workspaces</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Inspect workspace changes, services, context, and collaborate with embedded agents.
+          <h1 className="text-lg sm:text-xl font-semibold text-foreground">Workspaces</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Inspect workspace changes, services, context, and launch external AI harnesses.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* View Mode Switcher Toolbar */}
-          <div
-            role="group"
-            aria-label="Workspace layout"
-            className="flex items-center gap-1 rounded-lg border border-border bg-muted/60 p-1"
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSidebarCollapsed((prev) => !prev)}
+            title={sidebarCollapsed ? 'Show workspace list (Ctrl+B)' : 'Hide workspace list (Ctrl+B)'}
+            aria-label={sidebarCollapsed ? 'Show workspace list' : 'Hide workspace list'}
+            aria-expanded={!sidebarCollapsed}
           >
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className={cn(
-                'rounded-md p-1.5 text-xs font-medium transition-colors cursor-pointer',
-                sidebarCollapsed
-                  ? 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  : 'bg-background text-foreground shadow-sm',
-              )}
-              title={sidebarCollapsed ? 'Show workspaces sidebar (Ctrl+B)' : 'Hide workspaces sidebar (Ctrl+B)'}
-              aria-label="Toggle sidebar"
-              aria-expanded={!sidebarCollapsed}
-            >
-              <PanelLeft size={15} />
-            </button>
-            <div className="h-3.5 w-px bg-border my-auto mx-0.5" />
-            <button
-              onClick={() => setLayoutMode('cockpit')}
-              aria-label="Cockpit layout"
-              aria-pressed={layoutMode === 'cockpit'}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
-                layoutMode === 'cockpit'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-              )}
-              title="Cockpit mode: Spacious chat canvas with contextual inspector (Ctrl+\)"
-            >
-              <LayoutTemplate size={13} />
-              <span className="hidden sm:inline">Cockpit</span>
-            </button>
-            <button
-              onClick={() => setLayoutMode('split')}
-              aria-label="Split layout"
-              aria-pressed={layoutMode === 'split'}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
-                layoutMode === 'split'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-              )}
-              title="Dual-Split mode: 50/50 side-by-side chat and inspector (Ctrl+\)"
-            >
-              <Columns2 size={13} />
-              <span className="hidden sm:inline">Split</span>
-            </button>
-            <button
-              onClick={() => setLayoutMode('chat-only')}
-              aria-label="Chat-only layout"
-              aria-pressed={layoutMode === 'chat-only'}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
-                layoutMode === 'chat-only'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-              )}
-              title="Chat focus mode: Full width chat canvas (Ctrl+J)"
-            >
-              <MessageSquare size={13} />
-              <span className="hidden sm:inline">Chat</span>
-            </button>
-            <button
-              onClick={() => setLayoutMode('inspector-only')}
-              aria-label="Inspector-only layout"
-              aria-pressed={layoutMode === 'inspector-only'}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer',
-                layoutMode === 'inspector-only'
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-              )}
-              title="Inspector focus mode: Full width inspector"
-            >
-              <LayoutDashboard size={13} />
-              <span className="hidden sm:inline">Inspector</span>
-            </button>
-          </div>
-
-          <Button variant="outline" onClick={fetchWorkspaces} disabled={workspacesLoading}>
-            <RefreshCw size={14} className={workspacesLoading ? 'animate-spin text-primary' : ''} />
+            <PanelLeft size={14} className={cn('transition-transform', sidebarCollapsed && 'opacity-60')} />
+            <span className="hidden sm:inline">{sidebarCollapsed ? 'Show List' : 'Hide List'}</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchWorkspaces} disabled={workspacesLoading}>
+            <RefreshCw size={13} className={workspacesLoading ? 'animate-spin text-primary' : ''} />
             Refresh
           </Button>
         </div>
       </header>
 
-      <div className="flex gap-4 h-[calc(100vh-125px)] overflow-hidden pb-3">
+      <div className="flex gap-3 h-[calc(100vh-115px)] overflow-hidden pb-2">
         {/* ── Left rail: Workspaces List ─────────────────────────────────────────── */}
         {!sidebarCollapsed && (
-          <div className="w-60 shrink-0 flex flex-col overflow-y-auto pr-1">
+          <div className="w-52 sm:w-56 shrink-0 flex flex-col overflow-y-auto pr-1">
             <div className="relative mb-3">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search workspaces" className="[&_[data-slot=input]]:pl-8" />
@@ -559,7 +584,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           </div>
         )}
 
-        {/* ── Main content area based on layout mode ─────────────────────────── */}
+        {/* ── Main content area ────────────────────────────────────────────── */}
         {!selected ? (
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="max-w-md w-full">
@@ -571,7 +596,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     </EmptyMedia>
                     <EmptyTitle>No workspace selected</EmptyTitle>
                     <EmptyDescription>
-                      Pick a workspace from the list to see its status, repositories, changes, services, sessions and chat.
+                      Pick a workspace from the list to see its status, repositories, changes, services, and AI harness launchpad.
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -579,44 +604,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </div>
           </div>
         ) : (
-          <div
-            className={cn(
-              'flex-1 min-w-0 h-full gap-4',
-              (layoutMode === 'cockpit' || layoutMode === 'split')
-                && 'flex flex-col overflow-y-auto xl:grid xl:overflow-hidden',
-              layoutMode === 'cockpit'
-                && 'xl:grid-cols-[minmax(440px,960px)_minmax(380px,640px)]',
-              layoutMode === 'split' && 'xl:grid-cols-2',
-              layoutMode === 'chat-only' && 'flex justify-center overflow-hidden',
-              layoutMode === 'inspector-only' && 'overflow-y-auto pr-1',
-            )}
-          >
-            {/* Keep one AgentChat mounted while layout classes change. Unmounting
-                it closes the active WebSocket and interrupts the current turn. */}
-            <div
-              className={cn(
-                'min-w-0 flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm',
-                (layoutMode === 'cockpit' || layoutMode === 'split')
-                  && 'w-full min-h-[420px] flex-none xl:h-full xl:min-h-0',
-                layoutMode === 'chat-only' && 'w-full max-w-5xl h-full',
-                layoutMode === 'inspector-only' && 'hidden',
-              )}
-            >
-              {renderChat()}
-            </div>
-
-            <div
-              className={cn(
-                'min-w-0',
-                (layoutMode === 'cockpit' || layoutMode === 'split')
-                  && 'w-full flex-none overflow-visible xl:h-full xl:overflow-y-auto xl:pr-1',
-                layoutMode === 'chat-only' && 'hidden',
-                layoutMode === 'inspector-only' && 'h-full overflow-y-auto',
-              )}
-            >
-              <div className={cn(layoutMode === 'inspector-only' && 'mx-auto flex w-full max-w-6xl flex-col')}>
-                {renderInspector()}
-              </div>
+          <div className="flex-1 min-w-0 h-full overflow-y-auto pr-1">
+            <div className="mx-auto flex w-full max-w-6xl flex-col">
+              {renderInspector()}
             </div>
           </div>
         )}

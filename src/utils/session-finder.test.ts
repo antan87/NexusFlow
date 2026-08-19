@@ -2,7 +2,21 @@ import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { canOpenCodexSessionInWorkspace, canTransferClaudeSessionInWorkspace, getClaudeProjectFolderName, isCanonicalPathWithin, isNoiseUserRecord, claudeRecordText, codexMessageText, codexSessionId, isCodexSessionId, isInjectedContextText, getSessionTranscript } from './session-finder.js';
+import {
+  canOpenCodexSessionInWorkspace,
+  canTransferClaudeSessionInWorkspace,
+  getClaudeProjectFolderName,
+  getAntigravityDir,
+  isCanonicalPathWithin,
+  isNoiseUserRecord,
+  claudeRecordText,
+  codexMessageText,
+  codexSessionId,
+  isCodexSessionId,
+  isInjectedContextText,
+  getSessionTranscript,
+  findSessions,
+} from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
   it('matches Claude Code encoding for a Windows path (colon, backslash, dot, underscore)', () => {
@@ -247,5 +261,125 @@ describe('isInjectedContextText', () => {
   });
   it('does not flag a real prompt', () => {
     expect(isInjectedContextText('Refactor the auth module')).toBe(false);
+  });
+});
+
+describe('getAntigravityDir', () => {
+  const origAg = process.env.ANTIGRAVITY_CLI_HOME;
+  const origGemini = process.env.GEMINI_CLI_HOME;
+
+  afterEach(() => {
+    if (origAg === undefined) delete process.env.ANTIGRAVITY_CLI_HOME;
+    else process.env.ANTIGRAVITY_CLI_HOME = origAg;
+    if (origGemini === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = origGemini;
+  });
+
+  it('prefers ANTIGRAVITY_CLI_HOME when set', () => {
+    process.env.ANTIGRAVITY_CLI_HOME = '/custom/ag-home';
+    process.env.GEMINI_CLI_HOME = '/custom/gemini-home';
+    expect(getAntigravityDir()).toBe('/custom/ag-home');
+  });
+
+  it('supports GEMINI_CLI_HOME when ANTIGRAVITY_CLI_HOME is unset', () => {
+    delete process.env.ANTIGRAVITY_CLI_HOME;
+    process.env.GEMINI_CLI_HOME = '/custom/gemini-home';
+    expect(getAntigravityDir()).toBe(path.join('/custom/gemini-home', 'antigravity-cli'));
+  });
+
+  it('handles GEMINI_CLI_HOME already pointing to antigravity-cli directory', () => {
+    delete process.env.ANTIGRAVITY_CLI_HOME;
+    process.env.GEMINI_CLI_HOME = path.join('/custom/gemini-home', 'antigravity-cli');
+    expect(getAntigravityDir()).toBe(path.join('/custom/gemini-home', 'antigravity-cli'));
+  });
+
+  it('falls back to default homedir location when no env vars are set', () => {
+    delete process.env.ANTIGRAVITY_CLI_HOME;
+    delete process.env.GEMINI_CLI_HOME;
+    expect(getAntigravityDir()).toBe(path.join(os.homedir(), '.gemini', 'antigravity-cli'));
+  });
+});
+
+describe('JSON error boundaries and malformed lines resilience', () => {
+  let tempDir = '';
+  let workspaceDir = '';
+  let prevAg: string | undefined;
+  let prevClaude: string | undefined;
+  let prevCodex: string | undefined;
+
+  beforeEach(async () => {
+    prevAg = process.env.ANTIGRAVITY_CLI_HOME;
+    prevClaude = process.env.CLAUDE_CONFIG_DIR;
+    prevCodex = process.env.CODEX_HOME;
+
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-json-resilience-'));
+    workspaceDir = path.join(tempDir, 'workspace');
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    process.env.ANTIGRAVITY_CLI_HOME = path.join(tempDir, 'ag');
+    process.env.CLAUDE_CONFIG_DIR = path.join(tempDir, 'claude');
+    process.env.CODEX_HOME = path.join(tempDir, 'codex');
+
+    await fs.mkdir(process.env.ANTIGRAVITY_CLI_HOME, { recursive: true });
+    await fs.mkdir(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+    await fs.mkdir(path.join(process.env.CODEX_HOME, 'sessions'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    if (prevAg === undefined) delete process.env.ANTIGRAVITY_CLI_HOME;
+    else process.env.ANTIGRAVITY_CLI_HOME = prevAg;
+    if (prevClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevClaude;
+    if (prevCodex === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodex;
+
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('continues parsing Claude session files despite malformed JSON lines', async () => {
+    const claudeFolder = getClaudeProjectFolderName(workspaceDir);
+    const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', claudeFolder);
+    await fs.mkdir(claudeProjDir, { recursive: true });
+
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a99';
+    await fs.writeFile(
+      path.join(claudeProjDir, `${sessionId}.jsonl`),
+      [
+        '{ INVALID JSON LINE }',
+        JSON.stringify({ type: 'user', sessionId, timestamp: '2026-08-19T08:00:00.000Z', message: { content: 'Valid prompt' } }),
+        'CORRUPTED TEXT',
+        JSON.stringify({ type: 'assistant', sessionId, timestamp: '2026-08-19T08:01:00.000Z', message: { content: 'Valid response' } }),
+      ].join('\n'),
+    );
+
+    const sessions = await findSessions(workspaceDir);
+    expect(sessions.find((s) => s.id === sessionId)).toBeDefined();
+    expect(sessions.find((s) => s.id === sessionId)?.title).toBe('Valid prompt');
+
+    const transcript = await getSessionTranscript('claude', sessionId);
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0].content).toBe('Valid prompt');
+    expect(transcript[1].content).toBe('Valid response');
+  });
+
+  it('continues parsing Antigravity transcript despite malformed JSON lines', async () => {
+    const convId = '0199a213-81c0-7800-8aa1-bbab2a035a98';
+    const brainLogDir = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'brain', convId, '.system_generated', 'logs');
+    await fs.mkdir(brainLogDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(brainLogDir, 'transcript.jsonl'),
+      [
+        '{ MALFORMED JSON }',
+        JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Build feature X</USER_REQUEST>', timestamp: '2026-08-19T08:00:00.000Z' }),
+        'INVALID LINE',
+        JSON.stringify({ type: 'PLANNER_RESPONSE', content: 'Feature built.', timestamp: '2026-08-19T08:01:00.000Z' }),
+      ].join('\n'),
+    );
+
+    const transcript = await getSessionTranscript('antigravity', convId);
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0].content).toBe('Build feature X');
+    expect(transcript[1].content).toBe('Feature built.');
   });
 });

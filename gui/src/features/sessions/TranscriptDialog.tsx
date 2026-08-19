@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
-import { Copy, ExternalLink, Play } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
+import { Copy, ExternalLink, Terminal } from 'lucide-react';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Button } from '../../components/ui/button.js';
 import {
   Dialog,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogPanel,
@@ -13,17 +14,17 @@ import {
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { findWorkspaceForSession } from '../../lib/status.js';
-import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
-import type { Feature } from '../../types.js';
-import { providerForAssistant } from '../chat/chatLaunch.js';
+import { useWorkspaceLaunchTargets, useLaunchTerminal } from '../../lib/api/queries.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
+import type { AISession, Feature, TranscriptMessage } from '../../types.js';
 
 interface TranscriptDialogProps {
-  activeSession: any;
-  transcript: any[];
+  activeSession: AISession;
+  transcript: TranscriptMessage[];
   transcriptLoading: boolean;
-  setActiveSession: (session: any | null) => void;
+  setActiveSession: (session: AISession | null) => void;
   workspaces: Feature[];
-  handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
+  workspace?: Feature;
   handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -40,17 +41,33 @@ const assistantLabel = (assistant: string) =>
 const assistantTone = (assistant: string) =>
   assistant === 'claude' ? 'warning' : assistant === 'codex' ? 'success' : assistant === 'antigravity' ? 'accent' : 'info';
 
+const getResumeCommand = (assistant: string, sessionId: string): string => {
+  switch (assistant) {
+    case 'antigravity':
+      return `agy --conversation ${sessionId}`;
+    case 'claude':
+      return `claude --resume ${sessionId}`;
+    case 'codex':
+      return `codex resume ${sessionId}`;
+    case 'copilot':
+      return `copilot --resume ${sessionId}`;
+    default:
+      return `agy --conversation ${sessionId}`;
+  }
+};
+
 export function TranscriptDialog({
   activeSession,
   transcript,
   transcriptLoading,
   setActiveSession,
   workspaces,
-  handleResumeSession,
+  workspace,
   handleOpenDesktopSession,
   showToast,
 }: TranscriptDialogProps) {
   const launchTargets = useWorkspaceLaunchTargets();
+  const launchTerminalMutation = useLaunchTerminal();
   const codexDesktop = launchTargets.data?.find((target) => target.id === 'codex-desktop');
   const codexDesktopAvailable = codexDesktop?.available === true;
   const codexDesktopReason = launchTargets.isLoading
@@ -59,11 +76,25 @@ export function TranscriptDialog({
       ? 'Could not check whether Codex Desktop is available.'
       : codexDesktop?.unavailableReason ?? 'Codex Desktop is not available on this computer.';
   const openingDesktopRef = useRef(false);
+  const resumingTerminalRef = useRef(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [openingDesktop, setOpeningDesktop] = useState(false);
+  const [resumingTerminal, setResumingTerminal] = useState(false);
+
+  // Auto-scroll to the bottom (last message) when transcript finishes loading
+  useEffect(() => {
+    if (!transcriptLoading && transcript.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [transcriptLoading, transcript]);
+
+  const resolveTargetWorkspace = () => {
+    return workspace ?? findWorkspaceForSession(workspaces, activeSession.workspacePath);
+  };
 
   const openCodexDesktop = async () => {
     if (!codexDesktopAvailable || openingDesktopRef.current) return;
-    const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
+    const ws = resolveTargetWorkspace();
     if (!ws) {
       showToast('Could not match this session to a workspace — it may have been removed.', 'error');
       return;
@@ -81,6 +112,37 @@ export function TranscriptDialog({
     }
   };
 
+  const resumeInTerminal = async () => {
+    if (resumingTerminalRef.current) return;
+    const ws = resolveTargetWorkspace();
+    if (!ws) {
+      showToast('Could not match this session to a workspace.', 'error');
+      return;
+    }
+    resumingTerminalRef.current = true;
+    setResumingTerminal(true);
+    try {
+      await launchTerminalMutation.mutateAsync({
+        workspaceId: ws.branchName,
+        assistant: activeSession.assistant,
+        sessionId: activeSession.id,
+      });
+      showToast(`Launched interactive terminal for ${assistantLabel(activeSession.assistant)}.`, 'success');
+      setActiveSession(null);
+    } catch {
+      const cmd = getResumeCommand(activeSession.assistant, activeSession.id);
+      const copied = await safeCopyToClipboard(cmd);
+      if (copied) {
+        showToast(`Could not open terminal automatically. Copied command to clipboard:\n\n${cmd}`, 'info');
+      } else {
+        showToast(`Could not open terminal automatically. Run manually:\n\n${cmd}`, 'error');
+      }
+    } finally {
+      setResumingTerminal(false);
+      resumingTerminalRef.current = false;
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => !open && setActiveSession(null)}>
       <DialogPopup className="h-[80vh] max-w-4xl">
@@ -95,9 +157,12 @@ export function TranscriptDialog({
             <DialogTitle className="max-w-xl truncate text-sm" title={activeSession.title}>
               {activeSession.title}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Interactive transcript log and resume options for session {activeSession.id}
+            </DialogDescription>
           </div>
         </DialogHeader>
- 
+
         {/* Modal Body / Chat Messages */}
         <DialogPanel className="space-y-4">
           {transcriptLoading ? (
@@ -118,56 +183,43 @@ export function TranscriptDialog({
                 </div>
                 <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-xs leading-relaxed ${
                   msg.role === 'user'
-                    ? 'rounded-tr-none border-primary/20 bg-primary text-primary-foreground'
-                    : 'rounded-tl-none border-border bg-muted/40 text-foreground'
+                    ? 'rounded-tr-none border-primary/30 bg-primary/10 text-foreground dark:border-primary/40 dark:bg-primary/20'
+                    : 'rounded-tl-none border-border bg-card text-foreground shadow-xs dark:bg-muted/30'
                 }`}>
                   <ChatMarkdown content={msg.content} />
                 </div>
               </div>
             ))
           )}
+          <div ref={messagesEndRef} />
         </DialogPanel>
- 
+
         {/* Modal Footer */}
         <DialogFooter className="sm:justify-between">
           <span className="text-[11px] text-muted-foreground">
-            {providerForAssistant(activeSession.assistant)
-              ? 'This session can resume directly in NexusFlow chat.'
-              : 'This provider remains available as a view-only transcript.'}
+            Historical transcript inspection. Resume directly in your preferred environment.
           </span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                const cmd = activeSession.assistant === 'antigravity' ? `agy --conversation ${activeSession.id}` :
-                            activeSession.assistant === 'claude' ? `claude --resume ${activeSession.id}` :
-                            activeSession.assistant === 'codex' ? `codex resume ${activeSession.id}` :
-                            `copilot --resume ${activeSession.id}`;
-                navigator.clipboard.writeText(cmd);
+              onClick={async () => {
+                const cmd = getResumeCommand(activeSession.assistant, activeSession.id);
+                await safeCopyToClipboard(cmd);
                 showToast(`Copied run command to clipboard:\n\n${cmd}`, 'success');
               }}
             >
               <Copy size={13} /> Copy Resume Command
             </Button>
-            {providerForAssistant(activeSession.assistant) && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  // Never fall back to an arbitrary workspace — resuming a
-                  // session against the wrong cwd silently loses its context.
-                  const ws = findWorkspaceForSession(workspaces, activeSession.workspacePath);
-                  if (!ws) {
-                    showToast('Could not match this session to a workspace — it may have been removed.', 'error');
-                    return;
-                  }
-                  handleResumeSession(ws, activeSession.id, activeSession.assistant);
-                  setActiveSession(null);
-                }}
-              >
-                <Play size={12} /> Resume in NexusFlow
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={resumingTerminal}
+              onClick={() => void resumeInTerminal()}
+            >
+              {resumingTerminal ? <Spinner className="size-3" /> : <Terminal size={12} />}
+              Resume in Terminal
+            </Button>
             {activeSession.assistant === 'codex' && (
               <Button
                 variant="outline"

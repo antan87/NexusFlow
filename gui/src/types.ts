@@ -75,6 +75,13 @@ export interface AISession {
   };
 }
 
+/** A single chat message in a session transcript (mirrors src/types.ts ChatMessage). */
+export interface TranscriptMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+}
+
 export interface RepoInfo {
   name: string;
   path: string;

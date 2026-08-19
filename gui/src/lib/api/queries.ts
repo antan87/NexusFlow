@@ -440,4 +440,23 @@ export function useAssignWorkspaceSkills() {
   });
 }
 
+export interface LaunchTerminalPayload {
+  workspaceId: string;
+  command?: string;
+  assistant?: string;
+  sessionId?: string;
+  title?: string;
+}
+
+export function useLaunchTerminal() {
+  return useMutation({
+    mutationFn: ({ workspaceId, ...payload }: LaunchTerminalPayload) =>
+      apiFetch<{ success: boolean; command: string }>(`/api/workspace/${encodeURIComponent(workspaceId)}/terminal`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+  });
+}
+
+
 
