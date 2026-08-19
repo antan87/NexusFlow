@@ -6,7 +6,7 @@
 import { input, checkbox, confirm, select, search, editor } from '@inquirer/prompts';
 import chalk from 'chalk';
 
-import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo } from '../types.js';
+import type { AIAssistant, DetectedAI, DetectedEditor, RepoInfo, SkillItem } from '../types.js';
 import { isValidBranchName, listBranches } from './git.js';
 import { isValidProjectName } from '../core/new-repo.js';
 import type { WorkflowTemplate } from './workflows.js';
@@ -412,4 +412,20 @@ export async function promptNewStrategy(): Promise<{ name: string; content: stri
   }
 
   return { name: name.trim(), content: content.trim() };
+}
+
+/**
+ * Prompts the user to select Agent Skills to deploy to the workspace.
+ */
+export async function promptSelectSkills(skills: SkillItem[]): Promise<string[]> {
+  if (skills.length === 0) return [];
+  const selected = await checkbox({
+    message: 'Select Agent Skills to deploy to this workspace (optional):',
+    choices: skills.map((s) => ({
+      name: `${s.title || s.name} ${chalk.dim(`(${s.description.slice(0, 60)}...)`)}`,
+      value: s.id,
+      checked: false,
+    })),
+  });
+  return selected;
 }
