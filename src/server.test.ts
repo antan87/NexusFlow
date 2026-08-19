@@ -1062,6 +1062,46 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(text).toContain('"progress":100');
     });
 
+    it('saves enabledSkills and enabledAgents during workspace creation', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+        storageProvider: 'local'
+      } as any);
+
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/skills-ws');
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+      vi.spyOn(skillsCatalog, 'saveWorkspaceSkillsConfig').mockResolvedValue(undefined as any);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: 'skills-ws',
+          description: 'Skills workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['antigravity'],
+          enabledSkills: ['pr-review-toolkit', 'unit-test-coverage'],
+          enabledAgents: ['my-agent'],
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(skillsCatalog.saveWorkspaceSkillsConfig).toHaveBeenCalledWith(
+        expect.stringContaining('skills-ws'),
+        {
+          enabledSkills: ['pr-review-toolkit', 'unit-test-coverage'],
+          enabledAgents: ['my-agent'],
+          enabledCategories: [],
+        }
+      );
+    });
+
     // XML context packing tests removed.
 
     it('rejects in-place creation without a name', async () => {

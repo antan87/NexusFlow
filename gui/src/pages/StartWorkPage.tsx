@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot } from 'lucide-react';
 
+import { Badge } from '../components/ui/badge.js';
 import { Button } from '../components/ui/button.js';
 import { Input } from '../components/ui/input.js';
 import { Textarea } from '../components/ui/textarea.js';
@@ -25,6 +26,8 @@ import {
   useRepoBranches,
   useRepos,
   useWorkflowTemplates,
+  useSkills,
+  useAgents,
   type CreateWorkspacePayload,
 } from '../lib/api/queries.js';
 import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
@@ -128,6 +131,8 @@ export function StartWorkPage() {
   const repos = useRepos();
   const aiDetect = useAiDetect();
   const templates = useWorkflowTemplates();
+  const skillsQuery = useSkills();
+  const agentsQuery = useAgents();
   const createWorkspace = useCreateWorkspace();
   const { progress, start } = useCreationStream();
 
@@ -139,6 +144,8 @@ export function StartWorkPage() {
   const [adHocPaths, setAdHocPaths] = useState<string[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
+  const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
+  const [enabledAgents, setEnabledAgents] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<string>('');
   /** Editable teamwork instructions; prefilled by strategy pick or AI suggestion. */
   const [customInstructions, setCustomInstructions] = useState('');
@@ -240,6 +247,8 @@ export function StartWorkPage() {
           !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
       assistants,
+      enabledSkills: enabledSkills.length > 0 ? enabledSkills : undefined,
+      enabledAgents: enabledAgents.length > 0 ? enabledAgents : undefined,
       teamworkInstructions: customInstructions.trim() || undefined,
     };
     try {
@@ -555,6 +564,104 @@ export function StartWorkPage() {
                   className="mt-2 font-mono text-xs"
                 />
               </div>
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <Boxes className="size-4 text-primary" />
+                    Agent Skills ({enabledSkills.length} selected)
+                  </span>
+                  {(skillsQuery.data ?? []).length > 0 && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        const all = (skillsQuery.data ?? []).map((s) => s.id);
+                        setEnabledSkills(enabledSkills.length === all.length ? [] : all);
+                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground h-6 px-2"
+                    >
+                      {enabledSkills.length === (skillsQuery.data ?? []).length && (skillsQuery.data ?? []).length > 0
+                        ? 'Deselect All'
+                        : 'Select All'}
+                    </Button>
+                  )}
+                </div>
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-card/50 p-2 space-y-1.5">
+                  {skillsQuery.isLoading ? (
+                    <div className="flex items-center justify-center p-4 gap-2 text-xs text-muted-foreground">
+                      <Spinner className="size-3" />
+                      Loading skills...
+                    </div>
+                  ) : (skillsQuery.data ?? []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground p-2 text-center">No skills available in catalog.</p>
+                  ) : (
+                    (skillsQuery.data ?? []).map((skill) => {
+                      const isChecked = enabledSkills.includes(skill.id);
+                      return (
+                        <label
+                          key={skill.id}
+                          className={cn(
+                            'flex items-center justify-between gap-2 rounded-md p-2 text-xs cursor-pointer border transition-colors',
+                            isChecked ? 'border-primary/50 bg-primary/5 text-foreground' : 'border-transparent hover:bg-muted/50 text-muted-foreground'
+                          )}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Checkbox
+                              checked={isChecked}
+                              onCheckedChange={() =>
+                                setEnabledSkills((prev) =>
+                                  prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id]
+                                )
+                              }
+                            />
+                            <span className="font-mono font-medium truncate">{skill.title || skill.name}</span>
+                          </div>
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                            {skill.category}
+                          </Badge>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {(agentsQuery.data ?? []).length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-sm font-medium flex items-center gap-1.5">
+                      <Bot className="size-4 text-purple-400" />
+                      Codex Native Agents ({enabledAgents.length} selected)
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(agentsQuery.data ?? []).map((agent) => {
+                      const isChecked = enabledAgents.includes(agent.id);
+                      return (
+                        <label
+                          key={agent.id}
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs',
+                            isChecked ? 'border-purple-500/60 bg-purple-500/5 text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+                          )}
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={() =>
+                              setEnabledAgents((prev) =>
+                                prev.includes(agent.id) ? prev.filter((id) => id !== agent.id) : [...prev, agent.id]
+                              )
+                            }
+                          />
+                          <span className="font-mono">{agent.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
             </div>
           )}

@@ -149,7 +149,7 @@ function AppInner() {
   // Active workspace / detail sub-tab. Service state lives in the Services tab
   // (ServiceConsole) via react-query — App no longer owns it.
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan'>('overview');
+  const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills'>('overview');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -629,7 +629,7 @@ function AppInner() {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       const tab = parts[2];
-      const valid = ['overview', 'sessions', 'services', 'changes', 'knowledge', 'plan'];
+      const valid = ['overview', 'sessions', 'services', 'changes', 'knowledge', 'plan', 'skills'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
     } else {
       setActiveWsId(null);
@@ -855,7 +855,7 @@ Core Instructions:
       repos={repos}
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
-      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession }}
+      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
       knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
       planProps={{ planContent, planLoading }}

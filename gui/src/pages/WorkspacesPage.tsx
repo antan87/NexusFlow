@@ -31,8 +31,11 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
+import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 
-type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan';
+export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
+
+type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan' | 'skills';
 
 const TABS: Array<{ value: SubTab; label: string }> = [
   { value: 'overview', label: 'Overview' },
@@ -41,6 +44,7 @@ const TABS: Array<{ value: SubTab; label: string }> = [
   { value: 'sessions', label: 'Sessions' },
   { value: 'knowledge', label: 'Knowledge' },
   { value: 'plan', label: 'Plan' },
+  { value: 'skills', label: 'Skills' },
 ];
 
 const FILTERS = ['all', 'changes', 'running'] as const;
@@ -63,11 +67,11 @@ interface WorkspacesPageProps {
   repos: RepoInfo[];
   addRepoLoading: boolean;
   handleAddRepo: (wsName: string, repoPath: string) => Promise<void>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
   sessionProps: Omit<ComponentProps<typeof SessionHistory>, 'ws'>;
   changesProps: Omit<ComponentProps<typeof ChangesViewer>, 'ws'>;
   knowledgeProps: Omit<ComponentProps<typeof KnowledgeBase>, 'ws'>;
   planProps: ComponentProps<typeof ImplementationPlan>;
-  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export function WorkspacesPage(props: WorkspacesPageProps) {
@@ -86,11 +90,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     repos,
     addRepoLoading,
     handleAddRepo,
+    showToast,
     sessionProps,
     changesProps,
     knowledgeProps,
     planProps,
-    showToast,
   } = props;
 
   const [query, setQuery] = useState('');
@@ -482,6 +486,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
             {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
             {subTab === 'plan' && <ImplementationPlan {...planProps} />}
+            {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
           </TabsPanel>
         </Tabs>
       </div>

@@ -960,6 +960,15 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     // dir). One stable step id for both modes — only the wording differs.
     updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
     await createWorkspace(feature, body.repos);
+
+    if (Array.isArray(body.enabledSkills) || Array.isArray(body.enabledAgents) || Array.isArray(body.enabledCategories)) {
+      await saveWorkspaceSkillsConfig(workspacePath, {
+        enabledSkills: Array.isArray(body.enabledSkills) ? body.enabledSkills : [],
+        enabledAgents: Array.isArray(body.enabledAgents) ? body.enabledAgents : [],
+        enabledCategories: Array.isArray(body.enabledCategories) ? body.enabledCategories : [],
+      });
+    }
+
     updateJobStep(
       jobId,
       'workspace',
@@ -1013,7 +1022,9 @@ app.post('/api/workspace', async (c) => {
       description: string;
       repos: RepoSelection[];
       assistants: any[];
-
+      enabledSkills?: string[];
+      enabledAgents?: string[];
+      enabledCategories?: string[];
       teamworkInstructions?: string;
       resumption?: {
         testCommand?: string;

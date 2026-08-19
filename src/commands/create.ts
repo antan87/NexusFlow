@@ -31,9 +31,11 @@ import {
   promptNewStrategy,
   promptNewProjectName,
   promptRepoBranches,
+  promptSelectSkills,
 } from '../utils/prompts.js';
 import { createNewRepo } from '../core/new-repo.js';
 import { loadProjects, slugifyProjectName } from '../core/projects.js';
+import { getAllSkills, saveWorkspaceSkillsConfig } from '../utils/skills-catalog.js';
 import type { Feature, Project, RepoSelection, WorkspaceContext, WorkspaceMode } from '../types.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
 import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
@@ -223,6 +225,13 @@ export async function createCommand(): Promise<void> {
     }
   }
 
+  // ── 5.6. Select Agent Skills to deploy ──────────────────────────────
+  const catalogSkills = await getAllSkills();
+  const selectedSkills = await promptSelectSkills(catalogSkills);
+  if (selectedSkills.length > 0) {
+    console.log(chalk.green(`  ✔ Selected ${selectedSkills.length} skill(s) to deploy: ${selectedSkills.join(', ')}`));
+  }
+
   // ── 6. Create workspace ─────────────────────────────────────────────
   const workspacePath = path.join(config.workspacesDir, workspaceId);
   const feature: Feature = {
@@ -249,6 +258,15 @@ export async function createCommand(): Promise<void> {
     await createWorkspace(feature, selectedRepos, (repoName, index, total) => {
       wsSpinner.text = `Creating worktrees… ${repoName} (${index + 1}/${total})`;
     });
+
+    if (selectedSkills.length > 0) {
+      await saveWorkspaceSkillsConfig(workspacePath, {
+        enabledSkills: selectedSkills,
+        enabledAgents: [],
+        enabledCategories: [],
+      });
+    }
+
     wsSpinner.succeed(`Workspace created at ${chalk.bold(workspacePath)}`);
   } catch (error) {
     wsSpinner.fail('Failed to create workspace');

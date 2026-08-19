@@ -76,6 +76,9 @@ export interface CreateWorkspacePayload {
   repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
   assistants: string[];
   teamworkInstructions?: string;
+  enabledSkills?: string[];
+  enabledAgents?: string[];
+  enabledCategories?: string[];
 }
 
 export function useCreateWorkspace() {
@@ -458,5 +461,20 @@ export function useLaunchTerminal() {
   });
 }
 
-
+export function useRefreshWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workspaceId, force }: { workspaceId: string; force?: boolean }) =>
+      apiFetch<{ report: unknown }>(`/api/workspace/${encodeURIComponent(workspaceId)}/refresh`, {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-skills', variables.workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ['skills', variables.workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
+    },
+  });
+}
 
