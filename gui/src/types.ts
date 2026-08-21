@@ -41,6 +41,9 @@ export type WorkspaceLaunchIcon =
   | 'vscode-insiders'
   | 'cursor'
   | 'antigravity'
+  | 'powershell'
+  | 'cmd'
+  | 'terminal'
   | 'intellij'
   | 'webstorm'
   | 'pycharm'
@@ -73,6 +76,13 @@ export interface AISession {
     targetId: 'codex-desktop' | 'claude-desktop';
     method: 'direct' | 'guided';
   };
+}
+
+/** A single chat message in a session transcript (mirrors src/types.ts ChatMessage). */
+export interface TranscriptMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
 }
 
 export interface RepoInfo {

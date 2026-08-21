@@ -394,8 +394,18 @@ export async function loadWorkspaceManifest(
   workspacePath: string,
 ): Promise<Feature | null> {
   try {
-    const raw = await fs.readFile(path.join(workspacePath, MANIFEST_FILE), 'utf-8');
-    return normalizeFeature(JSON.parse(raw) as Feature);
+    const manifestPath = path.join(workspacePath, MANIFEST_FILE);
+    const raw = await fs.readFile(manifestPath, 'utf-8');
+    const feature = JSON.parse(raw) as Feature;
+    if (!feature.createdAt) {
+      try {
+        const st = await fs.stat(manifestPath);
+        feature.createdAt = (st.birthtime && st.birthtime.getTime() > 0 ? st.birthtime : st.mtime).toISOString();
+      } catch {
+        feature.createdAt = new Date(0).toISOString();
+      }
+    }
+    return normalizeFeature(feature);
   } catch {
     return null;
   }
@@ -578,8 +588,7 @@ export async function addRepoToWorkspace(
   await saveFeatureConfig(workspacePath, feature);
 
   // 3. Keep editor config in step: worktree mode ignores the new subdir in the
-  // root .gitignore; in-place mode adds the absolute path to the
-  // .code-workspace (otherwise the repo is invisible in the editor).
+  // root .gitignore; in both modes, .code-workspace includes the new repo folder.
   if (!inPlace) {
     try {
       const gitignorePath = path.join(workspacePath, '.gitignore');
@@ -596,19 +605,31 @@ export async function addRepoToWorkspace(
     } catch (error) {
       console.warn('Warning: Failed to update .gitignore:', error);
     }
-  } else {
+  }
+
+  try {
+    const workspaceName = path.basename(workspacePath);
+    const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+    let codeWorkspace: any;
     try {
-      const workspaceName = path.basename(workspacePath);
-      const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
-      const codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
+      codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
+    } catch {
+      codeWorkspace = {
+        folders: [{ path: '.', name: `${workspaceName} (workspace)` }],
+        settings: { 'search.useIgnoreFiles': false },
+      };
+    }
+    const folderPath = inPlace ? newRepoInfo.path : newRepoInfo.name;
+    const existingFolders = codeWorkspace.folders ?? [];
+    if (!existingFolders.some((f: any) => f.name === newRepoInfo.name || f.path === folderPath)) {
       codeWorkspace.folders = [
-        ...(codeWorkspace.folders ?? []),
-        { path: newRepoInfo.path, name: newRepoInfo.name },
+        ...existingFolders,
+        { path: folderPath, name: newRepoInfo.name },
       ];
       await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
-    } catch (error) {
-      console.warn('Warning: Failed to update .code-workspace file:', error);
     }
+  } catch (error) {
+    console.warn('Warning: Failed to update .code-workspace file:', error);
   }
 
   // 4. Re-run analysis, update configs, and repack workspace

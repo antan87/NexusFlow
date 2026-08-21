@@ -4,18 +4,15 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
-import {
-  createChatLaunchIntent,
-  providerForAssistant,
-  type EmbeddedHarnessAssistant,
-} from './features/chat/chatLaunch.js';
 import { Spinner } from './components/ui/spinner.js';
+import { safeCopyToClipboard } from './lib/clipboard.js';
+import { cn } from './lib/utils.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -46,15 +43,16 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 // Types canonicalized in ./types.ts — never redeclare them here.
 import type {
+  AISession,
   DetectedAI,
   DetectedEditor,
   Feature,
   NexusFlowConfig,
   RepoInfo,
   StorageAdapterMeta,
+  TranscriptMessage,
   WorkspaceStatus,
 } from './types.js';
-
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 let toastIdCounter = 0;
@@ -132,8 +130,6 @@ function AppInner() {
   const [suggestedImprovement, setSuggestedImprovement] = useState<string | null>(null);
   const [mgtAnalysisComment, setMgtAnalysisComment] = useState('');
 
-  const [resumingWs, setResumingWs] = useState<string | null>(null);
-
   // Workspaces list + at-a-glance statuses live in the shared react-query
   // cache — the same one the StartWorkPage/ProjectsPage mutations invalidate,
   // so a created or deleted workspace shows up here without manual syncing.
@@ -149,16 +145,15 @@ function AppInner() {
   const workspaces: Feature[] = workspacesQuery.data ?? [];
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
-  const statusesLoading = statusesQuery.isLoading;
 
   // Active workspace / detail sub-tab. Service state lives in the Services tab
   // (ServiceConsole) via react-query — App no longer owns it.
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills'>('overview');
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [activeSession, setActiveSession] = useState<any | null>(null);
-  const [transcript, setTranscript] = useState<any[]>([]);
+  const [activeSession, setActiveSession] = useState<AISession | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [gitChangesLoading, setGitChangesLoading] = useState(false);
@@ -558,41 +553,16 @@ function AppInner() {
 
   // ─── Actions ────────────────────────────────────────────────────────────
 
-  const handleResumeSession = async (ws: Feature, sessionId?: string, assistant?: string) => {
-    setResumingWs(ws.branchName);
-    try {
-      if (assistant && !providerForAssistant(assistant)) {
-        showToast('This assistant cannot resume in embedded chat.', 'error');
-        return;
-      }
-      const selectedAssistant = assistant
-        ? assistant as EmbeddedHarnessAssistant
-        : ws.assistants.find((candidate): candidate is EmbeddedHarnessAssistant => providerForAssistant(candidate) !== null);
-
-      if (!selectedAssistant) {
-        showToast('Select a supported local harness for this workspace to continue in embedded chat.', 'error');
-        return;
-      }
-
-      navigate(`/workspaces/${encodeURIComponent(ws.branchName)}`, {
-        state: {
-          chatLaunch: createChatLaunchIntent(selectedAssistant, sessionId ? { sessionId } : {}),
-        },
-      });
-      setActiveWsId(ws.branchName);
-    } finally {
-      setResumingWs(null);
-    }
-  };
-
   const handleOpenDesktopSession = async (
     ws: Feature,
     sessionId: string,
     assistant: string,
   ): Promise<boolean> => {
     if (assistant !== 'codex') {
-      showToast('Claude Code sessions currently resume in NexusFlow; Desktop resume is not documented yet.', 'info');
-      return false;
+      const cmd = assistant === 'claude' ? `claude --resume ${sessionId}` : `agy --conversation ${sessionId}`;
+      await safeCopyToClipboard(cmd);
+      showToast(`Copied ${assistant} resume command to clipboard:\n\n${cmd}`, 'info');
+      return true;
     }
 
     try {
@@ -612,15 +582,25 @@ function AppInner() {
     }
   };
 
-  const executeTerminal = (command: string) => {
+  const executeTerminal = async (command: string) => {
     if (!activeWsId) return;
     const ws = workspaces.find(w => w.branchName === activeWsId);
-    if (ws) {
+    if (!ws) return;
+    if (isVsCode) {
       window.parent.postMessage({
         type: 'executeTerminalCommand',
         command,
         cwd: ws.workspacePath
       }, '*');
+      return;
+    }
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(ws.branchName)}/terminal`, {
+        method: 'POST',
+        body: JSON.stringify({ command }),
+      });
+    } catch (e) {
+      showToast(`Terminal error: ${e instanceof Error ? e.message : String(e)}`, 'error');
     }
   };
 
@@ -701,6 +681,14 @@ function AppInner() {
     }
   }, [location.pathname]);
 
+  // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
+  useEffect(() => {
+    setSessions([]);
+    setGitChanges([]);
+    setKnowledgeContent('');
+    setPlanContent('');
+  }, [activeWsId]);
+
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
   useEffect(() => {
     if (activeWsId && (subTab === 'changes' || subTab === 'overview')) {
@@ -708,9 +696,9 @@ function AppInner() {
     }
   }, [activeWsId, subTab]);
 
-  // Load sessions when active workspace changes or subTab switches to 'sessions'
+  // Load sessions when active workspace changes or subTab switches to 'sessions' or 'overview'
   useEffect(() => {
-    if (activeWsId && subTab === 'sessions') {
+    if (activeWsId && (subTab === 'sessions' || subTab === 'overview')) {
       fetchWorkspaceSessions(activeWsId);
     }
   }, [activeWsId, subTab]);
@@ -729,7 +717,7 @@ function AppInner() {
     }
   }, [activeWsId, subTab]);
 
-  const handleCopyPrompt = (ws: Feature) => {
+  const handleCopyPrompt = async (ws: Feature) => {
     const repoNames = ws.repos.map((r) => r.split(/[\\/]/).pop()).join(', ');
     const prompt = `You are an AI assistant helping with feature development.
 We are working in a multi-repository workspace.
@@ -744,8 +732,12 @@ Core Instructions:
 2. Search "nexusflow-knowledge.md" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`nexusflow knowledge add\`. "nexusflow-plan.md" carries the phase order when a change spans repos.
 3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" inside sub-repositories.
 `;
-    navigator.clipboard.writeText(prompt);
-    showToast('AI context prompt copied to clipboard!', 'success');
+    const copied = await safeCopyToClipboard(prompt);
+    if (copied) {
+      showToast('AI context prompt copied to clipboard!', 'success');
+    } else {
+      showToast('Could not copy prompt to clipboard. Please check browser permissions.', 'error');
+    }
   };
 
   const handleDeleteWorkspace = async (wsName: string) => {
@@ -838,9 +830,9 @@ Core Instructions:
       workspaces={workspaces}
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
-      statusesLoading={statusesLoading}
       onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onNewWorkspace={() => navigate('/new')}
+      showToast={showToast}
     />
   ) : null;
 
@@ -865,19 +857,17 @@ Core Instructions:
       subTab={subTab}
       onSelect={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onSelectTab={(id, tab) => navigate(`/workspaces/${encodeURIComponent(id)}/${tab}`)}
-      resumingWs={resumingWs}
-      handleResumeSession={handleResumeSession}
       handleCopyPrompt={handleCopyPrompt}
       handleDeleteWorkspace={handleDeleteWorkspace}
       deleteWsLoading={deleteWsLoading}
       repos={repos}
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
-      showToast={showToast}
-      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleResumeSession, handleOpenDesktopSession }}
+      sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
       knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
       planProps={{ planContent, planLoading }}
+      showToast={showToast}
     />
   );
 
@@ -898,7 +888,6 @@ Core Instructions:
   const agentsPage = <AgentsPage showToast={showToast} />;
 
   const settingsPage = config ? (
-
     <SettingsPage
       config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
@@ -907,12 +896,22 @@ Core Instructions:
     />
   ) : null;
 
+  const defaultWorkspaceBranch = activeWsId || (workspaces.length > 0 ? workspaces[0].branchName : null);
+  const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
+
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <AppSidebar appVersion={appVersion} />
+      <AppSidebar
+        appVersion={appVersion}
+        workspaces={workspaces}
+        workspaceStatuses={workspaceStatuses}
+        workspacesLoading={workspacesLoading}
+        activeWsId={activeWsId}
+        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+      />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto p-6 sm:p-8">
+      <main className={cn('flex-1 min-w-0 h-screen', isWorkspaceRoute ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-3 sm:p-5 lg:p-6')}>
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-muted-foreground">
             <RefreshCw className="animate-spin text-primary" size={32} />
@@ -959,8 +958,8 @@ Core Instructions:
                     </button>
                   )}
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText('npm install -g @mrpatronz/nexusflow');
+                    onClick={async () => {
+                      await safeCopyToClipboard('npm install -g @mrpatronz/nexusflow');
                       showToast('Update command copied to clipboard!', 'success');
                     }}
                     disabled={updatingApp}
@@ -1008,20 +1007,30 @@ Core Instructions:
             >
               <Routes>
                 <Route path="/" element={dashboardPage} />
+                <Route path="/overview" element={dashboardPage} />
+                <Route path="/dashboard" element={dashboardPage} />
                 <Route path="/guide" element={guidePage} />
                 <Route path="/create" element={startWorkPage} />
                 <Route path="/new" element={startWorkPage} />
                 <Route path="/projects" element={projectsPage} />
-                <Route path="/workspaces" element={workspacesPage} />
+                <Route
+                  path="/workspaces"
+                  element={
+                    defaultWorkspaceBranch ? (
+                      <Navigate to={`/workspaces/${encodeURIComponent(defaultWorkspaceBranch)}`} replace />
+                    ) : (
+                      <Navigate to="/new" replace />
+                    )
+                  }
+                />
                 <Route path="/workspaces/:workspaceId" element={workspacesPage} />
                 <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
                 <Route path="/skills" element={skillsPage} />
                 <Route path="/agents" element={agentsPage} />
                 <Route path="/settings" element={settingsPage} />
                 <Route path="/workflows" element={workflowsPage} />
-
                 <Route path="/strategies" element={workflowsPage} />
-                <Route path="*" element={dashboardPage} />
+                <Route path="*" element={<Navigate to="/overview" replace />} />
               </Routes>
             </Suspense>
           </>
@@ -1035,7 +1044,7 @@ Core Instructions:
           transcriptLoading={transcriptLoading}
           setActiveSession={setActiveSession}
           workspaces={workspaces}
-          handleResumeSession={handleResumeSession}
+          workspace={workspaces.find((w) => w.branchName === activeWsId)}
           handleOpenDesktopSession={handleOpenDesktopSession}
           showToast={showToast}
         />

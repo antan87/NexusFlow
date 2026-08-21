@@ -38,6 +38,8 @@ import {
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
 } from './utils/workspace-launch.js';
+import { isBinaryOnPath, launchWorkspaceTerminal, SUPPORTED_ASSISTANTS } from './utils/terminal-launch.js';
+import { openInEditor } from './utils/open-editor.js';
 import {
   canOpenCodexSessionInWorkspace,
   canTransferClaudeSessionInWorkspace,
@@ -371,7 +373,13 @@ export function canOfferClaudeDesktopTransfer(
   platform: NodeJS.Platform = process.platform,
   architecture: NodeJS.Architecture = process.arch,
   env: NodeJS.ProcessEnv = process.env,
-  isCliConfigured: () => boolean = () => ProviderRegistry.getProvider('claude-cli')?.isConfigured() === true,
+  isCliConfigured: () => boolean = () => {
+    try {
+      const provider = ProviderRegistry.getProvider('claude-cli');
+      if (provider?.isConfigured()) return true;
+    } catch {}
+    return isBinaryOnPath('claude');
+  },
 ): boolean {
   const supportedPlatform = platform === 'darwin' || (platform === 'win32' && architecture === 'x64');
   const usesUnsupportedAuth = Boolean(
@@ -518,6 +526,18 @@ app.use(
     },
   }),
 );
+
+// Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
+// cross-site request forgery and browser form posts from untrusted web pages.
+app.use('/api/*', async (c, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(c.req.method)) {
+    const origin = c.req.header('origin');
+    if (origin && !hasTrustedLocalOrigin(origin)) {
+      return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+    }
+  }
+  await next();
+});
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
 
@@ -698,11 +718,16 @@ app.delete('/api/projects/:id', async (c) => {
   }
 });
 
-// 4. List existing workspaces
+// 4. List existing workspaces (ordered by newest creation date first)
 app.get('/api/workspaces', async (c) => {
   try {
     const config = await loadConfig();
     const workspaces = await listWorkspaces(config.workspacesDir);
+    workspaces.sort((a, b) => {
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
     return c.json(workspaces);
   } catch (error) {
     return errorResponse(c, error);
@@ -1213,6 +1238,11 @@ app.get('/api/workspace-launch-targets', async (c) => {
 
 // 8a. Open a real NexusFlow workspace in a selected desktop app or editor.
 app.post('/api/workspace/:id/launch', async (c) => {
+  const origin = c.req.header('origin');
+  if (origin && !hasTrustedLocalOrigin(origin)) {
+    return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+  }
+
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const { targetId, action = 'new', sessionId } = await c.req.json().catch(() => ({})) as {
@@ -1283,15 +1313,89 @@ app.post('/api/workspace/:id/launch', async (c) => {
   }
 });
 
-// 8b. Legacy editor route retained for older GUI clients using recognized
+// 8b. Launch an external interactive terminal for a workspace or AI session.
+app.post('/api/workspace/:id/terminal', async (c) => {
+  const origin = c.req.header('origin');
+  if (origin && !hasTrustedLocalOrigin(origin)) {
+    return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+  }
+
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const { command, assistant, sessionId, title } = await c.req.json().catch(() => ({})) as {
+      command?: unknown;
+      assistant?: unknown;
+      sessionId?: unknown;
+      title?: unknown;
+    };
+
+    if (assistant !== undefined) {
+      if (typeof assistant !== 'string' || !SUPPORTED_ASSISTANTS.has(assistant.trim().toLowerCase())) {
+        return c.json({ error: 'Invalid or unsupported assistant parameter.' }, 400);
+      }
+    }
+
+    if (sessionId !== undefined) {
+      if (typeof sessionId !== 'string' || !isValidSessionUuid(sessionId)) {
+        return c.json({ error: 'Invalid session UUID format.' }, 400);
+      }
+    }
+
+    if (command !== undefined && (typeof command !== 'string' || !command.trim())) {
+      return c.json({ error: 'Command must be a non-empty string.' }, 400);
+    }
+
+    if (title !== undefined && typeof title !== 'string') {
+      return c.json({ error: 'Title must be a string.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const requestedWorkspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    let workspacePath: string | null;
+    try {
+      workspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, requestedWorkspacePath);
+    } catch (error) {
+      if (error instanceof PathAccessError) throw error;
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+    if (!workspacePath) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const res = await launchWorkspaceTerminal(workspacePath, {
+      command: typeof command === 'string' ? command : undefined,
+      assistant: typeof assistant === 'string' ? assistant : undefined,
+      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+      title: typeof title === 'string' ? title : undefined,
+    });
+
+    return c.json({ success: true, command: res.command });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 8c. Legacy editor route retained for older GUI clients using recognized
 // graphical editors. Interactive terminal editors are intentionally rejected:
 // a detached HTTP request cannot safely provide their required TTY.
 app.post('/api/open-editor', async (c) => {
+  const origin = c.req.header('origin');
+  if (origin && !hasTrustedLocalOrigin(origin)) {
+    return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+  }
+
   try {
-    const { workspacePath, command } = await c.req.json() as {
-      workspacePath: string;
-      command: string;
+    const body = await c.req.json().catch(() => ({})) as {
+      workspacePath?: unknown;
+      command?: unknown;
     };
+    const { workspacePath, command } = body;
+    if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
+      return c.json({ error: 'Workspace path does not exist' }, 400);
+    }
+    if (typeof command !== 'string' || !command.trim()) {
+      return c.json({ error: 'Forbidden editor command' }, 400);
+    }
 
     const targetId = launchTargetIdForEditorCommand(command);
     if (!ALLOWED_EDITORS.has(command) || !targetId) {
@@ -1567,10 +1671,10 @@ app.get('/api/workspace/:id/changes', async (c) => {
           });
           const numstatLines = numstatRaw.split('\n').filter(Boolean);
           for (const numLine of numstatLines) {
-            const parts = numLine.trim().split(/\s+/);
-            if (parts.length >= 3) {
-              const [add, del, file] = parts;
-              numstatMap.set(file, {
+            const match = numLine.trim().match(/^(\d+|-)\s+(\d+|-)\s+(.*)$/);
+            if (match) {
+              const [, add, del, file] = match;
+              numstatMap.set(file.trim(), {
                 additions: add === '-' ? 0 : parseInt(add, 10) || 0,
                 deletions: del === '-' ? 0 : parseInt(del, 10) || 0,
               });
@@ -1825,6 +1929,11 @@ app.post('/api/workspace/:id/commit', async (c) => {
 
 // 14. Resume session in workspace (copies CLI resume command and opens editor)
 app.post('/api/workspace/:id/resume', async (c) => {
+  const origin = c.req.header('origin');
+  if (origin && !hasTrustedLocalOrigin(origin)) {
+    return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+  }
+
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
@@ -1836,9 +1945,19 @@ app.post('/api/workspace/:id/resume', async (c) => {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    const body = await c.req.json().catch(() => ({}));
-    const targetSessionId = body.sessionId;
-    const targetAssistant = body.assistant;
+    const body = await c.req.json().catch(() => ({})) as {
+      sessionId?: unknown;
+      assistant?: unknown;
+      command?: unknown;
+    };
+    const targetSessionId = typeof body.sessionId === 'string' && isValidSessionUuid(body.sessionId) ? body.sessionId : undefined;
+    if (body.sessionId !== undefined && targetSessionId === undefined) {
+      return c.json({ error: 'Invalid session UUID format.' }, 400);
+    }
+    if (body.command !== undefined && (typeof body.command !== 'string' || !ALLOWED_EDITORS.has(body.command))) {
+      return c.json({ error: 'Forbidden editor command' }, 400);
+    }
+    const targetAssistant = typeof body.assistant === 'string' ? body.assistant : undefined;
 
     // Find the session to resume
     let resumeCommand = '';
@@ -1884,17 +2003,11 @@ app.post('/api/workspace/:id/resume', async (c) => {
       if (!ALLOWED_EDITORS.has(body.command)) {
         return c.json({ error: 'Forbidden editor command' }, 400);
       }
-      const isWin = process.platform === 'win32';
-      const child = execa(body.command, [workspacePath], {
-        detached: true,
-        stdio: 'ignore',
-        shell: isWin,
-        cleanup: false,
-      });
-      child.unref();
-      child.catch((err) => {
+      try {
+        await openInEditor(body.command, workspacePath);
+      } catch (err) {
         console.error(`Failed to launch editor ${body.command} for path ${workspacePath}:`, err);
-      });
+      }
     }
 
     // Where the resume command should be run: the workspace dir, or the repo
@@ -1986,8 +2099,11 @@ app.get('/api/session/:assistant/:sessionId/transcript', async (c) => {
   const assistant = c.req.param('assistant');
   const sessionId = c.req.param('sessionId');
   try {
-    if (assistant === 'codex' && !isValidSessionUuid(sessionId)) {
-      return c.json({ error: 'Invalid Codex session id.' }, 400);
+    if (!SUPPORTED_ASSISTANTS.has(assistant.trim().toLowerCase())) {
+      return c.json({ error: `Unsupported assistant: "${assistant}".` }, 400);
+    }
+    if (!isValidSessionUuid(sessionId)) {
+      return c.json({ error: 'Invalid session UUID format.' }, 400);
     }
 
     const messages = await getSessionTranscript(assistant, sessionId);

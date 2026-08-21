@@ -9,6 +9,23 @@ import * as os from 'node:os';
 import type { AISession, ChatMessage } from '../types.js';
 
 /**
+ * Resolves the root directory for Antigravity session storage, respecting
+ * ANTIGRAVITY_CLI_HOME and GEMINI_CLI_HOME environment variables.
+ */
+export function getAntigravityDir(): string {
+  if (process.env.ANTIGRAVITY_CLI_HOME) {
+    return process.env.ANTIGRAVITY_CLI_HOME;
+  }
+  if (process.env.GEMINI_CLI_HOME) {
+    const base = process.env.GEMINI_CLI_HOME;
+    return path.basename(base) === 'antigravity-cli'
+      ? base
+      : path.join(base, 'antigravity-cli');
+  }
+  return path.join(os.homedir(), '.gemini', 'antigravity-cli');
+}
+
+/**
  * Derives the directory name that Claude Code uses inside `~/.claude/projects/`
  * for a given absolute project directory path.
  *
@@ -18,7 +35,8 @@ import type { AISession, ChatMessage } from '../types.js';
  * to their own dash → `C--`, and the `.` in the user name becomes a dash).
  */
 export function getClaudeProjectFolderName(absolutePath: string): string {
-  return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
+  const trimmed = absolutePath.replace(/[/\\]+$/, '');
+  return trimmed.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 /** Extract plain text from a Claude transcript record's message. */
@@ -80,6 +98,15 @@ export function isInjectedContextText(text: string): boolean {
 }
 
 /**
+ * Sanitizes and single-lines a session title, capping its length.
+ */
+export function sanitizeSessionTitle(rawTitle: string, maxLength = 80): string {
+  const singleLine = rawTitle.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!singleLine) return 'Untitled Session';
+  return singleLine.length > maxLength ? singleLine.slice(0, maxLength) + '...' : singleLine;
+}
+
+/**
  * Opens GitHub Copilot's SQLite session store (`~/.copilot/session-store.db`)
  * read-only via Node's built-in `node:sqlite`. Returns null when the store is
  * absent or the runtime lacks node:sqlite (e.g. an older bundled Node in a
@@ -91,7 +118,11 @@ async function openCopilotDb(): Promise<any | null> {
     const dbPath = path.join(os.homedir(), '.copilot', 'session-store.db');
     await fs.access(dbPath);
     const { DatabaseSync } = await import('node:sqlite');
-    return new DatabaseSync(dbPath, { readOnly: true });
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      db.exec('PRAGMA busy_timeout = 3000;');
+    } catch {}
+    return db;
   } catch {
     return null;
   }
@@ -167,7 +198,13 @@ export async function canOpenCodexSessionInWorkspace(
 
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
   const codexFiles = await getFilesRecursively(path.join(codexHome, 'sessions'), '.jsonl');
-  for (const file of codexFiles) {
+  const candidates = [...codexFiles].sort((a, b) => {
+    const aMatch = path.basename(a, '.jsonl').includes(sessionId) ? 0 : 1;
+    const bMatch = path.basename(b, '.jsonl').includes(sessionId) ? 0 : 1;
+    if (aMatch !== bMatch) return aMatch - bMatch;
+    return b.localeCompare(a);
+  });
+  for (const file of candidates) {
     try {
       const content = await fs.readFile(file, 'utf-8');
       for (const line of content.split('\n').filter(Boolean)) {
@@ -266,22 +303,26 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   const wsFolderName = path.basename(workspacePath);
 
   // Normalization helper for accurate path comparison
-  const normalizePath = (p: string) => path.normalize(p).toLowerCase();
-  const normWorkspace = normalizePath(workspacePath);
-  const normRepos = repoPaths.map(r => normalizePath(r));
+  const cleanPath = (p: string) => {
+    const resolved = path.resolve(p).replace(/[/\\]+$/, '');
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const normWorkspace = cleanPath(workspacePath);
+  const normRepos = repoPaths.map(cleanPath);
+  const sep = path.sep;
 
   const isPathMatch = (sessPath?: string) => {
     if (!sessPath) return false;
-    const normSess = normalizePath(sessPath);
-    if (normSess === normWorkspace || normSess.startsWith(normWorkspace + path.sep)) return true;
+    const normSess = cleanPath(sessPath);
+    if (normSess === normWorkspace || normSess.startsWith(normWorkspace + sep)) return true;
     for (const r of normRepos) {
-      if (normSess === r || normSess.startsWith(r + path.sep)) return true;
+      if (normSess === r || normSess.startsWith(r + sep)) return true;
     }
     return false;
   };
 
   // ─── 1. Scan Antigravity Sessions ──────────────────────────────────────
-  const agDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+  const agDir = getAntigravityDir();
   const agHistoryPath = path.join(agDir, 'history.jsonl');
   
   try {
@@ -318,13 +359,15 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         let firstUserMessage = null;
 
         for (const line of transcriptLines) {
-          const tObj = JSON.parse(line);
-          if (tObj.type === 'USER_INPUT' || tObj.type === 'PLANNER_RESPONSE') {
-            messageCount++;
-            if (tObj.type === 'USER_INPUT' && !firstUserMessage) {
-              firstUserMessage = tObj.content;
+          try {
+            const tObj = JSON.parse(line);
+            if (tObj.type === 'USER_INPUT' || tObj.type === 'PLANNER_RESPONSE') {
+              messageCount++;
+              if (tObj.type === 'USER_INPUT' && !firstUserMessage) {
+                firstUserMessage = tObj.content;
+              }
             }
-          }
+          } catch {}
         }
 
         if (firstUserMessage) {
@@ -335,14 +378,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         messageCount = convData.entries.length * 2;
       }
 
-      if (title.length > 80) {
-        title = title.substring(0, 80) + '...';
-      }
-
       sessions.push({
         id: convId,
         assistant: 'antigravity',
-        title,
+        title: sanitizeSessionTitle(title),
         createdAt,
         updatedAt,
         messageCount,
@@ -381,7 +420,12 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             let title = 'Claude Session';
 
             for (const line of lines) {
-              const record = JSON.parse(line);
+              let record: any;
+              try {
+                record = JSON.parse(line);
+              } catch {
+                continue;
+              }
               if (record.timestamp) {
                 if (!createdAt) createdAt = record.timestamp;
                 updatedAt = record.timestamp;
@@ -400,14 +444,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               }
             }
 
-            if (title.length > 80) {
-              title = title.substring(0, 80) + '...';
-            }
-
             sessions.push({
               id: sessionId,
               assistant: 'claude',
-              title,
+              title: sanitizeSessionTitle(title),
               createdAt: createdAt || new Date().toISOString(),
               updatedAt: updatedAt || new Date().toISOString(),
               messageCount,
@@ -426,7 +466,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   const codexSessionsDir = path.join(codexHome, 'sessions');
   try {
     const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
-    for (const file of codexFiles) {
+    // Sort candidate rollout files so most recent / newest are scanned first
+    const sortedCodexFiles = [...codexFiles].sort((a, b) => b.localeCompare(a));
+    const MAX_CODEX_SCAN = 200;
+    const filesToScan = sortedCodexFiles.slice(0, MAX_CODEX_SCAN);
+    for (const file of filesToScan) {
       try {
         const content = await fs.readFile(file, 'utf-8');
         const lines = content.split('\n').filter(Boolean);
@@ -478,7 +522,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         sessions.push({
           id: sessionId,
           assistant: 'codex',
-          title: title.length > 80 ? title.substring(0, 80) + '...' : title,
+          title: sanitizeSessionTitle(title),
           createdAt: createdAt || new Date().toISOString(),
           updatedAt: updatedAt || new Date().toISOString(),
           messageCount,
@@ -526,7 +570,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         sessions.push({
           id: row.id,
           assistant: 'copilot',
-          title: title.length > 80 ? title.substring(0, 80) + '...' : title,
+          title: sanitizeSessionTitle(title),
           createdAt: row.created_at || new Date().toISOString(),
           updatedAt: row.updated_at || new Date().toISOString(),
           messageCount,
@@ -556,32 +600,36 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
   const messages: ChatMessage[] = [];
 
   if (assistant === 'antigravity') {
-    const agDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
+    const agDir = getAntigravityDir();
     const transcriptPath = path.join(agDir, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
     const content = await fs.readFile(transcriptPath, 'utf-8');
     const lines = content.split('\n').filter(Boolean);
 
     for (const line of lines) {
-      const obj = JSON.parse(line);
-      if (obj.type === 'USER_INPUT') {
-        const rawContent = obj.content || '';
-        const cleanMatch = rawContent.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-        const cleanContent = cleanMatch ? cleanMatch[1].trim() : rawContent.trim();
-        messages.push({
-          role: 'user',
-          content: cleanContent,
-          timestamp: obj.created_at || obj.timestamp,
-        });
-      } else if (obj.type === 'PLANNER_RESPONSE') {
-        const content = (obj.content || '').trim();
-        if (content) {
-          messages.push({
-            role: 'assistant',
-            content,
-            timestamp: obj.created_at || obj.timestamp,
-          });
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === 'USER_INPUT') {
+          const rawContent = obj.content || '';
+          const cleanMatch = typeof rawContent === 'string' ? rawContent.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/) : null;
+          const cleanContent = cleanMatch ? cleanMatch[1].trim() : (typeof rawContent === 'string' ? rawContent.trim() : '');
+          if (cleanContent) {
+            messages.push({
+              role: 'user',
+              content: cleanContent,
+              timestamp: obj.created_at || obj.timestamp,
+            });
+          }
+        } else if (obj.type === 'PLANNER_RESPONSE') {
+          const content = (typeof obj.content === 'string' ? obj.content : '').trim();
+          if (content) {
+            messages.push({
+              role: 'assistant',
+              content,
+              timestamp: obj.created_at || obj.timestamp,
+            });
+          }
         }
-      }
+      } catch {}
     }
   } else if (assistant === 'claude') {
     const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -606,7 +654,12 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
     const lines = content.split('\n').filter(Boolean);
 
     for (const line of lines) {
-      const record = JSON.parse(line);
+      let record: any;
+      try {
+        record = JSON.parse(line);
+      } catch {
+        continue;
+      }
       const isUser = record.type === 'user' || record.role === 'user';
       const isAssistant = record.type === 'assistant' || record.role === 'assistant';
       if (!isUser && !isAssistant) continue;

@@ -19,42 +19,76 @@ describe('detectEditors', () => {
 
     const result = await detectEditors();
 
-    expect(result).toEqual([
-      { name: 'VS Code', command: 'code', detected: true },
-      { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
-      { name: 'Cursor', command: 'cursor', detected: true },
-      { name: 'Antigravity', command: 'antigravity', detected: false },
-      { name: 'IntelliJ IDEA', command: 'idea', detected: false },
-      { name: 'WebStorm', command: 'webstorm', detected: false },
-      { name: 'PyCharm', command: 'charm', detected: false },
-      { name: 'Sublime Text', command: 'subl', detected: false },
-      { name: 'Zed', command: 'zed', detected: false },
-      { name: 'Windsurf', command: 'windsurf', detected: false },
-    ]);
-
     const isWin = process.platform === 'win32';
+    const expected = isWin
+      ? [
+          { name: 'VS Code', command: 'code', detected: true },
+          { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
+          { name: 'Cursor', command: 'cursor', detected: true },
+          { name: 'Antigravity', command: 'antigravity', detected: false },
+          { name: 'PowerShell', command: 'powershell', detected: true },
+          { name: 'Command Prompt', command: 'cmd', detected: true },
+          { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+          { name: 'WebStorm', command: 'webstorm', detected: false },
+          { name: 'PyCharm', command: 'charm', detected: false },
+          { name: 'Sublime Text', command: 'subl', detected: false },
+          { name: 'Zed', command: 'zed', detected: false },
+          { name: 'Windsurf', command: 'windsurf', detected: false },
+        ]
+      : [
+          { name: 'VS Code', command: 'code', detected: true },
+          { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
+          { name: 'Cursor', command: 'cursor', detected: true },
+          { name: 'Antigravity', command: 'antigravity', detected: false },
+          { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+          { name: 'WebStorm', command: 'webstorm', detected: false },
+          { name: 'PyCharm', command: 'charm', detected: false },
+          { name: 'Sublime Text', command: 'subl', detected: false },
+          { name: 'Zed', command: 'zed', detected: false },
+          { name: 'Windsurf', command: 'windsurf', detected: false },
+        ];
+
+    expect(result).toEqual(expected);
+
     expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin });
     expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin });
     expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin });
     expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, shell: isWin });
   });
 
-  it('should return detected = false for all editors if execa throws an error', async () => {
+  it('should return detected = false for all editors if execa throws an error (except built-in Windows shells)', async () => {
     vi.mocked(execa).mockRejectedValue(new Error('Spawn error'));
 
     const result = await detectEditors();
+    const isWin = process.platform === 'win32';
+    const expected = isWin
+      ? [
+          { name: 'VS Code', command: 'code', detected: false },
+          { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
+          { name: 'Cursor', command: 'cursor', detected: false },
+          { name: 'Antigravity', command: 'antigravity', detected: false },
+          { name: 'PowerShell', command: 'powershell', detected: true },
+          { name: 'Command Prompt', command: 'cmd', detected: true },
+          { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+          { name: 'WebStorm', command: 'webstorm', detected: false },
+          { name: 'PyCharm', command: 'charm', detected: false },
+          { name: 'Sublime Text', command: 'subl', detected: false },
+          { name: 'Zed', command: 'zed', detected: false },
+          { name: 'Windsurf', command: 'windsurf', detected: false },
+        ]
+      : [
+          { name: 'VS Code', command: 'code', detected: false },
+          { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
+          { name: 'Cursor', command: 'cursor', detected: false },
+          { name: 'Antigravity', command: 'antigravity', detected: false },
+          { name: 'IntelliJ IDEA', command: 'idea', detected: false },
+          { name: 'WebStorm', command: 'webstorm', detected: false },
+          { name: 'PyCharm', command: 'charm', detected: false },
+          { name: 'Sublime Text', command: 'subl', detected: false },
+          { name: 'Zed', command: 'zed', detected: false },
+          { name: 'Windsurf', command: 'windsurf', detected: false },
+        ];
 
-    expect(result).toEqual([
-      { name: 'VS Code', command: 'code', detected: false },
-      { name: 'VS Code Insiders', command: 'code-insiders', detected: false },
-      { name: 'Cursor', command: 'cursor', detected: false },
-      { name: 'Antigravity', command: 'antigravity', detected: false },
-      { name: 'IntelliJ IDEA', command: 'idea', detected: false },
-      { name: 'WebStorm', command: 'webstorm', detected: false },
-      { name: 'PyCharm', command: 'charm', detected: false },
-      { name: 'Sublime Text', command: 'subl', detected: false },
-      { name: 'Zed', command: 'zed', detected: false },
-      { name: 'Windsurf', command: 'windsurf', detected: false },
-    ]);
+    expect(result).toEqual(expected);
   });
 });

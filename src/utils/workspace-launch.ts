@@ -95,10 +95,12 @@ const DESKTOP_TARGETS: readonly DesktopDefinition[] = [
 ] as const;
 
 const EDITOR_TARGETS: readonly EditorDefinition[] = [
-  { id: 'vscode', name: 'VS Code', command: 'code', icon: 'vscode', description: 'Open the generated VS Code workspace.' },
   { id: 'vscode-insiders', name: 'VS Code Insiders', command: 'code-insiders', icon: 'vscode-insiders', description: 'Open the generated workspace in Insiders.' },
+  { id: 'vscode', name: 'VS Code', command: 'code', icon: 'vscode', description: 'Open the generated VS Code workspace.' },
   { id: 'cursor', name: 'Cursor', command: 'cursor', icon: 'cursor', description: 'Open the generated workspace in Cursor.' },
   { id: 'antigravity', name: 'Antigravity', command: 'antigravity', icon: 'antigravity', description: 'Open the workspace in Antigravity.' },
+  { id: 'powershell', name: 'PowerShell', command: 'powershell', icon: 'powershell', description: 'Open an interactive PowerShell terminal in this workspace.' },
+  { id: 'cmd', name: 'Command Prompt', command: 'cmd', icon: 'cmd', description: 'Open Command Prompt in this workspace.' },
   { id: 'intellij', name: 'IntelliJ IDEA', command: 'idea', icon: 'intellij', description: 'Open the workspace folder in IntelliJ IDEA.' },
   { id: 'webstorm', name: 'WebStorm', command: 'webstorm', icon: 'webstorm', description: 'Open the workspace folder in WebStorm.' },
   { id: 'pycharm', name: 'PyCharm', command: 'charm', icon: 'pycharm', description: 'Open the workspace folder in PyCharm.' },

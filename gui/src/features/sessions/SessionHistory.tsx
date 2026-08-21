@@ -1,41 +1,109 @@
-import React, { useRef, useState } from 'react';
-import { ExternalLink, MessageSquareCode, MessageSquare, Play } from 'lucide-react';
-import type { Feature } from '../../types.js';
+import React, { useRef, useState, useMemo } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  MessageSquare,
+  Terminal,
+  Plus,
+  Search,
+  ArrowUpDown,
+  Check,
+} from 'lucide-react';
+import { BsOpenai } from 'react-icons/bs';
+import { SiClaude, SiGithubcopilot } from 'react-icons/si';
+import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
+
+import type { AISession, Feature, TranscriptMessage } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../../components/ui/empty.js';
+import { Card } from '../../components/ui/card.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
-import { useWorkspaceLaunchTargets } from '../../lib/api/queries.js';
-import { providerForAssistant } from '../chat/chatLaunch.js';
+import { useWorkspaceLaunchTargets, useLaunchTerminal, useAiDetect } from '../../lib/api/queries.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
+import { apiFetch } from '../../lib/api/client.js';
+import { cn } from '../../lib/utils.js';
+
+export type SessionSortOption =
+  | 'created-desc'
+  | 'created-asc'
+  | 'updated-desc'
+  | 'messages-desc'
+  | 'title-asc';
+
+export type SessionViewMode = 'harness' | 'timeline';
 
 interface SessionHistoryProps {
   ws: Feature;
-  sessions: any[];
+  sessions: AISession[];
   sessionsLoading: boolean;
-  setActiveSession: (val: any | null) => void;
-  setTranscript: (val: any[]) => void;
+  setActiveSession: (val: AISession | null) => void;
+  setTranscript: (val: TranscriptMessage[]) => void;
   fetchSessionTranscript: (assistant: string, sessionId: string) => Promise<void>;
-  handleResumeSession: (ws: Feature, sessionId?: string, assistant?: string) => Promise<void>;
   handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
 }
 
-const assistantLabel = (assistant: string) =>
-  assistant === 'antigravity'
-    ? 'Antigravity'
-    : assistant === 'claude'
-      ? 'Claude Code'
-      : assistant === 'codex'
-        ? 'OpenAI Codex'
-        : 'GitHub Copilot';
+export const getResumeCliCommand = (assistant: string, sessionId: string): string => {
+  switch (assistant) {
+    case 'antigravity':
+      return `agy --conversation ${sessionId}`;
+    case 'claude':
+      return `claude --resume ${sessionId}`;
+    case 'codex':
+      return `codex resume ${sessionId}`;
+    case 'copilot':
+      return `copilot --resume ${sessionId}`;
+    default:
+      return `agy --conversation ${sessionId}`;
+  }
+};
 
-const assistantTone = (assistant: string) =>
-  assistant === 'claude' ? 'warning' : assistant === 'codex' ? 'success' : assistant === 'antigravity' ? 'accent' : 'info';
+const renderAssistantIcon = (ast: string) => {
+  switch (ast) {
+    case 'antigravity':
+      return (
+        <span className="grid size-5.5 place-items-center rounded-md bg-card border border-border/80 shadow-2xs p-0.5 shrink-0" title="Google Antigravity">
+          <AntigravityIcon className="size-3.5" />
+        </span>
+      );
+    case 'claude':
+      return (
+        <span className="grid size-5.5 place-items-center rounded-md bg-[#D97757] text-white font-bold text-[9px] shadow-2xs shrink-0" title="Claude Code">
+          <SiClaude className="size-2.5" />
+        </span>
+      );
+    case 'codex':
+      return (
+        <span className="grid size-5.5 place-items-center rounded-md bg-foreground text-background font-bold text-[9px] shadow-2xs shrink-0" title="OpenAI Codex">
+          <BsOpenai className="size-2.5" />
+        </span>
+      );
+    case 'copilot':
+      return (
+        <span className="grid size-5.5 place-items-center rounded-md bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white font-bold text-[9px] shadow-2xs shrink-0" title="GitHub Copilot">
+          <SiGithubcopilot className="size-2.5" />
+        </span>
+      );
+    default:
+      return null;
+  }
+};
 
-/**
- * Lists a workspace's recorded agent sessions. The transcript itself is shown
- * by the app-level TranscriptDialog (App.tsx), which opens whenever
- * setActiveSession is called — this component must not render its own dialog.
- */
+const formatDate = (dStr?: string) => {
+  if (!dStr) return '';
+  const d = new Date(dStr);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const isToday = now.toDateString() === d.toDateString();
+  if (isToday) {
+    return `Today ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+};
+
 export const SessionHistory: React.FC<SessionHistoryProps> = ({
   ws,
   sessions,
@@ -43,22 +111,113 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   setActiveSession,
   setTranscript,
   fetchSessionTranscript,
-  handleResumeSession,
   handleOpenDesktopSession,
+  showToast,
 }) => {
   const launchTargets = useWorkspaceLaunchTargets();
-  const codexDesktop = launchTargets.data?.find((target) => target.id === 'codex-desktop');
-  const codexDesktopAvailable = codexDesktop?.available === true;
-  const codexDesktopReason = launchTargets.isLoading
-    ? 'Checking whether Codex Desktop is available…'
-    : launchTargets.isError
-      ? 'Could not check whether Codex Desktop is available.'
-      : codexDesktop?.unavailableReason ?? 'Codex Desktop is not available on this computer.';
-  const openingDesktopRef = useRef<string | null>(null);
+  const launchTerminalMutation = useLaunchTerminal();
+  const aiDetect = useAiDetect();
+
+  const isAgyDetected = aiDetect.data?.find((a) => a.name === 'antigravity')?.detected ?? true;
+  const isClaudeDetected = aiDetect.data?.find((a) => a.name === 'claude')?.detected ?? false;
+  const isCodexDetected = aiDetect.data?.find((a) => a.name === 'codex')?.detected ?? false;
+  const isCopilotDetected = aiDetect.data?.find((a) => a.name === 'copilot')?.detected ?? false;
+
+  const hasAgyIde = Boolean(launchTargets.data?.some((t) => t.id === 'antigravity' && t.available));
+  const hasCodexDesktop = Boolean(launchTargets.data?.some((t) => t.id === 'codex-desktop' && t.available));
+
   const [openingDesktopId, setOpeningDesktopId] = useState<string | null>(null);
+  const [resumingTerminalId, setResumingTerminalId] = useState<string | null>(null);
+  const [launchingNewAssistant, setLaunchingNewAssistant] = useState<string | null>(null);
+  const [launchedInfo, setLaunchedInfo] = useState<{ assistant: string; cmd: string; timestamp: Date } | null>(null);
+
+  // Sorting & Filtering state
+  const [sortBy, setSortBy] = useState<SessionSortOption>('created-desc');
+  const [viewMode, setViewMode] = useState<SessionViewMode>('harness');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAssistantFilter, setSelectedAssistantFilter] = useState<string>('all');
+
+  // Collapsed / expanded state per harness (default to false / collapsed)
+  const [expandedHarnesses, setExpandedHarnesses] = useState<Record<string, boolean>>({
+    antigravity: false,
+    claude: false,
+    codex: false,
+    copilot: false,
+  });
+
+  const toggleHarness = (id: string) => {
+    setExpandedHarnesses((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const resumingTerminalRef = useRef(false);
+  const openingDesktopRef = useRef<string | null>(null);
+
+  const openAppTarget = async (targetId: string) => {
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(ws.branchName)}/launch`, {
+        method: 'POST',
+        body: JSON.stringify({ targetId }),
+      });
+      const name = targetId === 'claude-desktop' ? 'Claude Desktop' : targetId === 'codex-desktop' ? 'Codex Desktop' : targetId;
+      showToast?.(`Launched ${name} for workspace ${ws.branchName}`, 'success');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to launch desktop application';
+      showToast?.(message, 'error');
+    }
+  };
+
+  const startNewSession = async (assistant: string) => {
+    if (launchingNewAssistant) return;
+    setLaunchingNewAssistant(assistant);
+    try {
+      await launchTerminalMutation.mutateAsync({
+        workspaceId: ws.branchName,
+        assistant,
+      });
+      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'claude' ? 'claude' : assistant === 'codex' ? 'codex' : 'copilot';
+      setLaunchedInfo({
+        assistant,
+        cmd,
+        timestamp: new Date(),
+      });
+      showToast?.(`Started new ${assistant} session in terminal`, 'success');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to launch terminal';
+      showToast?.(message, 'error');
+    } finally {
+      setLaunchingNewAssistant(null);
+    }
+  };
+
+  const resumeTerminalSession = async (sessionId: string, assistant: string) => {
+    if (resumingTerminalRef.current) return;
+    resumingTerminalRef.current = true;
+    setResumingTerminalId(sessionId);
+    try {
+      await launchTerminalMutation.mutateAsync({
+        workspaceId: ws.branchName,
+        sessionId,
+        assistant,
+      });
+      const cmd = getResumeCliCommand(assistant, sessionId);
+      setLaunchedInfo({
+        assistant,
+        cmd,
+        timestamp: new Date(),
+      });
+      showToast?.(`Resumed ${assistant} session in terminal`, 'success');
+    } catch (err: unknown) {
+      const fallbackCmd = getResumeCliCommand(assistant, sessionId);
+      await safeCopyToClipboard(fallbackCmd);
+      showToast?.(`Copied resume command to clipboard: ${fallbackCmd}`, 'info');
+    } finally {
+      setResumingTerminalId(null);
+      resumingTerminalRef.current = false;
+    }
+  };
 
   const openCodexDesktop = async (sessionId: string) => {
-    if (!codexDesktopAvailable || openingDesktopRef.current) return;
+    if (!hasCodexDesktop || openingDesktopRef.current) return;
     openingDesktopRef.current = sessionId;
     setOpeningDesktopId(sessionId);
     try {
@@ -69,81 +228,578 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     }
   };
 
+  // Sort comparator function
+  const sortSessions = (sessionList: AISession[], order: SessionSortOption): AISession[] => {
+    return [...sessionList].sort((a, b) => {
+      switch (order) {
+        case 'created-desc': {
+          const aTime = new Date(a.createdAt || a.updatedAt || 0).getTime();
+          const bTime = new Date(b.createdAt || b.updatedAt || 0).getTime();
+          return bTime - aTime;
+        }
+        case 'created-asc': {
+          const aTime = new Date(a.createdAt || a.updatedAt || 0).getTime();
+          const bTime = new Date(b.createdAt || b.updatedAt || 0).getTime();
+          return aTime - bTime;
+        }
+        case 'updated-desc': {
+          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return bTime - aTime;
+        }
+        case 'messages-desc': {
+          return (b.messageCount || 0) - (a.messageCount || 0);
+        }
+        case 'title-asc': {
+          return (a.title || '').localeCompare(b.title || '');
+        }
+        default:
+          return 0;
+      }
+    });
+  };
+
+  // Filtered & sorted master list
+  const filteredSessions = useMemo(() => {
+    let list = sessions;
+    if (selectedAssistantFilter !== 'all') {
+      list = list.filter((s) => s.assistant === selectedAssistantFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((s) => `${s.title} ${s.id} ${s.assistant}`.toLowerCase().includes(q));
+    }
+    return sortSessions(list, sortBy);
+  }, [sessions, selectedAssistantFilter, searchQuery, sortBy]);
+
+  // Group sessions by assistant with sorting applied
+  const agySessions = useMemo(
+    () => sortSessions(sessions.filter((s) => s.assistant === 'antigravity'), sortBy),
+    [sessions, sortBy]
+  );
+  const claudeSessions = useMemo(
+    () => sortSessions(sessions.filter((s) => s.assistant === 'claude'), sortBy),
+    [sessions, sortBy]
+  );
+  const codexSessions = useMemo(
+    () => sortSessions(sessions.filter((s) => s.assistant === 'codex'), sortBy),
+    [sessions, sortBy]
+  );
+  const copilotSessions = useMemo(
+    () => sortSessions(sessions.filter((s) => s.assistant === 'copilot'), sortBy),
+    [sessions, sortBy]
+  );
+
+  const isAssistantConfigured = (id: string) => ws.assistants?.includes(id) ?? false;
+
+  const allHarnesses = [
+    {
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      cliCommand: 'agy',
+      isDetected: isAgyDetected,
+      isConfigured: isAssistantConfigured('antigravity'),
+      hasApp: hasAgyIde,
+      appName: 'IDE',
+      appTargetId: 'antigravity',
+      sessions: agySessions,
+      icon: (
+        <span className="grid size-6 place-items-center rounded-md bg-card border border-border/80 shadow-2xs p-0.5">
+          <AntigravityIcon className="size-4" />
+        </span>
+      ),
+    },
+    {
+      id: 'claude',
+      name: 'Claude Code',
+      cliCommand: 'claude',
+      isDetected: isClaudeDetected,
+      isConfigured: isAssistantConfigured('claude'),
+      hasApp: false,
+      appName: 'App',
+      appTargetId: 'claude',
+      sessions: claudeSessions,
+      icon: (
+        <span className="grid size-6 place-items-center rounded-md bg-[#D97757] text-white font-bold text-[10px] shadow-2xs">
+          <SiClaude className="size-3" />
+        </span>
+      ),
+    },
+    {
+      id: 'codex',
+      name: 'OpenAI Codex',
+      cliCommand: 'codex',
+      isDetected: isCodexDetected,
+      isConfigured: isAssistantConfigured('codex'),
+      hasApp: hasCodexDesktop,
+      appName: 'Desktop',
+      appTargetId: 'codex-desktop',
+      sessions: codexSessions,
+      icon: (
+        <span className="grid size-6 place-items-center rounded-md bg-foreground text-background font-bold text-[10px] shadow-2xs">
+          <BsOpenai className="size-3" />
+        </span>
+      ),
+    },
+    {
+      id: 'copilot',
+      name: 'GitHub Copilot',
+      cliCommand: 'copilot',
+      isDetected: isCopilotDetected,
+      isConfigured: isAssistantConfigured('copilot'),
+      hasApp: false,
+      appName: 'App',
+      appTargetId: 'copilot',
+      sessions: copilotSessions,
+      icon: (
+        <span className="grid size-6 place-items-center rounded-md bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white font-bold text-[10px] shadow-2xs">
+          <SiGithubcopilot className="size-3" />
+        </span>
+      ),
+    },
+  ];
+
+  const installedHarnesses = allHarnesses;
+
+  const sortLabelMap: Record<SessionSortOption, string> = {
+    'created-desc': 'Newest',
+    'created-asc': 'Oldest',
+    'updated-desc': 'Recently active',
+    'messages-desc': 'Most turns',
+    'title-asc': 'A–Z',
+  };
+
   return (
-    <div>
-      {sessionsLoading ? (
-        <div className="flex justify-center py-10">
-          <Spinner className="size-5 text-primary" />
-        </div>
-      ) : sessions.length === 0 ? (
-        <Empty className="rounded-xl border border-border bg-card">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <MessageSquareCode />
-            </EmptyMedia>
-            <EmptyTitle>No Past AI Sessions Found</EmptyTitle>
-            <EmptyDescription>
-              Start a conversation with your AI assistant (e.g. running <code>claude</code>, <code>agy</code>, <code>codex</code>, or <code>copilot</code> inside this directory) to track session history here.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <div className="space-y-3 mb-6">
-          {sessions.map((sess) => (
-            <div key={sess.id} className="flex flex-col justify-between gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/15 md:flex-row md:items-center">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2.5 mb-1.5">
-                  <StatusBadge tone={assistantTone(sess.assistant)}>{assistantLabel(sess.assistant)}</StatusBadge>
-                  <span className="text-[10px] text-muted-foreground">
-                    Updated: {new Date(sess.updatedAt).toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">•</span>
-                  <span className="text-[10px] font-medium text-muted-foreground">
-                    {sess.messageCount} messages
-                  </span>
-                </div>
-                <h4 className="truncate pr-4 text-xs font-semibold text-foreground" title={sess.title}>
-                  {sess.title}
-                </h4>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setActiveSession(sess);
-                    setTranscript([]);
-                    fetchSessionTranscript(sess.assistant, sess.id);
-                  }}
+    <div className="space-y-3">
+      {/* Search, Filter & Sort Order Toolbar */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-md border border-border/80">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="relative flex-1 min-w-0 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search chat sessions..."
+              className="w-full pl-7 pr-6 py-1 text-xs rounded border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-[10px] cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Assistant Filter Pills */}
+          <div className="hidden md:flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setSelectedAssistantFilter('all')}
+              className={cn(
+                'px-2 py-0.5 text-[11px] rounded font-medium transition-colors cursor-pointer',
+                selectedAssistantFilter === 'all'
+                  ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                  : 'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted'
+              )}
+            >
+              All ({sessions.length})
+            </button>
+            {['antigravity', 'claude', 'codex', 'copilot'].map((ast) => {
+              const count = sessions.filter((s) => s.assistant === ast).length;
+              return (
+                <button
+                  type="button"
+                  key={ast}
+                  onClick={() => setSelectedAssistantFilter(selectedAssistantFilter === ast ? 'all' : ast)}
+                  className={cn(
+                    'px-2 py-0.5 text-[11px] rounded font-medium capitalize transition-colors cursor-pointer',
+                    selectedAssistantFilter === ast
+                      ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                      : 'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted'
+                  )}
                 >
-                  <MessageSquare size={13} /> View Chat Log
-                </Button>
-                {providerForAssistant(sess.assistant) && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleResumeSession(ws, sess.id, sess.assistant)}
-                  >
-                    <Play size={11} /> Resume in NexusFlow
-                  </Button>
-                )}
-                {sess.assistant === 'codex' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!codexDesktopAvailable || openingDesktopId !== null}
-                    title={codexDesktopAvailable ? 'Open this exact thread in Codex Desktop' : codexDesktopReason}
-                    aria-label={codexDesktopAvailable
-                      ? 'Open in Codex Desktop'
-                      : `Codex Desktop unavailable: ${codexDesktopReason}`}
-                    onClick={() => void openCodexDesktop(sess.id)}
-                  >
-                    {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
-                    {openingDesktopId === sess.id ? 'Opening…' : 'Open in Codex Desktop'}
-                  </Button>
-                )}
+                  {ast} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {sessionsLoading && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground shrink-0 pl-1">
+              <Spinner className="size-3" />
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Order / Sort Dropdown Menu with Base UI */}
+          <Menu>
+            <MenuTrigger className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded border border-border bg-card text-foreground hover:bg-accent cursor-pointer shadow-2xs transition-colors">
+              <ArrowUpDown size={11} className="text-muted-foreground" />
+              <span>{sortLabelMap[sortBy]}</span>
+              <ChevronDown size={10} className="text-muted-foreground opacity-70" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-48">
+              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Order Chats By
               </div>
+              <MenuItem onClick={() => setSortBy('created-desc')} className="flex items-center justify-between text-xs">
+                <span>Newest created</span>
+                {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('created-asc')} className="flex items-center justify-between text-xs">
+                <span>Oldest created</span>
+                {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('updated-desc')} className="flex items-center justify-between text-xs">
+                <span>Recently active</span>
+                {sortBy === 'updated-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('messages-desc')} className="flex items-center justify-between text-xs">
+                <span>Most turns</span>
+                {sortBy === 'messages-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('title-asc')} className="flex items-center justify-between text-xs">
+                <span>Title (A–Z)</span>
+                {sortBy === 'title-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+
+          {/* View Mode Toggle: Grouped vs Timeline */}
+          <div className="flex items-center rounded border border-border bg-card p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('harness')}
+              title="Group chats by AI Harness"
+              className={cn(
+                'px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer',
+                viewMode === 'harness' ? 'bg-primary text-primary-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Grouped
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('timeline')}
+              title="Unified Chronological Timeline"
+              className={cn(
+                'px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer',
+                viewMode === 'timeline' ? 'bg-primary text-primary-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Timeline
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Live Session HUD Banner */}
+      {launchedInfo && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-xs animate-fade-in">
+          <div className="flex items-center gap-2 text-foreground min-w-0">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="truncate">
+              <strong>Active in terminal:</strong>{' '}
+              <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded text-emerald-400">
+                {launchedInfo.cmd}
+              </code>
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={async () => {
+                await safeCopyToClipboard(launchedInfo.cmd);
+                showToast?.('Command copied to clipboard!', 'success');
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+            >
+              <Copy size={11} /> Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => setLaunchedInfo(null)}
+              className="text-muted-foreground hover:text-foreground cursor-pointer text-xs px-1"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline View (Unified sorted list across all harnesses) */}
+      {viewMode === 'timeline' ? (
+        <Card className="divide-y divide-border overflow-hidden surface-card">
+          {filteredSessions.length === 0 ? (
+            <div className="py-8 text-center text-xs text-muted-foreground">
+              {searchQuery ? 'No chat sessions match your search filter.' : 'No chat sessions recorded yet.'}
             </div>
-          ))}
+          ) : (
+            filteredSessions.map((sess) => (
+              <div
+                key={sess.id}
+                className="group flex flex-col gap-2 p-3 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {renderAssistantIcon(sess.assistant)}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-0.5">
+                      <span className="font-semibold capitalize text-foreground">
+                        {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : 'Copilot'}
+                      </span>
+                      <span>•</span>
+                      <span className="font-mono text-muted-foreground/80">{sess.id.slice(0, 8)}</span>
+                      <span>•</span>
+                      <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
+                      <span>•</span>
+                      <span className="font-mono">
+                        {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-semibold text-foreground truncate" title={sess.title}>
+                      {sess.title}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Sleek Balanced Action Toolbar */}
+                <div className="flex items-center gap-1.5 shrink-0 pl-8 sm:pl-0">
+                  <Button
+                    size="xs"
+                    variant="default"
+                    disabled={resumingTerminalId === sess.id}
+                    onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
+                    title={`Resume session in terminal (${sess.id})`}
+                  >
+                    {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
+                    <span>Resume</span>
+                  </Button>
+
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      setActiveSession(sess);
+                      setTranscript([]);
+                      fetchSessionTranscript(sess.assistant, sess.id);
+                    }}
+                    title="Inspect transcript log"
+                  >
+                    <MessageSquare size={12} />
+                    <span>Logs</span>
+                  </Button>
+
+                  {sess.assistant === 'codex' && hasCodexDesktop && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={openingDesktopId === sess.id}
+                      onClick={() => void openCodexDesktop(sess.id)}
+                      title="Open in Codex Desktop"
+                    >
+                      {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
+                      <span>Desktop</span>
+                    </Button>
+                  )}
+
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    onClick={async () => {
+                      const cmd = getResumeCliCommand(sess.assistant, sess.id);
+                      await safeCopyToClipboard(cmd);
+                      showToast?.(`Copied: ${cmd}`, 'success');
+                    }}
+                    title="Copy CLI resume command"
+                  >
+                    <Copy size={12} />
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </Card>
+      ) : (
+        /* Grouped View (By Harness - Clean Flat Divided Card) */
+        <div className="space-y-2.5">
+          {installedHarnesses.map((harness) => {
+            const isExpanded = expandedHarnesses[harness.id] ?? false;
+            const harnessSessions = harness.sessions.filter((s) => {
+              if (!searchQuery.trim()) return true;
+              const q = searchQuery.toLowerCase();
+              return `${s.title} ${s.id}`.toLowerCase().includes(q);
+            });
+
+            return (
+              <Card key={harness.id} className="overflow-hidden surface-card">
+                {/* Sleek Minimal Harness Header Bar */}
+                <div
+                  className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between bg-muted/20 hover:bg-muted/35 transition-colors cursor-pointer select-none"
+                  onClick={() => toggleHarness(harness.id)}
+                >
+                  <div className="flex flex-1 items-center gap-2.5 min-w-0">
+                    <span className="text-muted-foreground transition-transform">
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
+
+                    {harness.icon}
+
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="font-bold text-xs text-foreground">{harness.name}</span>
+
+                      <StatusBadge tone={harness.isDetected ? 'success' : 'neutral'} dot={harness.isDetected}>
+                        CLI: {harness.cliCommand}
+                      </StatusBadge>
+
+                      {harness.hasApp && (
+                        <StatusBadge tone="running">
+                          {harness.appName}
+                        </StatusBadge>
+                      )}
+
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        ({harnessSessions.length})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Uniform, Sleek Header Action Buttons */}
+                  <div className="flex items-center gap-1.5 shrink-0 pl-6 sm:pl-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="xs"
+                      variant="default"
+                      disabled={launchingNewAssistant === harness.id}
+                      onClick={() => void startNewSession(harness.id)}
+                      title={`Launch new ${harness.cliCommand} session in terminal`}
+                    >
+                      {launchingNewAssistant === harness.id ? (
+                        <Spinner className="size-3" />
+                      ) : (
+                        <Plus size={12} />
+                      )}
+                      <span>New Session</span>
+                    </Button>
+
+                    {harness.hasApp && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void openAppTarget(harness.appTargetId)}
+                        title={`Open in ${harness.appName}`}
+                      >
+                        <ExternalLink size={12} />
+                        <span>{harness.appName}</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded Session Rows (Flat Divided List) */}
+                {isExpanded && (
+                  <div className="divide-y divide-border/60 border-t border-border">
+                    {harnessSessions.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                        <span>
+                          {searchQuery ? 'No sessions match your search query.' : `No previous sessions recorded for ${harness.name}.`}
+                        </span>
+                        {!searchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => void startNewSession(harness.id)}
+                            className="text-primary font-semibold hover:underline cursor-pointer inline-flex items-center gap-1 text-xs"
+                          >
+                            <Plus size={11} /> Start session
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      harnessSessions.map((sess) => (
+                        <div
+                          key={sess.id}
+                          className="group flex flex-col gap-1.5 px-3.5 py-2.5 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5 mb-0.5 text-[11px] text-muted-foreground font-mono">
+                              <span>{sess.id.slice(0, 8)}</span>
+                              <span>•</span>
+                              <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
+                              <span>•</span>
+                              <span>
+                                {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
+                              </span>
+                            </div>
+                            <p className="text-xs font-semibold text-foreground truncate" title={sess.title}>
+                              {sess.title}
+                            </p>
+                          </div>
+
+                          {/* Sleek Balanced Action Toolbar */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              size="xs"
+                              variant="default"
+                              disabled={resumingTerminalId === sess.id}
+                              onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
+                              title={`Resume session in terminal (${sess.id})`}
+                            >
+                              {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
+                              <span>Resume</span>
+                            </Button>
+
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => {
+                                setActiveSession(sess);
+                                setTranscript([]);
+                                fetchSessionTranscript(sess.assistant, sess.id);
+                              }}
+                              title="Inspect transcript log"
+                            >
+                              <MessageSquare size={12} />
+                              <span>Logs</span>
+                            </Button>
+
+                            {sess.assistant === 'codex' && hasCodexDesktop && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                disabled={openingDesktopId === sess.id}
+                                onClick={() => void openCodexDesktop(sess.id)}
+                                title="Open in Codex Desktop"
+                              >
+                                {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
+                                <span>Desktop</span>
+                              </Button>
+                            )}
+
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              onClick={async () => {
+                                const cmd = getResumeCliCommand(sess.assistant, sess.id);
+                                await safeCopyToClipboard(cmd);
+                                showToast?.(`Copied: ${cmd}`, 'success');
+                              }}
+                              title="Copy CLI resume command"
+                            >
+                              <Copy size={12} />
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

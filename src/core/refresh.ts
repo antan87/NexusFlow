@@ -70,6 +70,36 @@ export async function refreshWorkspace(
 
   await generateContextFiles(ctx, feature.assistants, workspacePath);
 
+  // Ensure .code-workspace and .vscode/settings.json exist
+  try {
+    const workspaceName = path.basename(workspacePath);
+    const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+    try {
+      await fs.access(codeWorkspacePath);
+    } catch {
+      const inPlace = feature.mode === 'in-place';
+      const codeWorkspace = {
+        folders: [
+          { path: '.', name: `${workspaceName} (workspace)` },
+          ...allRepos.map((repo) => ({ path: inPlace ? repo.path : repo.name, name: repo.name })),
+        ],
+        settings: { 'search.useIgnoreFiles': false },
+      };
+      await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
+    }
+
+    const vscodeDir = path.join(workspacePath, '.vscode');
+    const settingsPath = path.join(vscodeDir, 'settings.json');
+    try {
+      await fs.access(settingsPath);
+    } catch {
+      await fs.mkdir(vscodeDir, { recursive: true });
+      await fs.writeFile(settingsPath, JSON.stringify({ 'search.useIgnoreFiles': false }, null, 2) + '\n', 'utf-8');
+    }
+  } catch (err) {
+    console.warn('Warning: Failed to ensure .code-workspace or .vscode/settings.json during refresh:', err);
+  }
+
   // If a handoff bundle exists, refresh it too — it reuses the cached
   // analysis, so this no longer triggers a second full analysis pass.
   let refreshedHandoff = false;

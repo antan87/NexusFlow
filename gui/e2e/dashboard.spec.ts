@@ -25,19 +25,19 @@ test.describe('Redesigned NexusFlow shell', () => {
   test('shows the dashboard overview with environment stats', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Environment Overview' })).toBeVisible();
     // Stat tiles + workspace row driven by the mocked status endpoint.
-    await expect(page.getByText('With uncommitted changes')).toBeVisible();
+    await expect(page.getByText('Git Activity')).toBeVisible();
     await expect(page.getByText('feature-x').first()).toBeVisible();
-    await expect(page.getByText('3 changed').first()).toBeVisible();
+    await expect(page.getByText('3 modified').first()).toBeVisible();
   });
 
   test('navigates to the workspaces master-detail and opens a workspace via deep link', async ({ page }) => {
     // Sidebar navigation updates the route.
     await page.goto('/');
-    await page.getByRole('link', { name: 'Workspaces' }).click();
-    await expect(page).toHaveURL(/#\/workspaces/);
-    await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
+    await page.getByRole('link', { name: /feature-x/ }).first().click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x/);
+    await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
     // Deep link selects a workspace and shows the detail tabs.
     await page.goto('/#/workspaces/feature-x');
