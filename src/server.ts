@@ -1085,9 +1085,11 @@ app.post('/api/workspace', async (c) => {
     // Validate repo names and paths synchronously before starting the job.
     for (const r of body.repos || []) {
       if (inPlace) {
-        assertWithin(config.devDir, path.resolve(r.path));
+        if (config.devDir && r.path) {
+          assertWithin(config.devDir, path.resolve(r.path));
+        }
       } else {
-        if (!isValidProjectName(r.name)) {
+        if (r.name && !isValidProjectName(r.name)) {
           return c.json({ error: `Invalid repository name: ${JSON.stringify(r.name)}` }, 400);
         }
       }
@@ -1231,7 +1233,9 @@ app.post('/api/workspace/:id/repo', async (c) => {
     const id = decodeURIComponent(c.req.param('id'));
     const { repoPath } = await c.req.json() as { repoPath: string };
     const config = await loadConfig();
-    assertWithin(config.devDir, path.resolve(repoPath));
+    if (config.devDir) {
+      assertWithin(config.devDir, path.resolve(repoPath));
+    }
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await addRepoToWorkspace(workspacePath, repoPath);

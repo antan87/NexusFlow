@@ -59,7 +59,13 @@ vi.mock('./utils/terminal-launch.js', async (importOriginal) => {
     }),
   };
 });
-vi.mock('./core/new-repo.js');
+vi.mock('./core/new-repo.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./core/new-repo.js')>();
+  return {
+    ...actual,
+    createNewRepo: vi.fn(),
+  };
+});
 vi.mock('./orchestration/index.js');
 
 
