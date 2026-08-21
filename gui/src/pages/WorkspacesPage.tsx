@@ -58,6 +58,7 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
+import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
@@ -377,9 +378,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                           Description
                         </h4>
-                        <p className="text-xs sm:text-sm leading-relaxed text-foreground/90 whitespace-pre-line">
-                          {selected.description}
-                        </p>
+                        <div className="text-xs sm:text-sm leading-relaxed text-foreground/90">
+                          <ChatMarkdown content={selected.description} />
+                        </div>
                       </div>
                     )}
 

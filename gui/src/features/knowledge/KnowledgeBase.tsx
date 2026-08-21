@@ -1,9 +1,10 @@
-import React from 'react';
-import { BookOpen, RefreshCw, Save, Edit } from 'lucide-react';
+import React, { useState } from 'react';
+import { BookOpen, RefreshCw, Save, Edit, FileText, Code } from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { Spinner } from '../../components/ui/spinner.js';
+import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 
 interface KnowledgeBaseProps {
   ws: Feature;
@@ -28,13 +29,35 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   setIsEditingKnowledge,
   handleSaveKnowledge,
 }) => {
+  const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
+
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card p-4 surface-card">
       <header className="flex justify-between items-center mb-4">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <BookOpen size={16} className="text-info" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
+          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
         </h4>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {!isEditingKnowledge && knowledgeContent && (
+            <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-md border border-border/60">
+              <Button
+                size="xs"
+                variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
+                onClick={() => setViewMode('preview')}
+                className="text-[11px] gap-1 px-2"
+              >
+                <FileText size={11} /> Preview
+              </Button>
+              <Button
+                size="xs"
+                variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
+                onClick={() => setViewMode('raw')}
+                className="text-[11px] gap-1 px-2"
+              >
+                <Code size={11} /> Raw
+              </Button>
+            </div>
+          )}
           {isEditingKnowledge ? (
             <>
               <Button
@@ -79,9 +102,17 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
           value={editedKnowledge}
           onChange={(e) => setEditedKnowledge(e.target.value)}
         />
+      ) : !knowledgeContent ? (
+        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+          No knowledge file generated yet.
+        </div>
+      ) : viewMode === 'preview' ? (
+        <div className="max-h-[500px] overflow-auto rounded-md border border-border/70 bg-muted/20 p-4">
+          <ChatMarkdown content={knowledgeContent} />
+        </div>
       ) : (
-        <div className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-muted/40 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
-          {knowledgeContent || "No knowledge file generated yet."}
+        <div className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+          {knowledgeContent}
         </div>
       )}
     </div>
