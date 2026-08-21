@@ -2,13 +2,13 @@ import { useState } from 'react';
 import {
   ChevronDown,
   ExternalLink,
-  Orbit,
   Sparkles,
   Terminal,
   Copy,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
-import { SiClaude } from 'react-icons/si';
+import { SiClaude, SiGithubcopilot } from 'react-icons/si';
+import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
 
 import { Button } from '../../components/ui/button.js';
 import {
@@ -52,6 +52,7 @@ export function AIHarnessLauncher({
   const isAgyDetected = aiDetect.data?.find((a) => a.name === 'antigravity')?.detected ?? true;
   const isClaudeDetected = aiDetect.data?.find((a) => a.name === 'claude')?.detected ?? false;
   const isCodexDetected = aiDetect.data?.find((a) => a.name === 'codex')?.detected ?? false;
+  const isCopilotDetected = aiDetect.data?.find((a) => a.name === 'copilot')?.detected ?? false;
 
   const hasAgyIde = Boolean(launchTargets.data?.some((t) => t.id === 'antigravity' && t.available));
   const hasClaudeDesktop = Boolean(launchTargets.data?.some((t) => t.id === 'claude-desktop' && t.available));
@@ -75,9 +76,13 @@ export function AIHarnessLauncher({
             {isBusy ? (
               <Spinner className="size-3.5" />
             ) : primaryAssistant === 'antigravity' ? (
-              <span className="grid size-4 place-items-center rounded bg-white/20 text-white font-bold text-[10px]">A</span>
+              <AntigravityIcon className="size-3.5" />
             ) : primaryAssistant === 'claude' ? (
               <SiClaude className="size-3.5 text-white" />
+            ) : primaryAssistant === 'codex' ? (
+              <BsOpenai className="size-3.5 text-white" />
+            ) : primaryAssistant === 'copilot' ? (
+              <SiGithubcopilot className="size-3.5 text-purple-400" />
             ) : (
               <Sparkles className="size-3.5" />
             )}
@@ -94,7 +99,7 @@ export function AIHarnessLauncher({
           hasAgyIde ? (
             <MenuSub>
               <MenuSubTrigger className="cursor-pointer">
-                <span className="grid size-4 place-items-center rounded bg-violet-600 text-white font-bold text-[9px]">A</span>
+                <AntigravityIcon className="size-4" />
                 <span>Antigravity</span>
               </MenuSubTrigger>
               <MenuSubPopup>
@@ -115,7 +120,7 @@ export function AIHarnessLauncher({
                   }}
                   className="cursor-pointer"
                 >
-                  <Orbit size={14} className="text-violet-500" />
+                  <AntigravityIcon className="size-3.5" />
                   <span>Antigravity IDE</span>
                 </MenuItem>
               </MenuSubPopup>
@@ -128,7 +133,7 @@ export function AIHarnessLauncher({
               }}
               className="cursor-pointer"
             >
-              <span className="grid size-4 place-items-center rounded bg-violet-600 text-white font-bold text-[9px]">A</span>
+              <AntigravityIcon className="size-4" />
               <span>Antigravity (agy)</span>
             </MenuItem>
           )
@@ -139,7 +144,9 @@ export function AIHarnessLauncher({
           hasClaudeDesktop ? (
             <MenuSub>
               <MenuSubTrigger className="cursor-pointer">
-                <span className="grid size-4 place-items-center rounded bg-[#D97757] text-white font-bold text-[9px]">C</span>
+                <span className="grid size-4 place-items-center rounded bg-[#D97757] text-white text-[9px]">
+                  <SiClaude className="size-2.5" />
+                </span>
                 <span>Claude Code</span>
               </MenuSubTrigger>
               <MenuSubPopup>
@@ -162,7 +169,7 @@ export function AIHarnessLauncher({
                   }}
                   className="cursor-pointer"
                 >
-                  <ExternalLink size={14} className="text-amber-500" />
+                  <ExternalLink size={14} />
                   <span>Claude Desktop</span>
                 </MenuItem>
               </MenuSubPopup>
@@ -175,7 +182,9 @@ export function AIHarnessLauncher({
               }}
               className="cursor-pointer"
             >
-              <span className="grid size-4 place-items-center rounded bg-[#D97757] text-white font-bold text-[9px]">C</span>
+              <span className="grid size-4 place-items-center rounded bg-[#D97757] text-white text-[9px]">
+                <SiClaude className="size-2.5" />
+              </span>
               <span>Claude Code (claude)</span>
             </MenuItem>
           )
@@ -226,6 +235,20 @@ export function AIHarnessLauncher({
               <span>OpenAI Codex (codex)</span>
             </MenuItem>
           )
+        )}
+
+        {/* 4. GitHub Copilot (Only if detected) */}
+        {isCopilotDetected && (
+          <MenuItem
+            onClick={() => {
+              setOpen(false);
+              void onLaunchTerminal('copilot');
+            }}
+            className="cursor-pointer"
+          >
+            <SiGithubcopilot className="size-4 text-purple-400" />
+            <span>GitHub Copilot (copilot)</span>
+          </MenuItem>
         )}
 
         <MenuSeparator />

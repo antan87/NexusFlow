@@ -394,8 +394,18 @@ export async function loadWorkspaceManifest(
   workspacePath: string,
 ): Promise<Feature | null> {
   try {
-    const raw = await fs.readFile(path.join(workspacePath, MANIFEST_FILE), 'utf-8');
-    return normalizeFeature(JSON.parse(raw) as Feature);
+    const manifestPath = path.join(workspacePath, MANIFEST_FILE);
+    const raw = await fs.readFile(manifestPath, 'utf-8');
+    const feature = JSON.parse(raw) as Feature;
+    if (!feature.createdAt) {
+      try {
+        const st = await fs.stat(manifestPath);
+        feature.createdAt = (st.birthtime && st.birthtime.getTime() > 0 ? st.birthtime : st.mtime).toISOString();
+      } catch {
+        feature.createdAt = new Date(0).toISOString();
+      }
+    }
+    return normalizeFeature(feature);
   } catch {
     return null;
   }

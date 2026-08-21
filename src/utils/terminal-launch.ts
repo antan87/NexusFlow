@@ -118,25 +118,39 @@ export async function launchWorkspaceTerminal(
   }
 
   if (platform === 'win32') {
-    // Launch interactive PowerShell in a visible new window using cmd.exe start
-    // Self-activating script: activates its own window on startup so it never opens behind other apps
     const winTitle = (options.title || 'NexusFlow Terminal').replace(/[^a-zA-Z0-9 _-]/g, '') || 'NexusFlow Terminal';
     const escapedWs = escapePsSingleQuote(workspacePath);
     const shellBin = isBinaryOnPath('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
+    const titleScript = `$host.UI.RawUI.WindowTitle = '${escapePsSingleQuote(winTitle)}'; `;
     const focusPrefix = '$wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; ';
     const psScript = cmdToRun
-      ? `${focusPrefix}Set-Location -LiteralPath '${escapedWs}'; ${cmdToRun}`
-      : `${focusPrefix}Set-Location -LiteralPath '${escapedWs}'`;
+      ? `${titleScript}${focusPrefix}Set-Location -LiteralPath '${escapedWs}'; ${cmdToRun}`
+      : `${titleScript}${focusPrefix}Set-Location -LiteralPath '${escapedWs}'`;
     const encodedCmd = Buffer.from(psScript, 'utf16le').toString('base64');
 
+    // Method 1: Start-Process via powershell.exe (guarantees a visible, focused native console window)
+    try {
+      const res = await execa('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Start-Process -FilePath '${shellBin}' -ArgumentList '-NoExit', '-EncodedCommand', '${encodedCmd}' -WorkingDirectory '${escapedWs}'`,
+      ], { reject: false, stdio: 'ignore' });
+      if (res.exitCode === 0) {
+        return { success: true, command: cmdToRun };
+      }
+    } catch {}
+
+    // Method 2: cmd.exe start
     try {
       const child = execa(
         'cmd.exe',
-        ['/d', '/s', '/c', 'start', `"${winTitle}"`, shellBin, '-NoExit', '-EncodedCommand', encodedCmd],
+        ['/c', 'start', '""', shellBin, '-NoExit', '-EncodedCommand', encodedCmd],
         {
           detached: true,
           stdio: 'ignore',
           shell: false,
+          windowsHide: false,
         },
       );
       if (child && typeof (child as any).catch === 'function') {

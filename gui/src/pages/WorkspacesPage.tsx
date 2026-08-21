@@ -1,36 +1,60 @@
-import { useMemo, useState, useEffect, useRef, type ComponentProps } from 'react';
+import { useState, useRef, useEffect, type ComponentProps } from 'react';
 import {
   RefreshCw,
   MoreVertical,
   Copy,
   Trash2,
-  Search,
   FolderGit2,
   Terminal,
-  PanelLeft,
   MessageSquare,
+  Code2,
+  ChevronDown,
+  Sparkles,
 } from 'lucide-react';
+import { BsOpenai } from 'react-icons/bs';
+import { SiClaude, SiGithubcopilot } from 'react-icons/si';
+import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
+import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
+
+const renderEditorIcon = (id: string, name: string) => {
+  const lower = `${id} ${name}`.toLowerCase();
+  if (lower.includes('insiders')) {
+    return <VscVscodeInsiders size={15} className="text-[#24C05A] shrink-0" />;
+  }
+  if (lower.includes('code') || lower.includes('vscode')) {
+    return <VscVscode size={15} className="text-[#007ACC] shrink-0" />;
+  }
+  if (lower.includes('antigravity')) {
+    return <AntigravityIcon className="size-3.5 shrink-0" />;
+  }
+  if (lower.includes('cursor')) {
+    return <Sparkles size={14} className="text-purple-400 shrink-0" />;
+  }
+  if (lower.includes('powershell') || lower.includes('pwsh')) {
+    return <Terminal size={14} className="text-sky-400 shrink-0" />;
+  }
+  if (lower.includes('cmd') || lower.includes('command prompt')) {
+    return <Terminal size={14} className="text-amber-400 shrink-0" />;
+  }
+  return <Code2 size={14} className="shrink-0" />;
+};
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
-import { Input } from '../components/ui/input.js';
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '../components/ui/menu.js';
-import { Skeleton } from '../components/ui/skeleton.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
-import { useWorkspaceServices, useLaunchTerminal, useAiDetect } from '../lib/api/queries.js';
-import { safeCopyToClipboard } from '../lib/clipboard.js';
+import { useWorkspaceServices, useWorkspaceLaunchTargets } from '../lib/api/queries.js';
 import { syncMeta, repoName } from '../lib/status.js';
+import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
-import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
@@ -47,19 +71,14 @@ const TABS: Array<{ value: SubTab; label: string }> = [
   { value: 'skills', label: 'Skills' },
 ];
 
-const FILTERS = ['all', 'changes', 'running'] as const;
-type Filter = (typeof FILTERS)[number];
-
-const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-
 interface WorkspacesPageProps {
   workspaces: Feature[];
   workspaceStatuses: Record<string, WorkspaceStatus>;
-  workspacesLoading: boolean;
-  fetchWorkspaces: () => Promise<void>;
+  workspacesLoading?: boolean;
+  fetchWorkspaces?: () => Promise<void>;
   selectedId: string | null;
   subTab: SubTab;
-  onSelect: (id: string) => void;
+  onSelect?: (id: string) => void;
   onSelectTab: (id: string, tab: SubTab) => void;
   handleCopyPrompt: (ws: Feature) => void;
   handleDeleteWorkspace: (wsName: string) => Promise<void>;
@@ -78,11 +97,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const {
     workspaces,
     workspaceStatuses,
-    workspacesLoading,
-    fetchWorkspaces,
     selectedId,
     subTab,
-    onSelect,
     onSelectTab,
     handleCopyPrompt,
     handleDeleteWorkspace,
@@ -97,71 +113,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     planProps,
   } = props;
 
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
-  const [launchingHarness, setLaunchingHarness] = useState<string | null>(null);
-  const launchInFlightRef = useRef(false);
-
-  const launchTerminalMutation = useLaunchTerminal();
-  const aiDetect = useAiDetect();
-  const isClaudeDetected = aiDetect.data?.find((a) => a.name === 'claude')?.detected ?? false;
-  const isCodexDetected = aiDetect.data?.find((a) => a.name === 'codex')?.detected ?? false;
-
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('nexusflow:workspaces:sidebarCollapsed') === 'true';
-    } catch {
-      // Fall back to expanded sidebar
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('nexusflow:workspaces:sidebarCollapsed', String(sidebarCollapsed));
-    } catch {
-      // Storage unavailable
-    }
-  }, [sidebarCollapsed]);
-
-  // Ctrl/Cmd+B shortcut toggles sidebar (guarded against active modals)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target;
-      if (
-        target instanceof HTMLInputElement
-        || target instanceof HTMLTextAreaElement
-        || target instanceof HTMLSelectElement
-        || (target instanceof HTMLElement && target.isContentEditable)
-        || document.querySelector('[role="dialog"]') !== null
-      ) return;
-
-      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
-      if (isCmdOrCtrl && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault();
-        setSidebarCollapsed((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
   const selectedMode = selected?.mode ?? 'worktree';
 
   // Detected services for the overview topology panel
   const detectedServices = useWorkspaceServices(selected?.branchName ?? null).data?.services ?? [];
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return workspaces.filter((w) => {
-      const st = workspaceStatuses[w.branchName];
-      if (q && !`${w.branchName} ${w.description}`.toLowerCase().includes(q)) return false;
-      if (filter === 'changes' && !(st && st.changedFiles > 0)) return false;
-      if (filter === 'running' && !(st && st.runningServices > 0)) return false;
-      return true;
-    });
-  }, [workspaces, workspaceStatuses, query, filter]);
 
   const repoRows = selected
     ? selected.repos.map((rp) => {
@@ -176,36 +132,45 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const availableRepos = selected ? repos.filter((r) => !selected.repos.includes(r.path)) : [];
 
-  const launchHarnessTerminal = async (assistant: string) => {
-    if (!selected || launchInFlightRef.current) return;
-    if (assistant === 'codex' && !isCodexDetected) {
-      showToast?.('OpenAI Codex CLI is not installed on your system.', 'info');
-      return;
-    }
-    if (assistant === 'claude' && !isClaudeDetected) {
-      showToast?.('Claude CLI is not installed on your system. Run: npm install -g @anthropic-ai/claude-code', 'info');
-      return;
-    }
-    launchInFlightRef.current = true;
-    setLaunchingHarness(`term:${assistant}`);
-    try {
-      await launchTerminalMutation.mutateAsync({
-        workspaceId: selected.branchName,
-        assistant,
-      });
-      showToast?.(`Launched interactive ${assistant} session in terminal.`, 'success');
-    } catch (err) {
-      console.error(`Failed to launch terminal for ${assistant}:`, err);
-      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'claude' ? 'claude' : assistant === 'codex' ? 'codex' : 'copilot';
-      const copied = await safeCopyToClipboard(cmd);
-      if (copied) {
-        showToast?.(`Could not launch terminal automatically. Copied command to clipboard:\n\n${cmd}`, 'info');
-      } else {
-        showToast?.(`Could not launch terminal automatically. Run manually:\n\n${cmd}`, 'error');
+  const launchTargets = useWorkspaceLaunchTargets();
+  const [openingEditor, setOpeningEditor] = useState<string | null>(null);
+  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
+  const editorMenuRef = useRef<HTMLDivElement>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!editorMenuOpen && !moreMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (editorMenuRef.current && !editorMenuRef.current.contains(e.target as Node)) {
+        setEditorMenuOpen(false);
       }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [editorMenuOpen, moreMenuOpen]);
+
+  const availableEditors = launchTargets.data?.filter((t) => t.kind === 'editor' && t.available) ?? [];
+  const primaryEditor = availableEditors.find((e) => e.id === 'vscode-insiders')
+    || availableEditors.find((e) => e.id === 'vscode')
+    || availableEditors[0];
+
+  const handleOpenEditor = async (targetId: string) => {
+    if (openingEditor || !selected) return;
+    setOpeningEditor(targetId);
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(selected.branchName)}/launch`, {
+        method: 'POST',
+        body: JSON.stringify({ targetId }),
+      });
+      showToast?.(`Opened workspace in ${targetId}.`, 'success');
+    } catch (e) {
+      showToast?.(`Failed to open ${targetId}: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
-      setLaunchingHarness(null);
-      launchInFlightRef.current = false;
+      setOpeningEditor(null);
     }
   };
 
@@ -232,44 +197,110 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-              <WorkspaceLauncher
-                workspaceId={selected.branchName}
-                workspacePath={selected.workspacePath}
-                isVsCode={isVsCode}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={Boolean(launchingHarness?.startsWith('term:'))}
-                onClick={() => launchHarnessTerminal(selected.assistants[0] || 'antigravity')}
-                title="Launch terminal shell in workspace"
-              >
-                {launchingHarness?.startsWith('term:') ? <Spinner className="size-3.5" /> : <Terminal size={13} />}
-                Terminal
-              </Button>
-              <Menu>
-                <MenuTrigger
+              {primaryEditor && (
+                availableEditors.length > 1 ? (
+                  <div className="relative flex items-center rounded-md border border-border bg-card shadow-xs" ref={editorMenuRef}>
+                    <button
+                      type="button"
+                      disabled={Boolean(openingEditor)}
+                      onClick={() => void handleOpenEditor(primaryEditor.id)}
+                      title={`Open workspace in ${primaryEditor.name}`}
+                      className="inline-flex items-center gap-1.5 rounded-l-md px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer border-r border-border"
+                    >
+                      {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
+                      <span>{primaryEditor.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorMenuOpen((prev) => !prev)}
+                      aria-label="Select Editor or Shell"
+                      aria-expanded={editorMenuOpen}
+                      className="grid h-8 w-6 place-items-center rounded-r-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer transition-colors"
+                    >
+                      <ChevronDown size={13} className={cn('transition-transform duration-150', editorMenuOpen && 'rotate-180')} />
+                    </button>
+
+                    {editorMenuOpen && (
+                      <div className="absolute right-0 top-full mt-1 w-52 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
+                        <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Open Workspace In
+                        </div>
+                        {availableEditors.map((ed) => (
+                          <button
+                            key={ed.id}
+                            type="button"
+                            onClick={() => {
+                              setEditorMenuOpen(false);
+                              void handleOpenEditor(ed.id);
+                            }}
+                            className={cn(
+                              'w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
+                              ed.id === primaryEditor.id && 'font-semibold text-primary bg-primary/10'
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {renderEditorIcon(ed.id, ed.name)}
+                              <span className="truncate">{ed.name}</span>
+                            </div>
+                            {ed.id === primaryEditor.id && <span className="text-[10px] text-muted-foreground font-mono shrink-0">(default)</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(openingEditor)}
+                    onClick={() => void handleOpenEditor(primaryEditor.id)}
+                    title={`Open workspace in ${primaryEditor.name}`}
+                    className="font-medium"
+                  >
+                    {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
+                    <span>{primaryEditor.name}</span>
+                  </Button>
+                )
+              )}
+              <div className="relative" ref={moreMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMoreMenuOpen((prev) => !prev)}
                   aria-label="More actions"
+                  aria-expanded={moreMenuOpen}
                   className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
                 >
                   <MoreVertical size={15} />
-                </MenuTrigger>
-                <MenuPopup align="end">
-                  <MenuItem onClick={() => handleCopyPrompt(selected)} className="cursor-pointer">
-                    <Copy size={14} /> Copy AI Context
-                  </MenuItem>
-                  <MenuSeparator />
-                  <MenuItem
-                    variant="destructive"
-                    disabled={deleteWsLoading === selected.branchName}
-                    onClick={() => void handleDeleteWorkspace(selected.branchName)}
-                    className="cursor-pointer"
-                  >
-                    <Trash2 size={14} />
-                    {deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
+                </button>
+
+                {moreMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-44 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        handleCopyPrompt(selected);
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <Copy size={13} /> <span>Copy AI Context</span>
+                    </button>
+                    <div className="my-1 h-px bg-border/60" />
+                    <button
+                      type="button"
+                      disabled={deleteWsLoading === selected.branchName}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        void handleDeleteWorkspace(selected.branchName);
+                      }}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 size={13} />
+                      <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -330,9 +361,23 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 <Card className="p-3.5 sm:p-4 bg-gradient-to-r from-card to-card/60">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="grid size-9 place-items-center rounded-xl bg-violet-600 text-white font-bold text-xs shadow-sm">
-                        {selected.assistants[0] === 'claude' ? 'C' : selected.assistants[0] === 'codex' ? 'O' : 'A'}
-                      </span>
+                      {selected.assistants[0] === 'claude' ? (
+                        <span className="grid size-9 place-items-center rounded-xl bg-[#D97757] text-white shadow-sm">
+                          <SiClaude className="size-5" />
+                        </span>
+                      ) : selected.assistants[0] === 'codex' ? (
+                        <span className="grid size-9 place-items-center rounded-xl bg-foreground text-background shadow-sm">
+                          <BsOpenai className="size-5" />
+                        </span>
+                      ) : selected.assistants[0] === 'copilot' ? (
+                        <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white shadow-sm">
+                          <SiGithubcopilot className="size-5" />
+                        </span>
+                      ) : (
+                        <span className="grid size-9 place-items-center rounded-xl bg-card border border-border/80 shadow-sm p-1.5">
+                          <AntigravityIcon className="size-6" />
+                        </span>
+                      )}
                       <div>
                         <div className="flex items-center gap-2">
                           <h3 className="text-sm font-semibold text-foreground capitalize">
@@ -410,11 +455,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                             <Button
                               variant="default"
                               size="sm"
-                              onClick={() => void launchHarnessTerminal(sess.assistant)}
-                              title="Resume in terminal"
+                              onClick={() => onSelectTab(selected.branchName, 'sessions')}
+                              title="Go to Sessions"
                             >
                               <Terminal size={12} />
-                              <span>Resume</span>
+                              <span>Sessions</span>
                             </Button>
                           </div>
                         </div>
@@ -443,13 +488,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <AddRepoPicker
                         repos={availableRepos}
                         disabled={addRepoLoading}
-                        onAdd={(path) => {
+                        onAdd={(repoPath: string) => {
                           if (
                             window.confirm(
-                              `Add repository "${repoName(path)}" to this workspace?\nThis creates a new git worktree and re-runs analysis.`,
+                              `Add repository "${repoName(repoPath)}" to this workspace?\nThis creates a new git worktree and re-runs analysis.`,
                             )
                           ) {
-                            void handleAddRepo(selected.branchName, path);
+                            void handleAddRepo(selected.branchName, repoPath);
                           }
                         }}
                       />
@@ -496,128 +541,32 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   };
 
   return (
-    <div className="flex flex-col h-full animate-fade-in">
-      <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-lg sm:text-xl font-semibold text-foreground">Workspaces</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Inspect workspace changes, services, context, and launch external AI harnesses.
-          </p>
+    <div className="flex flex-col h-full animate-fade-in w-full min-w-0">
+      {!selected ? (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-md w-full">
+            <Card className="border-dashed p-0 shadow-sm">
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FolderGit2 />
+                  </EmptyMedia>
+                  <EmptyTitle>No workspace selected</EmptyTitle>
+                  <EmptyDescription>
+                    Select a workspace from the sidebar to inspect git changes, services, context, or launch AI assistants.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </Card>
+          </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSidebarCollapsed((prev) => !prev)}
-            title={sidebarCollapsed ? 'Show workspace list (Ctrl+B)' : 'Hide workspace list (Ctrl+B)'}
-            aria-label={sidebarCollapsed ? 'Show workspace list' : 'Hide workspace list'}
-            aria-expanded={!sidebarCollapsed}
-          >
-            <PanelLeft size={14} className={cn('transition-transform', sidebarCollapsed && 'opacity-60')} />
-            <span className="hidden sm:inline">{sidebarCollapsed ? 'Show List' : 'Hide List'}</span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={fetchWorkspaces} disabled={workspacesLoading}>
-            <RefreshCw size={13} className={workspacesLoading ? 'animate-spin text-primary' : ''} />
-            Refresh
-          </Button>
+      ) : (
+        <div className="flex-1 min-w-0 h-full overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-6xl flex-col">
+            {renderInspector()}
+          </div>
         </div>
-      </header>
-
-      <div className="flex gap-3 h-[calc(100vh-115px)] overflow-hidden pb-2">
-        {/* ── Left rail: Workspaces List ─────────────────────────────────────────── */}
-        {!sidebarCollapsed && (
-          <div className="w-52 sm:w-56 shrink-0 flex flex-col overflow-y-auto pr-1">
-            <div className="relative mb-3">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search workspaces" className="[&_[data-slot=input]]:pl-8" />
-            </div>
-            <div className="mb-3 flex items-center gap-1 rounded-lg border border-border bg-muted p-1">
-              {FILTERS.map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  aria-pressed={filter === f}
-                  className={cn(
-                    'flex-1 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors cursor-pointer text-center',
-                    filter === f ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                  )}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-
-            {workspacesLoading ? (
-              <div className="flex flex-col gap-1.5">
-                {[0, 1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-14" />
-                ))}
-              </div>
-            ) : filtered.length === 0 ? (
-              <Card className="p-6 text-center text-sm text-muted-foreground">No workspaces match.</Card>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                {filtered.map((w) => {
-                  const st = workspaceStatuses[w.branchName];
-                  const active = w.branchName === selectedId;
-                  const sync = w.mode === 'in-place' ? null : st ? syncMeta(st.syncStatus) : null;
-                  return (
-                    <button
-                      key={w.id}
-                      onClick={() => onSelect(w.branchName)}
-                      className={cn(
-                        'rounded-lg border p-3 text-left transition-colors cursor-pointer',
-                        active ? 'border-primary/50 bg-primary/10' : 'border-border bg-card hover:border-foreground/15 hover:bg-accent/50',
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-mono text-sm font-semibold text-foreground">{w.branchName}</span>
-                        <span className="shrink-0 text-[11px] text-muted-foreground">{w.repos.length} repos</span>
-                      </div>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <span
-                          className={cn('h-1.5 w-1.5 rounded-full', st?.changedFiles ? 'bg-warning' : 'bg-success')}
-                          title={st?.changedFiles ? `${st.changedFiles} uncommitted` : 'Clean'}
-                        />
-                        {st?.runningServices ? <span className="h-1.5 w-1.5 rounded-full bg-running" title="Running services" /> : null}
-                        {sync && <span className="text-[11px] text-muted-foreground">{sync.label}</span>}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Main content area ────────────────────────────────────────────── */}
-        {!selected ? (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="max-w-md w-full">
-              <Card className="border-dashed p-0 shadow-sm">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FolderGit2 />
-                    </EmptyMedia>
-                    <EmptyTitle>No workspace selected</EmptyTitle>
-                    <EmptyDescription>
-                      Pick a workspace from the list to see its status, repositories, changes, services, and AI harness launchpad.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              </Card>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 min-w-0 h-full overflow-y-auto pr-1">
-            <div className="mx-auto flex w-full max-w-6xl flex-col">
-              {renderInspector()}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

@@ -57,10 +57,12 @@ describe('terminal-launch utility', () => {
       await expect(launchWorkspaceTerminal('relative/path')).rejects.toThrow('must be an absolute directory');
     });
 
-    it('launches interactive PowerShell on Windows via cmd.exe start', async () => {
-      const mockUnref = vi.fn();
-      vi.mocked(execaSync).mockReturnValue({ exitCode: 0 } as any);
-      vi.mocked(execa).mockReturnValue({ unref: mockUnref, catch: vi.fn() } as any);
+    it('launches PowerShell via Start-Process when available on Windows', async () => {
+      vi.mocked(execaSync).mockImplementation((_cmd: any, args?: any) => {
+        if (Array.isArray(args) && args[0] === 'pwsh.exe') return { exitCode: 0 } as any;
+        return { exitCode: 1 } as any;
+      });
+      vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
 
       const res = await launchWorkspaceTerminal("C:\\workspaces\\bob's-app", {
         assistant: 'antigravity',
@@ -69,12 +71,41 @@ describe('terminal-launch utility', () => {
 
       expect(res.success).toBe(true);
       expect(res.command).toBe('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921');
-      const expectedScript = "$wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; Set-Location -LiteralPath 'C:\\workspaces\\bob''s-app'; agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921";
+      const expectedScript = "$host.UI.RawUI.WindowTitle = 'NexusFlow Terminal'; $wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; Set-Location -LiteralPath 'C:\\workspaces\\bob''s-app'; agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921";
+      const expectedEncoded = Buffer.from(expectedScript, 'utf16le').toString('base64');
+      expect(execa).toHaveBeenCalledWith(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -FilePath 'pwsh.exe' -ArgumentList '-NoExit', '-EncodedCommand', '${expectedEncoded}' -WorkingDirectory 'C:\\workspaces\\bob''s-app'`],
+        { reject: false, stdio: 'ignore' },
+      );
+    });
+
+    it('falls back to cmd.exe start when Start-Process fails on Windows', async () => {
+      const mockUnref = vi.fn();
+      vi.mocked(execaSync).mockImplementation((_cmd: any, args?: any) => {
+        if (Array.isArray(args) && args[0] === 'pwsh.exe') return { exitCode: 0 } as any;
+        return { exitCode: 1 } as any;
+      });
+      vi.mocked(execa).mockImplementation((cmd: any) => {
+        if (cmd === 'powershell.exe') {
+          return Promise.resolve({ exitCode: 1 } as any);
+        }
+        return { unref: mockUnref, catch: vi.fn() } as any;
+      });
+
+      const res = await launchWorkspaceTerminal("C:\\workspaces\\bob's-app", {
+        assistant: 'antigravity',
+        sessionId: '3a14e9f7-628b-4d51-87b4-1065a7df4921',
+      }, 'win32');
+
+      expect(res.success).toBe(true);
+      expect(res.command).toBe('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921');
+      const expectedScript = "$host.UI.RawUI.WindowTitle = 'NexusFlow Terminal'; $wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; Set-Location -LiteralPath 'C:\\workspaces\\bob''s-app'; agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921";
       const expectedEncoded = Buffer.from(expectedScript, 'utf16le').toString('base64');
       expect(execa).toHaveBeenCalledWith(
         'cmd.exe',
-        ['/d', '/s', '/c', 'start', '"NexusFlow Terminal"', 'pwsh.exe', '-NoExit', '-EncodedCommand', expectedEncoded],
-        expect.objectContaining({ detached: true, shell: false }),
+        ['/c', 'start', '""', 'pwsh.exe', '-NoExit', '-EncodedCommand', expectedEncoded],
+        expect.objectContaining({ detached: true, shell: false, windowsHide: false }),
       );
       expect(mockUnref).toHaveBeenCalled();
     });

@@ -681,6 +681,14 @@ function AppInner() {
     }
   }, [location.pathname]);
 
+  // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
+  useEffect(() => {
+    setSessions([]);
+    setGitChanges([]);
+    setKnowledgeContent('');
+    setPlanContent('');
+  }, [activeWsId]);
+
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
   useEffect(() => {
     if (activeWsId && (subTab === 'changes' || subTab === 'overview')) {
@@ -688,9 +696,9 @@ function AppInner() {
     }
   }, [activeWsId, subTab]);
 
-  // Load sessions when active workspace changes or subTab switches to 'sessions'
+  // Load sessions when active workspace changes or subTab switches to 'sessions' or 'overview'
   useEffect(() => {
-    if (activeWsId && subTab === 'sessions') {
+    if (activeWsId && (subTab === 'sessions' || subTab === 'overview')) {
       fetchWorkspaceSessions(activeWsId);
     }
   }, [activeWsId, subTab]);
@@ -891,7 +899,14 @@ Core Instructions:
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <AppSidebar appVersion={appVersion} />
+      <AppSidebar
+        appVersion={appVersion}
+        workspaces={workspaces}
+        workspaceStatuses={workspaceStatuses}
+        workspacesLoading={workspacesLoading}
+        activeWsId={activeWsId}
+        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+      />
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6 min-w-0">

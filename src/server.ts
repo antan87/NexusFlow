@@ -706,11 +706,16 @@ app.delete('/api/projects/:id', async (c) => {
   }
 });
 
-// 4. List existing workspaces
+// 4. List existing workspaces (ordered by newest creation date first)
 app.get('/api/workspaces', async (c) => {
   try {
     const config = await loadConfig();
     const workspaces = await listWorkspaces(config.workspacesDir);
+    workspaces.sort((a, b) => {
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
     return c.json(workspaces);
   } catch (error) {
     return errorResponse(c, error);

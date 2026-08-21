@@ -7,6 +7,7 @@ import {
   Orbit,
   RefreshCw,
   Rocket,
+  Terminal,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
 import {
@@ -55,6 +56,9 @@ const ICONS: Record<WorkspaceLaunchIcon, React.ComponentType<{ className?: strin
   'vscode-insiders': VscVscodeInsiders,
   cursor: SiCursor,
   antigravity: Orbit,
+  powershell: Terminal,
+  cmd: Terminal,
+  terminal: Terminal,
   intellij: SiIntellijidea,
   webstorm: SiWebstorm,
   pycharm: SiPycharm,
@@ -70,6 +74,9 @@ const ICON_STYLES: Record<WorkspaceLaunchIcon, string> = {
   'vscode-insiders': 'bg-[#24A148] text-white',
   cursor: 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950',
   antigravity: 'bg-violet-600 text-white',
+  powershell: 'bg-sky-700 text-white',
+  cmd: 'bg-zinc-800 text-amber-400',
+  terminal: 'bg-zinc-800 text-emerald-400',
   intellij: 'bg-fuchsia-600 text-white',
   webstorm: 'bg-cyan-600 text-white',
   pycharm: 'bg-lime-600 text-zinc-950',
