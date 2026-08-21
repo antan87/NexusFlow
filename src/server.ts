@@ -19,9 +19,10 @@ import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
-import { createNewRepo } from './core/new-repo.js';
+import { createNewRepo, isValidProjectName } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
@@ -527,6 +528,23 @@ app.use(
   }),
 );
 
+// --- host guard: DNS rebinding protection ---
+function isAllowedHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return true; // Internal Hono programmatic invocations / test requests
+  const hostname = hostHeader.startsWith('[')
+    ? hostHeader.slice(1, hostHeader.indexOf(']'))
+    : hostHeader.split(':')[0]?.toLowerCase() ?? '';
+  return ['localhost', '127.0.0.1', '::1'].includes(hostname);
+}
+
+app.use('*', async (c, next) => {
+  const host = c.req.header('host');
+  if (!isAllowedHost(host)) {
+    return c.text('Forbidden: invalid Host header', 403);
+  }
+  await next();
+});
+
 // Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
 // cross-site request forgery and browser form posts from untrusted web pages.
 app.use('/api/*', async (c, next) => {
@@ -600,10 +618,15 @@ app.get('/api/adapters', async (c) => {
 // 2. Save configuration
 app.post('/api/config', async (c) => {
   try {
-    const newConfig = await c.req.json();
-
-    await saveConfig(newConfig);
-    return c.json({ success: true, config: newConfig });
+    const body = await c.req.json().catch(() => null);
+    const parsed = configPatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid config payload', issues: parsed.error.flatten() }, 400);
+    }
+    const current = await loadConfig();
+    const next = { ...current, ...parsed.data };
+    await saveConfig(next);
+    return c.json({ success: true, config: next });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1059,6 +1082,18 @@ app.post('/api/workspace', async (c) => {
     }
 
     const config = await loadConfig();
+    // Validate repo names and paths synchronously before starting the job.
+    for (const r of body.repos || []) {
+      if (inPlace) {
+        if (config.devDir && r.path) {
+          assertWithin(config.devDir, path.resolve(r.path));
+        }
+      } else {
+        if (r.name && !isValidProjectName(r.name)) {
+          return c.json({ error: `Invalid repository name: ${JSON.stringify(r.name)}` }, 400);
+        }
+      }
+    }
     // The job id doubles as the workspace directory name.
     const jobId = inPlace ? slugifyProjectName(body.name!) : body.branchName!;
     if (!jobId) {
@@ -1198,6 +1233,9 @@ app.post('/api/workspace/:id/repo', async (c) => {
     const id = decodeURIComponent(c.req.param('id'));
     const { repoPath } = await c.req.json() as { repoPath: string };
     const config = await loadConfig();
+    if (config.devDir) {
+      assertWithin(config.devDir, path.resolve(repoPath));
+    }
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await addRepoToWorkspace(workspacePath, repoPath);

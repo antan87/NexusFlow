@@ -51,9 +51,18 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true
     }
   });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('data:')) return;
+    if (assignedPort && !url.startsWith(`http://localhost:${assignedPort}`)) {
+      event.preventDefault();
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // Start the NexusFlow backend server dynamically on port 0 (OS assigns port).
   // Dev: run ../dist with node on PATH. Packaged: run the backend bundled under
@@ -140,8 +149,8 @@ function createWindow() {
     const output = data.toString();
     diag(`[backend:out] ${output.trimEnd()}`);
 
-    // Look for a log like "Dashboard is already active at: http://localhost:PORT"
-    const match = output.match(/http:\/\/localhost:(\d+)/);
+    // Match only our explicit ready token — never arbitrary URLs in output.
+    const match = output.match(/NEXUSFLOW_READY_PORT=(\d+)/);
     if (match && !assignedPort) {
       assignedPort = parseInt(match[1], 10);
       if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }

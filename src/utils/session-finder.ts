@@ -8,6 +8,19 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { AISession, ChatMessage } from '../types.js';
 
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Enforce UUID format for session IDs interpolated into filesystem paths. */
+export function assertSafeSessionId(assistant: string, sessionId: string): void {
+  if (assistant === 'codex') {
+    if (!isCodexSessionId(sessionId)) throw new Error('Invalid Codex session id');
+    return;
+  }
+  if (!SESSION_ID_RE.test(sessionId)) {
+    throw new Error(`Invalid ${assistant} session id`);
+  }
+}
+
 /**
  * Resolves the root directory for Antigravity session storage, respecting
  * ANTIGRAVITY_CLI_HOME and GEMINI_CLI_HOME environment variables.
@@ -597,6 +610,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
  * @returns A promise that resolves to an array of {@link ChatMessage} objects.
  */
 export async function getSessionTranscript(assistant: string, sessionId: string): Promise<ChatMessage[]> {
+  assertSafeSessionId(assistant, sessionId);
   const messages: ChatMessage[] = [];
 
   if (assistant === 'antigravity') {

@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 
 import type { OrchestrationDetection, RunningOrchestrator } from '../types.js';
-import { getPm2List, mutateRunningState, pm2Start, serviceLogFile } from './runner.js';
+import { getPm2List, mutateRunningState, pm2Prefix, pm2Start, serviceLogFile } from './runner.js';
 
 /**
  * Slugifies a detection id into a PM2/filesystem-safe token. Keyed on the id
@@ -28,7 +28,7 @@ function orchSlug(detection: OrchestrationDetection): string {
 
 /** PM2 app name for a pm2-mode orchestrator: `nexusflow-<ws>-orch-<slug>`. */
 export function orchestratorPm2Name(workspacePath: string, detection: OrchestrationDetection): string {
-  return `nexusflow-${path.basename(workspacePath)}-orch-${orchSlug(detection)}`;
+  return `${pm2Prefix(workspacePath)}orch-${orchSlug(detection)}`;
 }
 
 /** Log source name for a pm2-mode orchestrator (tailable like a service). */

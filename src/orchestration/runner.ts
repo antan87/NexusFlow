@@ -4,6 +4,7 @@
  * Uses PM2 for process management.
  */
 
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import chalk from 'chalk';
@@ -21,9 +22,20 @@ function getStatePath(workspacePath: string): string {
   return path.join(workspacePath, STATE_FILE);
 }
 
-/** PM2 app name for a workspace service: `nexusflow-<workspaceId>-<name>`. */
+/** Stable, collision-free 8-char hash of the absolute workspace path. */
+export function workspaceHash(workspacePath: string): string {
+  return createHash('sha256').update(path.resolve(workspacePath)).digest('hex').slice(0, 8);
+}
+
+/** Workspace PM2 prefix embedding the workspace hash to eliminate prefix over-matching. */
+export function pm2Prefix(workspacePath: string): string {
+  const base = path.basename(workspacePath).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 24);
+  return `nexusflow-${base}-${workspaceHash(workspacePath)}-`;
+}
+
+/** PM2 app name for a workspace service: `nexusflow-<base>-<hash>-<name>`. */
 export function pm2AppName(workspacePath: string, serviceName: string): string {
-  return `nexusflow-${path.basename(workspacePath)}-${serviceName}`;
+  return `${pm2Prefix(workspacePath)}${serviceName}`;
 }
 
 /**
@@ -325,7 +337,7 @@ export async function startServices(
  */
 export async function stopServices(workspacePath: string): Promise<void> {
   const workspaceId = path.basename(workspacePath);
-  const prefix = `nexusflow-${workspaceId}-`;
+  const prefix = pm2Prefix(workspacePath);
 
   console.log(chalk.cyan(`  Stopping all services under PM2 for workspace: ${workspaceId}...`));
 
@@ -369,7 +381,7 @@ export async function stopServices(workspacePath: string): Promise<void> {
  */
 export async function getServiceStatus(workspacePath: string): Promise<void> {
   const workspaceId = path.basename(workspacePath);
-  const prefix = `nexusflow-${workspaceId}-`;
+  const prefix = pm2Prefix(workspacePath);
 
   try {
     const pm2List = await getPm2List();

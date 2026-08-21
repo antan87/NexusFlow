@@ -16,7 +16,8 @@ const port = Number(process.env.NF_PORT ?? process.argv[2] ?? 0) || 0;
 
 startServer(port, { strictPort: false })
   .then(({ port: actualPort }) => {
-    // The Electron shell watches stdout for this URL to know the server is up.
+    // The Electron shell watches stdout for this token to know the server is up.
+    console.log(`NEXUSFLOW_READY_PORT=${actualPort}`);
     console.log(`Dashboard running at: http://localhost:${actualPort}`);
   })
   .catch((err) => {

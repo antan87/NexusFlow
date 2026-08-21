@@ -8,6 +8,7 @@ import {
   loadRunningState,
   parsePm2Json,
   pm2AppName,
+  pm2Prefix,
   serviceLogFile,
   startService,
   stopService,
@@ -81,8 +82,8 @@ describe('orchestration runner PM2 state handling', () => {
     vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
 
     const runningState = await loadRunningState(workspacePath, [
-      { name: 'nexusflow-feature-a-api', pid: 333, pm2_env: { status: 'online' } },
-      { name: 'nexusflow-feature-a-web', pid: 444, pm2_env: { status: 'stopped' } },
+      { name: pm2AppName(workspacePath, 'api'), pid: 333, pm2_env: { status: 'online' } },
+      { name: pm2AppName(workspacePath, 'web'), pid: 444, pm2_env: { status: 'stopped' } },
     ]);
 
     expect(runningState?.services).toHaveLength(1);
@@ -133,12 +134,13 @@ describe('orchestration runner PM2 state handling', () => {
   describe('per-service lifecycle', () => {
     it('pm2AppName and serviceLogFile derive workspace-scoped names', () => {
       const ws = path.join(process.cwd(), 'my-ws');
-      expect(pm2AppName(ws, 'api')).toBe('nexusflow-my-ws-api');
+      expect(pm2AppName(ws, 'api')).toMatch(/^nexusflow-my-ws-[0-9a-f]{8}-api$/);
       expect(serviceLogFile('/logs', 'api')).toBe(path.join('/logs', 'api.log'));
     });
 
     it('startService deletes any existing app, starts PM2, resolves the PID and upserts state', async () => {
       const ws = path.join(process.cwd(), 'my-ws');
+      const expectedApp = pm2AppName(ws, 'api');
       // fs: mkdir (log dir), then mutateRunningState reads (ENOENT) + writes.
       vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
       vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
@@ -146,15 +148,15 @@ describe('orchestration runner PM2 state handling', () => {
       vi.mocked(execa)
         .mockResolvedValueOnce({ stdout: '' } as any) // pm2 delete
         .mockResolvedValueOnce({ stdout: '' } as any) // pm2 start
-        .mockResolvedValueOnce({ stdout: '[{"name":"nexusflow-my-ws-api","pid":4321}]' } as any); // pm2 jlist
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp, pid: 4321 }]) } as any); // pm2 jlist
 
       const running = await startService(service('api', ws), ws, '/logs');
 
       expect(running?.pid).toBe(4321);
       const calls = vi.mocked(execa).mock.calls;
-      expect(calls[0]).toEqual(['npx', ['pm2', 'delete', 'nexusflow-my-ws-api'], { reject: false }]);
+      expect(calls[0]).toEqual(['npx', ['pm2', 'delete', expectedApp], { reject: false }]);
       expect(calls[1]?.[1]).toContain('start');
-      expect(calls[1]?.[1]).toContain('nexusflow-my-ws-api');
+      expect(calls[1]?.[1]).toContain(expectedApp);
       // State written with the running service.
       const written = JSON.parse(vi.mocked(fs.writeFile).mock.calls.at(-1)?.[1] as string);
       expect(written.services.map((s: any) => s.name)).toEqual(['api']);
@@ -173,19 +175,20 @@ describe('orchestration runner PM2 state handling', () => {
 
     it('stopService deletes the PM2 app and removes it from state', async () => {
       const ws = path.join(process.cwd(), 'my-ws');
+      const expectedApp = pm2AppName(ws, 'api');
       const state: RunningState = {
         workspacePath: ws,
         services: [{ name: 'api', pid: 1, config: service('api', ws), startedAt: 'x' }],
         updatedAt: 'x',
       };
       vi.mocked(execa)
-        .mockResolvedValueOnce({ stdout: '[{"name":"nexusflow-my-ws-api"}]' } as any) // jlist
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp }]) } as any) // jlist
         .mockResolvedValueOnce({ stdout: '' } as any); // pm2 delete
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
       vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
 
       expect(await stopService(ws, 'api')).toBe(true);
-      expect(vi.mocked(execa).mock.calls[1]).toEqual(['npx', ['pm2', 'delete', 'nexusflow-my-ws-api'], { reject: false }]);
+      expect(vi.mocked(execa).mock.calls[1]).toEqual(['npx', ['pm2', 'delete', expectedApp], { reject: false }]);
       // Services now empty → state file removed.
       expect(fs.unlink).toHaveBeenCalled();
     });
@@ -194,11 +197,15 @@ describe('orchestration runner PM2 state handling', () => {
   describe('stop-all carve-out', () => {
     it('stops orch-* named services but excludes recorded orchestrator apps', async () => {
       const ws = path.join(process.cwd(), 'my-ws');
+      const prefix = pm2Prefix(ws);
+      const orchApp = `${prefix}orch-tilt-tiltfile`;
+      const workerApp = `${prefix}orch-worker`;
+      const apiApp = `${prefix}api`;
       const state: RunningState = {
         workspacePath: ws,
         services: [],
         orchestrators: [
-          { id: 'tilt:Tiltfile', tool: 'tilt', configPath: 'Tiltfile', mode: 'pm2', pm2Name: 'nexusflow-my-ws-orch-tilt-tiltfile', logName: 'orch-tilt-tiltfile', startedAt: 'x' },
+          { id: 'tilt:Tiltfile', tool: 'tilt', configPath: 'Tiltfile', mode: 'pm2', pm2Name: orchApp, logName: 'orch-tilt-tiltfile', startedAt: 'x' },
         ],
         updatedAt: 'x',
       };
@@ -211,9 +218,9 @@ describe('orchestration runner PM2 state handling', () => {
         // orch-worker, and a plain service.
         .mockResolvedValueOnce({
           stdout: JSON.stringify([
-            { name: 'nexusflow-my-ws-orch-tilt-tiltfile' },
-            { name: 'nexusflow-my-ws-orch-worker' },
-            { name: 'nexusflow-my-ws-api' },
+            { name: orchApp },
+            { name: workerApp },
+            { name: apiApp },
           ]),
         } as any)
         .mockResolvedValue({ stdout: '' } as any); // subsequent pm2 delete calls
@@ -224,10 +231,10 @@ describe('orchestration runner PM2 state handling', () => {
         .filter((c) => (c[1] as string[] | undefined)?.[1] === 'delete')
         .map((c) => (c[1] as string[])[2]);
       // The orch-* SERVICE and the plain service are stopped...
-      expect(deleted).toContain('nexusflow-my-ws-orch-worker');
-      expect(deleted).toContain('nexusflow-my-ws-api');
+      expect(deleted).toContain(workerApp);
+      expect(deleted).toContain(apiApp);
       // ...but the recorded orchestrator app is left running.
-      expect(deleted).not.toContain('nexusflow-my-ws-orch-tilt-tiltfile');
+      expect(deleted).not.toContain(orchApp);
     });
   });
 });

@@ -24,6 +24,10 @@ function isPortActive(port: number): Promise<boolean> {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function openBrowser(url: string): void {
   let openCmd = '';
   if (process.platform === 'win32') {
@@ -41,16 +45,16 @@ function openBrowser(url: string): void {
   });
 }
 
-export async function findAvailablePort(startPort: number): Promise<number> {
+export async function findAvailablePort(startPort: number, attempts = 100): Promise<number> {
   let p = startPort;
-  while (p < startPort + 100) {
+  for (let i = 0; i < attempts; i++) {
     const active = await isPortActive(p);
     if (!active) {
       return p;
     }
     p++;
   }
-  return startPort;
+  throw new Error(`No available port found after ${attempts} attempts (starting at ${startPort})`);
 }
 
 /**
@@ -92,11 +96,26 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
       });
       child.unref();
 
-      console.log(chalk.green(`  ✔ Dashboard daemon successfully spawned on port ${chalk.bold(targetPort)}.`));
+      const deadline = Date.now() + 10_000;
+      let ready = false;
+      while (Date.now() < deadline) {
+        if (child.exitCode !== null && child.exitCode !== undefined) {
+          throw new Error(`Backend exited prematurely during startup (code ${child.exitCode})`);
+        }
+        if (await isPortActive(targetPort)) {
+          ready = true;
+          break;
+        }
+        await sleep(200);
+      }
+      if (!ready) {
+        try { child.kill(); } catch {}
+        throw new Error(`Backend daemon failed to bind port ${targetPort} within 10s`);
+      }
+
+      console.log(chalk.green(`  ✔ Dashboard daemon successfully running on port ${chalk.bold(targetPort)}.`));
       if (options.open) {
         console.log(chalk.dim('  Opening browser...'));
-        // Give the background process a brief moment to start listening
-        await new Promise((resolve) => setTimeout(resolve, 600));
         openBrowser(url);
       } else {
         console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or 'nexusflow dashboard' to open it.`));
