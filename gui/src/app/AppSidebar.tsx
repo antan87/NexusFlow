@@ -103,15 +103,7 @@ export function AppSidebar({
     });
   }, [workspaces, search, sortBy, workspaceStatuses]);
 
-  const isSecondaryRoute = pathname.startsWith('/projects')
-    || pathname.startsWith('/skills')
-    || pathname.startsWith('/agents')
-    || pathname.startsWith('/workflows')
-    || pathname.startsWith('/strategies')
-    || pathname.startsWith('/settings')
-    || pathname.startsWith('/guide');
-
-  const [toolsExpanded, setToolsExpanded] = useState<boolean>(isSecondaryRoute);
+  const [toolsExpanded, setToolsExpanded] = useState<boolean>(true);
 
   const linkClass = (active: boolean) =>
     cn(
@@ -362,6 +354,7 @@ export function AppSidebar({
             {/* Theme toggle */}
             <button
               type="button"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >

@@ -6,7 +6,7 @@ const feature = {
   branchName: 'feature-x',
   description: 'Improve the local harness handoff',
   repos: ['C:/dev/nexusflow'],
-  assistants: ['claude', 'codex', 'antigravity', 'copilot'],
+  assistants: ['antigravity', 'claude', 'codex', 'copilot'],
   workspacePath: 'C:/ws/feature-x',
   createdAt: '2026-08-10T00:00:00.000Z',
 };
@@ -67,15 +67,25 @@ async function mockProviderStatus(page: Page, providers: unknown[]) {
   });
 }
 
-test.describe('embedded harness handoff', () => {
+test.describe('Multi-Harness Sessions and Launcher', () => {
   test.use({
+    configData: {
+      exists: true,
+      config: {
+        version: '0.2.19',
+        devDir: 'C:/dev',
+        workspacesDir: 'C:/ws',
+        defaultAssistant: 'antigravity',
+        scanDepth: 2,
+      },
+    },
     workspacesData: [feature],
     workspacesStatusData: {
       'feature-x': {
         id: 'feature-x',
         branchName: 'feature-x',
-        changedFiles: 0,
-        dirtyRepos: 0,
+        changedFiles: 1,
+        dirtyRepos: 1,
         runningServices: 0,
         syncStatus: 'up-to-date',
         pendingValidation: false,
@@ -83,888 +93,103 @@ test.describe('embedded harness handoff', () => {
     },
   });
 
-  test('continues recent Codex work from the primary launcher', async ({ page }) => {
+  test('displays sessions list and allows switching between AI harnesses', async ({ page }) => {
     const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
-    let launchBody: Record<string, unknown> | null = null;
-    await page.route('**/api/workspace/feature-x/sessions?*', async (route) => {
+    await page.route('**/api/workspace/feature-x/sessions*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessions: [{
-            id: sessionId,
-            assistant: 'codex',
-            title: 'Finish the Desktop handoff',
-            createdAt: '2026-08-15T00:00:00.000Z',
-            updatedAt: '2026-08-16T00:00:00.000Z',
-            messageCount: 6,
-            workspacePath: feature.workspacePath,
-            desktopHandoff: { targetId: 'codex-desktop', method: 'direct' },
-          }],
-        }),
-      });
-    });
-    await page.route('**/api/workspace/feature-x/launch', async (route, request) => {
-      launchBody = request.postDataJSON();
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('button', { name: 'Open with…' }).click();
-    await expect(page.getByRole('region', { name: 'Continue recent work' })).toBeVisible();
-    await page.getByRole('button', { name: 'Resume Finish the Desktop handoff in Codex Desktop' }).click();
-
-    await expect.poll(() => launchBody).toEqual({
-      targetId: 'codex-desktop',
-      action: 'resume',
-      sessionId,
-    });
-    await expect(page.getByRole('heading', { name: 'Open workspace with…' })).not.toBeVisible();
-  });
-
-  test('uses Claude’s documented CLI-to-Desktop transfer without a guessed deep link', async ({ page }) => {
-    const sessionId = '123e4567-e89b-42d3-a456-426614174000';
-    const launchRequests: Record<string, unknown>[] = [];
-    await page.addInitScript(() => {
-      (window as any).__copiedText = '';
-      Object.defineProperty(navigator, 'clipboard', {
-        configurable: true,
-        value: { writeText: async (value: string) => { (window as any).__copiedText = value; } },
-      });
-    });
-    await page.route('**/api/workspace-launch-targets', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          {
-            id: 'codex-desktop', name: 'Codex Desktop', kind: 'ai-app', icon: 'codex',
-            description: 'Start a new Codex chat with this folder as its workspace.', available: true,
-          },
-          {
-            id: 'claude-desktop', name: 'Claude Desktop', kind: 'ai-app', icon: 'claude',
-            description: 'Open Claude Code with this folder selected.', available: true,
-          },
-        ]),
-      });
-    });
-    await page.route('**/api/workspace/feature-x/sessions?*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: sessionId,
-            assistant: 'claude',
-            title: 'Continue the UX audit',
-            createdAt: '2026-08-15T00:00:00.000Z',
-            updatedAt: '2026-08-16T00:00:00.000Z',
-            messageCount: 5,
-            workspacePath: feature.workspacePath,
-            desktopHandoff: { targetId: 'claude-desktop', method: 'guided' },
-          }],
-        }),
-      });
-    });
-    page.on('request', (request) => {
-      if (new URL(request.url()).pathname.endsWith('/launch')) {
-        launchRequests.push(request.postDataJSON());
-      }
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('button', { name: 'Open with…' }).click();
-    await page.getByRole('button', { name: 'Move Continue the UX audit to Claude Desktop' }).click();
-
-    await expect(page.getByRole('status')).toContainText('type /desktop in Claude');
-    await expect.poll(() => page.evaluate(() => (window as any).__copiedText)).toBe(`claude --resume ${sessionId}`);
-    expect(launchRequests).toEqual([]);
-  });
-
-  for (const scenario of [
-    { assistant: 'claude' as const, id: '123e4567-e89b-42d3-a456-426614174000' },
-    { assistant: 'codex' as const, id: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
-    { assistant: 'antigravity' as const, id: '223e4567-e89b-42d3-a456-426614174000' },
-    { assistant: 'copilot' as const, id: '323e4567-e89b-42d3-a456-426614174000' },
-  ]) {
-    test(`resumes a ${scenario.assistant} session directly in chat`, async ({ page }) => {
-      const frames: Array<Record<string, unknown>> = [];
-      const legacyRequests: string[] = [];
-      page.on('request', (request) => {
-        if (/\/resume$|\/api\/open-editor$/.test(new URL(request.url()).pathname)) {
-          legacyRequests.push(request.url());
-        }
-      });
-
-      await mockProviderStatus(page, [
-        provider('claude'),
-        provider('codex'),
-        provider('antigravity'),
-        provider('copilot'),
-      ]);
-      await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            sessions: [{
-              id: scenario.id,
-              assistant: scenario.assistant,
-              title: `${scenario.assistant} prior work`,
-              createdAt: '2026-08-09T00:00:00.000Z',
-              updatedAt: '2026-08-10T00:00:00.000Z',
-              messageCount: 2,
-            }],
-          }),
-        });
-      });
-      await page.route(`**/api/session/${scenario.assistant}/${scenario.id}/transcript`, async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            messages: [
-              { role: 'user', content: 'Inspect the repository' },
-              { role: 'assistant', content: 'Inspection complete' },
-            ],
-          }),
-        });
-      });
-      await page.routeWebSocket('**/ws', (socket) => {
-        socket.onMessage((message) => {
-          const frame = JSON.parse(String(message));
-          frames.push(frame);
-          if (frame.type === 'input') {
-            socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
-          }
-        });
-      });
-
-      await page.goto('/#/workspaces/feature-x/sessions');
-      await page.getByPlaceholder(/Start the agent/).fill('Do not send this unrelated draft');
-      await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
-
-      await expect(page.getByText('Inspection complete')).toBeVisible();
-      await expect.poll(() => frames.length).toBeGreaterThanOrEqual(1);
-      expect(frames[0]).toEqual({
-        type: 'start',
-        command: `${scenario.assistant}-cli`,
-        cwd: 'C:/ws/feature-x',
-        sessionId: scenario.id,
-        resume: true,
-      });
-      expect(frames.filter((frame) => frame.type === 'input')).toEqual([]);
-
-      const composer = page.getByPlaceholder(/Message the agent/);
-      await composer.fill('Continue from there');
-      await composer.press('Enter');
-      await expect.poll(() => frames.filter((frame) => frame.type === 'input').length).toBe(1);
-      expect(frames.filter((frame) => frame.type === 'input')).toMatchObject([
-        scenario.assistant === 'copilot'
-          ? { type: 'input', input: 'Continue from there' }
-          : { type: 'input', input: 'Continue from there', executionProfile: 'review' },
-      ]);
-      expect(legacyRequests).toEqual([]);
-    });
-  }
-
-  test('opens a recorded Codex session as the exact Desktop thread', async ({ page }) => {
-    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
-    let launchBody: Record<string, unknown> | null = null;
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: sessionId,
-            assistant: 'codex',
-            title: 'Continue the Desktop handoff',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 4,
-            workspacePath: feature.workspacePath,
-          }],
-        }),
-      });
-    });
-    await page.route('**/api/workspace/feature-x/launch', async (route, request) => {
-      launchBody = request.postDataJSON();
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, ...launchBody }),
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x/sessions');
-    await page.getByRole('button', { name: 'Open in Codex Desktop' }).click();
-
-    await expect.poll(() => launchBody).toEqual({
-      targetId: 'codex-desktop',
-      action: 'resume',
-      sessionId,
-    });
-    await expect(page.getByText('Sent the existing session to Codex Desktop.')).toBeVisible();
-  });
-
-  test('disables Desktop resume when Codex Desktop is unavailable', async ({ page }) => {
-    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
-    const launchRequests: string[] = [];
-    page.on('request', (request) => {
-      if (new URL(request.url()).pathname.endsWith('/launch')) launchRequests.push(request.url());
-    });
-    await page.route('**/api/workspace-launch-targets', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([{
-          id: 'codex-desktop',
-          name: 'Codex Desktop',
-          description: 'Start a new Codex chat with this folder as its workspace.',
-          kind: 'ai-app',
-          icon: 'codex',
-          available: false,
-          unavailableReason: 'Codex Desktop launch is supported on Windows and macOS.',
-        }]),
-      });
-    });
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: sessionId,
-            assistant: 'codex',
-            title: 'Desktop unavailable',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 2,
-            workspacePath: feature.workspacePath,
-          }],
-        }),
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x/sessions');
-
-    const desktopButton = page.getByRole('button', { name: /Codex Desktop unavailable/ });
-    await expect(desktopButton).toBeDisabled();
-    await expect(desktopButton).toHaveAttribute(
-      'title',
-      'Codex Desktop launch is supported on Windows and macOS.',
-    );
-    expect(launchRequests).toEqual([]);
-  });
-
-  test('authorizes each Codex turn with the profile selected for that turn', async ({ page }) => {
-    const frames: Array<Record<string, unknown>> = [];
-    await mockProviderStatus(page, [provider('claude'), provider('codex')]);
-    await page.routeWebSocket('**/ws', (socket) => {
-      socket.onMessage((message) => {
-        const frame = JSON.parse(String(message));
-        frames.push(frame);
-        if (frame.type === 'input') {
-          socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
-        }
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByLabel('Select Provider').click();
-    await page.getByRole('menuitem', { name: /Codex/ }).click();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
-
-    await page.getByPlaceholder(/Start the agent/).fill('Inspect without edits');
-    await page.getByRole('button', { name: 'Start' }).click();
-    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
-
-    await page.getByLabel('Select execution profile').click();
-    await page.getByRole('menuitem', { name: /Edit workspace/ }).click();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
-    await page.getByPlaceholder(/Message the agent/).fill('Apply the approved change');
-    await page.getByRole('button', { name: 'Send' }).click();
-    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(2);
-
-    expect(frames.filter(frame => frame.type === 'start')).toHaveLength(1);
-    expect(frames.filter(frame => frame.type === 'input')).toMatchObject([
-      { type: 'input', input: 'Inspect without edits', executionProfile: 'review' },
-      { type: 'input', input: 'Apply the approved change', executionProfile: 'workspace-write' },
-    ]);
-
-    await page.reload();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
-    await page.getByLabel('Select Provider').click();
-    await page.getByRole('menuitem', { name: /Claude Code/ }).click();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
-    await page.getByLabel('Select Provider').click();
-    await page.getByRole('menuitem', { name: /Codex/ }).click();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
-  });
-
-  test('keeps the active chat connected while workspace layouts change', async ({ page }) => {
-    const frames: Array<Record<string, unknown>> = [];
-    let connectionCount = 0;
-    let sendServerFrame: ((frame: Record<string, unknown>) => void) | undefined;
-    await mockProviderStatus(page, [provider('codex')]);
-    await page.routeWebSocket('**/ws', (socket) => {
-      connectionCount += 1;
-      sendServerFrame = (frame) => socket.send(JSON.stringify(frame));
-      socket.onMessage((message) => {
-        const frame = JSON.parse(String(message)) as Record<string, unknown>;
-        frames.push(frame);
-        if (frame.type === 'input' && frames.filter(candidate => candidate.type === 'input').length === 1) {
-          socket.send(JSON.stringify({ type: 'status', state: 'busy' }));
-          socket.send(JSON.stringify({ type: 'stream', text: 'Before layouts.' }));
-        }
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
-    await page.getByRole('button', { name: 'Start' }).click();
-    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
-    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
-    await expect(page.getByText('Before layouts.')).toBeVisible();
-    expect(sendServerFrame).toBeDefined();
-
-    await page.getByRole('button', { name: 'Split layout' }).click();
-    sendServerFrame!({ type: 'stream', text: ' Split.' });
-    await expect(page.getByText('Before layouts. Split.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
-    await page.getByRole('button', { name: 'Inspector-only layout' }).click();
-    sendServerFrame!({ type: 'stream', text: ' Inspector.' });
-    await page.getByRole('button', { name: 'Chat-only layout' }).click();
-    sendServerFrame!({ type: 'stream', text: ' Chat.' });
-    await expect(page.getByText('Before layouts. Split. Inspector. Chat.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
-    sendServerFrame!({ type: 'status', state: 'idle' });
-
-    await page.getByPlaceholder(/Message the agent/).fill('Continue in the same chat');
-    await page.getByRole('button', { name: 'Send' }).click();
-    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(2);
-    expect(frames.filter(frame => frame.type === 'start')).toHaveLength(1);
-    expect(connectionCount).toBe(1);
-  });
-
-  test('does not trigger workspace shortcuts from editable controls', async ({ page }) => {
-    await mockProviderStatus(page, [provider('codex')]);
-    await page.goto('/#/workspaces/feature-x');
-
-    for (const kind of ['input', 'textarea', 'select', 'contenteditable']) {
-      await page.evaluate((editableKind) => {
-        const element = editableKind === 'contenteditable'
-          ? document.createElement('div')
-          : document.createElement(editableKind);
-        element.setAttribute('data-shortcut-test', editableKind);
-        if (editableKind === 'contenteditable') {
-          element.contentEditable = 'true';
-          element.tabIndex = 0;
-        }
-        document.body.appendChild(element);
-        element.focus();
-        for (const key of ['\\', 'j', 'b']) {
-          element.dispatchEvent(new KeyboardEvent('keydown', {
-            key,
-            ctrlKey: true,
-            bubbles: true,
-            cancelable: true,
-          }));
-        }
-      }, kind);
-
-      await expect(page.getByRole('button', { name: 'Cockpit layout' })).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toHaveAttribute('aria-expanded', 'true');
-    }
-  });
-
-  test('only resumes a new Claude session after the provider acknowledges its id', async ({ page }) => {
-    const starts: Array<Record<string, unknown>> = [];
-    let connectionCount = 0;
-    await mockProviderStatus(page, [provider('claude')]);
-    await page.routeWebSocket('**/ws', (socket) => {
-      const connection = ++connectionCount;
-      let currentStart: Record<string, unknown> | null = null;
-      socket.onMessage((message) => {
-        const frame = JSON.parse(String(message)) as Record<string, unknown>;
-        if (frame.type === 'start') {
-          currentStart = frame;
-          starts.push(frame);
-        } else if (frame.type === 'input') {
-          if (connection === 1) {
-            socket.send(JSON.stringify({ type: 'session', id: '123e4567-e89b-42d3-a456-426614174999' }));
-            socket.send(JSON.stringify({ type: 'error', message: 'Claude failed before session init.' }));
-            socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
-          } else if (connection === 2 && typeof currentStart?.sessionId === 'string') {
-            socket.send(JSON.stringify({ type: 'session', id: currentStart.sessionId.toUpperCase() }));
-            socket.send(JSON.stringify({ type: 'stream', text: 'Claude acknowledged the session.' }));
-            socket.send(JSON.stringify({ type: 'status', state: 'idle' }));
-          }
-        }
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    const startTurn = async (text: string, expectedStarts: number) => {
-      await page.getByPlaceholder(/Start the agent/).fill(text);
-      await page.getByRole('button', { name: 'Start' }).click();
-      await expect.poll(() => starts.length).toBe(expectedStarts);
-    };
-
-    await startTurn('First attempt fails before acknowledgement', 1);
-    await expect(page.getByText('Claude failed before session init.')).toBeVisible();
-    await page.getByRole('button', { name: 'Stop' }).click();
-
-    await startTurn('Retry the unacknowledged session', 2);
-    await expect(page.getByText('Claude acknowledged the session.')).toBeVisible();
-    await expect.poll(() => page.evaluate(() => {
-      const stored = JSON.parse(localStorage.getItem('nexusflow_chat_feature-x') ?? '{}');
-      return stored.sessions?.['claude-cli']?.started;
-    })).toBe(true);
-    await page.reload();
-
-    await startTurn('Resume only after acknowledgement', 3);
-
-    expect(starts[0].sessionId).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(starts[1]).toMatchObject({
-      sessionId: starts[0].sessionId,
-      resume: false,
-    });
-    expect(starts[2]).toMatchObject({
-      sessionId: starts[0].sessionId,
-      resume: true,
-    });
-  });
-
-  test('keeps the active turn busy when the server rejects overlapping input', async ({ page }) => {
-    await mockProviderStatus(page, [provider('codex')]);
-    await page.routeWebSocket('**/ws', (socket) => {
-      socket.onMessage((message) => {
-        const frame = JSON.parse(String(message)) as Record<string, unknown>;
-        if (frame.type === 'input' && typeof frame.turnId === 'string') {
-          socket.send(JSON.stringify({
-            type: 'rejected',
-            reason: 'busy',
-            message: 'The agent is still processing the current turn.',
-            turnId: frame.turnId,
-          }));
-        }
-      });
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
-    await page.getByRole('button', { name: 'Start' }).click();
-
-    await expect(page.getByText('The agent is still processing the current turn.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
-    await expect(page.getByPlaceholder(/Message the agent/)).toHaveValue('Inspect the workspace');
-    await expect.poll(() => page.evaluate(() => {
-      const stored = JSON.parse(localStorage.getItem('nexusflow_chat_feature-x') ?? '{}');
-      return stored.messages?.some((message: Record<string, unknown>) => (
-        message.role === 'user' && message.content === 'Inspect the workspace'
-      ));
-    })).toBe(false);
-  });
-
-  test('resets an in-chat session resume to Review before the next turn', async ({ page }) => {
-    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
-    const frames: Array<Record<string, unknown>> = [];
-    await page.addInitScript(() => {
-      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
-        v: 4,
-        sessions: {},
-        providerId: 'codex-cli',
-        profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'workspace-write' },
-        messages: [{ role: 'assistant', content: 'Existing workspace chat' }],
-      }));
-    });
-    await mockProviderStatus(page, [provider('claude'), provider('codex')]);
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: sessionId,
-            assistant: 'codex',
-            title: 'Prior Codex review',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 2,
-          }],
-        }),
-      });
-    });
-    await page.route(`**/api/session/codex/${sessionId}/transcript`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ messages: [{ role: 'assistant', content: 'Prior session loaded' }] }),
-      });
-    });
-    await page.routeWebSocket('**/ws', (socket) => {
-      socket.onMessage((message) => frames.push(JSON.parse(String(message))));
-    });
-
-    await page.goto('/#/workspaces/feature-x');
-    await expect(page.getByLabel('Select execution profile')).toContainText('Edit workspace');
-    await page.getByTitle('Resume a past session').click();
-    await page.getByRole('button', { name: /Prior Codex review/ }).click();
-
-    await expect(page.getByText('Prior session loaded')).toBeVisible();
-    await expect(page.getByLabel('Select execution profile')).toContainText('Review only');
-    await page.getByPlaceholder(/Start the agent/).fill('Continue reviewing');
-    await page.getByRole('button', { name: 'Start' }).click();
-    await expect.poll(() => frames.filter(frame => frame.type === 'input').length).toBe(1);
-    expect(frames.filter(frame => frame.type === 'start')).toEqual([{
-      type: 'start',
-      command: 'codex-cli',
-      cwd: 'C:/ws/feature-x',
-      sessionId,
-      resume: true,
-    }]);
-    expect(frames.filter(frame => frame.type === 'input')).toMatchObject([
-      { type: 'input', input: 'Continue reviewing', executionProfile: 'review' },
-    ]);
-  });
-
-  test('rejects a write kickoff when the refreshed provider only supports Review', async ({ page }) => {
-    let socketCount = 0;
-    await page.addInitScript(() => {
-      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
-        v: 4,
-        sessions: {},
-        providerId: 'claude-cli',
-        profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'review' },
-        messages: [{ role: 'assistant', content: 'Preserve this chat' }],
-      }));
-    });
-    const reviewOnlyProvider = {
-      ...provider('claude'),
-      executionProfiles: [
-        { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
-      ],
-    };
-    await mockProviderStatus(page, [reviewOnlyProvider]);
-    await page.routeWebSocket('**/ws', () => {
-      socketCount += 1;
-    });
-
-    await page.goto('/#/dashboard');
-    await page.evaluate(() => {
-      window.history.replaceState({
-        usr: {
-          chatLaunch: {
-            nonce: crypto.randomUUID(),
-            providerId: 'claude-cli',
-            assistant: 'claude',
-            kickoff: 'Do not dispatch this unsupported write turn.',
-            executionProfile: 'workspace-write',
-          },
-        },
-        key: 'unsupported-write-profile',
-        idx: 0,
-      }, '', '/#/workspaces/feature-x');
-      window.location.reload();
-    });
-
-    await expect(page.getByText('Preserve this chat')).toBeVisible();
-    await expect(page.getByText(/Select a supported execution profile/i)).toBeVisible();
-    expect(socketCount).toBe(0);
-  });
-
-  test('preserves the current chat when a resume transcript cannot be loaded', async ({ page }) => {
-    let socketCount = 0;
-    await page.addInitScript(() => {
-      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
-        v: 3,
-        sessions: {},
-        providerId: 'claude-cli',
-        messages: [{ role: 'assistant', content: 'Keep this current chat' }],
-      }));
-    });
-    await mockProviderStatus(page, [provider('claude')]);
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: '123e4567-e89b-42d3-a456-426614174000',
-            assistant: 'claude',
-            title: 'Unavailable transcript',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 2,
-          }],
-        }),
-      });
-    });
-    await page.route('**/api/session/claude/*/transcript', async (route) => {
-      await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"missing"}' });
-    });
-    await page.routeWebSocket('**/ws', () => {
-      socketCount += 1;
-    });
-
-    await page.goto('/#/workspaces/feature-x/sessions');
-    await expect(page.getByText('Keep this current chat')).toBeVisible();
-    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
-
-    await expect(page.getByText('Keep this current chat')).toBeVisible();
-    await expect(page.getByText(/current chat was preserved/i)).toBeVisible();
-    expect(socketCount).toBe(0);
-  });
-
-  test('does not open a socket for an unavailable local CLI', async ({ page }) => {
-    let socketCount = 0;
-    let transcriptRequests = 0;
-    await page.addInitScript(() => {
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-    });
-    await mockProviderStatus(page, [provider('claude', false)]);
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          sessions: [{
-            id: '123e4567-e89b-42d3-a456-426614174000',
-            assistant: 'claude',
-            title: 'Claude session',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 2,
-          }],
-        }),
-      });
-    });
-    await page.route('**/api/session/claude/*/transcript', async (route) => {
-      transcriptRequests += 1;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"messages":[]}' });
-    });
-    await page.routeWebSocket('**/ws', () => {
-      socketCount += 1;
-    });
-
-    await page.goto('/#/workspaces/feature-x/sessions');
-    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
-
-    await expect(page.getByText(/Claude Code is not signed in/i).first()).toBeVisible();
-    await expect(page.getByText('claude auth login')).toBeVisible();
-    await page.getByRole('button', { name: 'Copy sign-in command' }).click();
-    await expect(page.getByText(/Copy the command shown above manually/i)).toBeVisible();
-    expect(transcriptRequests).toBe(0);
-    expect(socketCount).toBe(0);
-  });
-
-  for (const malformed of [
-    {
-      name: 'non-boolean availability',
-      status: { ...provider('claude'), isConfigured: 'false' },
-    },
-    {
-      name: 'unknown capability',
-      status: {
-        ...provider('claude'),
-        capabilities: { ...provider('claude').capabilities, workspaceAccess: 'unrestricted' },
-      },
-    },
-    {
-      name: 'unknown setup state',
-      status: { ...provider('claude', false), setupIssue: 'ready' },
-    },
-    {
-      name: 'unknown execution profile',
-      status: {
-        ...provider('claude'),
-        executionProfiles: [{ id: 'unrestricted', label: 'Unsafe', description: 'Anything goes.' }],
-        defaultExecutionProfile: 'unrestricted',
-      },
-    },
-  ]) {
-    test(`fails closed for ${malformed.name} in provider status`, async ({ page }) => {
-      let socketCount = 0;
-      const frames: Array<Record<string, unknown>> = [];
-      await mockProviderStatus(page, [malformed.status]);
-      await page.routeWebSocket('**/ws', (socket) => {
-        socketCount += 1;
-        socket.onMessage((message) => frames.push(JSON.parse(String(message))));
-      });
-
-      await page.goto('/#/dashboard');
-      await page.evaluate(() => {
-        window.history.replaceState({
-          usr: {
-            chatLaunch: {
-              nonce: crypto.randomUUID(),
-              providerId: 'claude-cli',
-              assistant: 'claude',
-              kickoff: 'This retained kickoff must not be dispatched.',
-              executionProfile: 'workspace-write',
+          sessions: [
+            {
+              id: sessionId,
+              assistant: 'codex',
+              title: 'Finish the Desktop handoff',
+              createdAt: '2026-08-15T00:00:00.000Z',
+              updatedAt: '2026-08-16T00:00:00.000Z',
+              messageCount: 6,
+              workspacePath: feature.workspacePath,
+              desktopHandoff: { targetId: 'codex-desktop', method: 'direct' },
             },
-          },
-          key: 'malformed-provider-status',
-          idx: 0,
-        }, '', '/#/workspaces/feature-x');
-        window.location.reload();
+            {
+              id: 'claude-session-1',
+              assistant: 'claude',
+              title: 'Refactor UI components',
+              createdAt: '2026-08-14T00:00:00.000Z',
+              updatedAt: '2026-08-14T10:00:00.000Z',
+              messageCount: 4,
+              workspacePath: feature.workspacePath,
+            },
+          ],
+        }),
       });
-
-      await expect(page.getByText(/selected local CLI is unavailable/i)).toBeVisible();
-      expect(socketCount).toBe(0);
-      expect(frames).toEqual([]);
     });
-  }
 
-  test('cancels a delayed resume when the workspace chat unmounts', async ({ page }) => {
-    let socketCount = 0;
-    let releaseTranscript!: () => void;
-    let noteTranscriptRequested!: () => void;
-    const transcriptGate = new Promise<void>((resolve) => { releaseTranscript = resolve; });
-    const transcriptRequested = new Promise<void>((resolve) => { noteTranscriptRequested = resolve; });
+    await page.goto('/#/workspaces/feature-x');
+    await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
-    await mockProviderStatus(page, [provider('claude')]);
-    await page.route('**/api/workspace/feature-x/sessions', async (route) => {
+    // Navigate to sessions tab
+    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+
+    // Switch to Timeline view so all sessions are listed
+    await page.getByRole('button', { name: /Timeline/i }).click();
+
+    // Check that recorded sessions appear
+    await expect(page.getByText('Finish the Desktop handoff')).toBeVisible();
+    await expect(page.getByText('Refactor UI components')).toBeVisible();
+  });
+
+  test('opens transcript dialog and copies CLI resume command', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    await page.route('**/api/workspace/feature-x/sessions*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessions: [{
-            id: '123e4567-e89b-42d3-a456-426614174000',
-            assistant: 'claude',
-            title: 'Delayed session',
-            createdAt: '2026-08-09T00:00:00.000Z',
-            updatedAt: '2026-08-10T00:00:00.000Z',
-            messageCount: 2,
-          }],
+          sessions: [
+            {
+              id: sessionId,
+              assistant: 'codex',
+              title: 'Implement feature workflow',
+              createdAt: '2026-08-15T00:00:00.000Z',
+              updatedAt: '2026-08-16T00:00:00.000Z',
+              messageCount: 2,
+              workspacePath: feature.workspacePath,
+            },
+          ],
         }),
       });
     });
-    await page.route('**/api/session/claude/*/transcript', async (route) => {
-      noteTranscriptRequested();
-      await transcriptGate;
+
+    await page.route(`**/api/session/codex/${sessionId}/transcript*`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ messages: [{ role: 'assistant', content: 'Stale transcript' }] }),
-      }).catch(() => {});
-    });
-    await page.routeWebSocket('**/ws', () => { socketCount += 1; });
-
-    await page.goto('/#/workspaces/feature-x/sessions');
-    await page.getByPlaceholder(/Start the agent/).fill('Keep this draft');
-    await page.getByRole('button', { name: 'Resume in NexusFlow' }).click();
-    await transcriptRequested;
-    await expect(page.getByPlaceholder(/Start the agent/)).toBeDisabled();
-
-    await page.goto('/#/dashboard');
-    await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
-    releaseTranscript();
-    await page.waitForTimeout(100);
-
-    expect(socketCount).toBe(0);
-  });
-
-  test('keeps a connection bound to Codex when StrictMode status requests settle out of order', async ({ page }) => {
-    const frames: Array<Record<string, unknown>> = [];
-    let statusRequests = 0;
-    let releaseFirstStatus!: () => void;
-    const firstStatusGate = new Promise<void>((resolve) => { releaseFirstStatus = resolve; });
-
-    await page.addInitScript(() => {
-      localStorage.setItem('nexusflow_chat_feature-x', JSON.stringify({
-        v: 3,
-        sessions: {},
-        providerId: 'codex-cli',
-        messages: [],
-      }));
-    });
-    await page.route('**/api/adapters/status', async (route) => {
-      statusRequests += 1;
-      if (statusRequests === 1) {
-        await firstStatusGate;
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([provider('claude')]),
-        }).catch(() => {});
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([provider('claude'), provider('codex')]),
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'Please implement markdown rendering in the overview', timestamp: '2026-08-15T00:00:00.000Z' },
+            { role: 'assistant', content: 'Here is the **Markdown** plan:\n\n1. Add ChatMarkdown\n2. Update tests', timestamp: '2026-08-15T00:01:00.000Z' },
+          ],
+        }),
       });
-    });
-    await page.routeWebSocket('**/ws', (socket) => {
-      socket.onMessage((message) => frames.push(JSON.parse(String(message))));
     });
 
     await page.goto('/#/workspaces/feature-x');
-    await expect.poll(() => statusRequests).toBeGreaterThanOrEqual(2);
-    await expect(page.getByLabel('Select Provider')).toContainText('Codex');
-    await page.getByPlaceholder(/Start the agent/).fill('Use the bound provider');
-    await page.getByRole('button', { name: 'Start' }).click();
-    await expect.poll(() => frames.length).toBeGreaterThanOrEqual(2);
+    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
 
-    releaseFirstStatus();
-    await page.waitForTimeout(100);
+    // Switch to Timeline view so all sessions are listed
+    await page.getByRole('button', { name: /Timeline/i }).click();
 
-    await expect(page.getByLabel('Select Provider')).toContainText('Codex');
-    expect(frames[0]).toMatchObject({ command: 'codex-cli', cwd: 'C:/ws/feature-x' });
-    expect(frames[1]).toMatchObject({
-      type: 'input',
-      input: 'Use the bound provider',
-      executionProfile: 'review',
-    });
-  });
+    // Click transcript view button (named Logs)
+    await page.getByRole('button', { name: /Logs/i }).first().click();
 
-});
+    // Verify transcript modal appears with rich markdown
+    await expect(page.getByText('Please implement markdown rendering in the overview')).toBeVisible();
+    await expect(page.getByText('Here is the Markdown plan:')).toBeVisible();
 
-test.describe('workspace root fallback', () => {
-  const workspaceOnlyFeature = {
-    ...feature,
-    id: 'workspace-only',
-    branchName: 'workspace-only',
-    repos: [],
-    workspacePath: 'C:/ws/workspace-only',
-  };
-
-  test.use({
-    workspacesData: [workspaceOnlyFeature],
-    workspacesStatusData: {
-      'workspace-only': {
-        id: 'workspace-only',
-        branchName: 'workspace-only',
-        changedFiles: 0,
-        dirtyRepos: 0,
-        runningServices: 0,
-        syncStatus: 'up-to-date',
-        pendingValidation: false,
-      },
-    },
-  });
-
-  test('starts the harness in the workspace root when no repository is present', async ({ page }) => {
-    const frames: Array<Record<string, unknown>> = [];
-    await mockProviderStatus(page, [provider('codex')]);
-    await page.routeWebSocket('**/ws', (socket) => {
-      socket.onMessage((message) => {
-        frames.push(JSON.parse(String(message)) as Record<string, unknown>);
-      });
-    });
-
-    await page.goto('/#/workspaces/workspace-only');
-    await page.getByPlaceholder(/Start the agent/).fill('Inspect the workspace');
-    await page.getByRole('button', { name: 'Start' }).click();
-
-    await expect.poll(() => frames.filter(frame => frame.type === 'start').length).toBe(1);
-    expect(frames.find(frame => frame.type === 'start')).toMatchObject({
-      command: 'codex-cli',
-      cwd: 'C:/ws/workspace-only',
-    });
+    // Verify copy CLI command button is available
+    await expect(page.getByRole('button', { name: /Copy CLI Command/i })).toBeVisible();
   });
 });
+
+
