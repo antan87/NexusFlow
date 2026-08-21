@@ -9,6 +9,7 @@ import {
   Code2,
   ChevronDown,
   Sparkles,
+  Puzzle,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
@@ -46,7 +47,7 @@ import { Spinner } from '../components/ui/spinner.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
-import { useWorkspaceServices, useWorkspaceLaunchTargets } from '../lib/api/queries.js';
+import { useWorkspaceServices, useWorkspaceLaunchTargets, useWorkspaceSkills, useSkills } from '../lib/api/queries.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
@@ -119,6 +120,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   // Detected services for the overview topology panel
   const detectedServices = useWorkspaceServices(selected?.branchName ?? null).data?.services ?? [];
+
+  // Active skills in this workspace
+  const workspaceSkillsConfig = useWorkspaceSkills(selected?.branchName ?? null).data;
+  const { data: allSkills = [], isLoading: skillsLoading } = useSkills(selected?.branchName);
+  const activeSkills = allSkills.filter((s) => workspaceSkillsConfig?.enabledSkills?.includes(s.id));
 
   const repoRows = selected
     ? selected.repos.map((rp) => {
@@ -425,6 +431,90 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           </div>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Section 4: Workspace Active Skills & Capabilities */}
+                    <div className="p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Active Skills & Capabilities
+                          </h4>
+                          <span className={cn(
+                            'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium font-mono border',
+                            activeSkills.length > 0
+                              ? 'border-primary/20 bg-primary/10 text-primary'
+                              : 'border-border/70 bg-muted/60 text-muted-foreground'
+                          )}>
+                            {activeSkills.length} active
+                          </span>
+                        </div>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => onSelectTab(selected.branchName, 'skills')}
+                          className="text-xs gap-1.5"
+                        >
+                          <Puzzle size={12} />
+                          <span>Manage Skills</span>
+                        </Button>
+                      </div>
+
+                      {skillsLoading ? (
+                        <div className="h-10 rounded bg-muted/40 animate-pulse" />
+                      ) : activeSkills.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-border/80 bg-muted/20 px-3 py-3 sm:flex sm:items-center sm:justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-medium text-foreground">No active skills configured</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              Attach PR review toolkits, linters, or test runners to enhance AI assistant context in this workspace.
+                            </p>
+                          </div>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => onSelectTab(selected.branchName, 'skills')}
+                            className="shrink-0 text-primary hover:text-primary mt-2 sm:mt-0 font-medium"
+                          >
+                            Configure Skills →
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {activeSkills.map((skill) => (
+                            <div
+                              key={skill.id}
+                              className="flex flex-col justify-between p-2.5 rounded-md border border-border/80 bg-card/60 hover:bg-card transition-colors shadow-2xs gap-1.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="grid size-5 place-items-center rounded bg-primary/10 text-primary shrink-0">
+                                    <Puzzle size={11} />
+                                  </span>
+                                  <span className="text-xs font-semibold text-foreground truncate" title={skill.title || skill.name}>
+                                    {skill.title || skill.name}
+                                  </span>
+                                </div>
+                                <span
+                                  className={cn(
+                                    'text-[10px] font-mono uppercase px-1 py-0.5 rounded border shrink-0',
+                                    skill.custom
+                                      ? 'border-purple-500/20 bg-purple-500/10 text-purple-400'
+                                      : 'border-border/70 bg-muted text-muted-foreground'
+                                  )}
+                                >
+                                  {skill.custom ? 'Custom' : 'Template'}
+                                </span>
+                              </div>
+                              {skill.description && (
+                                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                  {skill.description}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </Card>
                 </div>
