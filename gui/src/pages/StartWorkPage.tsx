@@ -167,12 +167,6 @@ export function StartWorkPage() {
     }
   }, [aiDetect.data]);
 
-  // Navigate straight to the workspace overview as soon as creation succeeds
-  useEffect(() => {
-    if (progress.status === 'completed' && progress.workspaceId) {
-      navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
-    }
-  }, [progress.status, progress.workspaceId, navigate]);
 
 
 
