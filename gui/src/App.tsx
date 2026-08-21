@@ -4,7 +4,7 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
@@ -12,6 +12,7 @@ import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
+import { cn } from './lib/utils.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -144,7 +145,6 @@ function AppInner() {
   const workspaces: Feature[] = workspacesQuery.data ?? [];
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
-  const statusesLoading = statusesQuery.isLoading;
 
   // Active workspace / detail sub-tab. Service state lives in the Services tab
   // (ServiceConsole) via react-query — App no longer owns it.
@@ -830,9 +830,9 @@ Core Instructions:
       workspaces={workspaces}
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
-      statusesLoading={statusesLoading}
       onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onNewWorkspace={() => navigate('/new')}
+      showToast={showToast}
     />
   ) : null;
 
@@ -888,7 +888,6 @@ Core Instructions:
   const agentsPage = <AgentsPage showToast={showToast} />;
 
   const settingsPage = config ? (
-
     <SettingsPage
       config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
@@ -896,6 +895,9 @@ Core Instructions:
       fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}
     />
   ) : null;
+
+  const defaultWorkspaceBranch = activeWsId || (workspaces.length > 0 ? workspaces[0].branchName : null);
+  const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -909,7 +911,7 @@ Core Instructions:
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6 min-w-0">
+      <main className={cn('flex-1 min-w-0 h-screen', isWorkspaceRoute ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-3 sm:p-5 lg:p-6')}>
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-muted-foreground">
             <RefreshCw className="animate-spin text-primary" size={32} />
@@ -1005,20 +1007,30 @@ Core Instructions:
             >
               <Routes>
                 <Route path="/" element={dashboardPage} />
+                <Route path="/overview" element={dashboardPage} />
+                <Route path="/dashboard" element={dashboardPage} />
                 <Route path="/guide" element={guidePage} />
                 <Route path="/create" element={startWorkPage} />
                 <Route path="/new" element={startWorkPage} />
                 <Route path="/projects" element={projectsPage} />
-                <Route path="/workspaces" element={workspacesPage} />
+                <Route
+                  path="/workspaces"
+                  element={
+                    defaultWorkspaceBranch ? (
+                      <Navigate to={`/workspaces/${encodeURIComponent(defaultWorkspaceBranch)}`} replace />
+                    ) : (
+                      <Navigate to="/new" replace />
+                    )
+                  }
+                />
                 <Route path="/workspaces/:workspaceId" element={workspacesPage} />
                 <Route path="/workspaces/:workspaceId/:tab" element={workspacesPage} />
                 <Route path="/skills" element={skillsPage} />
                 <Route path="/agents" element={agentsPage} />
                 <Route path="/settings" element={settingsPage} />
                 <Route path="/workflows" element={workflowsPage} />
-
                 <Route path="/strategies" element={workflowsPage} />
-                <Route path="*" element={dashboardPage} />
+                <Route path="*" element={<Navigate to="/overview" replace />} />
               </Routes>
             </Suspense>
           </>

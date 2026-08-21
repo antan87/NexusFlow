@@ -76,7 +76,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
 
       {/* Orchestration tools — actionable rows. */}
       {orchTools.length > 0 && (
-        <div className="mb-5 rounded-xl border border-border bg-card p-4">
+        <div className="mb-4 rounded-md border border-border/80 bg-card p-4 surface-card">
           <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             <AlertTriangle size={12} className="text-info" /> Orchestration tools
           </div>
@@ -84,7 +84,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
             {orchTools.map((tool) => {
               const running = runningOrchIds.has(tool.id);
               return (
-                <div key={tool.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 p-3">
+                <div key={tool.id} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 p-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${running ? 'bg-success' : 'bg-muted-foreground/40'}`} />
@@ -123,29 +123,29 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
       )}
 
       {/* Workspace status + bulk controls. */}
-      <div className="mb-6 rounded-xl border border-border bg-card p-5">
-        <div className="mb-3 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+      <div className="mb-4 rounded-md border border-border/80 bg-card p-4 surface-card">
+        <div className="mb-2 flex items-center justify-between text-xs font-semibold text-muted-foreground">
           <span>Workspace Status</span>
           <StatusBadge tone={isAnyRunning ? 'running' : 'idle'}>{isAnyRunning ? 'Active' : 'Standby'}</StatusBadge>
         </div>
-        <div className="mb-4 text-xs font-semibold text-foreground">
+        <div className="mb-3 text-xs font-semibold text-foreground">
           {isAnyRunning ? `${runningNames.size} process${runningNames.size === 1 ? '' : 'es'} active` : 'All processes offline'}
         </div>
-        <div className="flex gap-3">
-          <Button disabled={isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'start' })}>
-            <Play size={14} /> Start All Services
+        <div className="flex gap-2">
+          <Button size="sm" disabled={isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'start' })}>
+            <Play size={13} /> Start All Services
           </Button>
-          <Button variant="destructive" disabled={!isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'stop' })}>
-            <Square size={14} /> Stop All
+          <Button size="sm" variant="destructive" disabled={!isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'stop' })}>
+            <Square size={13} /> Stop All
           </Button>
         </div>
       </div>
 
       {/* Split-pane console. */}
       {(services.length > 0 || orchLogs.length > 0) && (
-        <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm lg:grid-cols-12">
+        <div className="grid grid-cols-1 overflow-hidden rounded-md border border-border/80 bg-card shadow-xs lg:grid-cols-12 surface-card">
           {/* Service list with per-row controls. */}
-          <div className="border-b border-border bg-muted/30 p-5 lg:col-span-4 lg:border-b-0 lg:border-r">
+          <div className="border-b border-border/80 bg-muted/20 p-4 lg:col-span-4 lg:border-b-0 lg:border-r">
             <h4 className="mb-4 flex items-center gap-1.5 border-b border-border pb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               <Terminal size={12} className="text-primary" /> Background Services
             </h4>

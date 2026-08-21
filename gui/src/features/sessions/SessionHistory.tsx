@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -16,8 +16,11 @@ import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
 
 import type { AISession, Feature, TranscriptMessage } from '../../types.js';
+import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { Spinner } from '../../components/ui/spinner.js';
+import { StatusBadge } from '../../components/ui/status-badge.js';
 import { useWorkspaceLaunchTargets, useLaunchTerminal, useAiDetect } from '../../lib/api/queries.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { apiFetch } from '../../lib/api/client.js';
@@ -130,22 +133,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
   // Sorting & Filtering state
   const [sortBy, setSortBy] = useState<SessionSortOption>('created-desc');
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const sortMenuRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewMode] = useState<SessionViewMode>('harness');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAssistantFilter, setSelectedAssistantFilter] = useState<string>('all');
-
-  useEffect(() => {
-    if (!sortMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
-        setSortMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handleClickOutside);
-    return () => window.removeEventListener('mousedown', handleClickOutside);
-  }, [sortMenuOpen]);
 
   // Collapsed / expanded state per harness (default to false / collapsed)
   const [expandedHarnesses, setExpandedHarnesses] = useState<Record<string, boolean>>({
@@ -380,10 +370,10 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   };
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
       {/* Search, Filter & Sort Order Toolbar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-lg border border-border/70">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-md border border-border/80">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="relative flex-1 min-w-0 max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
             <input
@@ -391,7 +381,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search chat sessions..."
-              className="w-full pl-7 pr-6 py-1 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full pl-7 pr-6 py-1 text-xs rounded border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
             />
             {searchQuery && (
               <button
@@ -410,7 +400,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               type="button"
               onClick={() => setSelectedAssistantFilter('all')}
               className={cn(
-                'px-2 py-0.5 text-[11px] rounded-md font-medium transition-colors cursor-pointer',
+                'px-2 py-0.5 text-[11px] rounded font-medium transition-colors cursor-pointer',
                 selectedAssistantFilter === 'all'
                   ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
                   : 'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -426,7 +416,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   key={ast}
                   onClick={() => setSelectedAssistantFilter(selectedAssistantFilter === ast ? 'all' : ast)}
                   className={cn(
-                    'px-2 py-0.5 text-[11px] rounded-md font-medium capitalize transition-colors cursor-pointer',
+                    'px-2 py-0.5 text-[11px] rounded font-medium capitalize transition-colors cursor-pointer',
                     selectedAssistantFilter === ast
                       ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
                       : 'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -445,113 +435,50 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Order / Sort Dropdown Menu */}
-          <div className="relative" ref={sortMenuRef}>
-            <button
-              type="button"
-              onClick={() => setSortMenuOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-md border border-border bg-background text-foreground hover:bg-accent cursor-pointer shadow-2xs transition-colors"
-              title="Change sort order"
-              aria-expanded={sortMenuOpen}
-            >
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Order / Sort Dropdown Menu with Base UI */}
+          <Menu>
+            <MenuTrigger className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded border border-border bg-card text-foreground hover:bg-accent cursor-pointer shadow-2xs transition-colors">
               <ArrowUpDown size={11} className="text-muted-foreground" />
               <span>{sortLabelMap[sortBy]}</span>
-              <ChevronDown size={10} className={cn('text-muted-foreground opacity-70 transition-transform duration-150', sortMenuOpen && 'rotate-180')} />
-            </button>
-
-            {sortMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-44 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Order Chats By
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('created-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'created-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>📅 Newest created</span>
-                  {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('created-asc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'created-asc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>⏳ Oldest created</span>
-                  {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('updated-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'updated-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>⚡ Recently active</span>
-                  {sortBy === 'updated-desc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('messages-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'messages-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>💬 Most turns</span>
-                  {sortBy === 'messages-desc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('title-asc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'title-asc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>🔤 Title (A–Z)</span>
-                  {sortBy === 'title-asc' && <Check size={12} className="text-primary" />}
-                </button>
+              <ChevronDown size={10} className="text-muted-foreground opacity-70" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-48">
+              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Order Chats By
               </div>
-            )}
-          </div>
+              <MenuItem onClick={() => setSortBy('created-desc')} className="flex items-center justify-between text-xs">
+                <span>Newest created</span>
+                {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('created-asc')} className="flex items-center justify-between text-xs">
+                <span>Oldest created</span>
+                {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('updated-desc')} className="flex items-center justify-between text-xs">
+                <span>Recently active</span>
+                {sortBy === 'updated-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('messages-desc')} className="flex items-center justify-between text-xs">
+                <span>Most turns</span>
+                {sortBy === 'messages-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('title-asc')} className="flex items-center justify-between text-xs">
+                <span>Title (A–Z)</span>
+                {sortBy === 'title-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
 
           {/* View Mode Toggle: Grouped vs Timeline */}
-          <div className="flex items-center rounded-md border border-border bg-background p-0.5 shadow-2xs">
+          <div className="flex items-center rounded border border-border bg-card p-0.5 shadow-2xs">
             <button
               type="button"
               onClick={() => setViewMode('harness')}
               title="Group chats by AI Harness"
               className={cn(
                 'px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer',
-                viewMode === 'harness' ? 'bg-accent text-accent-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
+                viewMode === 'harness' ? 'bg-primary text-primary-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               Grouped
@@ -562,7 +489,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               title="Unified Chronological Timeline"
               className={cn(
                 'px-2 py-0.5 text-xs rounded font-medium transition-colors cursor-pointer',
-                viewMode === 'timeline' ? 'bg-accent text-accent-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
+                viewMode === 'timeline' ? 'bg-primary text-primary-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               Timeline
@@ -573,7 +500,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
       {/* Live Session HUD Banner */}
       {launchedInfo && (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs animate-fade-in">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-xs animate-fade-in">
           <div className="flex items-center gap-2 text-foreground min-w-0">
             <span className="size-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="truncate">
@@ -608,22 +535,22 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
       {/* Timeline View (Unified sorted list across all harnesses) */}
       {viewMode === 'timeline' ? (
-        <div className="space-y-1.5">
+        <Card className="divide-y divide-border overflow-hidden surface-card">
           {filteredSessions.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground bg-card/40 rounded-lg border border-border">
+            <div className="py-8 text-center text-xs text-muted-foreground">
               {searchQuery ? 'No chat sessions match your search filter.' : 'No chat sessions recorded yet.'}
             </div>
           ) : (
             filteredSessions.map((sess) => (
               <div
                 key={sess.id}
-                className="group flex flex-col gap-2 rounded-lg border border-border/70 bg-card/70 p-2 transition-all hover:border-primary/40 hover:bg-card hover:shadow-xs sm:flex-row sm:items-center sm:justify-between"
+                className="group flex flex-col gap-2 p-3 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
               >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   {renderAssistantIcon(sess.assistant)}
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                      <span className="font-semibold capitalize text-foreground/90">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-0.5">
+                      <span className="font-semibold capitalize text-foreground">
                         {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : 'Copilot'}
                       </span>
                       <span>•</span>
@@ -631,7 +558,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                       <span>•</span>
                       <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
                       <span>•</span>
-                      <span className="font-medium text-foreground/75">
+                      <span className="font-mono">
                         {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
                       </span>
                     </div>
@@ -642,65 +569,65 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                 </div>
 
                 {/* Sleek Balanced Action Toolbar */}
-                <div className="flex items-center gap-1.5 shrink-0 pl-7 sm:pl-0">
-                  <button
-                    type="button"
+                <div className="flex items-center gap-1.5 shrink-0 pl-8 sm:pl-0">
+                  <Button
+                    size="xs"
+                    variant="default"
                     disabled={resumingTerminalId === sess.id}
                     onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
                     title={`Resume session in terminal (${sess.id})`}
-                    className="inline-flex items-center justify-center gap-1 min-w-20 px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-600/90 text-white hover:bg-emerald-600 shadow-2xs hover:shadow-xs transition-all cursor-pointer disabled:opacity-50"
                   >
                     {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
                     <span>Resume</span>
-                  </button>
+                  </Button>
 
-                  <button
-                    type="button"
+                  <Button
+                    size="xs"
+                    variant="outline"
                     onClick={() => {
                       setActiveSession(sess);
                       setTranscript([]);
                       fetchSessionTranscript(sess.assistant, sess.id);
                     }}
                     title="Inspect transcript log"
-                    className="inline-flex items-center justify-center gap-1 min-w-16 px-2 py-1 text-xs font-medium rounded-md border border-border bg-background/80 text-foreground hover:bg-accent transition-colors cursor-pointer"
                   >
-                    <MessageSquare size={12} className="text-muted-foreground" />
+                    <MessageSquare size={12} />
                     <span>Logs</span>
-                  </button>
+                  </Button>
 
                   {sess.assistant === 'codex' && hasCodexDesktop && (
-                    <button
-                      type="button"
+                    <Button
+                      size="xs"
+                      variant="outline"
                       disabled={openingDesktopId === sess.id}
                       onClick={() => void openCodexDesktop(sess.id)}
                       title="Open in Codex Desktop"
-                      className="inline-flex items-center justify-center gap-1 min-w-18 px-2 py-1 text-xs font-medium rounded-md border border-border bg-background/80 text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
                     >
                       {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
                       <span>Desktop</span>
-                    </button>
+                    </Button>
                   )}
 
-                  <button
-                    type="button"
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
                     onClick={async () => {
                       const cmd = getResumeCliCommand(sess.assistant, sess.id);
                       await safeCopyToClipboard(cmd);
                       showToast?.(`Copied: ${cmd}`, 'success');
                     }}
                     title="Copy CLI resume command"
-                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
                   >
                     <Copy size={12} />
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))
           )}
-        </div>
+        </Card>
       ) : (
-        /* Grouped View (By Harness) */
-        <div className="space-y-2">
+        /* Grouped View (By Harness - Clean Flat Divided Card) */
+        <div className="space-y-2.5">
           {installedHarnesses.map((harness) => {
             const isExpanded = expandedHarnesses[harness.id] ?? false;
             const harnessSessions = harness.sessions.filter((s) => {
@@ -710,62 +637,46 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             });
 
             return (
-              <Card key={harness.id} className="overflow-hidden border border-border/80 bg-card shadow-2xs">
+              <Card key={harness.id} className="overflow-hidden surface-card">
                 {/* Sleek Minimal Harness Header Bar */}
                 <div
-                  className={cn(
-                    'flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between bg-card/70 transition-colors',
-                    isExpanded && 'border-b border-border/50'
-                  )}
+                  className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between bg-muted/20 hover:bg-muted/35 transition-colors cursor-pointer select-none"
+                  onClick={() => toggleHarness(harness.id)}
                 >
-                  <div
-                    onClick={() => toggleHarness(harness.id)}
-                    className="flex flex-1 items-center gap-2 cursor-pointer select-none"
-                  >
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground transition-transform"
-                      aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                    >
+                  <div className="flex flex-1 items-center gap-2.5 min-w-0">
+                    <span className="text-muted-foreground transition-transform">
                       {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </button>
+                    </span>
 
                     {harness.icon}
 
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-semibold text-xs text-foreground">{harness.name}</span>
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="font-bold text-xs text-foreground">{harness.name}</span>
 
-                      {harness.isDetected ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          CLI: {harness.cliCommand}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-                          {harness.cliCommand}
-                        </span>
-                      )}
+                      <StatusBadge tone={harness.isDetected ? 'success' : 'neutral'} dot={harness.isDetected}>
+                        CLI: {harness.cliCommand}
+                      </StatusBadge>
 
                       {harness.hasApp && (
-                        <span className="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                        <StatusBadge tone="running">
                           {harness.appName}
-                        </span>
+                        </StatusBadge>
                       )}
 
-                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
-                        {harnessSessions.length} {harnessSessions.length === 1 ? 'session' : 'sessions'}
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        ({harnessSessions.length})
                       </span>
                     </div>
                   </div>
 
                   {/* Uniform, Sleek Header Action Buttons */}
-                  <div className="flex items-center gap-1.5 shrink-0 pl-6 sm:pl-0">
-                    <button
-                      type="button"
+                  <div className="flex items-center gap-1.5 shrink-0 pl-6 sm:pl-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="xs"
+                      variant="default"
                       disabled={launchingNewAssistant === harness.id}
                       onClick={() => void startNewSession(harness.id)}
                       title={`Launch new ${harness.cliCommand} session in terminal`}
-                      className="inline-flex items-center justify-center gap-1.5 min-w-28 px-2.5 py-1 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs hover:shadow-xs transition-all cursor-pointer disabled:opacity-50"
                     >
                       {launchingNewAssistant === harness.id ? (
                         <Spinner className="size-3" />
@@ -773,27 +684,27 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         <Plus size={12} />
                       )}
                       <span>New Session</span>
-                    </button>
+                    </Button>
 
                     {harness.hasApp && (
-                      <button
-                        type="button"
+                      <Button
+                        size="xs"
+                        variant="outline"
                         onClick={() => void openAppTarget(harness.appTargetId)}
                         title={`Open in ${harness.appName}`}
-                        className="inline-flex items-center justify-center gap-1 min-w-18 px-2.5 py-1 text-xs font-medium rounded-md border border-border bg-background text-foreground hover:bg-accent transition-colors cursor-pointer"
                       >
-                        <ExternalLink size={12} className="opacity-80" />
+                        <ExternalLink size={12} />
                         <span>{harness.appName}</span>
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
 
-                {/* Expanded Session Cards List */}
+                {/* Expanded Session Rows (Flat Divided List) */}
                 {isExpanded && (
-                  <div className="bg-muted/15 p-2 space-y-1.5">
+                  <div className="divide-y divide-border/60 border-t border-border">
                     {harnessSessions.length === 0 ? (
-                      <div className="py-2 px-3 text-center text-xs text-muted-foreground rounded border border-border/40 bg-card/40 flex items-center justify-center gap-2">
+                      <div className="p-4 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                         <span>
                           {searchQuery ? 'No sessions match your search query.' : `No previous sessions recorded for ${harness.name}.`}
                         </span>
@@ -801,7 +712,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                           <button
                             type="button"
                             onClick={() => void startNewSession(harness.id)}
-                            className="text-primary font-medium hover:underline cursor-pointer inline-flex items-center gap-1 text-xs"
+                            className="text-primary font-semibold hover:underline cursor-pointer inline-flex items-center gap-1 text-xs"
                           >
                             <Plus size={11} /> Start session
                           </button>
@@ -811,81 +722,75 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                       harnessSessions.map((sess) => (
                         <div
                           key={sess.id}
-                          className="group flex flex-col gap-1.5 rounded-md border border-border/60 bg-card p-2 transition-all hover:border-primary/40 hover:shadow-2xs sm:flex-row sm:items-center sm:justify-between"
+                          className="group flex flex-col gap-1.5 px-3.5 py-2.5 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5 mb-0.5 text-[10px] text-muted-foreground">
-                              <span className="font-mono text-muted-foreground/80">{sess.id.slice(0, 8)}</span>
+                            <div className="flex flex-wrap items-center gap-1.5 mb-0.5 text-[11px] text-muted-foreground font-mono">
+                              <span>{sess.id.slice(0, 8)}</span>
                               <span>•</span>
                               <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
-                              {sess.updatedAt && sess.updatedAt !== sess.createdAt && (
-                                <>
-                                  <span>•</span>
-                                  <span className="text-muted-foreground/75">Active {formatDate(sess.updatedAt)}</span>
-                                </>
-                              )}
                               <span>•</span>
-                              <span className="font-medium text-foreground/75">
+                              <span>
                                 {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
                               </span>
                             </div>
-                            <p className="text-xs font-medium text-foreground truncate" title={sess.title}>
+                            <p className="text-xs font-semibold text-foreground truncate" title={sess.title}>
                               {sess.title}
                             </p>
                           </div>
 
                           {/* Sleek Balanced Action Toolbar */}
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
+                            <Button
+                              size="xs"
+                              variant="default"
                               disabled={resumingTerminalId === sess.id}
                               onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
                               title={`Resume session in terminal (${sess.id})`}
-                              className="inline-flex items-center justify-center gap-1 min-w-20 px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-600/90 text-white hover:bg-emerald-600 shadow-2xs hover:shadow-xs transition-all cursor-pointer disabled:opacity-50"
                             >
                               {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
                               <span>Resume</span>
-                            </button>
+                            </Button>
 
-                            <button
-                              type="button"
+                            <Button
+                              size="xs"
+                              variant="outline"
                               onClick={() => {
                                 setActiveSession(sess);
                                 setTranscript([]);
                                 fetchSessionTranscript(sess.assistant, sess.id);
                               }}
                               title="Inspect transcript log"
-                              className="inline-flex items-center justify-center gap-1 min-w-16 px-2 py-1 text-xs font-medium rounded-md border border-border bg-background text-foreground hover:bg-accent transition-colors cursor-pointer"
                             >
-                              <MessageSquare size={12} className="text-muted-foreground" />
+                              <MessageSquare size={12} />
                               <span>Logs</span>
-                            </button>
+                            </Button>
 
                             {sess.assistant === 'codex' && hasCodexDesktop && (
-                              <button
-                                type="button"
+                              <Button
+                                size="xs"
+                                variant="outline"
                                 disabled={openingDesktopId === sess.id}
                                 onClick={() => void openCodexDesktop(sess.id)}
                                 title="Open in Codex Desktop"
-                                className="inline-flex items-center justify-center gap-1 min-w-18 px-2 py-1 text-xs font-medium rounded-md border border-border bg-background text-foreground hover:bg-accent transition-colors cursor-pointer disabled:opacity-50"
                               >
                                 {openingDesktopId === sess.id ? <Spinner className="size-3" /> : <ExternalLink size={12} />}
                                 <span>Desktop</span>
-                              </button>
+                              </Button>
                             )}
 
-                            <button
-                              type="button"
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
                               onClick={async () => {
                                 const cmd = getResumeCliCommand(sess.assistant, sess.id);
                                 await safeCopyToClipboard(cmd);
                                 showToast?.(`Copied: ${cmd}`, 'success');
                               }}
                               title="Copy CLI resume command"
-                              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
                             >
                               <Copy size={12} />
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ))

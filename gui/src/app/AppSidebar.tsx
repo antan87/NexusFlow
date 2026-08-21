@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   FolderGit2,
   Workflow,
@@ -12,11 +12,13 @@ import {
   ChevronDown,
   ArrowUpDown,
   Check,
+  Activity,
   type LucideIcon,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { useTheme } from './ThemeProvider.js';
@@ -52,28 +54,6 @@ export interface AppSidebarProps {
   onSelectWorkspace?: (id: string) => void;
 }
 
-const formatWorkspaceDate = (createdAtStr?: string) => {
-  if (!createdAtStr) return '';
-  const d = new Date(createdAtStr);
-  if (isNaN(d.getTime())) return '';
-  const now = new Date();
-  const isToday = now.toDateString() === d.toDateString();
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = yesterday.toDateString() === d.toDateString();
-
-  if (isToday) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-  if (isYesterday) {
-    return 'Yesterday';
-  }
-  if (now.getFullYear() === d.getFullYear()) {
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  }
-  return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' });
-};
-
 export function AppSidebar({
   appVersion,
   workspaces = [],
@@ -86,19 +66,6 @@ export function AppSidebar({
   const { theme, setTheme } = useTheme();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const sortMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!sortMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
-        setSortMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handleClickOutside);
-    return () => window.removeEventListener('mousedown', handleClickOutside);
-  }, [sortMenuOpen]);
 
   const filteredWorkspaces = useMemo(() => {
     let list = workspaces;
@@ -149,7 +116,7 @@ export function AppSidebar({
   const linkClass = (active: boolean) =>
     cn(
       'flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors cursor-pointer',
-      active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+      active ? 'bg-primary/10 text-primary font-semibold' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
     );
 
   const sortLabelMap: Record<WorkspaceSortOption, string> = {
@@ -161,132 +128,88 @@ export function AppSidebar({
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/40 p-3 select-none h-screen overflow-hidden">
-      {/* Brand Header */}
-      <div className="mb-2.5 flex items-center justify-between px-1">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground shadow-xs">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
+      {/* Header */}
+      <div className="flex h-12 items-center justify-between px-3 border-b border-border/60">
+        <Link to="/overview" className="flex items-center gap-2">
+          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-[11px] font-bold text-primary-foreground shadow-xs">
             NF
           </div>
-          <span className="text-sm font-bold tracking-tight text-foreground">NexusFlow</span>
+          <span className="text-xs font-bold tracking-tight text-foreground">NexusFlow</span>
         </Link>
-        <span className="text-[10px] font-mono text-muted-foreground/80">v{appVersion}</span>
+        <span className="text-[10px] font-mono text-muted-foreground/70">v{appVersion}</span>
       </div>
 
-      {/* Start Work Action Button */}
-      <Link
-        to="/new"
-        className="mb-3 inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow"
-      >
-        <Plus size={15} /> Start work
-      </Link>
+      {/* Top Action & Overview Nav */}
+      <div className="p-2.5 pb-1 space-y-1.5">
+        <NavLink
+          to="/overview"
+          className={({ isActive }) =>
+            cn(
+              'flex h-7.5 items-center gap-2 rounded-md px-2.5 text-xs font-medium transition-colors cursor-pointer',
+              isActive || location.pathname === '/'
+                ? 'bg-primary/10 text-primary font-semibold'
+                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+            )
+          }
+        >
+          <Activity size={13} className="shrink-0 text-primary" />
+          <span>Overview</span>
+        </NavLink>
 
-      {/* Workspaces Section (Default) */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        <Link
+          to="/new"
+          className="flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
+        >
+          <Plus size={14} />
+          <span>Start work</span>
+        </Link>
+      </div>
+
+      {/* Workspaces Section */}
+      <div className="flex flex-1 flex-col overflow-hidden px-2">
+        {/* Section Header with Declarative Base UI Menu */}
+        <div className="flex items-center justify-between px-1 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>Workspaces</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+            <span className="rounded bg-muted/80 px-1 py-0.2 font-mono text-[10px] text-foreground">
               {filteredWorkspaces.length}
             </span>
           </div>
 
-          {/* Sleek Bulletproof Order By Menu */}
-          <div className="relative" ref={sortMenuRef}>
-            <button
-              type="button"
-              onClick={() => setSortMenuOpen((prev) => !prev)}
-              className="flex items-center gap-1 text-[10px] normal-case font-medium text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors border border-transparent hover:border-border/60"
-              title="Change workspace sort order"
-              aria-expanded={sortMenuOpen}
-            >
-              <ArrowUpDown size={11} className="opacity-80" />
+          {/* Declarative Base UI Order By Menu */}
+          <Menu>
+            <MenuTrigger className="flex items-center gap-1 text-[11px] normal-case font-medium text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors">
+              <ArrowUpDown size={11} className="opacity-70" />
               <span>{sortLabelMap[sortBy]}</span>
-              <ChevronDown size={10} className={cn('opacity-60 transition-transform duration-150', sortMenuOpen && 'rotate-180')} />
-            </button>
-
-            {sortMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-44 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Order Workspaces By
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('created-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'created-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>📅 Newest created</span>
-                  {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('created-asc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'created-asc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>⏳ Oldest created</span>
-                  {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('changes-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'changes-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>🟡 Most changes</span>
-                  {sortBy === 'changes-desc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('name-asc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'name-asc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>🔤 Name (A–Z)</span>
-                  {sortBy === 'name-asc' && <Check size={12} className="text-primary" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSortBy('repos-desc');
-                    setSortMenuOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                    sortBy === 'repos-desc' && 'font-semibold text-primary bg-primary/10'
-                  )}
-                >
-                  <span>📁 Most repos</span>
-                  {sortBy === 'repos-desc' && <Check size={12} className="text-primary" />}
-                </button>
+              <ChevronDown size={10} className="opacity-60" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-48">
+              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Order Workspaces By
               </div>
-            )}
-          </div>
+              <MenuItem onClick={() => setSortBy('created-desc')} className="flex items-center justify-between text-xs">
+                <span>Newest created</span>
+                {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('created-asc')} className="flex items-center justify-between text-xs">
+                <span>Oldest created</span>
+                {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('changes-desc')} className="flex items-center justify-between text-xs">
+                <span>Most changes</span>
+                {sortBy === 'changes-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('name-asc')} className="flex items-center justify-between text-xs">
+                <span>Name (A–Z)</span>
+                {sortBy === 'name-asc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+              <MenuItem onClick={() => setSortBy('repos-desc')} className="flex items-center justify-between text-xs">
+                <span>Most repos</span>
+                {sortBy === 'repos-desc' && <Check size={12} className="text-primary" />}
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
         </div>
 
         {/* Quick Search */}
@@ -297,11 +220,12 @@ export function AppSidebar({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filter workspaces..."
-            className="w-full rounded-md border border-border/80 bg-background/80 py-1 pl-6 pr-6 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
+            className="h-7 w-full rounded-md border border-border/80 bg-background/80 py-1 pl-6 pr-6 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
           />
           {search && (
             <button
               onClick={() => setSearch('')}
+              aria-label="Clear filter"
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-[10px] cursor-pointer"
             >
               ✕
@@ -309,25 +233,24 @@ export function AppSidebar({
           )}
         </div>
 
-        {/* Workspaces List (Outlook Compact Items) */}
-        <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5">
+        {/* Workspaces List (Sleek Handcrafted Rows) */}
+        <div className="flex-1 overflow-y-auto space-y-1 pr-0.5">
           {workspacesLoading ? (
             <div className="space-y-1.5 py-1">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="h-12 rounded-lg border border-border/40 bg-muted/30 animate-pulse" />
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-10 rounded-md bg-muted/40 animate-pulse" />
               ))}
             </div>
           ) : filteredWorkspaces.length === 0 ? (
-            <div className="py-4 text-center text-xs text-muted-foreground">
-              {search ? 'No matching workspaces' : 'No active workspaces'}
+            <div className="py-6 text-center text-xs text-muted-foreground/80">
+              {search ? 'No matches' : 'No workspaces'}
             </div>
           ) : (
             filteredWorkspaces.map((w) => {
+              const isSelected = activeWsId === w.branchName;
               const st = workspaceStatuses[w.branchName];
-              const active = activeWsId === w.branchName;
               const hasChanges = Boolean(st && st.changedFiles > 0);
               const hasServices = Boolean(st && st.runningServices > 0);
-              const dateLabel = formatWorkspaceDate(w.createdAt);
 
               return (
                 <Link
@@ -335,83 +258,63 @@ export function AppSidebar({
                   to={`/workspaces/${encodeURIComponent(w.branchName)}`}
                   onClick={() => onSelectWorkspace?.(w.branchName)}
                   className={cn(
-                    'group relative flex flex-col gap-1 rounded-lg border p-2 text-left transition-all cursor-pointer select-none',
-                    active
-                      ? 'border-primary/50 bg-primary/10 shadow-xs ring-1 ring-primary/20'
-                      : 'border-border/60 bg-card/60 hover:border-border hover:bg-accent/40',
+                    'group flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-xs transition-colors cursor-pointer border border-transparent',
+                    isSelected
+                      ? 'bg-accent text-foreground font-medium border-border/70 shadow-2xs'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                   )}
                 >
-                  {/* Left Status Strip */}
-                  <span
-                    className={cn(
-                      'absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r transition-colors',
-                      active
-                        ? 'bg-primary'
-                        : hasChanges
-                          ? 'bg-amber-500'
-                          : 'bg-emerald-500',
-                    )}
-                  />
-
-                  {/* Header: Name + Date */}
-                  <div className="flex items-center justify-between gap-1.5 pl-1.5">
-                    <span className="truncate font-mono text-xs font-bold text-foreground" title={w.branchName}>
+                  {/* Title & Status indicator */}
+                  <div className="flex items-center justify-between gap-1.5 min-w-0">
+                    <span className="truncate font-mono tracking-tight font-medium text-foreground">
                       {w.branchName}
                     </span>
-                    {dateLabel && (
-                      <span className="shrink-0 text-[10px] font-medium text-muted-foreground/80" title={`Created: ${w.createdAt}`}>
-                        {dateLabel}
-                      </span>
-                    )}
+                    <span
+                      className={cn(
+                        'size-1.5 rounded-full shrink-0',
+                        hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                      )}
+                      title={hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
+                    />
                   </div>
 
-                  {/* Metrics Row */}
-                  <div className="flex flex-wrap items-center gap-1 pl-1.5 text-[10px]">
-                    {hasChanges ? (
-                      <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0.5 font-semibold text-amber-500">
-                        <span className="size-1 rounded-full bg-amber-500" />
-                        {st!.changedFiles} chg
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1 py-0.5 font-medium text-emerald-500">
-                        <span className="size-1 rounded-full bg-emerald-500" />
-                        Clean
-                      </span>
+                  {/* Metadata Subtitle */}
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground/80 font-mono">
+                    <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                    {hasChanges && (
+                      <>
+                        <span>•</span>
+                        <span className="text-amber-600 dark:text-amber-400 font-semibold">{st!.changedFiles} chg</span>
+                      </>
                     )}
-
-                    {/* AI Icons */}
-                    {w.assistants?.map((ast) => (
-                      <span key={ast} className="inline-flex items-center" title={`Configured AI: ${ast}`}>
-                        {ast === 'antigravity' ? (
-                          <AntigravityIcon className="size-3.5" />
-                        ) : ast === 'claude' ? (
-                          <span className="grid size-3.5 place-items-center rounded bg-[#D97757] text-white shadow-2xs">
-                            <SiClaude className="size-2" />
-                          </span>
-                        ) : ast === 'codex' ? (
-                          <span className="grid size-3.5 place-items-center rounded bg-foreground text-background shadow-2xs">
-                            <BsOpenai className="size-2" />
-                          </span>
-                        ) : ast === 'copilot' ? (
-                          <span className="grid size-3.5 place-items-center rounded bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white shadow-2xs">
-                            <SiGithubcopilot className="size-2" />
-                          </span>
-                        ) : null}
-                      </span>
-                    ))}
-
-                    {/* Services */}
                     {hasServices && (
-                      <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1 py-0.5 font-mono text-emerald-500">
-                        <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
-                        {st!.runningServices} svc
-                      </span>
+                      <>
+                        <span>•</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 font-semibold">
+                          <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+                          {st!.runningServices} svc
+                        </span>
+                      </>
                     )}
 
-                    {/* Repos count */}
-                    <span className="ml-auto text-[9px] text-muted-foreground/80 font-mono">
-                      {w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}
-                    </span>
+                    {/* AI Icon indicators */}
+                    {w.assistants && w.assistants.length > 0 && (
+                      <div className="ml-auto flex items-center gap-1">
+                        {w.assistants.map((ast) => (
+                          <span key={ast} className="opacity-70 group-hover:opacity-100 transition-opacity">
+                            {ast === 'antigravity' ? (
+                              <AntigravityIcon className="size-3" />
+                            ) : ast === 'claude' ? (
+                              <SiClaude className="size-2.5 text-[#D97757]" />
+                            ) : ast === 'codex' ? (
+                              <BsOpenai className="size-2.5 text-foreground" />
+                            ) : (
+                              <SiGithubcopilot className="size-2.5 text-blue-400" />
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </Link>
               );
@@ -420,21 +323,21 @@ export function AppSidebar({
         </div>
       </div>
 
-      {/* Expandable Tools & Secondary Options (Collapsed by default to maximize Workspaces space) */}
-      <div className="mt-2 border-t border-border pt-1.5 flex flex-col gap-0.5">
+      {/* Expandable Tools & Secondary Options */}
+      <div className="border-t border-border/60 p-2 flex flex-col gap-0.5">
         <button
           type="button"
           onClick={() => setToolsExpanded((prev) => !prev)}
           className="flex items-center justify-between w-full rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
           aria-expanded={toolsExpanded}
         >
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs">⚙️</span>
-            <span>More & Tools</span>
+          <div className="flex items-center gap-2">
+            <SettingsIcon size={13} className="text-muted-foreground/70" />
+            <span>Tools & Library</span>
           </div>
           <ChevronDown
-            size={13}
-            className={cn('transition-transform duration-200 opacity-70', toolsExpanded && 'rotate-180')}
+            size={12}
+            className={cn('transition-transform duration-200 opacity-60', toolsExpanded && 'rotate-180')}
           />
         </button>
 
@@ -445,14 +348,14 @@ export function AppSidebar({
               const Icon = item.icon;
               return (
                 <NavLink key={item.to} to={item.to} className={linkClass(active)}>
-                  <Icon size={14} />
+                  <Icon size={13} />
                   <span>{item.label}</span>
                 </NavLink>
               );
             })}
 
             <NavLink to="/guide" className={linkClass(pathname.startsWith('/guide'))}>
-              <BookOpen size={14} />
+              <BookOpen size={13} />
               <span>Getting Started</span>
             </NavLink>
 
@@ -462,7 +365,7 @@ export function AppSidebar({
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
               <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
             </button>
           </div>

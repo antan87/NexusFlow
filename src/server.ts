@@ -527,6 +527,18 @@ app.use(
   }),
 );
 
+// Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
+// cross-site request forgery and browser form posts from untrusted web pages.
+app.use('/api/*', async (c, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(c.req.method)) {
+    const origin = c.req.header('origin');
+    if (origin && !hasTrustedLocalOrigin(origin)) {
+      return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+    }
+  }
+  await next();
+});
+
 // ─── API Endpoints ────────────────────────────────────────────────────────
 
 // Status checks may execute a trusted local CLI from PATH. Keep that work

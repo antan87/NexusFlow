@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import {
   RefreshCw,
   MoreVertical,
@@ -6,7 +6,6 @@ import {
   Trash2,
   FolderGit2,
   Terminal,
-  MessageSquare,
   Code2,
   ChevronDown,
   Sparkles,
@@ -42,11 +41,13 @@ const renderEditorIcon = (id: string, name: string) => {
 import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
 import { useWorkspaceServices, useWorkspaceLaunchTargets } from '../lib/api/queries.js';
+import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
@@ -134,24 +135,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const launchTargets = useWorkspaceLaunchTargets();
   const [openingEditor, setOpeningEditor] = useState<string | null>(null);
-  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
-  const editorMenuRef = useRef<HTMLDivElement>(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!editorMenuOpen && !moreMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (editorMenuRef.current && !editorMenuRef.current.contains(e.target as Node)) {
-        setEditorMenuOpen(false);
-      }
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setMoreMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handleClickOutside);
-    return () => window.removeEventListener('mousedown', handleClickOutside);
-  }, [editorMenuOpen, moreMenuOpen]);
 
   const availableEditors = launchTargets.data?.filter((t) => t.kind === 'editor' && t.available) ?? [];
   const primaryEditor = availableEditors.find((e) => e.id === 'vscode-insiders')
@@ -176,77 +159,119 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const renderInspector = () => {
     if (!selected) return null;
+    const st = workspaceStatuses[selected.branchName];
+    const sync = selectedMode === 'in-place' ? null : (st ? syncMeta(st.syncStatus) : null);
+
     return (
-      <div className="flex flex-col gap-3.5">
-        {/* Workspace Summary Header Card */}
-        <Card className="p-3.5 sm:p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col min-w-0 pb-8">
+        {/* Workspace Hero Header */}
+        <div className="border-b border-border/80 bg-card/40 px-5 py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            {/* Left: Branch Title, Tag, and Sub-metrics */}
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <h2 className="truncate text-lg sm:text-xl font-bold text-foreground" title={selected.branchName}>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate font-mono text-base sm:text-lg font-bold text-foreground tracking-tight" title={selected.branchName}>
                   {selected.branchName}
-                </h2>
-                <StatusBadge tone={selectedMode}>
+                </h1>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const copied = await safeCopyToClipboard(selected.branchName);
+                    if (copied) showToast?.('Copied branch name to clipboard.', 'success');
+                  }}
+                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer"
+                  title="Copy branch name"
+                >
+                  <Copy size={13} />
+                </button>
+                <span className="inline-flex items-center rounded border border-border/80 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground uppercase tracking-wider">
                   {selectedMode === 'in-place' ? 'In-place' : 'Worktree'}
-                </StatusBadge>
+                </span>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
-                <span>·</span>
+
+              {/* Sub-strip with live status indicators */}
+              <div className="mt-1.5 flex flex-wrap items-center gap-2.5 font-mono text-[11px] text-muted-foreground">
                 <span>{selected.repos.length} {selected.repos.length === 1 ? 'repo' : 'repos'}</span>
+                <span>•</span>
+                <span>Created {new Date(selected.createdAt).toLocaleDateString()}</span>
+                {st && st.changedFiles > 0 ? (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-amber-400 font-semibold">
+                      <span className="size-1.5 rounded-full bg-amber-400" />
+                      {st.changedFiles} modified
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-emerald-400">
+                      <span className="size-1.5 rounded-full bg-emerald-400" />
+                      Clean
+                    </span>
+                  </>
+                )}
+                {st && st.runningServices > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-emerald-400">
+                      <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      {st.runningServices} active
+                    </span>
+                  </>
+                )}
+                {sync && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-primary">
+                      <RefreshCw size={10} /> {sync.label}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+
+            {/* Right: Split Launch Combobox & Actions */}
+            <div className="flex items-center gap-1.5 shrink-0">
               {primaryEditor && (
                 availableEditors.length > 1 ? (
-                  <div className="relative flex items-center rounded-md border border-border bg-card shadow-xs" ref={editorMenuRef}>
+                  <div className="inline-flex h-8 items-center rounded-md border border-border bg-card shadow-xs">
                     <button
                       type="button"
                       disabled={Boolean(openingEditor)}
                       onClick={() => void handleOpenEditor(primaryEditor.id)}
                       title={`Open workspace in ${primaryEditor.name}`}
-                      className="inline-flex items-center gap-1.5 rounded-l-md px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer border-r border-border"
+                      className="inline-flex h-full items-center gap-1.5 px-3 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer rounded-l-md"
                     >
                       {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
                       <span>{primaryEditor.name}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditorMenuOpen((prev) => !prev)}
-                      aria-label="Select Editor or Shell"
-                      aria-expanded={editorMenuOpen}
-                      className="grid h-8 w-6 place-items-center rounded-r-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer transition-colors"
-                    >
-                      <ChevronDown size={13} className={cn('transition-transform duration-150', editorMenuOpen && 'rotate-180')} />
-                    </button>
-
-                    {editorMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1 w-52 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
+                    <Menu>
+                      <MenuTrigger className="inline-flex h-full w-6 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent border-l border-border transition-colors cursor-pointer rounded-r-md">
+                        <ChevronDown size={12} />
+                      </MenuTrigger>
+                      <MenuPopup align="end" className="w-52">
                         <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                           Open Workspace In
                         </div>
                         {availableEditors.map((ed) => (
-                          <button
+                          <MenuItem
                             key={ed.id}
-                            type="button"
-                            onClick={() => {
-                              setEditorMenuOpen(false);
-                              void handleOpenEditor(ed.id);
-                            }}
+                            onClick={() => void handleOpenEditor(ed.id)}
                             className={cn(
-                              'w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground',
-                              ed.id === primaryEditor.id && 'font-semibold text-primary bg-primary/10'
+                              'flex items-center justify-between text-xs',
+                              ed.id === primaryEditor.id && 'font-semibold text-primary'
                             )}
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               {renderEditorIcon(ed.id, ed.name)}
                               <span className="truncate">{ed.name}</span>
                             </div>
-                            {ed.id === primaryEditor.id && <span className="text-[10px] text-muted-foreground font-mono shrink-0">(default)</span>}
-                          </button>
+                            {ed.id === primaryEditor.id && <span className="text-[10px] text-muted-foreground font-mono">(default)</span>}
+                          </MenuItem>
                         ))}
-                      </div>
-                    )}
+                      </MenuPopup>
+                    </Menu>
                   </div>
                 ) : (
                   <Button
@@ -262,302 +287,177 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </Button>
                 )
               )}
-              <div className="relative" ref={moreMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setMoreMenuOpen((prev) => !prev)}
-                  aria-label="More actions"
-                  aria-expanded={moreMenuOpen}
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
-                >
-                  <MoreVertical size={15} />
-                </button>
 
-                {moreMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-44 z-50 rounded-lg border border-border bg-popover p-1 shadow-lg text-foreground animate-fade-in">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoreMenuOpen(false);
-                        handleCopyPrompt(selected);
-                      }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
-                    >
-                      <Copy size={13} /> <span>Copy AI Context</span>
-                    </button>
-                    <div className="my-1 h-px bg-border/60" />
-                    <button
-                      type="button"
-                      disabled={deleteWsLoading === selected.branchName}
-                      onClick={() => {
-                        setMoreMenuOpen(false);
-                        void handleDeleteWorkspace(selected.branchName);
-                      }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left cursor-pointer transition-colors text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 size={13} />
-                      <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+              {/* More Actions Menu */}
+              <Menu>
+                <MenuTrigger className="grid size-8 place-items-center rounded-md border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer">
+                  <MoreVertical size={14} />
+                </MenuTrigger>
+                <MenuPopup align="end" className="w-48">
+                  <MenuItem onClick={() => handleCopyPrompt(selected)} className="flex items-center gap-2 text-xs">
+                    <Copy size={13} /> <span>Copy AI Context</span>
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => void handleDeleteWorkspace(selected.branchName)}
+                    disabled={deleteWsLoading === selected.branchName}
+                    className="flex items-center gap-2 text-xs text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 size={13} />
+                    <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}</span>
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
             </div>
           </div>
+        </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {(() => {
-              const st = workspaceStatuses[selected.branchName];
-              if (!st) return null;
-              const sync = selectedMode === 'in-place' ? null : syncMeta(st.syncStatus);
-              return (
-                <>
-                  {st.changedFiles > 0 ? (
-                    <StatusBadge tone="warning" dot>
-                      {st.changedFiles} uncommitted
-                    </StatusBadge>
-                  ) : (
-                    <StatusBadge tone="idle" dot>
-                      Clean
-                    </StatusBadge>
-                  )}
-                  {st.runningServices > 0 ? (
-                    <StatusBadge tone="running" dot>
-                      {st.runningServices} running
-                    </StatusBadge>
-                  ) : (
-                    <StatusBadge tone="idle" dot>
-                      No services
-                    </StatusBadge>
-                  )}
-                  {sync && (
-                    <StatusBadge tone={sync.tone}>
-                      <RefreshCw size={11} /> {sync.label}
-                    </StatusBadge>
-                  )}
-                  {st.pendingValidation && <StatusBadge tone="warning">Needs validation</StatusBadge>}
-                </>
-              );
-            })()}
-          </div>
-        </Card>
-
-        {/* Tab Navigation */}
-        <Tabs
-          value={subTab}
-          onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}
-          className="mb-4"
-        >
-          <TabsList className="max-w-full overflow-x-auto">
-            {TABS.map((tab) => (
-              <TabsTab key={tab.value} value={tab.value}>
-                {tab.value === 'sessions' ? 'AI & Sessions' : tab.label}
-              </TabsTab>
-            ))}
-          </TabsList>
-          <TabsPanel value={subTab} className="animate-fade-in pt-3">
-            {subTab === 'overview' && (
-              <div className="flex flex-col gap-3.5">
-                {/* Configured AI Assistant Banner */}
-                <Card className="p-3.5 sm:p-4 bg-gradient-to-r from-card to-card/60">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-3">
-                      {selected.assistants[0] === 'claude' ? (
-                        <span className="grid size-9 place-items-center rounded-xl bg-[#D97757] text-white shadow-sm">
-                          <SiClaude className="size-5" />
+        {/* Tab Navigation & Content Container */}
+        <div className="px-5 pt-3">
+          <Tabs
+            value={subTab}
+            onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}
+            className="mb-4"
+          >
+            <TabsList className="max-w-full overflow-x-auto">
+              {TABS.map((tab) => (
+                <TabsTab key={tab.value} value={tab.value}>
+                  {tab.value === 'sessions' ? 'AI & Sessions' : tab.label}
+                </TabsTab>
+              ))}
+            </TabsList>
+            <TabsPanel value={subTab} className="animate-fade-in pt-3">
+              {subTab === 'overview' && (
+                <div className="flex flex-col gap-3">
+                  {/* Unified Divided Overview Card */}
+                  <Card className="divide-y divide-border overflow-hidden surface-card">
+                    {/* Section 1: AI Assistant & Fast Action Header */}
+                    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between bg-muted/20">
+                      <div className="flex items-center gap-3">
+                        <span className="grid size-9 place-items-center rounded-lg border border-border bg-card text-foreground shadow-xs">
+                          {selected.assistants[0] === 'claude' ? (
+                            <SiClaude className="size-4 text-[#D97757]" />
+                          ) : selected.assistants[0] === 'codex' ? (
+                            <BsOpenai className="size-4 text-foreground" />
+                          ) : selected.assistants[0] === 'copilot' ? (
+                            <SiGithubcopilot className="size-4 text-blue-400" />
+                          ) : (
+                            <AntigravityIcon className="size-5" />
+                          )}
                         </span>
-                      ) : selected.assistants[0] === 'codex' ? (
-                        <span className="grid size-9 place-items-center rounded-xl bg-foreground text-background shadow-sm">
-                          <BsOpenai className="size-5" />
-                        </span>
-                      ) : selected.assistants[0] === 'copilot' ? (
-                        <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white shadow-sm">
-                          <SiGithubcopilot className="size-5" />
-                        </span>
-                      ) : (
-                        <span className="grid size-9 place-items-center rounded-xl bg-card border border-border/80 shadow-sm p-1.5">
-                          <AntigravityIcon className="size-6" />
-                        </span>
-                      )}
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-semibold text-foreground capitalize">
-                            {selected.assistants[0] || 'Antigravity'}
-                          </h3>
-                          <StatusBadge tone="running">Configured AI</StatusBadge>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-xs sm:text-sm font-semibold text-foreground capitalize">
+                              {selected.assistants[0] || 'Antigravity'}
+                            </h3>
+                            <StatusBadge tone="running">Configured AI</StatusBadge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Workspace rules, prompt templates, and skills ready.
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Context and instructions generated for this workspace.
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => onSelectTab(selected.branchName, 'sessions')}
+                      >
+                        AI Sessions & Harnesses →
+                      </Button>
+                    </div>
+
+                    {/* Section 2: Workspace Description (if present) */}
+                    {selected.description && (
+                      <div className="p-4">
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                          Description
+                        </h4>
+                        <p className="text-xs sm:text-sm leading-relaxed text-foreground/90 whitespace-pre-line">
+                          {selected.description}
                         </p>
                       </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => onSelectTab(selected.branchName, 'sessions')}
-                    >
-                      AI Sessions & Harnesses →
-                    </Button>
-                  </div>
-                </Card>
+                    )}
 
-                {/* Recent AI Sessions Quick Panel (if any sessions exist) */}
-                {sessionProps.sessions.length > 0 && (
-                  <Card className="p-3.5 sm:p-4">
-                    <div className="mb-2.5 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-semibold text-foreground">Recent Sessions</h3>
-                        <span className="text-xs text-muted-foreground">({sessionProps.sessions.length})</span>
+                    {/* Section 3: Repositories & Ports */}
+                    <div className="p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Mapped Repositories ({selected.repos.length})
+                        </h4>
+                        {availableRepos.length > 0 && (
+                          <AddRepoPicker
+                            repos={availableRepos}
+                            disabled={addRepoLoading}
+                            onAdd={(repoPath: string) => {
+                              if (
+                                window.confirm(
+                                  `Add repository "${repoName(repoPath)}" to this workspace?\nThis creates a new git worktree and re-runs analysis.`,
+                                )
+                              ) {
+                                void handleAddRepo(selected.branchName, repoPath);
+                              }
+                            }}
+                          />
+                        )}
                       </div>
-                      <button
-                        onClick={() => onSelectTab(selected.branchName, 'sessions')}
-                        className="text-xs font-medium text-primary hover:underline cursor-pointer flex items-center gap-1"
-                      >
-                        View all sessions →
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {sessionProps.sessions.slice(0, 2).map((sess) => (
-                        <div
-                          key={sess.id}
-                          className="flex flex-col gap-2 rounded-lg border border-border bg-card/50 p-2.5 transition-colors hover:border-foreground/15 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <StatusBadge tone={sess.assistant === 'claude' ? 'warning' : 'running'}>
-                                {sess.assistant}
-                              </StatusBadge>
-                              <span className="text-[11px] text-muted-foreground">
-                                {new Date(sess.updatedAt).toLocaleDateString()}
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">•</span>
-                              <span className="text-[11px] font-medium text-muted-foreground">
-                                {sess.messageCount} msgs
+                      <div className="divide-y divide-border/60">
+                        {repoRows.map((r) => (
+                          <div key={r.name} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 text-xs">
+                            <div className="flex items-center gap-2 font-mono min-w-0">
+                              <span
+                                className={cn(
+                                  'size-2 rounded-full shrink-0',
+                                  r.changedCount === null ? 'bg-muted-foreground' : r.changedCount > 0 ? 'bg-warning' : 'bg-success',
+                                )}
+                                title={r.changedCount === null ? 'Status unknown' : r.changedCount > 0 ? `${r.changedCount} uncommitted changes` : 'Clean'}
+                              />
+                              <span className="truncate font-semibold text-foreground">{r.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground font-mono shrink-0">
+                              {r.ports.map((p) => (
+                                <span key={p} className="rounded border border-border bg-muted/80 px-1.5 py-0.5 text-[11px] text-running-foreground">
+                                  :{p}
+                                </span>
+                              ))}
+                              <span>
+                                {r.changedCount === null ? '—' : r.changedCount > 0 ? `${r.changedCount} changed` : 'clean'}
                               </span>
                             </div>
-                            <p className="text-xs font-medium text-foreground truncate" title={sess.title}>
-                              {sess.title}
-                            </p>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                sessionProps.setActiveSession(sess);
-                                sessionProps.setTranscript([]);
-                                sessionProps.fetchSessionTranscript(sess.assistant, sess.id);
-                              }}
-                              title="Inspect read-only transcript log"
-                            >
-                              <MessageSquare size={12} />
-                              <span>Transcript</span>
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => onSelectTab(selected.branchName, 'sessions')}
-                              title="Go to Sessions"
-                            >
-                              <Terminal size={12} />
-                              <span>Sessions</span>
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   </Card>
-                )}
-
-                {/* Description Card */}
-                <Card className="p-5">
-                  <h3 className="mb-2 text-sm font-semibold text-foreground">Description</h3>
-                  {selected.description ? (
-                    <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{selected.description}</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No description provided.</p>
-                  )}
-                </Card>
-
-                {/* Repositories Card */}
-                <Card className="p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Repositories <span className="text-muted-foreground">({selected.repos.length})</span>
-                    </h3>
-                    {availableRepos.length > 0 && (
-                      <AddRepoPicker
-                        repos={availableRepos}
-                        disabled={addRepoLoading}
-                        onAdd={(repoPath: string) => {
-                          if (
-                            window.confirm(
-                              `Add repository "${repoName(repoPath)}" to this workspace?\nThis creates a new git worktree and re-runs analysis.`,
-                            )
-                          ) {
-                            void handleAddRepo(selected.branchName, repoPath);
-                          }
-                        }}
-                      />
-                    )}
-                  </div>
-                  <div className="divide-y divide-border">
-                    {repoRows.map((r) => (
-                      <div key={r.name} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                        <span
-                          className={cn(
-                            'h-2 w-2 shrink-0 rounded-full',
-                            r.changedCount === null ? 'bg-muted-foreground' : r.changedCount > 0 ? 'bg-warning' : 'bg-success',
-                          )}
-                          title={r.changedCount === null ? 'Status unknown' : r.changedCount > 0 ? 'Uncommitted changes' : 'Clean'}
-                        />
-                        <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">{r.name}</span>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {r.ports.map((p) => (
-                            <span key={p} className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-running-foreground">
-                              :{p}
-                            </span>
-                          ))}
-                          <span className="w-24 text-right text-xs text-muted-foreground">
-                            {r.changedCount === null ? '—' : r.changedCount > 0 ? `${r.changedCount} changed` : 'clean'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-[11px] text-muted-foreground">Per-repo git state and detected service ports.</p>
-                </Card>
-              </div>
-            )}
-            {subTab === 'sessions' && <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />}
-            {subTab === 'services' && <ServiceConsole ws={selected} />}
-            {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
-            {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
-            {subTab === 'plan' && <ImplementationPlan {...planProps} />}
-            {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
-          </TabsPanel>
-        </Tabs>
+                </div>
+              )}
+              {subTab === 'sessions' && <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />}
+              {subTab === 'services' && <ServiceConsole ws={selected} />}
+              {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
+              {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
+              {subTab === 'plan' && <ImplementationPlan {...planProps} />}
+              {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
+            </TabsPanel>
+          </Tabs>
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="flex flex-col h-full animate-fade-in w-full min-w-0">
+    <div className="flex flex-col h-full animate-fade-in w-full min-w-0 bg-background">
       {!selected ? (
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-md w-full">
-            <Card className="border-dashed p-0 shadow-sm">
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FolderGit2 />
-                  </EmptyMedia>
-                  <EmptyTitle>No workspace selected</EmptyTitle>
-                  <EmptyDescription>
-                    Select a workspace from the sidebar to inspect git changes, services, context, or launch AI assistants.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            </Card>
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderGit2 />
+                </EmptyMedia>
+                <EmptyTitle>No workspace selected</EmptyTitle>
+                <EmptyDescription>
+                  Select a workspace from the sidebar to inspect git changes, services, context, or launch AI assistants.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           </div>
         </div>
       ) : (
