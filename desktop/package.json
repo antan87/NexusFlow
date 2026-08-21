@@ -1,6 +1,6 @@
 {
   "name": "nexusflow-desktop",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "type": "module",
   "main": "main.js",
   "scripts": {
