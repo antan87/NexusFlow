@@ -49,6 +49,16 @@ vi.mock('./resources/service.js', async (importOriginal) => {
 vi.mock('./utils/detect-ai.js', () => ({
   detectAIAssistants: vi.fn().mockResolvedValue([])
 }));
+vi.mock('./utils/terminal-launch.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./utils/terminal-launch.js')>();
+  return {
+    ...actual,
+    launchWorkspaceTerminal: vi.fn().mockResolvedValue({
+      success: true,
+      command: 'claude --resume 0199a213-81c0-7800-8aa1-bbab2a035a54',
+    }),
+  };
+});
 vi.mock('./core/new-repo.js');
 vi.mock('./orchestration/index.js');
 

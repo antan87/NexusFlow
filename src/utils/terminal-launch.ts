@@ -106,7 +106,10 @@ export async function launchWorkspaceTerminal(
   options: TerminalLaunchOptions = {},
   platform = process.platform,
 ): Promise<{ success: boolean; command: string }> {
-  if (!path.isAbsolute(workspacePath)) {
+  const isAbsolute = platform === 'win32'
+    ? path.win32.isAbsolute(workspacePath)
+    : (path.posix.isAbsolute(workspacePath) || path.win32.isAbsolute(workspacePath));
+  if (!isAbsolute) {
     throw new Error('Workspace path must be an absolute directory.');
   }
 
