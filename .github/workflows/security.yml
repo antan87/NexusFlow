@@ -55,3 +55,12 @@ jobs:
 
       - name: Audit Root Dependencies
         run: npm audit --audit-level=critical
+
+      - name: Audit GUI Dependencies
+        run: npm audit --prefix gui --audit-level=critical
+
+      - name: Audit Desktop Dependencies
+        run: npm audit --prefix desktop --audit-level=critical
+
+      - name: Audit Extension Dependencies
+        run: npm audit --prefix extension --audit-level=critical
