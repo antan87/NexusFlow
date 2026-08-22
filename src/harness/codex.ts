@@ -7,12 +7,17 @@ import {
 } from "./interface.js";
 import { Pushable } from "./pushable.js";
 import type {
+  AuthStatus,
   HarnessEvent,
   NormalizedUsage,
   ResumeSpec,
+  SerializedError,
   StartSpec,
   WorkspaceRef,
 } from "./types.js";
+
+type Thread = ReturnType<Codex["startThread"]>;
+type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
 function serializeError(err: unknown): SerializedError {
   if (err instanceof Error) {
@@ -65,6 +70,23 @@ export class CodexAdapter implements HarnessAdapter {
     }
     const thread = this.client.resumeThread(spec.sessionId);
     return this.spawn(spec, thread);
+  }
+
+  async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
+    const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
+    // TODO(spike-7): Probe Codex CLI session/auth configuration
+    if (hasApiKey) {
+      return {
+        configured: true,
+        method: "api-key",
+        hasApiKeyFallback: true,
+      };
+    }
+    return {
+      configured: true,
+      method: "chatgpt-signin",
+      message: "Using Codex CLI authentication.",
+    };
   }
 
   async listSessions(_workspace: WorkspaceRef): Promise<SessionSummary[]> {

@@ -14,9 +14,11 @@ import {
 import { Pushable } from "./pushable.js";
 import type {
   ApprovalDecision,
+  AuthStatus,
   HarnessEvent,
   NormalizedUsage,
   ResumeSpec,
+  SerializedError,
   StartSpec,
   WorkspaceRef,
 } from "./types.js";
@@ -55,6 +57,32 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       resume: spec.sessionId,
       forkSession: spec.mode === "fork", // audit-preserving retries => mode:"fork"
     });
+  }
+
+  async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
+    const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+    const hasOauthToken = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+    // Tokens provisioned via `claude setup-token` (CLAUDE_CODE_OAUTH_TOKEN) report
+    // as subscription-oauth because they bill against the user's subscription plan.
+    if (hasOauthToken) {
+      return {
+        configured: true,
+        method: "subscription-oauth",
+        hasApiKeyFallback: hasApiKey,
+      };
+    }
+    if (hasApiKey) {
+      return {
+        configured: true,
+        method: "api-key",
+        hasApiKeyFallback: true,
+      };
+    }
+    return {
+      configured: false,
+      method: "unauthenticated",
+      message: "No Anthropic API key or Claude Code OAuth token detected.",
+    };
   }
 
   async listSessions(_workspace: WorkspaceRef): Promise<SessionSummary[]> {

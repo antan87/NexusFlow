@@ -1,5 +1,6 @@
 import type {
   ApprovalDecision,
+  AuthStatus,
   HarnessEvent,
   ResumeSpec,
   StartSpec,
@@ -9,7 +10,7 @@ import type {
 
 export type SessionSummary = {
   id: string;
-  updatedAt: Date;
+  updatedAt: string;
   title?: string;
 };
 
@@ -42,7 +43,7 @@ export interface HarnessAdapter {
   start(spec: StartSpec): Promise<SessionHandle>;
   resume(spec: ResumeSpec): Promise<SessionHandle>;
   /** Check engine authentication status (API key presence, OAuth tokens, session validity). */
-  authStatus?(workspace?: WorkspaceRef): Promise<AuthStatus>;
+  authStatus(workspace?: WorkspaceRef): Promise<AuthStatus>;
   /** Backed by Claude sessionStore. Throws for Codex (known asymmetry). */
   listSessions(workspace: WorkspaceRef): Promise<SessionSummary[]>;
 }
