@@ -63,7 +63,7 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
   const separator = path.delimiter;
   const extensions = process.platform === 'win32'
     ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : [''];
+    : [];
 
   for (const dir of pathValue.split(separator).filter(Boolean)) {
     const base = path.join(dir.replace(/^"|"$/g, ''), name);
