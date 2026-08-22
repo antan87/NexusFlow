@@ -60,15 +60,20 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
   const pathValue = env.PATH ?? env.Path ?? '';
   if (!pathValue) return null;
 
-  const separator = process.platform === 'win32' ? ';' : ':';
+  const separator = path.delimiter;
   const extensions = process.platform === 'win32'
     ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
     : [''];
 
   for (const dir of pathValue.split(separator).filter(Boolean)) {
     const base = path.join(dir.replace(/^"|"$/g, ''), name);
-    const candidates = [base, ...extensions.map((extension) => base + extension.toLowerCase())];
-    for (const candidate of candidates) {
+    const candidates = [
+      base,
+      ...extensions.map((extension) => base + (extension.startsWith('.') ? extension : `.${extension}`).toLowerCase()),
+      ...extensions.map((extension) => base + (extension.startsWith('.') ? extension : `.${extension}`).toUpperCase()),
+    ];
+    const uniqueCandidates = Array.from(new Set(candidates));
+    for (const candidate of uniqueCandidates) {
       try {
         if (fsSync.statSync(candidate).isFile()) return candidate;
       } catch {

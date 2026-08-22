@@ -170,13 +170,40 @@ export abstract class CliAdapterBase extends EventEmitter {
   }
 }
 
-// With shell:true on Windows, child.kill() only kills the shell wrapper,
-// so take the whole tree down via taskkill.
+// With shell:true or child subprocess trees, terminating a process requires killing
+// the whole tree. On Windows, taskkill /T /F handles this. On POSIX (Linux/macOS),
+// we send SIGTERM to the process group with a graceful escalation to SIGKILL.
 export function killTree(child: ChildProcess | null) {
   if (!child || child.killed || child.exitCode !== null || !child.pid) return;
+  const pid = child.pid;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
   } else {
-    child.kill('SIGTERM');
+    try {
+      // Attempt to terminate the entire process group if detached/leader
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // Already exited
+      }
+    }
+
+    // Grace period escalation to SIGKILL
+    const forceKillTimer = setTimeout(() => {
+      try {
+        if (!child.killed && child.exitCode === null) {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            child.kill('SIGKILL');
+          }
+        }
+      } catch {
+        // Already exited
+      }
+    }, 500);
+    forceKillTimer.unref?.();
   }
 }

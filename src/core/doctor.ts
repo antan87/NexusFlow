@@ -16,6 +16,7 @@ import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
+import { findExecutable } from '../agent/cliAvailability.js';
 
 import type { ProjectAnalysis } from '../types.js';
 
@@ -270,26 +271,43 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   }
 
   // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
-  const isWin = process.platform === 'win32';
-  const astMap: Record<string, string> = { claude: 'claude', codex: 'codex', antigravity: 'agy' };
+  const astMap: Record<string, string> = {
+    claude: 'claude',
+    codex: 'codex',
+    antigravity: 'agy',
+    copilot: 'copilot',
+    cursor: 'cursor-agent',
+  };
 
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
-      const bin = astMap[a.toLowerCase()];
-      if (bin) {
-        try {
-          const checkCmd = isWin ? 'where' : 'which';
-          const res = await execa(checkCmd, [bin], { reject: false });
-          if (res.exitCode !== 0) {
-            warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
-            checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: `CLI binary "${bin}" is not on PATH` });
-          } else {
-            checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
-          }
-        } catch {
-          // ignore
-        }
+      const bin = astMap[a.toLowerCase()] ?? a.toLowerCase();
+      const resolved = findExecutable(bin);
+      if (!resolved) {
+        warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
+        checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: `CLI binary "${bin}" is not on PATH` });
+      } else {
+        checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
       }
+    }
+  }
+
+  // ── 8. System & OS Environment ──────────────────────────────────────────
+  const gitBin = findExecutable('git');
+  if (gitBin) {
+    checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+  } else {
+    errors.push('git is not found on PATH. Git is required for workspace operations.');
+    checks.push({ category: 'Environment', name: 'git', status: 'fail', message: 'git is not on PATH' });
+  }
+
+  if (process.platform === 'linux') {
+    const xdgOpen = findExecutable('xdg-open');
+    if (xdgOpen) {
+      checks.push({ category: 'Environment', name: 'xdg-utils', status: 'pass', message: 'xdg-open is available for desktop integration' });
+    } else {
+      warnings.push('xdg-open is not installed. Installing xdg-utils is recommended for opening browsers and editors on Linux.');
+      checks.push({ category: 'Environment', name: 'xdg-utils', status: 'warn', message: 'xdg-open not found (install xdg-utils)' });
     }
   }
 

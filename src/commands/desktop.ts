@@ -58,11 +58,12 @@ export async function desktopCommand(): Promise<void> {
   console.log(chalk.dim('Launching the desktop app…'));
 
   // The Electron app spawns the backend from ../dist, so the CLI must be built.
-  const child = spawn('npm', ['start'], {
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const child = spawn(npmCmd, ['start'], {
     cwd: desktopDir,
     detached: true,
     stdio: 'ignore',
-    shell: process.platform === 'win32', // npm is npm.cmd on Windows
+    shell: false,
   });
 
   child.on('error', (err) => {
