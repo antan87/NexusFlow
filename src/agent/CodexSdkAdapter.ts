@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import * as path from 'node:path';
 import { getAdapter } from '../harness/index.js';
 import type { HarnessAdapter, SessionHandle } from '../harness/interface.js';
+import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 
@@ -29,7 +30,8 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
       return;
     }
 
-    const permissionMode = executionProfile === 'workspace-write' ? 'acceptEdits' : 'default';
+    const permissionMode: PermissionMode =
+      executionProfile === 'workspace-write' ? 'acceptEdits' : 'default';
     const workspaceId = path.basename(this.cwd);
 
     if (!this.handle) {
