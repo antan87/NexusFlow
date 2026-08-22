@@ -23,6 +23,17 @@ import type {
 
 type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
+function serializeError(err: unknown): SerializedError {
+  if (err instanceof Error) {
+    return {
+      message: err.message || "Unknown error",
+      name: err.name,
+      stack: err.stack,
+    };
+  }
+  return { message: String(err) };
+}
+
 export class ClaudeCodeAdapter implements HarnessAdapter {
   readonly vendor = "claude-code" as const;
 
@@ -75,6 +86,10 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       rejectId = rej;
     });
 
+    if (spec.prompt !== undefined && spec.prompt.length > 0) {
+      userInput.push({ type: "user", prompt: spec.prompt });
+    }
+
     // Approval bridge: canUseTool callback ↔ approval_required event + respondToApproval()
     const canUseTool: CanUseTool = async (_toolName, _input, { signal }) => {
       const requestId = randomUUID();
@@ -126,6 +141,11 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       respondToApproval: (requestId, decision) =>
         approvals.get(requestId)?.(decision),
       interrupt: async () => abort.abort(),
+      dispose: async () => {
+        abort.abort();
+        userInput.end();
+        out.end();
+      },
     };
   }
 
@@ -167,10 +187,9 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       })) {
         this.mapMessage(msg, out, args);
       }
-      out.end();
     } catch (err) {
-      args.rejectId(err as Error); // sessionId() must not hang on pre-init failure
-      out.push({ type: "turn_failed", error: err as Error, fatal: true });
+      args.rejectId(err instanceof Error ? err : new Error(String(err))); // sessionId() must not hang on pre-init failure
+      out.push({ type: "turn_failed", error: serializeError(err), fatal: true });
       out.end();
     }
   }
@@ -192,10 +211,14 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         }
         break;
 
-      case "stream_event":
+      case "stream_event": {
         // Partial assistant text deltas (requires includePartialMessages).
-        // TODO(spike-1): confirm delta shape on pinned >=0.3.234.
+        const event = (msg as any).event;
+        if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta" && event.delta.text) {
+          out.push({ type: "text_delta", text: event.delta.text });
+        }
         break;
+      }
 
       case "assistant":
         for (const block of (msg as any).message?.content ?? []) {
@@ -238,7 +261,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         } else {
           out.push({
             type: "turn_failed",
-            error: new Error(`claude turn failed: ${msg.subtype}`),
+            error: { message: `claude turn failed: ${msg.subtype}` },
             fatal: msg.subtype === "error_during_execution",
           });
         }

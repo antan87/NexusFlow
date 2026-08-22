@@ -22,7 +22,7 @@ export interface SessionHandle {
    */
   sessionId(): Promise<string>;
 
-  /** Terminates after terminal event (turn_completed / turn_failed). */
+  /** Terminates after explicit dispose() or fatal unrecoverable error. Multi-turn stream stays alive across turns. */
   events: AsyncIterable<HarnessEvent>;
 
   /** Queue a follow-up user turn. One in-flight turn per handle (adapters serialize). */
@@ -32,12 +32,17 @@ export interface SessionHandle {
   respondToApproval(requestId: string, decision: ApprovalDecision): void;
 
   interrupt(): Promise<void>;
+
+  /** Closes input queues, cancels active turns, and terminates the event stream. */
+  dispose(): Promise<void>;
 }
 
 export interface HarnessAdapter {
   readonly vendor: Vendor;
   start(spec: StartSpec): Promise<SessionHandle>;
   resume(spec: ResumeSpec): Promise<SessionHandle>;
+  /** Check engine authentication status (API key presence, OAuth tokens, session validity). */
+  authStatus?(workspace?: WorkspaceRef): Promise<AuthStatus>;
   /** Backed by Claude sessionStore. Throws for Codex (known asymmetry). */
   listSessions(workspace: WorkspaceRef): Promise<SessionSummary[]>;
 }
@@ -49,5 +54,11 @@ export class UnsupportedOperationError extends Error {
     reason: string,
   ) {
     super(`[${vendor}] ${operation} unsupported: ${reason}`);
+  }
+}
+
+export class AuthRequiredError extends Error {
+  constructor(public readonly vendor: Vendor, message: string) {
+    super(`[${vendor}] Authentication required: ${message}`);
   }
 }

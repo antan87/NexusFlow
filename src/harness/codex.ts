@@ -14,8 +14,25 @@ import type {
   WorkspaceRef,
 } from "./types.js";
 
-type Thread = ReturnType<Codex["startThread"]>;
-type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
+function serializeError(err: unknown): SerializedError {
+  if (err instanceof Error) {
+    return {
+      message: err.message || "Unknown error",
+      name: err.name,
+      stack: err.stack,
+    };
+  }
+  return { message: String(err) };
+}
+
+function mapPatchKind(kind: string | undefined): "write" | "edit" | "delete" | string {
+  switch (kind) {
+    case "add": return "write";
+    case "update": return "edit";
+    case "delete": return "delete";
+    default: return kind ?? "edit";
+  }
+}
 
 export class CodexAdapter implements HarnessAdapter {
   readonly vendor = "codex" as const;
@@ -65,6 +82,7 @@ export class CodexAdapter implements HarnessAdapter {
     // Serial turn queue: Codex threads support sequential runs, not concurrent ones.
     const turnQueue: string[] = [];
     let draining = false;
+    let disposed = false;
 
     let resolveId!: (s: string) => void;
     let rejectId!: (e: Error) => void;
@@ -74,10 +92,10 @@ export class CodexAdapter implements HarnessAdapter {
     });
 
     const drain = async () => {
-      if (draining) return;
+      if (draining || disposed) return;
       draining = true;
       try {
-        while (turnQueue.length > 0) {
+        while (turnQueue.length > 0 && !disposed) {
           const prompt = turnQueue.shift()!;
           await this.runTurn(thread, prompt, out, spec, resolveId, rejectId);
         }
@@ -96,6 +114,7 @@ export class CodexAdapter implements HarnessAdapter {
       sessionId: () => sessionIdPromise,
       events: out,
       send: (prompt) => {
+        if (disposed) return;
         turnQueue.push(prompt);
         void drain();
       },
@@ -104,6 +123,11 @@ export class CodexAdapter implements HarnessAdapter {
       respondToApproval: (_requestId, _decision) => {},
       interrupt: async () => {
         // TODO(spike-5): thread.interrupt()/abort support in pinned SDK version.
+      },
+      dispose: async () => {
+        disposed = true;
+        turnQueue.length = 0;
+        out.end();
       },
     };
   }
@@ -125,8 +149,10 @@ export class CodexAdapter implements HarnessAdapter {
         }
       }
     } catch (err) {
-      rejectId(err as Error);
-      out.push({ type: "turn_failed", error: err as Error, fatal: true });
+      args_reject: {
+        rejectId(err instanceof Error ? err : new Error(String(err)));
+      }
+      out.push({ type: "turn_failed", error: serializeError(err), fatal: true });
       out.end();
     }
   }
@@ -153,13 +179,13 @@ export class CodexAdapter implements HarnessAdapter {
 
       case "turn.completed":
         out.push({ type: "turn_completed", usage: this.normalizeUsage((ev as any).usage) });
-        out.end();
+        // Streams stay open across consecutive turns until explicit dispose()
         break;
 
       case "turn.failed":
         out.push({
           type: "turn_failed",
-          error: new Error((ev as any).error?.message ?? "codex turn failed"),
+          error: { message: (ev as any).error?.message ?? "codex turn failed" },
           fatal: true,
         });
         out.end();
@@ -175,8 +201,7 @@ export class CodexAdapter implements HarnessAdapter {
       case "file_change":
         out.push({
           type: "file_changed",
-          // item.changes: [{ path, kind }] — kind maps write/edit/delete
-          kind: item.changes?.[0]?.kind ?? "edit",
+          kind: mapPatchKind(item.changes?.[0]?.kind),
           paths: item.changes?.map((c: any) => c.path) ?? [],
         });
         break;

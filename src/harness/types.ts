@@ -74,13 +74,30 @@ export type ResumeSpec = Omit<StartSpec, "prompt"> & {
   mode: ResumeMode;
 };
 
+export type SerializedError = {
+  message: string;
+  name?: string;
+  stack?: string;
+};
+
+export type AuthMethod = "api-key" | "subscription-oauth" | "chatgpt-signin";
+
+export type AuthStatus = {
+  configured: boolean;
+  method?: AuthMethod;
+  email?: string;
+  hasApiKeyFallback?: boolean;
+  message?: string;
+};
+
 export type HarnessEvent =
   | { type: "session_started"; sessionId: string }
+  | { type: "text_delta"; text: string }
   | { type: "assistant_message"; text: string }
   | { type: "tool_requested"; callId?: string; tool: string; input?: unknown }
   | { type: "tool_completed"; callId?: string; ok: boolean; outputSummary?: string }
   | { type: "file_changed"; kind: "write" | "edit" | "delete" | string; paths: string[] }
   | { type: "approval_required"; requestId: string; tool: string; input?: unknown }
   | { type: "turn_completed"; usage: NormalizedUsage }
-  | { type: "turn_failed"; error: Error; fatal: boolean }
+  | { type: "turn_failed"; error: SerializedError; fatal: boolean }
   | { type: "raw"; vendor: Vendor; payload: unknown };
