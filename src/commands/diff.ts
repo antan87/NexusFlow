@@ -13,6 +13,8 @@ import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 interface DiffOptions {
   /** Restrict the diff to these repos (by directory name). */
   repo?: string[];
+  /** Output raw JSON format. */
+  json?: boolean;
 }
 
 /**
@@ -22,13 +24,15 @@ interface DiffOptions {
  * @param options - Optional flags.
  */
 export async function diffCommand(workspaceArg?: string, options?: DiffOptions): Promise<void> {
-  console.log(chalk.bold.cyan('\n🔍 NexusFlow — Workspace Diff Summary\n'));
-
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace to view diff:');
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
+    if (options?.json) {
+      console.log(JSON.stringify({ error: 'Failed to load workspace configuration' }));
+      return;
+    }
     console.error(chalk.red('✖ Failed to load workspace configuration.'));
     return;
   }
@@ -37,9 +41,20 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
   try {
     results = await getWorkspaceDiffReport(workspacePath, options?.repo);
   } catch (error) {
+    if (options?.json) {
+      console.log(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
     console.error(chalk.red(`✖ ${error instanceof Error ? error.message : String(error)}`));
     return;
   }
+
+  if (options?.json) {
+    console.log(JSON.stringify(results, null, 2));
+    return;
+  }
+
+  console.log(chalk.bold.cyan('\n🔍 NexusFlow — Workspace Diff Summary\n'));
 
   if (results.length === 0) {
     console.log(chalk.green('✅ All repositories are clean and pushed.\n'));
