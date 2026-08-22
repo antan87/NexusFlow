@@ -60,19 +60,28 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
   const pathValue = env.PATH ?? env.Path ?? '';
   if (!pathValue) return null;
 
-  const separator = process.platform === 'win32' ? ';' : ':';
+  const separator = path.delimiter;
   const extensions = process.platform === 'win32'
     ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : [''];
+    : [];
 
   for (const dir of pathValue.split(separator).filter(Boolean)) {
     const base = path.join(dir.replace(/^"|"$/g, ''), name);
-    const candidates = [base, ...extensions.map((extension) => base + extension.toLowerCase())];
+    const candidates = [
+      base,
+      ...extensions.map((ext) => base + (ext.startsWith('.') ? ext : `.${ext}`).toLowerCase()),
+    ];
     for (const candidate of candidates) {
       try {
-        if (fsSync.statSync(candidate).isFile()) return candidate;
+        const stat = fsSync.statSync(candidate);
+        if (stat.isFile()) {
+          if (process.platform !== 'win32') {
+            fsSync.accessSync(candidate, fsSync.constants.X_OK);
+          }
+          return candidate;
+        }
       } catch {
-        // Not here; keep looking.
+        // Not here or not executable; keep looking.
       }
     }
   }
