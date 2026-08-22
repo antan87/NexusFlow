@@ -24,8 +24,12 @@ export type NormalizedUsage = {
   outputTokens: number;
   /** cache reads + cache creation, summed */
   cachedInputTokens?: number;
-  costUsd?: number;
+  /** Client-side ESTIMATE of equivalent API cost. Never authoritative. Never use for chargeback. */
+  costUsdEstimate?: number;
 };
+
+/** Derived from auth method: plan-included sessions render tokens prominently and suppress or label dollar estimates. */
+export type BillingMode = "per-token" | "plan-included";
 
 export type ApprovalDecision =
   | { behavior: "allow"; updatedInput?: unknown }
