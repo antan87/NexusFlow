@@ -23,9 +23,9 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -55,9 +55,9 @@ jobs:
       id-token: write   # npm trusted publishing and provenance
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
           registry-url: 'https://registry.npmjs.org/'
@@ -97,9 +97,9 @@ jobs:
       id-token: write   # Azure OIDC
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -144,9 +144,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -166,7 +166,7 @@ jobs:
           "$hash  NexusFlowSetup.exe" | Out-File -FilePath desktop/dist/NexusFlowSetup.exe.sha256 -Encoding ascii
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: nexusflow-setup
           path: |
@@ -184,13 +184,13 @@ jobs:
       contents: write
     steps:
       - name: Download installer artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: nexusflow-setup
           path: dist
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release v${{ needs.guard.outputs.version }}
