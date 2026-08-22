@@ -10,6 +10,7 @@ import { execa } from 'execa';
 import { createWorktree, removeWorktree } from './worktree.js';
 import { loadFeatureConfig, saveFeatureConfig } from './workspace.js';
 import { refreshWorkspace } from './refresh.js';
+import { acquireLock, type ReleaseLock } from './locks.js';
 import { detectDefaultBranch, isValidBranchName } from '../utils/git.js';
 import { isInPlace } from '../utils/feature.js';
 import type { Feature, IsolatedRepoInfo } from '../types.js';
@@ -171,19 +172,37 @@ export async function isolateWorkspaceRepo(
       console.warn(`Warning: failed to update .gitignore for isolated repo ${repoName}:`, error);
     }
 
-    // 3. Atomically update manifest using freshest state
-    const freshFeature = (await loadFeatureConfig(workspacePath)) ?? feature;
-    if (!freshFeature.isolatedRepos) {
-      freshFeature.isolatedRepos = {};
+    // 3. Atomically update manifest using freshest state with lock
+    const lockPath = path.join(workspacePath, '.isolate.lock');
+    let releaseLock: ReleaseLock | null = null;
+    try {
+      releaseLock = await acquireLock(lockPath, {
+        staleMs: 10_000,
+        timeoutMs: 15_000,
+        timeoutMessage: 'Timed out acquiring lock to update workspace manifest',
+      });
+    } catch {
+      // If locking fails, proceed best-effort
     }
-    const isolatedInfo: IsolatedRepoInfo = {
-      worktreePath,
-      branchName,
-      baseBranch,
-      isolatedAt: new Date().toISOString(),
-    };
-    freshFeature.isolatedRepos[repoName] = isolatedInfo;
-    await saveFeatureConfig(workspacePath, freshFeature);
+
+    try {
+      const freshFeature = (await loadFeatureConfig(workspacePath)) ?? feature;
+      if (!freshFeature.isolatedRepos) {
+        freshFeature.isolatedRepos = {};
+      }
+      const isolatedInfo: IsolatedRepoInfo = {
+        worktreePath,
+        branchName,
+        baseBranch,
+        isolatedAt: new Date().toISOString(),
+      };
+      freshFeature.isolatedRepos[repoName] = isolatedInfo;
+      await saveFeatureConfig(workspacePath, freshFeature);
+    } finally {
+      if (releaseLock) {
+        await releaseLock().catch(() => {});
+      }
+    }
 
     // 4. Refresh workspace context files (.code-workspace, AGENTS.md, etc.)
     try {
