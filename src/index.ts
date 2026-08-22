@@ -466,7 +466,8 @@ adapterCmd.action(runAction(adapterListCommand));
 // Schedule command group
 const scheduleCmd = program
   .command('schedule')
-  .description('Manage recurring workspace jobs (sync/refresh) — jobs run while a NexusFlow server is active');
+  .description('Manage recurring workspace jobs (sync/refresh) — jobs run while a NexusFlow server is active')
+  .option('--json', 'Output in JSON format');
 
 scheduleCmd
   .command('add')
