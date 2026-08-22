@@ -3,7 +3,7 @@
  * Minimal entry point for the desktop app's embedded backend: starts the Hono
  * dashboard server directly, without the CLI layer (commander/pm2/inquirer and
  * all the command modules). The Electron shell spawns this and parses the
- * "http://localhost:<port>" line from stdout.
+ * explicit "NEXUSFLOW_READY_PORT=<port>" token from stdout.
  *
  * Running the full CLI (`index.js ui`) here is both unnecessary and fragile —
  * under Electron-as-Node the CLI's commander import can resolve to pm2's

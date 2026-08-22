@@ -26,4 +26,10 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.8.0-rc.1', '1.8.0')).toBe(true);
     expect(isNewerVersion('1.8.0', '1.8.0-rc.1')).toBe(false);
   });
+
+  it('safely handles empty, 0.0.0, or unknown fallback version strings', () => {
+    expect(isNewerVersion('0.0.0', '2.5.2')).toBe(false);
+    expect(isNewerVersion('unknown', '2.5.2')).toBe(false);
+    expect(isNewerVersion('', '2.5.2')).toBe(false);
+  });
 });

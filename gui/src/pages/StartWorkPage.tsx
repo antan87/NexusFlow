@@ -315,7 +315,12 @@ export function StartWorkPage() {
             </div>
           )}
           {progress.status === 'running' && (
-            <p className="text-sm text-muted-foreground">This can take a moment for large repositories.</p>
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-muted-foreground">This can take a moment for large repositories.</p>
+              <Button variant="outline" size="sm" onClick={reset}>
+                Cancel creation
+              </Button>
+            </div>
           )}
         </div>
       </div>

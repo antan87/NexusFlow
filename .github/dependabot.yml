@@ -76,6 +76,11 @@ updates:
     open-pull-requests-limit: 5
     reviewers:
       - "antan87"
+    ignore:
+      - dependency-name: "actions/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "softprops/*"
+        update-types: ["version-update:semver-major"]
     groups:
       github-actions:
         patterns:

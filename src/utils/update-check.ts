@@ -45,7 +45,7 @@ export function getCurrentVersion(): string {
       const packageJsonPath = path.join(currentDir, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
         const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-        return pkg.version;
+        if (pkg.version) return pkg.version;
       }
       const parentDir = path.dirname(currentDir);
       if (parentDir === currentDir) break;
@@ -54,7 +54,7 @@ export function getCurrentVersion(): string {
   } catch {
     // Fallback if filesystem access fails
   }
-  return '0.1.5'; // Sensible fallback (active release)
+  return '0.0.0';
 }
 
 /**
@@ -144,7 +144,9 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
  * date". A stable release supersedes a prerelease of the same numeric core.
  */
 export function isNewerVersion(current: string, latest: string): boolean {
-  if (current === latest) return false;
+  if (!current || !latest || current === latest || current === '0.0.0' || current === 'unknown') {
+    return false;
+  }
 
   const core = (v: string): number[] =>
     v.trim().replace(/^v/, '').split('-')[0].split('.').map((n) => Number.parseInt(n, 10) || 0);
@@ -200,7 +202,14 @@ export interface ToolUpdateStatus {
   updateCmd: string;
 }
 
+let cachedToolsStatus: { timestamp: number; data: ToolUpdateStatus[] } | null = null;
+const TOOLS_CACHE_TTL = 60_000; // 1 minute
+
 export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]> {
+  if (!force && cachedToolsStatus && Date.now() - cachedToolsStatus.timestamp < TOOLS_CACHE_TTL) {
+    return cachedToolsStatus.data;
+  }
+
   const currentVersion = getCurrentVersion();
   const tools = [
     {
@@ -211,7 +220,6 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
       updateCmd: 'npm install -g @mrpatronz/nexusflow',
       getCurrent: async () => currentVersion,
     },
-
     {
       id: 'antigravity',
       name: 'Antigravity CLI',
@@ -248,46 +256,47 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
     }
   ];
 
-  const results: ToolUpdateStatus[] = [];
+  const results = await Promise.all(
+    tools.map(async (t): Promise<ToolUpdateStatus> => {
+      let installed = false;
+      let currentVal = '';
+      let latestVal = '';
 
-  for (const t of tools) {
-    let installed = false;
-    let currentVal = '';
-    let latestVal = '';
-    
-    try {
-      currentVal = await t.getCurrent();
-      installed = currentVal !== '';
-    } catch {}
-
-    if (installed && t.npmPackage) {
       try {
-        const response = await fetch(`https://registry.npmjs.org/${t.npmPackage}/latest`, {
-          signal: AbortSignal.timeout(2000),
-        });
-        if (response.ok) {
-          const data = await response.json() as { version: string };
-          latestVal = data.version;
-        }
+        currentVal = await t.getCurrent();
+        installed = currentVal !== '';
       } catch {}
-    }
 
-    if (!latestVal) {
-      latestVal = currentVal || '1.0.0';
-    }
+      if (installed && t.npmPackage) {
+        try {
+          const response = await fetch(`https://registry.npmjs.org/${t.npmPackage}/latest`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (response.ok) {
+            const data = await response.json() as { version: string };
+            latestVal = data.version;
+          }
+        } catch {}
+      }
 
-    results.push({
-      id: t.id,
-      name: t.name,
-      command: t.command,
-      installed,
-      currentVersion: currentVal || 'Not Installed',
-      latestVersion: latestVal,
-      updateAvailable: installed && isNewerVersion(currentVal, latestVal),
-      updateCmd: t.updateCmd,
-    });
-  }
+      if (!latestVal) {
+        latestVal = currentVal || '1.0.0';
+      }
 
+      return {
+        id: t.id,
+        name: t.name,
+        command: t.command,
+        installed,
+        currentVersion: currentVal || 'Not Installed',
+        latestVersion: latestVal,
+        updateAvailable: installed && isNewerVersion(currentVal, latestVal),
+        updateCmd: t.updateCmd,
+      };
+    })
+  );
+
+  cachedToolsStatus = { timestamp: Date.now(), data: results };
   return results;
 }
 
