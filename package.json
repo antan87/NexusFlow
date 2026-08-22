@@ -47,7 +47,7 @@
   "author": "MrPatronHogia",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
