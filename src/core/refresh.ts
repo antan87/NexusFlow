@@ -12,6 +12,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
+import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import type { WorkspaceContext } from '../types.js';
@@ -58,7 +59,8 @@ export async function refreshWorkspace(
     );
   }
 
-  const allRepos = await resolveRepoInfos(feature.repos);
+  const resolvedPaths = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));
+  const allRepos = await resolveRepoInfos(resolvedPaths);
 
   const { analysis, analyzed, reused } = await analyzeAllReposCached(
     allRepos,
@@ -70,23 +72,27 @@ export async function refreshWorkspace(
 
   await generateContextFiles(ctx, feature.assistants, workspacePath);
 
-  // Ensure .code-workspace and .vscode/settings.json exist
+  // Ensure .code-workspace and .vscode/settings.json exist and stay updated
   try {
     const workspaceName = path.basename(workspacePath);
     const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
-    try {
-      await fs.access(codeWorkspacePath);
-    } catch {
-      const inPlace = feature.mode === 'in-place';
-      const codeWorkspace = {
-        folders: [
-          { path: '.', name: `${workspaceName} (workspace)` },
-          ...allRepos.map((repo) => ({ path: inPlace ? repo.path : repo.name, name: repo.name })),
-        ],
-        settings: { 'search.useIgnoreFiles': false },
-      };
-      await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
-    }
+    const inPlace = feature.mode === 'in-place';
+    const codeWorkspace = {
+      folders: [
+        { path: '.', name: `${workspaceName} (workspace)` },
+        ...allRepos.map((repo) => {
+          const isIsolated = Boolean(
+            feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path],
+          );
+          return {
+            path: inPlace && !isIsolated ? repo.path : repo.name,
+            name: repo.name,
+          };
+        }),
+      ],
+      settings: { 'search.useIgnoreFiles': false },
+    };
+    await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
 
     const vscodeDir = path.join(workspacePath, '.vscode');
     const settingsPath = path.join(vscodeDir, 'settings.json');

@@ -1362,7 +1362,61 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(data.customInstructions).toContain('Plan, Implement, Review');
       });
 
+      it('POST /api/workspace/:id/isolate isolates a repository', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+        });
 
+        vi.mocked(workspace.isolateWorkspaceRepo).mockResolvedValue({
+          repoName: 'my-repo',
+          sourcePath: '/dev/my-repo',
+          worktreePath: '/dev/workspaces/my-ws/my-repo',
+          branchName: 'feat/my-repo-ws',
+          baseBranch: 'main',
+          alreadyIsolated: false,
+        });
+
+        const response = await app.request('/api/workspace/my-ws/isolate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: 'my-repo', branchName: 'feat/my-repo-ws' }),
+        });
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.success).toBe(true);
+        expect(data.repoName).toBe('my-repo');
+        expect(data.branchName).toBe('feat/my-repo-ws');
+        expect(workspace.isolateWorkspaceRepo).toHaveBeenCalledWith(
+          path.resolve('/dev/workspaces', 'my-ws'),
+          'my-repo',
+          { branchName: 'feat/my-repo-ws', baseBranch: undefined },
+        );
+      });
+
+      it('POST /api/workspace/:id/isolate requires repo parameter', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+        });
+
+        const response = await app.request('/api/workspace/my-ws/isolate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+
+        expect(response.status).toBe(400);
+        const data = await response.json();
+        expect(data.error).toContain('Missing "repo" parameter');
+      });
     });
   });
 

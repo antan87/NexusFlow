@@ -204,6 +204,18 @@ export interface Project {
  */
 export type WorkspaceMode = 'worktree' | 'in-place';
 
+/** Metadata for a repository dynamically isolated into a worktree on-demand. */
+export interface IsolatedRepoInfo {
+  /** Absolute path to the isolated worktree directory. */
+  worktreePath: string;
+  /** Git branch name checked out in this worktree. */
+  branchName: string;
+  /** Base branch the feature branch was created from, if known. */
+  baseBranch?: string;
+  /** ISO-8601 timestamp of when isolation occurred. */
+  isolatedAt: string;
+}
+
 /** A feature workspace that spans one or more repos. */
 export interface Feature {
   /** Unique identifier — the git branch name (worktree mode) or slugified workspace name (in-place mode). */
@@ -232,6 +244,12 @@ export interface Feature {
    * out instead of {@link branchName}). Absent for repos on the feature branch.
    */
   repoBranches?: Record<string, string>;
+
+  /**
+   * For in-place features, repos that have been dynamically isolated into
+   * dedicated worktrees on-demand (keyed by repo directory name).
+   */
+  isolatedRepos?: Record<string, IsolatedRepoInfo>;
 
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];

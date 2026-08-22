@@ -11,7 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import type { NexusFlowConfig } from '../types.js';
-import { loadFeatureConfig } from '../core/workspace.js';
+import { loadFeatureConfig, isolateWorkspaceRepo } from '../core/workspace.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { syncWorkspace } from '../core/sync.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
@@ -382,6 +382,45 @@ export const tools: NexusFlowTool[] = [
         return text(tail || '(empty log)');
       } catch (error: any) {
         return errorResult(`Error reading logs: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'isolate_repo',
+    description:
+      'Dynamically isolate a repository in an in-place workspace into a dedicated worktree before writing code. This creates a dedicated feature branch and worktree directory so the repository default/main branch remains clean and untouched.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: {
+          type: 'string',
+          description: 'Name or path of the repository to isolate.',
+        },
+        branchName: {
+          type: 'string',
+          description: 'Optional feature branch name to create/checkout. Defaults to feat/<repo>-<workspaceId>.',
+        },
+        baseBranch: {
+          type: 'string',
+          description: 'Optional base branch to branch off. Defaults to repository default branch.',
+        },
+        ...workspaceIdProp,
+      },
+      required: ['repo'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const repoName = String(args.repo || '').trim();
+        if (!repoName) return errorResult('Repository name is required.');
+        const result = await isolateWorkspaceRepo(ctx.workspacePath, repoName, {
+          branchName: args.branchName ? String(args.branchName) : undefined,
+          baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
+        });
+        return json(result);
+      } catch (error: any) {
+        return errorResult(`Error isolating repository: ${error.message}`);
       }
     },
   }
