@@ -21,6 +21,8 @@ import type {
   WorkspaceRef,
 } from "./types.js";
 
+type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
+
 export class ClaudeCodeAdapter implements HarnessAdapter {
   readonly vendor = "claude-code" as const;
 
@@ -57,7 +59,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   // ── internals ──────────────────────────────────────────────────────────
 
   private spawn(
-    spec: StartSpec & { prompt?: string },
+    spec: BaseSpec,
     overrides: Partial<Options> = {},
   ): SessionHandle {
     const out = new Pushable<HarnessEvent>();
@@ -85,7 +87,19 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       // TODO(policy): auto-deny on timeout so handles never hang forever —
       // pairs with the orphaned-session startup sweep.
       return await new Promise((resolve) => {
-        approvals.set(requestId, resolve);
+        approvals.set(requestId, (decision: ApprovalDecision) => {
+          if (decision.behavior === "allow") {
+            resolve({
+              behavior: "allow",
+              updatedInput: decision.updatedInput as Record<string, unknown> | undefined,
+            });
+          } else {
+            resolve({
+              behavior: "deny",
+              message: decision.message,
+            });
+          }
+        });
         signal?.addEventListener("abort", () =>
           resolve({ behavior: "deny", message: "interrupted" }),
         );
@@ -116,7 +130,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   private async pump(args: {
-    spec: StartSpec & { prompt?: string };
+    spec: BaseSpec;
     overrides: Partial<Options>;
     userInput: Pushable<{ type: "user"; prompt: string }>;
     out: Pushable<HarnessEvent>;
@@ -150,7 +164,6 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       for await (const msg of query({
         prompt: userInput as any,
         options,
-        abortController: undefined, // TODO: wire args.signal once version supports passing it here
       })) {
         this.mapMessage(msg, out, args);
       }
@@ -168,7 +181,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     args: {
       resolveId: (s: string) => void;
       rejectId: (e: Error) => void;
-      spec: StartSpec;
+      spec: BaseSpec;
     },
   ): void {
     switch (msg.type) {
@@ -233,7 +246,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       }
     }
 
-    if ((args.spec as StartSpec).debugMirrorRaw) {
+    if (args.spec.debugMirrorRaw) {
       out.push({ type: "raw", vendor: "claude-code", payload: msg });
     }
   }

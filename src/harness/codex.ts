@@ -15,6 +15,7 @@ import type {
 } from "./types.js";
 
 type Thread = ReturnType<Codex["startThread"]>;
+type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
 export class CodexAdapter implements HarnessAdapter {
   readonly vendor = "codex" as const;
@@ -59,7 +60,7 @@ export class CodexAdapter implements HarnessAdapter {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  private spawn(spec: StartSpec & { prompt?: string }, thread: Thread): SessionHandle {
+  private spawn(spec: BaseSpec, thread: Thread): SessionHandle {
     const out = new Pushable<HarnessEvent>();
     // Serial turn queue: Codex threads support sequential runs, not concurrent ones.
     const turnQueue: string[] = [];
@@ -111,12 +112,12 @@ export class CodexAdapter implements HarnessAdapter {
     thread: Thread,
     prompt: string,
     out: Pushable<HarnessEvent>,
-    spec: StartSpec,
+    spec: BaseSpec,
     resolveId: (s: string) => void,
     rejectId: (e: Error) => void,
   ): Promise<void> {
     try {
-      const run = thread.runStreamed(prompt);
+      const run = await thread.runStreamed(prompt);
       for await (const ev of run.events) {
         this.mapEvent(ev as any, out, resolveId);
         if (spec.debugMirrorRaw) {
