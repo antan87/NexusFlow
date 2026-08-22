@@ -5,7 +5,7 @@
 
 import * as path from 'node:path';
 
-import type { Feature, WorkspaceMode } from '../types.js';
+import type { Feature, WorkspaceMode, IsolatedRepoInfo } from '../types.js';
 
 /** The mode assumed for manifests written before {@link WorkspaceMode} existed. */
 export const DEFAULT_WORKSPACE_MODE: WorkspaceMode = 'worktree';
@@ -29,6 +29,19 @@ export function isInPlace(feature: Feature): boolean {
   return feature.mode === 'in-place';
 }
 
+function getIsolatedRepo(feature: Feature, repoNameOrPath: string): IsolatedRepoInfo | undefined {
+  if (!feature.isolatedRepos) return undefined;
+  const direct = feature.isolatedRepos[repoNameOrPath] ?? feature.isolatedRepos[path.basename(repoNameOrPath)];
+  if (direct) return direct;
+  const target = repoNameOrPath.toLowerCase();
+  const baseTarget = path.basename(repoNameOrPath).toLowerCase();
+  const key = Object.keys(feature.isolatedRepos).find((k) => {
+    const lk = k.toLowerCase();
+    return lk === target || lk === baseTarget;
+  });
+  return key ? feature.isolatedRepos[key] : undefined;
+}
+
 /**
  * Resolves where one of a feature's repos actually lives on disk — THE single
  * source of truth for the mode rule. Worktree repos live inside the workspace
@@ -47,9 +60,7 @@ export function resolveFeatureRepoPath(
   repoPath: string,
 ): string {
   if (isInPlace(feature)) {
-    const repoName = path.basename(repoPath);
-    const isolated =
-      feature.isolatedRepos?.[repoName] ?? feature.isolatedRepos?.[repoPath];
+    const isolated = getIsolatedRepo(feature, repoPath);
     if (isolated?.worktreePath) {
       return path.resolve(isolated.worktreePath);
     }
@@ -67,10 +78,7 @@ export function resolveFeatureRepoPath(
  */
 export function isRepoIsolated(feature: Feature, repoNameOrPath: string): boolean {
   if (!isInPlace(feature)) return true;
-  const repoName = path.basename(repoNameOrPath);
-  return Boolean(
-    feature.isolatedRepos?.[repoName] ?? feature.isolatedRepos?.[repoNameOrPath],
-  );
+  return Boolean(getIsolatedRepo(feature, repoNameOrPath));
 }
 
 /**

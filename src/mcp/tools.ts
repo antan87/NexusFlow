@@ -389,20 +389,23 @@ export const tools: NexusFlowTool[] = [
     name: 'isolate_repo',
     description:
       'Dynamically isolate a repository in an in-place workspace into a dedicated worktree before writing code. This creates a dedicated feature branch and worktree directory so the repository default/main branch remains clean and untouched.',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         repo: {
           type: 'string',
+          minLength: 1,
           description: 'Name or path of the repository to isolate.',
         },
         branchName: {
           type: 'string',
+          minLength: 1,
           description: 'Optional feature branch name to create/checkout. Defaults to feat/<repo>-<workspaceId>.',
         },
         baseBranch: {
           type: 'string',
+          minLength: 1,
           description: 'Optional base branch to branch off. Defaults to repository default branch.',
         },
         ...workspaceIdProp,
@@ -418,7 +421,10 @@ export const tools: NexusFlowTool[] = [
           branchName: args.branchName ? String(args.branchName) : undefined,
           baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
         });
-        return json(result);
+        return json({
+          ...result,
+          instruction: `Repository '${result.repoName}' is now isolated at '${result.worktreePath}' on branch '${result.branchName}'. ACTION REQUIRED: Direct all subsequent file edits, reads, and test executions for this repo to '${result.worktreePath}'. Do NOT edit files in '${result.sourcePath}'.`,
+        });
       } catch (error: any) {
         return errorResult(`Error isolating repository: ${error.message}`);
       }

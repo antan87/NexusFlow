@@ -60,6 +60,7 @@ describe('MCP tools', () => {
     expect(content.repoName).toBe('repo1');
     expect(content.branchName).toBe('feat/repo1-my-ws');
     expect(content.alreadyIsolated).toBe(false);
+    expect(content.instruction).toContain('is now isolated at');
   });
 
   it('returns error if repo argument is missing or empty in isolate_repo handler', async () => {

@@ -8,6 +8,7 @@ import { isolateWorkspaceRepo } from './isolate.js';
 import { saveFeatureConfig, loadFeatureConfig, deleteWorkspace } from './workspace.js';
 import { resolveFeatureRepoPath, isRepoIsolated } from '../utils/feature.js';
 import { syncWorkspace } from './sync.js';
+import { runDoctor } from './doctor.js';
 import type { Feature } from '../types.js';
 
 async function initGitRepo(dir: string): Promise<void> {
@@ -222,5 +223,129 @@ describe('isolateWorkspaceRepo & on-demand worktree isolation', { timeout: 30000
     // Worktree list in source repo is clean
     const { stdout: wtList } = await execa('git', ['worktree', 'list'], { cwd: repo1Dir });
     expect(wtList).not.toContain(worktreeDir);
+  });
+
+  it('rejects invalid or option-injected branch names', async () => {
+    const feature: Feature = {
+      id: 'sec-test',
+      mode: 'in-place',
+      branchName: 'sec-test',
+      description: 'Security validation test',
+      repos: [repo1Dir],
+      originalRepos: [repo1Dir],
+      assistants: ['antigravity'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+
+    await expect(
+      isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: '--lock' }),
+    ).rejects.toThrow('Invalid branch name');
+
+    await expect(
+      isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: '-f' }),
+    ).rejects.toThrow('Invalid branch name');
+
+    await expect(
+      isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: 'invalid branch with spaces' }),
+    ).rejects.toThrow('Invalid branch name');
+  });
+
+  it('recovers and recreates worktree if directory is deleted from disk', async () => {
+    const feature: Feature = {
+      id: 'recover-test',
+      mode: 'in-place',
+      branchName: 'recover-test',
+      description: 'Recovery test',
+      repos: [repo1Dir],
+      originalRepos: [repo1Dir],
+      assistants: ['antigravity'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+
+    // Initial isolation
+    const res1 = await isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: 'feat/rec-1' });
+    expect(res1.alreadyIsolated).toBe(false);
+
+    // Simulate accidental deletion of worktree folder from disk
+    await fs.rm(res1.worktreePath, { recursive: true, force: true });
+
+    // Calling isolate again should prune stale git registration and recreate cleanly
+    const res2 = await isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: 'feat/rec-1' });
+    expect(res2.worktreePath).toBe(res1.worktreePath);
+    expect(await fs.stat(res2.worktreePath)).toBeDefined();
+  });
+
+  it('handles case-insensitive repository lookups on Windows', async () => {
+    const feature: Feature = {
+      id: 'case-test',
+      mode: 'in-place',
+      branchName: 'case-test',
+      description: 'Case sensitivity test',
+      repos: [repo1Dir],
+      originalRepos: [repo1Dir],
+      assistants: ['antigravity'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+
+    // Pass uppercase repo name 'REPO1'
+    const result = await isolateWorkspaceRepo(workspaceDir, 'REPO1', { branchName: 'feat/case-test' });
+    expect(result.repoName).toBe('repo1');
+    expect(result.branchName).toBe('feat/case-test');
+  });
+
+  it('handles concurrent isolation operations without manifest clobbering', async () => {
+    const feature: Feature = {
+      id: 'concurrency-test',
+      mode: 'in-place',
+      branchName: 'concurrency-test',
+      description: 'Concurrency test',
+      repos: [repo1Dir, repo2Dir],
+      originalRepos: [repo1Dir, repo2Dir],
+      assistants: ['antigravity'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+
+    // Isolate repo1 and repo2 concurrently
+    const [res1, res2] = await Promise.all([
+      isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: 'feat/concurrent-1' }),
+      isolateWorkspaceRepo(workspaceDir, 'repo2', { branchName: 'feat/concurrent-2' }),
+    ]);
+
+    expect(res1.repoName).toBe('repo1');
+    expect(res2.repoName).toBe('repo2');
+
+    const updated = await loadFeatureConfig(workspaceDir);
+    expect(updated?.isolatedRepos?.['repo1']).toBeDefined();
+    expect(updated?.isolatedRepos?.['repo2']).toBeDefined();
+  });
+
+  it('doctor passes cleanly on isolated in-place workspace without false branch mismatch warnings', async () => {
+    const feature: Feature = {
+      id: 'doc-test',
+      mode: 'in-place',
+      branchName: 'doc-test',
+      description: 'Doctor test',
+      repos: [repo1Dir],
+      originalRepos: [repo1Dir],
+      assistants: ['antigravity'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+
+    await isolateWorkspaceRepo(workspaceDir, 'repo1', { branchName: 'feat/doc-isolated' });
+
+    const report = await runDoctor(workspaceDir);
+    const branchCheck = report.checks.find((c) => c.category === 'Branch Alignment & Git Status');
+    expect(branchCheck?.status).toBe('pass');
+    expect(report.errors).toHaveLength(0);
   });
 });

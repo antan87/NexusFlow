@@ -5,11 +5,12 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { execa } from 'execa';
 
-import { createWorktree } from './worktree.js';
-import { loadFeatureConfig, saveFeatureConfig, excludeNexusFlowFiles } from './workspace.js';
+import { createWorktree, removeWorktree } from './worktree.js';
+import { loadFeatureConfig, saveFeatureConfig } from './workspace.js';
 import { refreshWorkspace } from './refresh.js';
-import { detectDefaultBranch } from '../utils/git.js';
+import { detectDefaultBranch, isValidBranchName } from '../utils/git.js';
 import { isInPlace } from '../utils/feature.js';
 import type { Feature, IsolatedRepoInfo } from '../types.js';
 
@@ -27,6 +28,15 @@ export interface IsolateRepoResult {
   branchName: string;
   baseBranch: string;
   alreadyIsolated: boolean;
+}
+
+function assertWithin(baseDir: string, target: string): string {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(target);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error(`Target path "${target}" escapes workspace base directory "${baseDir}".`);
+  }
+  return resolved;
 }
 
 /**
@@ -50,10 +60,15 @@ export async function isolateWorkspaceRepo(
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
   }
 
-  const normalizedTarget = path.normalize(repoNameOrPath).toLowerCase();
-  const targetBasename = path.basename(repoNameOrPath).toLowerCase();
+  const trimmed = repoNameOrPath.trim();
+  if (!trimmed || /[\r\n]/.test(trimmed)) {
+    throw new Error(`Invalid repository name or path: "${repoNameOrPath}".`);
+  }
 
-  // Match against feature.repos
+  const normalizedTarget = path.normalize(trimmed).toLowerCase();
+  const targetBasename = path.basename(trimmed).toLowerCase();
+
+  // Match against feature.repos (case-insensitive for Windows resilience)
   const repoIndex = feature.repos.findIndex((r) => {
     const norm = path.normalize(r).toLowerCase();
     return norm === normalizedTarget || path.basename(r).toLowerCase() === targetBasename;
@@ -80,8 +95,12 @@ export async function isolateWorkspaceRepo(
     };
   }
 
-  // Check if already isolated
-  const existingIsolation = feature.isolatedRepos?.[repoName];
+  // Case-insensitive lookup for existing isolation
+  const isolatedKey = Object.keys(feature.isolatedRepos || {}).find(
+    (k) => k.toLowerCase() === repoName.toLowerCase() || k.toLowerCase() === trimmed.toLowerCase(),
+  );
+  const existingIsolation = isolatedKey ? feature.isolatedRepos?.[isolatedKey] : undefined;
+
   if (existingIsolation) {
     try {
       await fs.access(existingIsolation.worktreePath);
@@ -94,7 +113,10 @@ export async function isolateWorkspaceRepo(
         alreadyIsolated: true,
       };
     } catch {
-      // Directory no longer exists; recreate below
+      // Directory no longer exists on disk; prune worktree registration and recreate
+      try {
+        await execa('git', ['worktree', 'prune'], { cwd: sourcePath });
+      } catch {}
     }
   }
 
@@ -106,62 +128,89 @@ export async function isolateWorkspaceRepo(
       ? feature.branchName
       : `feat/${repoName}-${feature.id}`);
 
-  const worktreePath = path.join(workspacePath, repoName);
-
-  // 1. Create the git worktree
-  await createWorktree(sourcePath, worktreePath, branchName, baseBranch);
-
-  // 2. Update .gitignore in workspace root to ignore the newly created worktree folder
-  try {
-    const gitignorePath = path.join(workspacePath, '.gitignore');
-    let gitignoreContent = '';
-    try {
-      gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    } catch {}
-
-    const entry = `/${repoName}/`;
-    if (!gitignoreContent.includes(entry)) {
-      await fs.writeFile(
-        gitignorePath,
-        gitignoreContent ? `${gitignoreContent.trimEnd()}\n${entry}\n` : `${entry}\n`,
-        'utf-8',
-      );
-    }
-  } catch (error) {
-    console.warn(`Warning: failed to update .gitignore for isolated repo ${repoName}:`, error);
+  if (!isValidBranchName(branchName)) {
+    throw new Error(`Invalid branch name "${branchName}".`);
+  }
+  if (!isValidBranchName(baseBranch)) {
+    throw new Error(`Invalid base branch name "${baseBranch}".`);
   }
 
-  // 3. Update manifest
-  if (!feature.isolatedRepos) {
-    feature.isolatedRepos = {};
-  }
-  const isolatedInfo: IsolatedRepoInfo = {
-    worktreePath,
-    branchName,
-    baseBranch,
-    isolatedAt: new Date().toISOString(),
-  };
-  feature.isolatedRepos[repoName] = isolatedInfo;
-  await saveFeatureConfig(workspacePath, feature);
+  const worktreePath = assertWithin(workspacePath, path.join(workspacePath, repoName));
 
-  // 4. Exclude NexusFlow files for the new worktree checkout
+  // Prune any stale worktree registrations prior to creation
   try {
-    await excludeNexusFlowFiles(workspacePath, feature);
+    await execa('git', ['worktree', 'prune'], { cwd: sourcePath });
   } catch {}
 
-  // 5. Refresh workspace context files (.code-workspace, AGENTS.md, etc.)
-  try {
-    await refreshWorkspace(workspacePath);
-  } catch (error) {
-    console.warn(`Warning: failed to refresh workspace context after isolating ${repoName}:`, error);
-  }
+  let worktreeCreated = false;
+  let branchCreated = false;
 
-  return {
-    repoName,
-    sourcePath,
-    worktreePath,
-    branchName,
-    baseBranch,
-    alreadyIsolated: false,
-  };
+  try {
+    // 1. Create the git worktree
+    const wtRes = await createWorktree(sourcePath, worktreePath, branchName, baseBranch);
+    worktreeCreated = true;
+    branchCreated = wtRes.createdBranch;
+
+    // 2. Update .gitignore in workspace root to ignore the newly created worktree folder
+    try {
+      const gitignorePath = path.join(workspacePath, '.gitignore');
+      let gitignoreContent = '';
+      try {
+        gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+      } catch {}
+
+      const entry = `/${repoName}/`;
+      if (!gitignoreContent.includes(entry)) {
+        await fs.writeFile(
+          gitignorePath,
+          gitignoreContent ? `${gitignoreContent.trimEnd()}\n${entry}\n` : `${entry}\n`,
+          'utf-8',
+        );
+      }
+    } catch (error) {
+      console.warn(`Warning: failed to update .gitignore for isolated repo ${repoName}:`, error);
+    }
+
+    // 3. Atomically update manifest using freshest state
+    const freshFeature = (await loadFeatureConfig(workspacePath)) ?? feature;
+    if (!freshFeature.isolatedRepos) {
+      freshFeature.isolatedRepos = {};
+    }
+    const isolatedInfo: IsolatedRepoInfo = {
+      worktreePath,
+      branchName,
+      baseBranch,
+      isolatedAt: new Date().toISOString(),
+    };
+    freshFeature.isolatedRepos[repoName] = isolatedInfo;
+    await saveFeatureConfig(workspacePath, freshFeature);
+
+    // 4. Refresh workspace context files (.code-workspace, AGENTS.md, etc.)
+    try {
+      await refreshWorkspace(workspacePath);
+    } catch (error) {
+      console.warn(`Warning: failed to refresh workspace context after isolating ${repoName}:`, error);
+    }
+
+    return {
+      repoName,
+      sourcePath,
+      worktreePath,
+      branchName,
+      baseBranch,
+      alreadyIsolated: false,
+    };
+  } catch (error) {
+    if (worktreeCreated) {
+      try {
+        await removeWorktree(sourcePath, worktreePath, true);
+      } catch {}
+      if (branchCreated) {
+        try {
+          await execa('git', ['branch', '-D', branchName], { cwd: sourcePath });
+        } catch {}
+      }
+    }
+    throw error;
+  }
 }

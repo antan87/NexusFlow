@@ -4,6 +4,7 @@
  */
 
 import { execa } from 'execa';
+import { isValidBranchName } from '../utils/git.js';
 
 /** Result of creating a worktree. */
 export interface CreateWorktreeResult {
@@ -49,6 +50,13 @@ export async function createWorktree(
   baseBranch: string,
   options: CreateWorktreeOptions = {},
 ): Promise<CreateWorktreeResult> {
+  if (!isValidBranchName(branchName)) {
+    throw new Error(`Invalid branch name "${branchName}".`);
+  }
+  if (!isValidBranchName(baseBranch)) {
+    throw new Error(`Invalid base branch name "${baseBranch}".`);
+  }
+
   let fetched = false;
   // Fetch latest remote state.
   try {

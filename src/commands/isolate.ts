@@ -67,11 +67,15 @@ export async function isolateCommand(
       feature.branchName && feature.branchName !== feature.id
         ? feature.branchName
         : `feat/${repoName}-${feature.id}`;
-    branchName = await input({
-      message: `Feature branch name for "${repoName}":`,
-      default: defaultBranchName,
-      validate: (v) => v.trim().length > 0 || 'Branch name cannot be empty',
-    });
+    if (!process.stdin.isTTY) {
+      branchName = defaultBranchName;
+    } else {
+      branchName = await input({
+        message: `Feature branch name for "${repoName}":`,
+        default: defaultBranchName,
+        validate: (v) => v.trim().length > 0 || 'Branch name cannot be empty',
+      });
+    }
   }
 
   const spinner = ora(`Isolating repository "${repoName}" into a worktree...`).start();

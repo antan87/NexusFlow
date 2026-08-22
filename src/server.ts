@@ -1250,18 +1250,22 @@ app.post('/api/workspace/:id/isolate', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const body = await c.req.json().catch(() => ({})) as {
-      repo?: string;
-      branchName?: string;
-      baseBranch?: string;
+      repo?: unknown;
+      branchName?: unknown;
+      baseBranch?: unknown;
     };
-    if (!body.repo || typeof body.repo !== 'string') {
+    const repo = typeof body.repo === 'string' ? body.repo.trim() : '';
+    if (!repo) {
       return c.json({ error: 'Missing "repo" parameter in request body' }, 400);
     }
+    const branchName = typeof body.branchName === 'string' && body.branchName.trim() ? body.branchName.trim() : undefined;
+    const baseBranch = typeof body.baseBranch === 'string' && body.baseBranch.trim() ? body.baseBranch.trim() : undefined;
+
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const result = await isolateWorkspaceRepo(workspacePath, body.repo, {
-      branchName: body.branchName,
-      baseBranch: body.baseBranch,
+    const result = await isolateWorkspaceRepo(workspacePath, repo, {
+      branchName,
+      baseBranch,
     });
     return c.json({ success: true, ...result });
   } catch (error) {

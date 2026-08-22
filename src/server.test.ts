@@ -1417,6 +1417,30 @@ describe('Server API Endpoints Unit Tests', () => {
         const data = await response.json();
         expect(data.error).toContain('Missing "repo" parameter');
       });
+
+      it('POST /api/workspace/:id/isolate rejects whitespace repo and path traversal ids', async () => {
+        vi.spyOn(config, 'loadConfig').mockResolvedValue({
+          version: '1.0',
+          devDir: '/dev',
+          workspacesDir: '/dev/workspaces',
+          defaultAssistant: null,
+          scanDepth: 2,
+        });
+
+        const res1 = await app.request('/api/workspace/my-ws/isolate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: '   ' }),
+        });
+        expect(res1.status).toBe(400);
+
+        const res2 = await app.request('/api/workspace/..%2f..%2fevil/isolate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: 'my-repo' }),
+        });
+        expect(res2.status).toBe(400);
+      });
     });
   });
 

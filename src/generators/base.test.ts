@@ -281,7 +281,7 @@ describe('buildContextContent', () => {
 
       expect(content).toContain(nodeRepo);
       expect(content).toContain('(on existing-feature)');
-      expect(content).toContain('NexusFlow does not manage branches here');
+      expect(content).toContain('READ-ONLY reference mode');
       expect(content).not.toContain('Do not edit the original repositories');
     });
   });
