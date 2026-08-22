@@ -131,4 +131,66 @@ describe('killTree', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     }
   });
+
+  it('escalates to child.kill(SIGKILL) when non-detached child survives SIGTERM', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as any);
+
+    try {
+      const child = {
+        pid: 7777,
+        exitCode: null,
+        killed: false,
+        kill: vi.fn(),
+      } as unknown as ChildProcess;
+
+      killTree(child, { detached: false, gracePeriodMs: 3000 });
+
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+      // Advance past grace period while process is still alive
+      vi.advanceTimersByTime(3000);
+
+      expect(killSpy).toHaveBeenCalledWith(7777, 0);
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+  });
+
+  it('treats EPERM error on process.kill(pid, 0) as alive and escalates to SIGKILL', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid: number, signal?: any) => {
+      if (signal === 0) {
+        const err = new Error('EPERM') as any;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return true as any;
+    });
+
+    try {
+      const child = {
+        pid: 8888,
+        exitCode: null,
+        killed: false,
+        kill: vi.fn(),
+      } as unknown as ChildProcess;
+
+      killTree(child, { detached: true, gracePeriodMs: 3000 });
+
+      vi.advanceTimersByTime(3000);
+
+      expect(killSpy).toHaveBeenCalledWith(8888, 0);
+      expect(killSpy).toHaveBeenCalledWith(-8888, 'SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+  });
 });

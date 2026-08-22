@@ -74,7 +74,7 @@ export abstract class CliAdapterBase extends EventEmitter {
    */
   protected failCurrentTurn(error: Error, terminateProcess = false): void {
     this.pendingTurnError ??= error;
-    if (terminateProcess) killTree(this.child);
+    if (terminateProcess) killTree(this.child, { detached: process.platform !== 'win32' });
   }
 
   public async start(cwd: string): Promise<void> {
@@ -99,6 +99,7 @@ export abstract class CliAdapterBase extends EventEmitter {
     return spawn(this.binary, args, {
       cwd: this.cwd,
       shell: this.useShell,
+      detached: process.platform !== 'win32',
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
   }
@@ -163,7 +164,7 @@ export abstract class CliAdapterBase extends EventEmitter {
   public stop(): void {
     this.stopped = true;
     this.pendingTurnError = null;
-    killTree(this.child);
+    killTree(this.child, { detached: process.platform !== 'win32' });
     this.child = null;
     this.isProcessing = false;
     this.emit('close', 0);

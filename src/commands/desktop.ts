@@ -64,6 +64,7 @@ export async function desktopCommand(): Promise<void> {
     detached: true,
     stdio: 'ignore',
     shell: isWin, // .cmd requires a shell on patched Node (CVE-2024-27980)
+    windowsHide: true,
   });
 
   child.on('error', (err) => {

@@ -308,10 +308,12 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
           checks.push({ category: 'Environment', name: 'git', status: 'pass', message: `version ${versionMatch[0]} (>= 2.20)` });
         }
       } else {
-        checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+        warnings.push('git is installed but its version could not be determined.');
+        checks.push({ category: 'Environment', name: 'git', status: 'warn', message: 'installed on PATH (could not determine version)' });
       }
     } catch {
-      checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+      warnings.push('git is installed but its version check failed.');
+      checks.push({ category: 'Environment', name: 'git', status: 'warn', message: 'installed on PATH (version check failed)' });
     }
   } else {
     errors.push('git is not found on PATH. Git is required for workspace operations.');
