@@ -70,137 +70,92 @@ program.hook('preAction', (thisCommand) => {
   }
 });
 
+function isDebugMode(): boolean {
+  return process.argv.includes('--debug') || Boolean(process.env.NEXUSFLOW_DEBUG);
+}
+
+/**
+ * Wraps a command action: clean exit on prompt cancellation (Ctrl+C inside an
+ * inquirer prompt), clean red error message by default, and exit code 1.
+ * When --debug is provided, prints the full error stack.
+ */
+function runAction<A extends unknown[]>(fn: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\n✖ ${message}`));
+      if (isDebugMode() && error instanceof Error && error.stack) {
+        console.error(chalk.dim(error.stack));
+      } else if (!isDebugMode()) {
+        console.error(chalk.dim('  (Run with --debug for details)\n'));
+      }
+      process.exit(1);
+    }
+  };
+}
+
 program
   .command('create')
   .description(
     'Create a new feature workspace — pick repos, pick AI assistants, generate context',
   )
-  .action(async () => {
-    try {
-      await createCommand();
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(createCommand));
 
 program
   .command('list')
   .alias('ls')
   .description('List all existing workspaces')
-  .action(async () => {
-    try {
-      await listCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .option('--json', 'Output as JSON')
+  .action(runAction(listCommand));
 
 program
   .command('open')
   .description('Re-open an existing workspace in an editor')
-  .action(async () => {
-    try {
-      await openCommand();
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(openCommand));
 
 program
   .command('init')
   .description('Initialize NexusFlow configuration')
-  .action(async () => {
-    try {
-      await initCommand();
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(initCommand));
 
 program
   .command('start')
   .description('Start all services in a workspace')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await startCommand(workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await startCommand(workspace);
+  }));
 
 program
   .command('stop')
   .description('Stop all running services in a workspace')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await stopCommand(workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await stopCommand(workspace);
+  }));
 
 program
   .command('logs')
   .description('Show logs from running services')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-n, --lines <number>', 'Number of lines per service', '30')
-  .action(async (workspace: string | undefined, options: { lines: string }) => {
-    try {
-      await logsCommand(workspace, parseInt(options.lines, 10));
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { lines: string }) => {
+    await logsCommand(workspace, parseInt(options.lines, 10));
+  }));
 
 program
   .command('status')
   .description('Show status of running services')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await statusCommand(workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await statusCommand(workspace);
+  }));
 
 program
   .command('ui')
@@ -210,14 +165,9 @@ program
   .option('--open', 'Also open the dashboard in your default browser')
   .option('--server-only', '(deprecated — server-only is now the default)')
   .option('--strict-port', 'Fail instead of auto-incrementing when the port is in use')
-  .action(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }) => {
-    try {
-      await uiCommand(options);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }) => {
+    await uiCommand(options);
+  }));
 
 program
   .command('dashboard')
@@ -290,18 +240,9 @@ program
   .description('Display a unified summary of changes across all repositories (including unpushed commits)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-r, --repo <repos...>', 'Only show the given repositories (by name)')
-  .action(async (workspace: string | undefined, options: { repo?: string[] }) => {
-    try {
-      await diffCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { repo?: string[] }) => {
+    await diffCommand(workspace, options);
+  }));
 
 // Pack command removed.
 
@@ -310,18 +251,9 @@ program
   .alias('rm')
   .description('Delete a workspace and cleanly prune/remove its git worktrees')
   .argument('[workspace]', 'Workspace name or path')
-  .action(async (workspace?: string) => {
-    try {
-      await removeCommand(workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await removeCommand(workspace);
+  }));
 
 program
   .command('add-repo')
@@ -329,18 +261,9 @@ program
   .description('Add a repository to an existing workspace and update configurations')
   .argument('[repo-path]', 'Path to the repository to add')
   .argument('[workspace]', 'Workspace name or path')
-  .action(async (repoPath?: string, workspace?: string) => {
-    try {
-      await addRepoCommand(repoPath, workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (repoPath?: string, workspace?: string) => {
+    await addRepoCommand(repoPath, workspace);
+  }));
 
 program
   .command('isolate')
@@ -350,31 +273,17 @@ program
   .option('-b, --branch <branch>', 'Target feature branch name')
   .option('--base <base>', 'Base branch to branch off')
   .option('-w, --workspace <workspace>', 'Workspace name or path')
-  .action(async (repo?: string, branchArg?: string, options?: { branch?: string; base?: string; workspace?: string }) => {
-    try {
-      await isolateCommand(repo, branchArg, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (repo?: string, branchArg?: string, options?: { branch?: string; base?: string; workspace?: string }) => {
+    await isolateCommand(repo, branchArg, options);
+  }));
 
 program
   .command('handoff')
   .description('Generate a compact handoff bundle (nexusflow-handoff.md) for session resumption')
   .argument('[workspace]', 'Path to the workspace')
-  .action(async (workspace) => {
-    try {
-      await handoffCommand(workspace);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace) => {
+    await handoffCommand(workspace);
+  }));
 
 
 program
@@ -383,27 +292,17 @@ program
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
   .option('-s, --strategy <id>', 'Update the teamwork strategy (use template ID, or "auto" for AI suggestion)')
-  .action(async (workspace: string | undefined, options: { force?: boolean; strategy?: string }) => {
-    try {
-      await refreshCommand(options, workspace);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { force?: boolean; strategy?: string }) => {
+    await refreshCommand(options, workspace);
+  }));
 
 program
   .command('doctor')
   .description('Run diagnostics to verify workspace health and check for local loop issues')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await doctorCommand(workspace);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await doctorCommand(workspace);
+  }));
 
 program
   .command('finish')
@@ -415,18 +314,9 @@ program
   .option('--cleanup', 'Remove the workspace after everything is confirmed pushed (still asks for confirmation)')
   .option('-y, --yes', 'Accept defaults for non-destructive prompts')
   .option('--dry-run', 'Show what finish would do without changing anything')
-  .action(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean }) => {
-    try {
-      await finishCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean }) => {
+    await finishCommand(workspace, options);
+  }));
 
 // Knowledge command group
 const knowledgeCmd = program
@@ -442,18 +332,9 @@ knowledgeCmd
   .requiredOption('-m, --message <msg>', 'The learning to record, as a rule plus its reason (max 300 chars)')
   .option('--title <title>', 'Short title (used for decision headings)')
   .option('-r, --repo <repo>', "Write to this repo's persistent base knowledge instead")
-  .action(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {
-    try {
-      await knowledgeAddCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {
+    await knowledgeAddCommand(workspace, options);
+  }));
 
 knowledgeCmd
   .command('show')
@@ -461,18 +342,9 @@ knowledgeCmd
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-s, --section <name>', 'Only show one section')
   .option('-r, --repo <repo>', "Show the repo's base knowledge file instead")
-  .action(async (workspace: string | undefined, options: { section?: string; repo?: string }) => {
-    try {
-      await knowledgeShowCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { section?: string; repo?: string }) => {
+    await knowledgeShowCommand(workspace, options);
+  }));
 
 knowledgeCmd
   .command('promote')
@@ -483,38 +355,9 @@ knowledgeCmd
   .option('-m, --message <msg>', 'Promote this text directly (non-interactive)')
   .option('--move', 'Remove the entry from the workspace file after promoting (default: copy)')
   .option('--all', 'Promote all decisions, gotchas and assumptions without prompting')
-  .action(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
-    try {
-      await knowledgePromoteCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
-
-/**
- * Wraps a command action: clean exit on prompt cancellation (Ctrl+C inside an
- * inquirer prompt), exit code 1 with the error otherwise. New command
- * registrations should use this instead of copy-pasting the try/catch.
- */
-function runAction<A extends unknown[]>(fn: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
-  return async (...args: A) => {
-    try {
-      await fn(...args);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  };
-}
+  .action(runAction(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
+    await knowledgePromoteCommand(workspace, options);
+  }));
 
 // Project command group
 const projectCmd = program
@@ -560,53 +403,20 @@ strategyCmd
   .command('list')
   .alias('ls')
   .description('List all available strategy templates (built-in and custom)')
-  .action(async () => {
-    try {
-      await strategyListCommand();
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(strategyListCommand));
 
 strategyCmd
   .command('create')
   .description('Create a new custom strategy template')
   .option('-n, --name <name>', 'Strategy name')
   .option('-f, --file <path>', 'Load content from a .md or .txt file')
-  .action(async (options: { name?: string; file?: string }) => {
-    try {
-      await strategyCreateCommand(options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(strategyCreateCommand));
 
 strategyCmd
   .command('edit')
   .description('Edit an existing custom strategy template')
   .option('--id <id>', 'Template ID to edit (skips the selection prompt)')
-  .action(async (options: { id?: string }) => {
-    try {
-      await strategyEditCommand(options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(strategyEditCommand));
 
 strategyCmd
   .command('delete')
@@ -614,98 +424,42 @@ strategyCmd
   .description('Delete a custom strategy template')
   .option('--id <id>', 'Template ID to delete (skips the selection prompt)')
   .option('-y, --yes', 'Skip confirmation prompt')
-  .action(async (options: { id?: string; yes?: boolean }) => {
-    try {
-      await strategyDeleteCommand(options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(strategyDeleteCommand));
 
 strategyCmd
   .command('show')
   .description('Display the full content of a strategy template')
   .option('--id <id>', 'Template ID to show (skips the selection prompt)')
-  .action(async (options: { id?: string }) => {
-    try {
-      await strategyShowCommand(options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(strategyShowCommand));
 
 program
   .command('desktop')
   .description('Launch the NexusFlow desktop application')
-  .action(async () => {
-    try {
-      await desktopCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(desktopCommand));
+
 // Config command group
 const configCmd = program.command('config').description('View and update NexusFlow configuration');
 
 configCmd
   .command('show')
   .description('Display the current configuration')
-  .action(async () => {
-    try {
-      await configShowCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(configShowCommand));
 
 configCmd
   .command('get')
   .description('Get a specific configuration key')
   .argument('<key>', 'Configuration key to read')
-  .action(async (key: string) => {
-    try {
-      await configGetCommand(key);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(configGetCommand));
 
 configCmd
   .command('set')
   .description('Set a configuration key to a value')
   .argument('<key>', 'Configuration key to set')
   .argument('<value>', 'Value to assign')
-  .action(async (key: string, value: string) => {
-    try {
-      await configSetCommand(key, value);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(configSetCommand));
 
 // Default action when 'nexusflow config' is run without a subcommand
-configCmd.action(async () => {
-  try {
-    await configShowCommand();
-  } catch (error) {
-    console.error(error);
-    process.exit(1);
-  }
-});
+configCmd.action(runAction(configShowCommand));
 
 // Adapter command group
 const adapterCmd = program.command('adapter').description('Manage storage adapters — list, switch, configure, or create new ones');
@@ -713,63 +467,28 @@ const adapterCmd = program.command('adapter').description('Manage storage adapte
 adapterCmd
   .command('list')
   .description('List all available storage adapters')
-  .action(async () => {
-    try {
-      await adapterListCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(adapterListCommand));
 
 adapterCmd
   .command('use')
   .description('Switch to a different storage adapter (prompts for config if needed)')
   .argument('<name>', 'Adapter name to activate')
-  .action(async (name: string) => {
-    try {
-      await adapterUseCommand(name);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(adapterUseCommand));
 
 adapterCmd
   .command('info')
   .description('Show detailed information about an adapter')
   .argument('<name>', 'Adapter name to inspect')
-  .action(async (name: string) => {
-    try {
-      await adapterInfoCommand(name);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(adapterInfoCommand));
 
 adapterCmd
   .command('init')
   .description('Scaffold a new adapter plugin project')
   .argument('<name>', 'Name for the new adapter')
-  .action(async (name: string) => {
-    try {
-      await adapterInitCommand(name);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(adapterInitCommand));
 
 // Default action when 'nexusflow adapter' is run without a subcommand
-adapterCmd.action(async () => {
-  try {
-    await adapterListCommand();
-  } catch (error) {
-    console.error(error);
-    process.exit(1);
-  }
-});
+adapterCmd.action(runAction(adapterListCommand));
 
 // Schedule command group
 const scheduleCmd = program
@@ -782,94 +501,47 @@ scheduleCmd
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-t, --task <task>', 'Job to run: "sync" or "refresh"', 'sync')
   .requiredOption('-e, --every <interval>', 'How often to run, e.g. 30m, 2h, 1d')
-  .action(async (workspace: string | undefined, options: { task?: string; every?: string }) => {
-    try {
-      await scheduleAddCommand(workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { task?: string; every?: string }) => {
+    await scheduleAddCommand(workspace, options);
+  }));
 
 scheduleCmd
   .command('list')
   .alias('ls')
   .description('List all scheduled jobs')
-  .action(async () => {
-    try {
-      await scheduleListCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(scheduleListCommand));
 
 scheduleCmd
   .command('remove')
   .alias('rm')
   .description('Remove a scheduled job')
   .argument('<id>', 'Job id (see "nexusflow schedule list")')
-  .action(async (id: string) => {
-    try {
-      await scheduleRemoveCommand(id);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(scheduleRemoveCommand));
 
 scheduleCmd
   .command('enable')
   .description('Enable a scheduled job')
   .argument('<id>', 'Job id (see "nexusflow schedule list")')
-  .action(async (id: string) => {
-    try {
-      await scheduleToggleCommand(id, true);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (id: string) => {
+    await scheduleToggleCommand(id, true);
+  }));
 
 scheduleCmd
   .command('disable')
   .description('Disable a scheduled job without removing it')
   .argument('<id>', 'Job id (see "nexusflow schedule list")')
-  .action(async (id: string) => {
-    try {
-      await scheduleToggleCommand(id, false);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (id: string) => {
+    await scheduleToggleCommand(id, false);
+  }));
 
 scheduleCmd
   .command('run')
   .description('Run a scheduled job immediately')
   .argument('<id>', 'Job id (see "nexusflow schedule list")')
-  .action(async (id: string) => {
-    try {
-      await scheduleRunCommand(id);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(scheduleRunCommand));
 
 // Default action when 'nexusflow schedule' is run without a subcommand
-scheduleCmd.action(async () => {
-  try {
-    await scheduleListCommand();
-  } catch (error) {
-    console.error(error);
-    process.exit(1);
-  }
-});
+scheduleCmd.action(runAction(scheduleListCommand));
 
 const mcp = program.command('mcp').description('Manage the NexusFlow MCP Server for AI assistants');
 
@@ -877,30 +549,16 @@ mcp
   .command('run')
   .description('Start the NexusFlow MCP Server (typically called automatically by AI assistants)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await mcpRunCommand(workspace);
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(mcpRunCommand));
 
 mcp
   .command('setup')
   .description('Automatically configure your AI environments (Claude Desktop, Cursor, VS Code) to use the NexusFlow MCP Server')
-  .action(async () => {
-    try {
-      await mcpSetupCommand();
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(mcpSetupCommand));
 
 program.hook('postAction', async (thisCommand, actionCommand) => {
-  // Skip update check for MCP run to prevent contaminating stdout stream
-  if (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp') {
+  // Skip update check for non-TTY streams and MCP runs to prevent contaminating stdout stream
+  if (!process.stdout.isTTY || (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp')) {
     return;
   }
 

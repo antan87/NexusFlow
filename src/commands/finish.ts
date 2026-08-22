@@ -10,6 +10,7 @@ import { confirm, input, checkbox, select } from '@inquirer/prompts';
 import * as path from 'node:path';
 
 import { loadFeatureConfig, deleteWorkspace } from '../core/workspace.js';
+import { stopServices } from '../orchestration/runner.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
 import { finishWorkspace, type RepoFinishReport } from '../core/finish.js';
 import { getWorkspaceRepos } from '../utils/multi-git.js';
@@ -143,6 +144,11 @@ export async function finishCommand(
       : true;
     if (confirmed) {
       try {
+        try {
+          await stopServices(workspacePath);
+        } catch {
+          // Non-fatal if no services were running or PM2 is not active
+        }
         await deleteWorkspace(workspacePath);
         console.log(chalk.green(`\n✅ Removed workspace ${feature.branchName}.\n`));
       } catch (error) {

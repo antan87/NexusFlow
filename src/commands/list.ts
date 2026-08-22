@@ -11,9 +11,14 @@ import { listWorkspaces } from '../core/workspace.js';
 /**
  * Lists all existing workspaces, showing feature name, repos, and status.
  */
-export async function listCommand(): Promise<void> {
+export async function listCommand(options?: { json?: boolean }): Promise<void> {
   const config = await loadConfig();
   const workspaces = await listWorkspaces(config.workspacesDir);
+
+  if (options?.json) {
+    console.log(JSON.stringify(workspaces, null, 2));
+    return;
+  }
 
   if (workspaces.length === 0) {
     console.log(chalk.yellow('\nNo workspaces found.'));

@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import * as net from 'node:net';
 import { startServer } from '../server.js';
 
-function isPortActive(port: number): Promise<boolean> {
+export function isPortActive(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect(port, 'localhost');
     socket.on('connect', () => {

@@ -10,6 +10,7 @@ import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
+import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
@@ -103,6 +104,7 @@ function AppInner() {
   // App Autoupdate State
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
+  const [workspaceToDelete, setWorkspaceToDelete] = useState<string | null>(null);
 
 
   // Workflow Strategy Management State
@@ -741,9 +743,10 @@ Core Instructions:
   };
 
   const handleDeleteWorkspace = async (wsName: string) => {
-    if (!window.confirm(`Are you sure you want to delete the workspace "${wsName}"?\nThis will force remove all git worktrees inside it and delete all files in the folder.`)) {
-      return;
-    }
+    setWorkspaceToDelete(wsName);
+  };
+
+  const confirmDeleteWorkspace = async (wsName: string) => {
     setDeleteWsLoading(wsName);
     try {
       const encodedId = encodeURIComponent(wsName);
@@ -759,6 +762,7 @@ Core Instructions:
         }
         await fetchWorkspaces();
         showToast(`Workspace ${wsName} successfully deleted.`, 'success');
+        setWorkspaceToDelete(null);
       } else {
         showToast(`Failed to delete workspace: ${data.error || 'Unknown error'}`, 'error');
       }
@@ -1049,6 +1053,14 @@ Core Instructions:
           showToast={showToast}
         />
       )}
+
+      <DeleteWorkspaceDialog
+        workspaceName={workspaceToDelete}
+        open={workspaceToDelete !== null}
+        onClose={() => setWorkspaceToDelete(null)}
+        onConfirm={confirmDeleteWorkspace}
+        loading={deleteWsLoading !== null}
+      />
 
       <ToastStack
         toasts={toasts}
