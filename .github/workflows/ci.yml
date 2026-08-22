@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -9,6 +13,9 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -16,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
 
       - name: Check version consistency
         run: node scripts/sync-version.mjs --check

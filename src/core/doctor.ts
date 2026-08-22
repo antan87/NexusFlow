@@ -269,5 +269,29 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     checks.push({ category: 'Core Artifacts', name: '.vscode/settings.json', status: 'warn', message: 'is missing or invalid' });
   }
 
+  // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
+  const isWin = process.platform === 'win32';
+  const astMap: Record<string, string> = { claude: 'claude', codex: 'codex', antigravity: 'agy' };
+
+  if (feature.assistants && feature.assistants.length > 0) {
+    for (const a of feature.assistants) {
+      const bin = astMap[a.toLowerCase()];
+      if (bin) {
+        try {
+          const checkCmd = isWin ? 'where' : 'which';
+          const res = await execa(checkCmd, [bin], { reject: false });
+          if (res.exitCode !== 0) {
+            warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
+            checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: `CLI binary "${bin}" is not on PATH` });
+          } else {
+            checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
   return report();
 }

@@ -25,6 +25,7 @@ import {
   setScheduleEnabled,
   type ScheduleTask,
 } from '../core/scheduler.js';
+import { isPortActive } from './ui.js';
 
 /**
  * Adds a recurring job for a workspace.
@@ -66,6 +67,12 @@ export async function scheduleAddCommand(
  */
 export async function scheduleListCommand(): Promise<void> {
   console.log(chalk.bold.cyan('\n🕐 NexusFlow — Scheduled Jobs\n'));
+
+  const serverActive = await isPortActive(3000);
+  if (!serverActive) {
+    console.log(chalk.yellow('⚠️  Notice: The NexusFlow background server is not currently active.'));
+    console.log(chalk.dim('   Jobs are dormant until started with: nexusflow ui --daemon\n'));
+  }
 
   const store = await loadSchedules();
   if (store.jobs.length === 0) {

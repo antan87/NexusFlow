@@ -134,7 +134,7 @@ export function StartWorkPage() {
   const skillsQuery = useSkills();
   const agentsQuery = useAgents();
   const createWorkspace = useCreateWorkspace();
-  const { progress, start } = useCreationStream();
+  const { progress, start, reset } = useCreationStream();
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
@@ -305,9 +305,14 @@ export function StartWorkPage() {
             </>
           )}
           {progress.status === 'failed' && (
-            <Button variant="outline" onClick={() => window.location.reload()}>
-              Start over
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="default" onClick={reset}>
+                Back to form (edit & retry)
+              </Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Start over (clear form)
+              </Button>
+            </div>
           )}
           {progress.status === 'running' && (
             <p className="text-sm text-muted-foreground">This can take a moment for large repositories.</p>

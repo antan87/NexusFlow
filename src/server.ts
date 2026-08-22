@@ -15,6 +15,8 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 
@@ -2267,17 +2269,42 @@ app.post('/api/updates/download', async (c) => {
       throw new Error(`HTTP error ${response.status}`);
     }
 
-    // Node fetch body stream download
+    // Node fetch body stream download and SHA-256 computation
+    const hash = createHash('sha256');
     const fileStream = createWriteStream(targetPath);
     if (!response.body) {
       throw new Error('Response body is null');
     }
-    
-    // Convert ReadableStream to Node stream
-    await pipeline(response.body as any, fileStream);
+
+    const nodeStream = Readable.fromWeb(response.body as any);
+    nodeStream.on('data', (chunk) => hash.update(chunk));
+    await pipeline(nodeStream, fileStream);
+
+    const computedHash = hash.digest('hex').toLowerCase();
+
+    // Verify SHA-256 against release checksum file if published
+    try {
+      const shaUrl = `${downloadUrl}.sha256`;
+      if (isAllowedUpdateUrl(shaUrl)) {
+        const shaRes = await fetch(shaUrl);
+        if (shaRes.ok) {
+          const shaText = await shaRes.text();
+          const expectedHash = shaText.trim().split(/\s+/)[0]?.toLowerCase();
+          if (expectedHash && expectedHash.length === 64 && expectedHash !== computedHash) {
+            await fs.unlink(targetPath).catch(() => {});
+            throw new Error(`SHA-256 checksum mismatch (expected ${expectedHash}, got ${computedHash})`);
+          }
+        }
+      }
+    } catch (shaErr) {
+      if (shaErr instanceof Error && shaErr.message.includes('SHA-256 checksum mismatch')) {
+        throw shaErr;
+      }
+      // Non-fatal if sha256 sidecar does not exist on older releases
+    }
 
     downloadedInstallerPath = targetPath;
-    return c.json({ success: true, path: targetPath });
+    return c.json({ success: true, path: targetPath, sha256: computedHash });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return c.json({ error: `Download failed: ${msg}` }, 500);

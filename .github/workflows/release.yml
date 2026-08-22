@@ -159,11 +159,19 @@ jobs:
       - name: Build desktop installer (electron-builder)
         run: npm run build --prefix desktop
 
+      - name: Generate installer SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash desktop/dist/NexusFlowSetup.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  NexusFlowSetup.exe" | Out-File -FilePath desktop/dist/NexusFlowSetup.exe.sha256 -Encoding ascii
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
           name: nexusflow-setup
-          path: desktop/dist/NexusFlowSetup.exe
+          path: |
+            desktop/dist/NexusFlowSetup.exe
+            desktop/dist/NexusFlowSetup.exe.sha256
           if-no-files-found: error
 
   # ── One GitHub Release for the tag, with every artifact attached ───────────────
@@ -188,4 +196,6 @@ jobs:
           name: Release v${{ needs.guard.outputs.version }}
           generate_release_notes: true
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
-          files: dist/NexusFlowSetup.exe
+          files: |
+            dist/NexusFlowSetup.exe
+            dist/NexusFlowSetup.exe.sha256
