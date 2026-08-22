@@ -17,6 +17,7 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 ## ✨ Features
 
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories
+- **Cross-Platform Parity** — fully supported across Linux, macOS, and Windows with native process-group cleanup, xdg-utils integration, and signal escalation
 - **Project registry** — save named, persistent repo groups in `~/.nexusflow/projects.json` and reuse them from the CLI or API
 - **The full feature loop** — `create` opens a workspace, `finish` closes it: commit + push every repo, open PRs (or print compare links), promote learnings, and optionally clean up
 - **Knowledge that accumulates** — capture decisions and gotchas as you work with `nexusflow knowledge add`, then `promote` the reusable ones into per-repo memory that survives across features
