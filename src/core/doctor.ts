@@ -11,7 +11,7 @@ import { globby } from 'globby';
 
 import { loadConfig } from './config.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
-import { isInPlace } from '../utils/feature.js';
+import { isInPlace, resolveFeatureRepoPath } from '../utils/feature.js';
 import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
@@ -54,7 +54,8 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     throw new Error('Failed to load workspace configuration. Ensure nexusflow.json exists.');
   }
 
-  const allRepos = await resolveRepoInfos(feature.repos);
+  const resolvedPaths = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));
+  const allRepos = await resolveRepoInfos(resolvedPaths);
   const checks: DoctorCheck[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];

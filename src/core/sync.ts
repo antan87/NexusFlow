@@ -9,7 +9,7 @@
 import * as path from 'node:path';
 
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
-import { isInPlace } from '../utils/feature.js';
+import { isInPlace, resolveFeatureRepoPath } from '../utils/feature.js';
 import { recordRepoSync } from './workspace-state.js';
 import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -115,8 +115,9 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
       continue;
     }
 
-    const defaultBranch = repo.defaultBranch || 'main';
-    const result = await rebaseRepo(repo.path, defaultBranch);
+    const isolatedInfo = feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path];
+    const targetBase = isolatedInfo?.baseBranch || repo.defaultBranch || 'main';
+    const result = await rebaseRepo(repo.path, targetBase);
 
     await recordRepoSync(workspacePath, repo.name, {
       status: result.status,
@@ -125,7 +126,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
 
     repoReports.push({
       name: repo.name,
-      baseBranch: defaultBranch,
+      baseBranch: targetBase,
       status: result.status,
       message: result.message,
       conflict: result.conflict,
@@ -149,7 +150,8 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
   let contextRefreshed = false;
   if (contentChanged) {
     try {
-      const allRepos = await resolveRepoInfos(feature.repos);
+      const resolved = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));
+      const allRepos = await resolveRepoInfos(resolved);
 
       const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };

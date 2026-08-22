@@ -510,14 +510,14 @@ export async function deleteWorkspace(
   } else if (feature && isInPlace(feature) && feature.isolatedRepos) {
     const origRepos = feature.originalRepos || feature.repos;
     for (const [repoName, isolated] of Object.entries(feature.isolatedRepos)) {
-      const matchedSource = origRepos.find((r) => path.basename(r) === repoName) || path.join(workspacePath, repoName);
+      const matchedSource =
+        origRepos.find((r) => path.basename(r).toLowerCase() === repoName.toLowerCase()) ||
+        origRepos[0] ||
+        path.join(workspacePath, repoName);
       try {
         await removeWorktree(matchedSource, isolated.worktreePath, true);
       } catch (error) {
         console.warn(`Warning: failed to remove isolated worktree for ${repoName} in ${matchedSource}:`, error);
-        try {
-          await execa('git', ['worktree', 'prune'], { cwd: matchedSource });
-        } catch {}
       }
     }
   } else if (!feature) {
@@ -532,7 +532,7 @@ export async function deleteWorkspace(
             const stat = await fs.stat(gitFilePath);
             if (stat.isFile()) {
               const content = await fs.readFile(gitFilePath, 'utf-8');
-              const match = content.match(/gitdir:\s*(.+)\.git\/worktrees/);
+              const match = content.match(/gitdir:\s*(.+)[/\\]\.git[/\\]worktrees/i);
               if (match && match[1]) {
                 const mainRepoPath = path.resolve(match[1].trim());
                 await removeWorktree(mainRepoPath, subPath, true);
@@ -551,6 +551,14 @@ export async function deleteWorkspace(
   } catch (error) {
     console.error(`Failed to delete workspace directory ${workspacePath}:`, error);
     throw error;
+  }
+
+  // Post-deletion prune across source repos to ensure clean git state
+  const sourceReposToPrune = feature?.originalRepos || feature?.repos || [];
+  for (const repoPath of sourceReposToPrune) {
+    try {
+      await execa('git', ['worktree', 'prune'], { cwd: repoPath });
+    } catch {}
   }
 }
 

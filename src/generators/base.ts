@@ -144,15 +144,15 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     const branch = rel?.branch ?? (isolated ? isolated.branchName : undefined);
     const location = inPlace
       ? (isIsolated
-          ? `${isolated!.worktreePath}${branch ? ` (on ${branch} [isolated worktree])` : ' [isolated worktree]'}`
-          : `${repo.path}${branch ? ` (on ${branch})` : ''}`)
-      : repo.name;
+          ? `\`${isolated!.worktreePath}\` *(on ${branch ?? 'feature branch'} [isolated worktree])*`
+          : `\`${repo.path}\`${branch ? ` (on ${branch})` : ''}`)
+      : `\`${repo.name}\``;
 
     const ties: string[] = [];
     if (rel?.dependsOn.length) ties.push(`needs ${rel.dependsOn.map((n) => '`' + n + '`').join(', ')}`);
     if (rel?.consumedBy.length) ties.push(`used by ${rel.consumedBy.map((n) => '`' + n + '`').join(', ')}`);
 
-    return `| \`${repo.name}\` | \`${location}\` | ${verify ? '`' + verify + '`' : '—'} | ${ties.join('; ') || '—'} |`;
+    return `| \`${repo.name}\` | ${location} | ${verify ? '`' + verify + '`' : '—'} | ${ties.join('; ') || '—'} |`;
   });
 
   // The earliest repo something actually builds on — and it names what. The
@@ -173,8 +173,8 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
   const hasIsolated = inPlace && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
   const structureRule = inPlace
     ? (hasIsolated
-        ? 'This is an in-place workspace with isolated worktree(s). Repos marked `[isolated worktree]` must be edited inside their dedicated worktree path. You can isolate other repositories on demand with `nexusflow isolate <repo>` or the `isolate_repo` tool.'
-        : 'These are the original repositories, on whatever branch each has checked out — NexusFlow does not manage branches here, so check before you commit. You can isolate any repo into a dedicated worktree on demand with `nexusflow isolate <repo>` or the `isolate_repo` tool.')
+        ? '**RULE**: Repos marked `[isolated worktree]` MUST be edited inside their dedicated worktree path. Unisolated repos are in READ-ONLY reference mode: before modifying files in any unisolated repository, you MUST invoke the `isolate_repo` MCP tool (or run `nexusflow isolate <repo>`).'
+        : '**RULE**: These repositories are in READ-ONLY reference mode on host branches. Before making ANY file modifications, you MUST invoke the `isolate_repo` MCP tool (or run `nexusflow isolate <repo>`) to create a dedicated feature worktree.')
     : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
   // Repos that already ship their own assistant instructions; those override
