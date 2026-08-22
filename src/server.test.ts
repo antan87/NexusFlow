@@ -1153,6 +1153,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
     it('creates an in-place workspace against the source repos (no worktree remap)', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        devDir: '/mock',
         workspacesDir: '/mock/workspaces',
         storageProvider: 'local'
       } as any);
