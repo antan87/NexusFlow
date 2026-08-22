@@ -80,7 +80,12 @@ export type SerializedError = {
   stack?: string;
 };
 
-export type AuthMethod = "api-key" | "subscription-oauth" | "chatgpt-signin";
+export type AuthMethod =
+  | "api-key"
+  | "subscription-oauth"
+  | "chatgpt-signin"
+  | "cloud-gateway"
+  | "unauthenticated";
 
 export type AuthStatus = {
   configured: boolean;
