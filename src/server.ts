@@ -225,6 +225,17 @@ app.get('/ws', async (c, next) => {
                 return;
               }
 
+              const config = await loadConfig();
+              if (typeof payload.cwd !== 'string' || !payload.cwd.trim()) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Workspace directory cwd is required.' }));
+                return;
+              }
+              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, payload.cwd);
+              if (!safeCwd) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
+                return;
+              }
+
               let session: AgentSession | undefined;
               if (payload.sessionId !== undefined && payload.sessionId !== null) {
                 if (!isValidSessionUuid(payload.sessionId)) {
@@ -268,7 +279,7 @@ app.get('/ws', async (c, next) => {
                 if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
               });
-              startedAgent.start(payload.cwd, session);
+              startedAgent.start(safeCwd, session);
             } else if (payload.type === 'input') {
               if (agent && activeProvider) {
                 if (!turnGate.tryBegin()) {
@@ -1082,12 +1093,14 @@ app.post('/api/workspace', async (c) => {
     }
 
     const config = await loadConfig();
+    const devDir = config.devDir || path.join(os.homedir(), 'dev');
     // Validate repo names and paths synchronously before starting the job.
     for (const r of body.repos || []) {
       if (inPlace) {
-        if (config.devDir && r.path) {
-          assertWithin(config.devDir, path.resolve(r.path));
+        if (!r.path) {
+          return c.json({ error: 'Repository path is required for in-place mode.' }, 400);
         }
+        assertWithin(devDir, path.resolve(r.path));
       } else {
         if (r.name && !isValidProjectName(r.name)) {
           return c.json({ error: `Invalid repository name: ${JSON.stringify(r.name)}` }, 400);
@@ -1233,9 +1246,8 @@ app.post('/api/workspace/:id/repo', async (c) => {
     const id = decodeURIComponent(c.req.param('id'));
     const { repoPath } = await c.req.json() as { repoPath: string };
     const config = await loadConfig();
-    if (config.devDir) {
-      assertWithin(config.devDir, path.resolve(repoPath));
-    }
+    const devDir = config.devDir || path.join(os.homedir(), 'dev');
+    assertWithin(devDir, path.resolve(repoPath));
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
     await addRepoToWorkspace(workspacePath, repoPath);
