@@ -296,7 +296,7 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   const gitBin = findExecutable('git');
   if (gitBin) {
     try {
-      const gitVersionRes = await execa('git', ['--version'], { reject: false });
+      const gitVersionRes = await execa(gitBin, ['--version'], { reject: false });
       const versionMatch = gitVersionRes.stdout.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
       if (versionMatch) {
         const major = parseInt(versionMatch[1]!, 10);

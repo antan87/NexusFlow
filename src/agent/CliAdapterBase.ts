@@ -178,8 +178,15 @@ export interface KillTreeOptions {
 
 // With shell:true or child subprocess trees, terminating a process requires killing
 // the whole tree. On Windows, taskkill /T /F handles this. On POSIX (Linux/macOS),
-// we send SIGTERM to the process group (if detached) or child process, with a
-// graceful escalation to SIGKILL if still alive after the grace period.
+// we send SIGTERM to the process group (when spawned detached) or direct child process,
+// with a graceful escalation to SIGKILL if still alive after the grace period.
+//
+// Notes on trade-offs:
+// - Direct PID liveness probe: process.kill(pid, 0) verifies the direct child. When
+//   spawned with detached: true, group signaling (-pid) cleanly terminates all child/grandchild
+//   processes. In non-detached fallback, only the direct child process is signaled.
+// - Unref'd escalation timer: setTimeout.unref() allows the host CLI/server process to exit
+//   naturally without being kept alive by pending escalation timers during clean shutdown.
 export function killTree(child: ChildProcess | null, options?: KillTreeOptions) {
   if (!child || child.exitCode !== null || !child.pid) return;
   const pid = child.pid;

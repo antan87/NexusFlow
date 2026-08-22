@@ -193,4 +193,44 @@ describe('killTree', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     }
   });
+
+  it('falls back to child.kill on both SIGTERM and SIGKILL if process-group signaling throws', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid: number, signal?: any) => {
+      if (pid < 0) {
+        const err = new Error('ESRCH') as any;
+        err.code = 'ESRCH';
+        throw err;
+      }
+      return true as any;
+    });
+
+    try {
+      const child = {
+        pid: 6543,
+        exitCode: null,
+        killed: false,
+        kill: vi.fn(),
+      } as unknown as ChildProcess;
+
+      killTree(child, { detached: true, gracePeriodMs: 3000 });
+
+      // Group signal threw, fallback to child.kill('SIGTERM')
+      expect(killSpy).toHaveBeenCalledWith(-6543, 'SIGTERM');
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+      // Grace period expires
+      vi.advanceTimersByTime(3000);
+
+      // Liveness probe succeeded, group SIGKILL threw, fallback to child.kill('SIGKILL')
+      expect(killSpy).toHaveBeenCalledWith(6543, 0);
+      expect(killSpy).toHaveBeenCalledWith(-6543, 'SIGKILL');
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+  });
 });

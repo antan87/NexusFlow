@@ -370,7 +370,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     transport.process.stdin?.end();
     void transport.connection.close().catch(() => {});
     const forceKill = setTimeout(
-      () => killTree(transport.process, { detached: process.platform !== 'win32' }),
+      () => killTree(transport.process, { detached: process.platform !== 'win32', gracePeriodMs: 250 }),
       500,
     );
     forceKill.unref?.();
