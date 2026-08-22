@@ -200,7 +200,7 @@ app.get('/ws', async (c, next) => {
     const turnGate = new AgentTurnGate();
 
     return {
-      onMessage(event, ws) {
+      async onMessage(event, ws) {
         if (typeof event.data === 'string') {
           if (event.data === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }));
