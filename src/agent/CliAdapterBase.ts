@@ -170,40 +170,58 @@ export abstract class CliAdapterBase extends EventEmitter {
   }
 }
 
+export interface KillTreeOptions {
+  detached?: boolean;
+  gracePeriodMs?: number;
+}
+
 // With shell:true or child subprocess trees, terminating a process requires killing
 // the whole tree. On Windows, taskkill /T /F handles this. On POSIX (Linux/macOS),
-// we send SIGTERM to the process group with a graceful escalation to SIGKILL.
-export function killTree(child: ChildProcess | null) {
-  if (!child || child.killed || child.exitCode !== null || !child.pid) return;
+// we send SIGTERM to the process group (if detached) or child process, with a
+// graceful escalation to SIGKILL if still alive after the grace period.
+export function killTree(child: ChildProcess | null, options?: KillTreeOptions) {
+  if (!child || child.exitCode !== null || !child.pid) return;
   const pid = child.pid;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
   } else {
-    try {
-      // Attempt to terminate the entire process group if detached/leader
-      process.kill(-pid, 'SIGTERM');
-    } catch {
+    let signaled = false;
+    if (options?.detached) {
+      try {
+        process.kill(-pid, 'SIGTERM');
+        signaled = true;
+      } catch {}
+    }
+    if (!signaled) {
       try {
         child.kill('SIGTERM');
-      } catch {
-        // Already exited
-      }
+      } catch {}
     }
 
-    // Grace period escalation to SIGKILL
+    const gracePeriod = options?.gracePeriodMs ?? 3000;
     const forceKillTimer = setTimeout(() => {
+      let alive = false;
       try {
-        if (!child.killed && child.exitCode === null) {
-          try {
-            process.kill(-pid, 'SIGKILL');
-          } catch {
-            child.kill('SIGKILL');
-          }
-        }
-      } catch {
-        // Already exited
+        process.kill(pid, 0);
+        alive = true;
+      } catch (e: any) {
+        alive = e?.code === 'EPERM';
       }
-    }, 500);
+      if (!alive) return;
+
+      if (options?.detached) {
+        try {
+          process.kill(-pid, 'SIGKILL');
+          return;
+        } catch {}
+      }
+      try {
+        child.kill('SIGKILL');
+      } catch {}
+    }, gracePeriod);
     forceKillTimer.unref?.();
   }
 }

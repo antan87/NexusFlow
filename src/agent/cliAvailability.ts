@@ -69,15 +69,19 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
     const base = path.join(dir.replace(/^"|"$/g, ''), name);
     const candidates = [
       base,
-      ...extensions.map((extension) => base + (extension.startsWith('.') ? extension : `.${extension}`).toLowerCase()),
-      ...extensions.map((extension) => base + (extension.startsWith('.') ? extension : `.${extension}`).toUpperCase()),
+      ...extensions.map((ext) => base + (ext.startsWith('.') ? ext : `.${ext}`).toLowerCase()),
     ];
-    const uniqueCandidates = Array.from(new Set(candidates));
-    for (const candidate of uniqueCandidates) {
+    for (const candidate of candidates) {
       try {
-        if (fsSync.statSync(candidate).isFile()) return candidate;
+        const stat = fsSync.statSync(candidate);
+        if (stat.isFile()) {
+          if (process.platform !== 'win32') {
+            fsSync.accessSync(candidate, fsSync.constants.X_OK);
+          }
+          return candidate;
+        }
       } catch {
-        // Not here; keep looking.
+        // Not here or not executable; keep looking.
       }
     }
   }

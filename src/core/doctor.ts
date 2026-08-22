@@ -295,7 +295,24 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   // ── 8. System & OS Environment ──────────────────────────────────────────
   const gitBin = findExecutable('git');
   if (gitBin) {
-    checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+    try {
+      const gitVersionRes = await execa('git', ['--version'], { reject: false });
+      const versionMatch = gitVersionRes.stdout.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+      if (versionMatch) {
+        const major = parseInt(versionMatch[1]!, 10);
+        const minor = parseInt(versionMatch[2]!, 10);
+        if (major < 2 || (major === 2 && minor < 20)) {
+          warnings.push(`git version ${versionMatch[0]} is older than recommended (>= 2.20 recommended for worktree operations).`);
+          checks.push({ category: 'Environment', name: 'git', status: 'warn', message: `version ${versionMatch[0]} (>= 2.20 recommended)` });
+        } else {
+          checks.push({ category: 'Environment', name: 'git', status: 'pass', message: `version ${versionMatch[0]} (>= 2.20)` });
+        }
+      } else {
+        checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+      }
+    } catch {
+      checks.push({ category: 'Environment', name: 'git', status: 'pass', message: 'installed and available on PATH' });
+    }
   } else {
     errors.push('git is not found on PATH. Git is required for workspace operations.');
     checks.push({ category: 'Environment', name: 'git', status: 'fail', message: 'git is not on PATH' });

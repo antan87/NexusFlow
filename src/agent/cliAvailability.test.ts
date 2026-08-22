@@ -24,7 +24,9 @@ afterEach(async () => {
 describe('findExecutable', () => {
   it('finds a file on PATH', async () => {
     const name = process.platform === 'win32' ? 'thing.cmd' : 'thing';
-    await fs.writeFile(path.join(home, name), '', 'utf-8');
+    const targetFile = path.join(home, name);
+    await fs.writeFile(targetFile, '', { mode: 0o755 });
+    try { await fs.chmod(targetFile, 0o755); } catch {}
 
     expect(findExecutable('thing', { PATH: home, PATHEXT: '.CMD' })).not.toBeNull();
   });
@@ -35,6 +37,24 @@ describe('findExecutable', () => {
 
   it('returns null when PATH is empty', () => {
     expect(findExecutable('claude', {})).toBeNull();
+  });
+
+  it('handles quoted directory paths in PATH', async () => {
+    const name = process.platform === 'win32' ? 'quoted.cmd' : 'quoted';
+    const targetFile = path.join(home, name);
+    await fs.writeFile(targetFile, '', { mode: 0o755 });
+    try { await fs.chmod(targetFile, 0o755); } catch {}
+
+    const quotedPath = `"${home}"`;
+    expect(findExecutable('quoted', { PATH: quotedPath, PATHEXT: '.CMD' })).not.toBeNull();
+  });
+
+  it.skipIf(process.platform === 'win32')('returns null for non-executable files on POSIX', async () => {
+    const nonExec = path.join(home, 'non-exec');
+    await fs.writeFile(nonExec, '', { mode: 0o644 });
+    try { await fs.chmod(nonExec, 0o644); } catch {}
+
+    expect(findExecutable('non-exec', { PATH: home })).toBeNull();
   });
 });
 
