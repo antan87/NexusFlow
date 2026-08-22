@@ -87,7 +87,8 @@ export async function acquireLock(lockPath: string, options: LockOptions): Promi
         await fs.unlink(lockPath).catch(() => {});
       };
     } catch (error) {
-      if (getErrorCode(error) !== 'EEXIST') throw error;
+      const code = getErrorCode(error);
+      if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'EACCES') throw error;
       if (await clearStaleLock(lockPath, options.staleMs)) continue;
       if (Date.now() - startedAt >= options.timeoutMs) {
         throw new Error(options.timeoutMessage);
