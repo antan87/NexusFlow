@@ -25,7 +25,7 @@ import {
   setScheduleEnabled,
   type ScheduleTask,
 } from '../core/scheduler.js';
-import { isPortActive } from './ui.js';
+import { findActiveServerPort } from './ui.js';
 
 /**
  * Adds a recurring job for a workspace.
@@ -65,16 +65,24 @@ export async function scheduleAddCommand(
 /**
  * Lists all scheduled jobs with their status and next due time.
  */
-export async function scheduleListCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Scheduled Jobs\n'));
+export async function scheduleListCommand(options?: { json?: boolean }): Promise<void> {
+  const store = await loadSchedules();
+  const activePort = await findActiveServerPort();
 
-  const serverActive = await isPortActive(3000);
-  if (!serverActive) {
-    console.log(chalk.yellow('⚠️  Notice: The NexusFlow background server is not currently active.'));
-    console.log(chalk.dim('   Jobs are dormant until started with: nexusflow ui --daemon\n'));
+  if (options?.json) {
+    console.log(JSON.stringify({ jobs: store.jobs, serverActive: activePort !== null, serverPort: activePort }, null, 2));
+    return;
   }
 
-  const store = await loadSchedules();
+  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Scheduled Jobs\n'));
+
+  if (!activePort) {
+    console.log(chalk.yellow('⚠️  Notice: The NexusFlow background server is not currently active.'));
+    console.log(chalk.dim('   Jobs are dormant until started with: nexusflow ui --daemon\n'));
+  } else {
+    console.log(chalk.green(`✔ NexusFlow background server is active (port ${activePort}).\n`));
+  }
+
   if (store.jobs.length === 0) {
     console.log(chalk.yellow('No scheduled jobs. Add one with:'));
     console.log(chalk.dim('  nexusflow schedule add [workspace] --task sync --every 2h\n'));

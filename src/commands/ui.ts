@@ -9,7 +9,51 @@ import { exec, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
 import * as net from 'node:net';
+import * as fs from 'node:fs/promises';
+import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
+
+export interface DaemonState {
+  pid: number;
+  port: number;
+  startedAt: string;
+}
+
+export async function getDaemonState(): Promise<DaemonState | null> {
+  try {
+    const filePath = path.join(getConfigDir(), 'daemon.json');
+    const content = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+export async function recordDaemonState(state: DaemonState | null): Promise<void> {
+  try {
+    const configDir = getConfigDir();
+    await fs.mkdir(configDir, { recursive: true });
+    const filePath = path.join(configDir, 'daemon.json');
+    if (state === null) {
+      await fs.unlink(filePath).catch(() => {});
+    } else {
+      await fs.writeFile(filePath, JSON.stringify(state, null, 2), 'utf-8');
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
+export async function findActiveServerPort(): Promise<number | null> {
+  const daemonState = await getDaemonState();
+  if (daemonState && await isPortActive(daemonState.port)) {
+    return daemonState.port;
+  }
+  for (let p = 3000; p <= 3005; p++) {
+    if (await isPortActive(p)) return p;
+  }
+  return null;
+}
 
 export function isPortActive(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -112,6 +156,8 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
         try { child.kill(); } catch {}
         throw new Error(`Backend daemon failed to bind port ${targetPort} within 10s`);
       }
+
+      await recordDaemonState({ pid: child.pid ?? 0, port: targetPort, startedAt: new Date().toISOString() });
 
       console.log(chalk.green(`  ✔ Dashboard daemon successfully running on port ${chalk.bold(targetPort)}.`));
       if (options.open) {

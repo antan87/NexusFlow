@@ -14,13 +14,19 @@ import { getServiceStatus, loadRunningState } from '../orchestration/index.js';
  * Shows status of running services for a workspace.
  *
  * @param workspaceArg - Optional workspace path from CLI.
+ * @param options      - Command options including --json.
  */
-export async function statusCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n📊 NexusFlow — Service Status\n'));
-
+export async function statusCommand(workspaceArg?: string, options?: { json?: boolean }): Promise<void> {
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
 
+  if (options?.json) {
+    const runningState = await loadRunningState(workspacePath);
+    console.log(JSON.stringify(runningState, null, 2));
+    return;
+  }
+
+  console.log(chalk.bold.cyan('\n📊 NexusFlow — Service Status\n'));
   await getServiceStatus(workspacePath);
   console.log();
 }

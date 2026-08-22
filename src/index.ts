@@ -153,8 +153,9 @@ program
   .command('status')
   .description('Show status of running services')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(runAction(async (workspace?: string) => {
-    await statusCommand(workspace);
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: { json?: boolean }) => {
+    await statusCommand(workspace, options);
   }));
 
 program
@@ -174,45 +175,25 @@ program
   .alias('dash')
   .description('Open the web dashboard in your default browser')
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
-  .action(async (options: { port?: string }) => {
-    try {
-      await uiCommand({ ...options, daemon: true, open: true });
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
-
+  .action(runAction(async (options: { port?: string }) => {
+    await uiCommand({ ...options, daemon: true, open: true });
+  }));
 
 program
   .command('tui')
   .description('Open the interactive terminal GUI (TUI) dashboard')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await tuiCommand({ workspace });
-    } catch (error) {
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await tuiCommand({ workspace });
+  }));
 
 program
   .command('sync')
   .description('Sync all repositories in a workspace')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(async (workspace?: string) => {
-    try {
-      await syncCommand(workspace);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace?: string) => {
+    await syncCommand(workspace);
+  }));
 
 program
   .command('commit')
@@ -222,25 +203,17 @@ program
   .option('--no-push', 'Stage and commit changes without pushing to remote')
   .option('--dry-run', 'Preview changes without committing')
   .option('-r, --repo <repos...>', 'Only commit the given repositories (by name)')
-  .action(async (workspace: string | undefined, options: { message: string; push?: boolean; dryRun?: boolean; repo?: string[] }) => {
-    try {
-      await commitCommand(options.message, workspace, options);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('User force closed')) {
-        console.log('\nCancelled.');
-        process.exit(0);
-      }
-      console.error(error);
-      process.exit(1);
-    }
-  });
+  .action(runAction(async (workspace: string | undefined, options: { message: string; push?: boolean; dryRun?: boolean; repo?: string[] }) => {
+    await commitCommand(options.message, workspace, options);
+  }));
 
 program
   .command('diff')
   .description('Display a unified summary of changes across all repositories (including unpushed commits)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-r, --repo <repos...>', 'Only show the given repositories (by name)')
-  .action(runAction(async (workspace: string | undefined, options: { repo?: string[] }) => {
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: { repo?: string[]; json?: boolean }) => {
     await diffCommand(workspace, options);
   }));
 
@@ -509,6 +482,7 @@ scheduleCmd
   .command('list')
   .alias('ls')
   .description('List all scheduled jobs')
+  .option('--json', 'Output in JSON format')
   .action(runAction(scheduleListCommand));
 
 scheduleCmd
