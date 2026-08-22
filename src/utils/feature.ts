@@ -33,7 +33,8 @@ export function isInPlace(feature: Feature): boolean {
  * Resolves where one of a feature's repos actually lives on disk — THE single
  * source of truth for the mode rule. Worktree repos live inside the workspace
  * dir (re-derived from the basename so a relocated workspace still resolves);
- * in-place repos are the source repositories at their stored absolute paths.
+ * in-place repos are the source repositories at their stored absolute paths,
+ * unless dynamically isolated into a dedicated worktree on-demand.
  *
  * @param feature       - The feature the repo belongs to.
  * @param workspacePath - The workspace directory's CURRENT location (callers
@@ -45,9 +46,31 @@ export function resolveFeatureRepoPath(
   workspacePath: string,
   repoPath: string,
 ): string {
-  return isInPlace(feature)
-    ? repoPath
-    : path.resolve(workspacePath, path.basename(repoPath));
+  if (isInPlace(feature)) {
+    const repoName = path.basename(repoPath);
+    const isolated =
+      feature.isolatedRepos?.[repoName] ?? feature.isolatedRepos?.[repoPath];
+    if (isolated?.worktreePath) {
+      return path.resolve(isolated.worktreePath);
+    }
+    return repoPath;
+  }
+  return path.resolve(workspacePath, path.basename(repoPath));
+}
+
+/**
+ * Whether a specific repository in a feature is currently isolated in a
+ * dedicated worktree.
+ *
+ * @param feature        - The feature manifest.
+ * @param repoNameOrPath - Directory name or path of the repository.
+ */
+export function isRepoIsolated(feature: Feature, repoNameOrPath: string): boolean {
+  if (!isInPlace(feature)) return true;
+  const repoName = path.basename(repoNameOrPath);
+  return Boolean(
+    feature.isolatedRepos?.[repoName] ?? feature.isolatedRepos?.[repoNameOrPath],
+  );
 }
 
 /**
@@ -61,3 +84,4 @@ export function resolveFeatureRepoPath(
 export function getSessionCwd(feature: Feature): string {
   return feature.workspacePath;
 }
+

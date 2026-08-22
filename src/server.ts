@@ -26,7 +26,7 @@ import { createNewRepo, isValidProjectName } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
-import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace } from './core/workspace.js';
+import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
@@ -1240,6 +1240,30 @@ app.post('/api/workspace/:id/repo', async (c) => {
 
     await addRepoToWorkspace(workspacePath, repoPath);
     return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 7.7b. Isolate repo in in-place workspace
+app.post('/api/workspace/:id/isolate', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json().catch(() => ({})) as {
+      repo?: string;
+      branchName?: string;
+      baseBranch?: string;
+    };
+    if (!body.repo || typeof body.repo !== 'string') {
+      return c.json({ error: 'Missing "repo" parameter in request body' }, 400);
+    }
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const result = await isolateWorkspaceRepo(workspacePath, body.repo, {
+      branchName: body.branchName,
+      baseBranch: body.baseBranch,
+    });
+    return c.json({ success: true, ...result });
   } catch (error) {
     return errorResponse(c, error);
   }

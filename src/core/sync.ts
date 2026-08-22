@@ -73,8 +73,10 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
 
   // In-place workspaces work directly in the source repos on whatever branch
   // the user has checked out — rebasing those from under them would be a
-  // destructive surprise. Sync is a deliberate no-op.
-  if (isInPlace(feature)) {
+  // destructive surprise. If repos are dynamically isolated into dedicated
+  // worktrees, only those isolated worktrees are synced against their base.
+  const hasIsolated = isInPlace(feature) && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
+  if (isInPlace(feature) && !hasIsolated) {
     return {
       workspacePath,
       branchName: feature.branchName,
@@ -99,6 +101,20 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
   let errorCount = 0;
 
   for (const repo of repos) {
+    const isIsolated = isInPlace(feature) && Boolean(
+      feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path],
+    );
+
+    if (isInPlace(feature) && !isIsolated) {
+      repoReports.push({
+        name: repo.name,
+        baseBranch: '',
+        status: 'up-to-date',
+        message: 'In-place repo — branches are managed by you; sync skipped.',
+      });
+      continue;
+    }
+
     const defaultBranch = repo.defaultBranch || 'main';
     const result = await rebaseRepo(repo.path, defaultBranch);
 

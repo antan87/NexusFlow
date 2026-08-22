@@ -136,11 +136,16 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     const verify = a ? getConventionalTestCommand(a) : '';
 
     // In-place repos can each sit on a different branch, which is worth stating.
+    // Repos dynamically isolated into dedicated worktrees show their worktree path.
     // In worktree mode they are all on the feature branch named just below, so
     // repeating it per row would be noise.
-    const branch = rel?.branch;
+    const isIsolated = inPlace && Boolean(feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path]);
+    const isolated = feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path];
+    const branch = rel?.branch ?? (isolated ? isolated.branchName : undefined);
     const location = inPlace
-      ? `${repo.path}${branch ? ` (on ${branch})` : ''}`
+      ? (isIsolated
+          ? `${isolated!.worktreePath}${branch ? ` (on ${branch} [isolated worktree])` : ' [isolated worktree]'}`
+          : `${repo.path}${branch ? ` (on ${branch})` : ''}`)
       : repo.name;
 
     const ties: string[] = [];
@@ -165,8 +170,11 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
 
   // Only the rule an assistant cannot infer. Which directory to run a command
   // in, and how git works, are not worth the tokens.
+  const hasIsolated = inPlace && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
   const structureRule = inPlace
-    ? 'These are the original repositories, on whatever branch each has checked out — NexusFlow does not manage branches here, so check before you commit.'
+    ? (hasIsolated
+        ? 'This is an in-place workspace with isolated worktree(s). Repos marked `[isolated worktree]` must be edited inside their dedicated worktree path. You can isolate other repositories on demand with `nexusflow isolate <repo>` or the `isolate_repo` tool.'
+        : 'These are the original repositories, on whatever branch each has checked out — NexusFlow does not manage branches here, so check before you commit. You can isolate any repo into a dedicated worktree on demand with `nexusflow isolate <repo>` or the `isolate_repo` tool.')
     : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
   // Repos that already ship their own assistant instructions; those override

@@ -488,8 +488,8 @@ export async function deleteWorkspace(
   }
 
   // In-place: feature.repos are the user's source repositories — they must
-  // never be touched. Deleting the workspace only removes the lightweight
-  // directory (manifest + context files) at the end of this function.
+  // never be touched. If specific repos were dynamically isolated into
+  // dedicated worktrees, those isolated worktrees are safely removed here.
   if (feature && !isInPlace(feature)) {
     const origRepos = feature.originalRepos || [];
     for (let i = 0; i < feature.repos.length; i++) {
@@ -505,6 +505,19 @@ export async function deleteWorkspace(
         } catch (pruneError) {
           console.warn(`Warning: failed to prune worktrees in ${originalPath}:`, pruneError);
         }
+      }
+    }
+  } else if (feature && isInPlace(feature) && feature.isolatedRepos) {
+    const origRepos = feature.originalRepos || feature.repos;
+    for (const [repoName, isolated] of Object.entries(feature.isolatedRepos)) {
+      const matchedSource = origRepos.find((r) => path.basename(r) === repoName) || path.join(workspacePath, repoName);
+      try {
+        await removeWorktree(matchedSource, isolated.worktreePath, true);
+      } catch (error) {
+        console.warn(`Warning: failed to remove isolated worktree for ${repoName} in ${matchedSource}:`, error);
+        try {
+          await execa('git', ['worktree', 'prune'], { cwd: matchedSource });
+        } catch {}
       }
     }
   } else if (!feature) {
@@ -657,7 +670,7 @@ export async function addRepoToWorkspace(
  * Automatically adds NexusFlow workspace context and config files to git's local
  * exclude list for each repository so they never show up in `git status` or get committed.
  */
-async function excludeNexusFlowFiles(workspacePath: string, feature: Feature): Promise<void> {
+export async function excludeNexusFlowFiles(workspacePath: string, feature: Feature): Promise<void> {
   const excludeEntries = [
     'CLAUDE.md',
     'AGENTS.md',
@@ -719,3 +732,6 @@ async function excludeNexusFlowFiles(workspacePath: string, feature: Feature): P
     }
   }
 }
+
+export { isolateWorkspaceRepo, type IsolateRepoOptions, type IsolateRepoResult } from './isolate.js';
+

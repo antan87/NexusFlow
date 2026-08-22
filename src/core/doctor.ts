@@ -106,9 +106,20 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     }
 
     if (isInPlace(feature)) {
-      // In-place workspaces have no expected branch — the user manages
-      // branches; a mismatch warning here would fire for every repo forever.
-      checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'info', message: `On branch "${branch}" (in-place workspace — branches managed by you)` });
+      const isolated = feature.isolatedRepos?.[repo.name] ?? feature.isolatedRepos?.[repo.path];
+      if (isolated) {
+        const expectedBranch = isolated.branchName;
+        if (branch !== expectedBranch) {
+          warnings.push(`Repository "${repo.name}" is checked out on branch "${branch}", but isolated worktree branch is "${expectedBranch}".`);
+          checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'warn', message: `Branch mismatch (${branch} vs expected ${expectedBranch} [isolated worktree])` });
+        } else {
+          checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'pass', message: `Aligned on branch "${branch}" (isolated worktree)` });
+        }
+      } else {
+        // In-place workspaces have no expected branch — the user manages
+        // branches; a mismatch warning here would fire for every repo forever.
+        checks.push({ category: 'Branch Alignment & Git Status', name: repo.name, status: 'info', message: `On branch "${branch}" (in-place workspace — branches managed by you)` });
+      }
     } else {
       // Per-repo existing-branch overrides are expected to differ from the
       // feature branch.

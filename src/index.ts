@@ -30,6 +30,7 @@ import { loadConfig } from './core/config.js';
 import { debugLog } from './utils/debug.js';
 import { loadPlugins } from './core/plugins/loader.js';
 import { addRepoCommand } from './commands/add-repo.js';
+import { isolateCommand } from './commands/isolate.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 
@@ -331,6 +332,27 @@ program
   .action(async (repoPath?: string, workspace?: string) => {
     try {
       await addRepoCommand(repoPath, workspace);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('User force closed')) {
+        console.log('\nCancelled.');
+        process.exit(0);
+      }
+      console.error(error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('isolate')
+  .description('Dynamically isolate a repository in an in-place workspace into a dedicated worktree on demand')
+  .argument('[repo]', 'Name or path of the repository to isolate')
+  .argument('[branch]', 'Target feature branch name')
+  .option('-b, --branch <branch>', 'Target feature branch name')
+  .option('--base <base>', 'Base branch to branch off')
+  .option('-w, --workspace <workspace>', 'Workspace name or path')
+  .action(async (repo?: string, branchArg?: string, options?: { branch?: string; base?: string; workspace?: string }) => {
+    try {
+      await isolateCommand(repo, branchArg, options);
     } catch (error) {
       if (error instanceof Error && error.message.includes('User force closed')) {
         console.log('\nCancelled.');
