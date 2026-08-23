@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import { getLocalCliEntry, getLocalMcpServerConfig } from './mcp-config.js';
 
@@ -17,5 +17,9 @@ describe('Local MCP Server Config Helper', () => {
     expect(config.args).toContain('/workspace/path');
     expect(config.args).toContain('--role');
     expect(config.args).toContain('developer');
+  });
+
+  it('throws helpful remediation error when dist/index.js is missing', () => {
+    expect(() => getLocalCliEntry('/non/existent/dist/index.js')).toThrow(/Run "npm run build" to compile/);
   });
 });

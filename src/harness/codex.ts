@@ -51,10 +51,15 @@ export class CodexAdapter implements HarnessAdapter {
   readonly vendor = "codex" as const;
   private clientOpts: NonNullable<ConstructorParameters<typeof Codex>[0]>;
   private client: Codex;
+  private clientFactory?: (opts: ConstructorParameters<typeof Codex>[0]) => Codex;
 
-  constructor(clientOpts: ConstructorParameters<typeof Codex>[0] = {}) {
+  constructor(
+    clientOpts: ConstructorParameters<typeof Codex>[0] = {},
+    clientFactory?: (opts: ConstructorParameters<typeof Codex>[0]) => Codex,
+  ) {
     this.clientOpts = clientOpts ?? {};
-    this.client = new Codex(this.clientOpts);
+    this.clientFactory = clientFactory;
+    this.client = clientFactory ? clientFactory(this.clientOpts) : new Codex(this.clientOpts);
   }
 
   async start(spec: StartSpec): Promise<SessionHandle> {
@@ -63,13 +68,21 @@ export class CodexAdapter implements HarnessAdapter {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
     const client = spec.mcpServers
-      ? new Codex({
-          ...this.clientOpts,
-          config: {
-            ...this.clientOpts.config,
-            mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-          },
-        })
+      ? (this.clientFactory
+          ? this.clientFactory({
+              ...this.clientOpts,
+              config: {
+                ...this.clientOpts.config,
+                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
+              },
+            })
+          : new Codex({
+              ...this.clientOpts,
+              config: {
+                ...this.clientOpts.config,
+                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
+              },
+            }))
       : this.client;
 
     const thread = client.startThread({
@@ -97,13 +110,21 @@ export class CodexAdapter implements HarnessAdapter {
       );
     }
     const client = spec.mcpServers
-      ? new Codex({
-          ...this.clientOpts,
-          config: {
-            ...this.clientOpts.config,
-            mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-          },
-        })
+      ? (this.clientFactory
+          ? this.clientFactory({
+              ...this.clientOpts,
+              config: {
+                ...this.clientOpts.config,
+                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
+              },
+            })
+          : new Codex({
+              ...this.clientOpts,
+              config: {
+                ...this.clientOpts.config,
+                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
+              },
+            }))
       : this.client;
 
     const thread = client.resumeThread(spec.sessionId);
