@@ -197,7 +197,7 @@ describe('Harness Abstraction Layer', () => {
         await expect(
           adapter.start({
             prompt: 'test',
-            workspace: { rootPath: 'C:/test' },
+            workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
           }),
         ).rejects.toThrow(AuthRequiredError);
       } finally {

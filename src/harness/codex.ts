@@ -232,7 +232,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   private mapEvent(
-    ev: ThreadEvent,
+    ev: any,
     push: (ev: HarnessEvent) => void,
     resolveId: (s: string) => void,
   ): void {
