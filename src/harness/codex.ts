@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Codex, type Thread, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
+import { Codex, type CodexOptions, type Thread, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
 import {
   type HarnessAdapter,
   type SessionHandle,
@@ -67,7 +67,7 @@ export class CodexAdapter implements HarnessAdapter {
           ...this.clientOpts,
           config: {
             ...this.clientOpts.config,
-            mcp_servers: spec.mcpServers as any,
+            mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
           },
         })
       : this.client;
@@ -101,7 +101,7 @@ export class CodexAdapter implements HarnessAdapter {
           ...this.clientOpts,
           config: {
             ...this.clientOpts.config,
-            mcp_servers: spec.mcpServers as any,
+            mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
           },
         })
       : this.client;
@@ -117,18 +117,21 @@ export class CodexAdapter implements HarnessAdapter {
       env?.CODEX_API_KEY ??
       process.env.CODEX_API_KEY
     );
-    if (hasApiKey) {
-      return {
-        configured: true,
-        method: "api-key",
-        hasApiKeyFallback: true,
-      };
-    }
 
     // Probe Codex CLI authentication file
     const codexHome = env?.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
     const authFile = path.join(codexHome, "auth.json");
-    if (fs.existsSync(authFile)) {
+    const hasChatGptSignin = fs.existsSync(authFile);
+
+    if (hasApiKey) {
+      return {
+        configured: true,
+        method: "api-key",
+        hasApiKeyFallback: hasChatGptSignin,
+      };
+    }
+
+    if (hasChatGptSignin) {
       return {
         configured: true,
         method: "chatgpt-signin",

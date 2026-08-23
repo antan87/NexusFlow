@@ -40,6 +40,14 @@ export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 /** Mirrors Claude's ResumeMode. Codex ignores `mode:"fork"` (see adapter). */
 export type ResumeMode = "resume" | "fork";
 
+export interface McpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export type McpServersConfig = Record<string, McpServerConfig>;
+
 export type StartSpec = {
   prompt: string;
   workspace: WorkspaceRef;
@@ -53,7 +61,7 @@ export type StartSpec = {
    * Note: Merged on top of process.env (spread-overrides); cannot unset host variables.
    */
   env?: Record<string, string>;
-  mcpServers?: Record<string, unknown>;
+  mcpServers?: McpServersConfig;
   /**
    * ESCAPE HATCH — vendor-native option bag, spread LAST so it overrides
    * everything above. Never widen this type.
