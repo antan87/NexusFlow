@@ -10,7 +10,6 @@ export default defineConfig({
       '**/scratch/**',
       '**/gui/**',
       '**/desktop/**'
-    ],
-    testTimeout: 30000,
+    ]
   }
 });

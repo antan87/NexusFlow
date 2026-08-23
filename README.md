@@ -38,12 +38,11 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 
 ### Prerequisites
 
-| Requirement | Version | Platform Notes |
-|:---|:---|:---|
-| [Node.js](https://nodejs.org) | 20 or later | Supported across Linux, macOS, and Windows |
-| [Git](https://git-scm.com) | 2.20 or later | Required for worktree and multi-git operations |
-| npm | Bundled with Node.js | Standard package manager |
-| `xdg-utils` | Recommended | Linux only (for auto-opening the web dashboard) |
+| Requirement | Version |
+|:---|:---|
+| [Node.js](https://nodejs.org) | 18 or later |
+| [Git](https://git-scm.com) | 2.20 or later (worktree support) |
+| npm | Bundled with Node.js |
 
 ### Install from npm
 

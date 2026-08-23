@@ -95,7 +95,6 @@ export function createAcpTransport(options: AcpTransportOptions): AcpTransport {
   const child = spawn(options.executable, options.args, {
     cwd: options.cwd,
     env: { ...process.env, FORCE_COLOR: '0' },
-    detached: process.platform !== 'win32',
     // npm installs expose a .cmd shim on Windows. All argv here is provider
     // configuration; user prompts and session ids travel inside ACP JSON.
     shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(options.executable),
@@ -355,7 +354,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
   private stopTransport(kill: boolean): void {
     const child = this.transport?.process ?? null;
     child?.stdin?.end();
-    if (kill) killTree(child, { detached: process.platform !== 'win32' });
+    if (kill) killTree(child);
     this.transport = null;
     this.sessionId = null;
   }
@@ -369,10 +368,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     }
     transport.process.stdin?.end();
     void transport.connection.close().catch(() => {});
-    const forceKill = setTimeout(
-      () => killTree(transport.process, { detached: process.platform !== 'win32', gracePeriodMs: 250 }),
-      500,
-    );
+    const forceKill = setTimeout(() => killTree(transport.process), 500);
     forceKill.unref?.();
   }
 }

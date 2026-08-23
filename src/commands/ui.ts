@@ -73,24 +73,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 function openBrowser(url: string): void {
-  let command: string;
-  let args: string[];
+  let openCmd = '';
   if (process.platform === 'win32') {
-    command = 'cmd';
-    args = ['/c', 'start', '""', url];
+    openCmd = `start ${url}`;
   } else if (process.platform === 'darwin') {
-    command = 'open';
-    args = [url];
+    openCmd = `open ${url}`;
   } else {
-    command = 'xdg-open';
-    args = [url];
+    openCmd = `xdg-open ${url}`;
   }
 
-  const child = spawn(command, args, { stdio: 'ignore', detached: true, windowsHide: true });
-  child.on('error', () => {
-    console.log(chalk.dim(`  Could not auto-open browser. Please visit ${url} manually.`));
+  exec(openCmd, (err) => {
+    if (err) {
+      console.log(chalk.dim(`  Could not auto-open browser. Please visit ${url} manually.`));
+    }
   });
-  child.unref();
 }
 
 export async function findAvailablePort(startPort: number, attempts = 100): Promise<number> {

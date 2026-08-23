@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Codex, type Thread } from "@openai/codex-sdk";
+import { Codex, type Thread, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
 import {
   type HarnessAdapter,
   type SessionHandle,
@@ -21,7 +21,6 @@ import type {
   WorkspaceRef,
 } from "./types.js";
 
-type ThreadEvent = Parameters<Parameters<Thread["runStreamed"]>[1] extends (e: infer E) => any ? E : any>[0];
 type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
 function serializeError(err: unknown): SerializedError {
@@ -64,7 +63,7 @@ export class CodexAdapter implements HarnessAdapter {
     const thread = this.client.startThread({
       workingDirectory: spec.workspace.rootPath,
       // NexusFlow workspaces are multi-repo roots => usually NOT a git repo.
-      // Without this, Codex refuses to run. Caller nativeOptions can override if provided.
+      // Without this, Codex refuses to run (verified in Spike 4).
       skipGitRepoCheck: true,
       ...(spec.nativeOptions as Record<string, unknown>),
     });
@@ -139,6 +138,7 @@ export class CodexAdapter implements HarnessAdapter {
     const turnQueue: string[] = [];
     let draining = false;
     let disposed = false;
+    let currentAbort: AbortController | null = null;
 
     const safePush = (ev: HarnessEvent) => {
       if (disposed) return;
@@ -164,7 +164,9 @@ export class CodexAdapter implements HarnessAdapter {
       try {
         while (turnQueue.length > 0 && !disposed) {
           const prompt = turnQueue.shift()!;
-          await this.runTurn(thread, prompt, safePush, out, spec, resolveId, rejectId, () => disposed);
+          currentAbort = new AbortController();
+          await this.runTurn(thread, prompt, safePush, out, spec, resolveId, rejectId, currentAbort.signal, () => disposed);
+          currentAbort = null;
         }
       } finally {
         draining = false;
@@ -185,15 +187,20 @@ export class CodexAdapter implements HarnessAdapter {
         turnQueue.push(prompt);
         void drain();
       },
-      // Codex approvals are config-level (sandbox/approval policy) today, not
-      // interactive callbacks. TODO(spike-7): confirm; until then this is a no-op.
-      respondToApproval: (_requestId, _decision) => {},
+      respondToApproval: (_requestId, _decision) => {
+        // Codex approvals are configured at thread startup (sandboxMode/approvalPolicy).
+      },
       interrupt: async () => {
-        // TODO(spike-5): thread.interrupt()/abort support in pinned SDK version.
+        if (currentAbort) {
+          currentAbort.abort();
+        }
       },
       dispose: async () => {
         disposed = true;
         turnQueue.length = 0;
+        if (currentAbort) {
+          currentAbort.abort();
+        }
         try {
           out.end();
         } catch {}
@@ -209,13 +216,14 @@ export class CodexAdapter implements HarnessAdapter {
     spec: BaseSpec,
     resolveId: (s: string) => void,
     rejectId: (e: Error) => void,
+    signal: AbortSignal,
     isDisposed: () => boolean,
   ): Promise<void> {
     try {
-      const run = await thread.runStreamed(prompt);
+      const run = await thread.runStreamed(prompt, { signal });
       for await (const ev of run.events) {
         if (isDisposed()) break;
-        this.mapEvent(ev as any, safePush, resolveId);
+        this.mapEvent(ev, safePush, resolveId);
         if (spec.debugMirrorRaw) {
           safePush({ type: "raw", vendor: "codex", payload: ev });
         }
@@ -232,41 +240,49 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   private mapEvent(
-    ev: any,
+    ev: ThreadEvent,
     push: (ev: HarnessEvent) => void,
     resolveId: (s: string) => void,
   ): void {
     switch (ev.type) {
       case "thread.started":
-        resolveId((ev as any).thread_id);
-        push({ type: "session_started", sessionId: (ev as any).thread_id });
+        resolveId(ev.thread_id);
+        push({ type: "session_started", sessionId: ev.thread_id });
         break;
 
       case "item.started":
-        // Command executions starting → tool_requested.
-        // TODO(spike-6): confirm item discriminator field name on pinned version.
+      case "item.updated":
+        // Item in progress (commands, tool calls)
         break;
 
       case "item.completed":
-        this.mapItem((ev as any).item, push);
+        this.mapItem(ev.item, push);
         break;
 
       case "turn.completed":
-        push({ type: "turn_completed", usage: this.normalizeUsage((ev as any).usage) });
+        push({ type: "turn_completed", usage: this.normalizeUsage(ev.usage) });
         // Streams stay open across consecutive turns until explicit dispose()
         break;
 
       case "turn.failed":
         push({
           type: "turn_failed",
-          error: { message: (ev as any).error?.message ?? "codex turn failed" },
+          error: { message: ev.error.message ?? "codex turn failed" },
+          fatal: true,
+        });
+        break;
+
+      case "error":
+        push({
+          type: "turn_failed",
+          error: { message: ev.message },
           fatal: true,
         });
         break;
     }
   }
 
-  private mapItem(item: { type: string } & Record<string, any>, push: (ev: HarnessEvent) => void): void {
+  private mapItem(item: ThreadItem, push: (ev: HarnessEvent) => void): void {
     switch (item.type) {
       case "agent_message":
         push({ type: "assistant_message", text: item.text });
@@ -275,7 +291,7 @@ export class CodexAdapter implements HarnessAdapter {
         push({
           type: "file_changed",
           kind: mapPatchKind(item.changes?.[0]?.kind),
-          paths: item.changes?.map((c: any) => c.path) ?? [],
+          paths: item.changes?.map((c) => c.path) ?? [],
         });
         break;
       case "command_execution":
@@ -287,7 +303,7 @@ export class CodexAdapter implements HarnessAdapter {
         });
         break;
       case "mcp_tool_call":
-        push({ type: "tool_completed", callId: item.id, ok: !item.status || item.status === "success" });
+        push({ type: "tool_completed", callId: item.id, ok: item.status === "completed" });
         break;
       default:
         // reasoning / web_search / todo_list — pass-through only via raw mirroring

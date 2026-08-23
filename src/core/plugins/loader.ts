@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import type { PluginRegistryContext, NexusFlowPlugin } from './index.js';
 import { registerStorageProvider } from '../adapters/registry.js';
 
@@ -20,8 +19,8 @@ export async function loadPlugins(program: any, pluginsList: string[]): Promise<
         resolvedPath = path.resolve(pluginPath);
       }
       
-      // Dynamic import works with standard file:// URLs across platforms
-      const fileUrl = resolvedPath.startsWith('file://') ? resolvedPath : pathToFileURL(resolvedPath).href;
+      // Dynamic import works with file:// URLs on Windows
+      const fileUrl = resolvedPath.startsWith('file://') ? resolvedPath : `file:///${resolvedPath.replace(/\\/g, '/')}`;
       const module = await import(fileUrl);
       const plugin: NexusFlowPlugin = module.default || module.plugin;
       
