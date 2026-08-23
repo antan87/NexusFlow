@@ -82,15 +82,11 @@ export async function openCommand(): Promise<void> {
       console.log(chalk.cyan(`\n🚀 Starting ${assistant} session inside workspace...\n`));
 
       const sessions = await findSessions(selected, loadedFeature.repos);
-      let cmdName = 'agy';
+      let cmdName = assistant.toLowerCase();
       let cmdArgs: string[] = [];
 
-      if (assistant === 'claude') {
-        cmdName = 'claude';
-      } else if (assistant === 'codex') {
-        cmdName = 'codex';
-      } else if (assistant === 'copilot') {
-        cmdName = 'copilot';
+      if (assistant === 'antigravity') {
+        cmdName = 'agy';
       } else if (assistant === 'cursor') {
         cmdName = 'cursor-agent';
       }

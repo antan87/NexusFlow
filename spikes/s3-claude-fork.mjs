@@ -1,20 +1,24 @@
 import { InMemorySessionStore, forkSession } from "@anthropic-ai/claude-agent-sdk";
+import * as os from "node:os";
+import * as path from "node:path";
+import assert from "node:assert";
 import crypto from "node:crypto";
 
 console.log("=== SPIKE 3: Custom-Store Fork & UUID Remapping ===");
 
-// Set BOTH CLAUDE_CONFIG_DIR and CLAUDE_CODE_PROJECT_DIR_NAME
-process.env.CLAUDE_CONFIG_DIR = "C:/tmp/.claude";
-process.env.CLAUDE_CODE_PROJECT_DIR_NAME = "ws-test-project";
+// Portable temp config directory across Linux, macOS, and Windows
+const configDir = path.join(os.tmpdir(), "claude-spike-3-config");
+const workspaceId = "ws-fork-test";
+process.env.CLAUDE_CONFIG_DIR = configDir;
+process.env.CLAUDE_CODE_PROJECT_DIR_NAME = workspaceId;
 
 const store = new InMemorySessionStore();
-const projectKey = "ws-test-project";
+const projectKey = workspaceId;
 
 const sourceSessionId = crypto.randomUUID();
 const entry1Uuid = crypto.randomUUID();
 const entry2Uuid = crypto.randomUUID();
 
-// Populate valid entries with required fields
 const entry1 = {
   type: "user",
   uuid: entry1Uuid,
@@ -22,7 +26,7 @@ const entry1 = {
   parentUuid: null,
   logicalParentUuid: null,
   timestamp: new Date().toISOString(),
-  message: { role: "user", content: "Initial turn prompt" }
+  message: { role: "user", content: "Initial turn prompt" },
 };
 const entry2 = {
   type: "assistant",
@@ -31,32 +35,31 @@ const entry2 = {
   parentUuid: entry1Uuid,
   logicalParentUuid: entry1Uuid,
   timestamp: new Date().toISOString(),
-  message: { role: "assistant", content: [{ type: "text", text: "Assistant response" }] }
+  message: { role: "assistant", content: [{ type: "text", text: "Assistant response" }] },
 };
 
 await store.append({ projectKey, sessionId: sourceSessionId }, [entry1, entry2]);
 
-console.log("Source entries before fork:", (await store.load({ projectKey, sessionId: sourceSessionId }))?.length);
+const sourceBefore = await store.load({ projectKey, sessionId: sourceSessionId });
+assert.strictEqual(sourceBefore?.length, 2, "Spike 3: Source session must contain 2 entries before fork");
 
-try {
-  const result = await forkSession(sourceSessionId, {
-    sessionStore: store,
-  });
+const result = await forkSession(sourceSessionId, {
+  sessionStore: store,
+});
 
-  console.log("\nforkSession returned result:", result);
-  const targetSessionId = result.sessionId;
-  const forkedEntries = await store.load({ projectKey, sessionId: targetSessionId });
-  console.log("Forked entries count:", forkedEntries?.length);
-  console.log("Forked entry 1:", forkedEntries?.[0]);
-  console.log("Forked entry 2:", forkedEntries?.[1]);
+const targetSessionId = result.sessionId;
+const forkedEntries = await store.load({ projectKey, sessionId: targetSessionId });
+const sourceAfter = await store.load({ projectKey, sessionId: sourceSessionId });
 
-  console.log("\n--- SPIKE 3 VERIFIED CLAIMS ---");
-  console.log("1. Original entries untouched?", (await store.load({ projectKey, sessionId: sourceSessionId }))?.length === 2);
-  console.log("2. Target session created?", Boolean(forkedEntries));
-  console.log("3. Session ID remapped to target?", forkedEntries?.[0]?.sessionId === targetSessionId);
-  console.log("4. Message UUID remapped to new UUID?", forkedEntries?.[0]?.uuid !== entry1Uuid && Boolean(forkedEntries?.[0]?.uuid));
-  console.log("5. Parent UUID remapped to new parent?", forkedEntries?.[1]?.parentUuid === forkedEntries?.[0]?.uuid);
-  console.log("6. forkedFrom metadata recorded?", Boolean(forkedEntries?.[0]?.forkedFrom));
-} catch (err) {
-  console.error("Spike 3 error:", err);
-}
+// Strict Assertions
+assert.ok(targetSessionId && targetSessionId !== sourceSessionId, "Spike 3: targetSessionId must be a newly allocated UUID");
+assert.strictEqual(sourceAfter?.length, 2, "Spike 3: Original source session entries MUST be untouched");
+assert.ok(forkedEntries && forkedEntries.length >= 2, "Spike 3: Target session must contain the forked entries");
+assert.strictEqual(forkedEntries[0].sessionId, targetSessionId, "Spike 3: Entry 0 sessionId must be rewritten to targetSessionId");
+assert.notStrictEqual(forkedEntries[0].uuid, entry1Uuid, "Spike 3: Entry 0 UUID must be remapped to a fresh UUID");
+assert.strictEqual(forkedEntries[1].parentUuid, forkedEntries[0].uuid, "Spike 3: Entry 1 parentUuid must point to remapped Entry 0 UUID");
+assert.ok(forkedEntries[0].forkedFrom, "Spike 3: forkedFrom lineage metadata must be present");
+assert.strictEqual(forkedEntries[0].forkedFrom.sessionId, sourceSessionId, "Spike 3: forkedFrom.sessionId must reference sourceSessionId");
+assert.strictEqual(forkedEntries[0].forkedFrom.messageUuid, entry1Uuid, "Spike 3: forkedFrom.messageUuid must reference original message UUID");
+
+console.log("✅ Spike 3 Passed: Custom-store fork granular entry remapping & lineage verified.");
