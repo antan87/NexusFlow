@@ -238,7 +238,7 @@ test.describe('Vim Navigation Mode', () => {
     test('suspends navigation and action triggers during modal overlays', async ({ page }) => {
       const postCalls: string[] = [];
       page.on('request', (req) => {
-        if (req.method() === 'POST' && /\/services$/.test(req.url())) {
+        if (req.method() === 'POST') {
           postCalls.push(req.url());
         }
       });
@@ -260,7 +260,7 @@ test.describe('Vim Navigation Mode', () => {
       // Press s inside open modal — action key must NOT trigger background workspace start action
       await page.keyboard.press('s');
       await expect(page.locator('.vim-focus')).toHaveCount(0);
-      expect(postCalls).toHaveLength(0);
+      expect(postCalls).toEqual([]);
 
       // Escape closes modal cleanly
       await page.keyboard.press('Escape');

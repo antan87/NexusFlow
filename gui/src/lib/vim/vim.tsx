@@ -190,6 +190,7 @@ export function VimProvider(props: VimProviderProps) {
   }, []);
 
   const toggle = useCallback(() => {
+    setHelpOpen(false);
     setEnabled((v) => {
       const next = !v;
       localStorage.setItem(LS_KEY, next ? 'on' : 'off');
@@ -259,11 +260,11 @@ export function VimProvider(props: VimProviderProps) {
       const currentScope = scopeRef.current;
       const container =
         focusedRef.current ??
-        document.querySelector<HTMLElement>('[data-vim-selected]') ??
+        document.querySelector<HTMLElement>(`[data-vim-scope="${currentScope}"] [data-vim-selected]`) ??
         document.querySelector<HTMLElement>(`[data-vim-scope="${currentScope}"]`);
       const btn =
         container?.querySelector<HTMLElement>(`[data-vim-action="${action}"]`) ??
-        document.querySelector<HTMLElement>(`[data-vim-action="${action}"]`);
+        [...document.querySelectorAll<HTMLElement>(`[data-vim-scope="${currentScope}"] [data-vim-action="${action}"]`)].find(visible);
       if (btn) {
         btn.click();
       } else if (props.commands?.[action]) {
@@ -351,9 +352,7 @@ export function VimProvider(props: VimProviderProps) {
         return;
       }
 
-      if (!enabled) return;
-
-      /* help cheatsheet overlay open: only Escape or ? close it, suspend normal navigation */
+      /* help cheatsheet overlay open: only Escape, ?, or q close it */
       if (helpOpen) {
         if (e.key === 'Escape' || e.key === '?' || e.key === 'q') {
           setHelpOpen(false);
@@ -361,6 +360,8 @@ export function VimProvider(props: VimProviderProps) {
         }
         return;
       }
+
+      if (!enabled) return;
 
       // Radix / Modal overlay guard: if an open modal or dropdown menu is detected, suspend Vim navigation
       const isOverlayOpen = !!document.querySelector(OVERLAY);
