@@ -1039,6 +1039,7 @@ describe('Server API Endpoints Unit Tests', () => {
   describe('POST /api/workspace', () => {
     it('should complete workspace creation successfully', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        devDir: '/mock',
         workspacesDir: '/mock/workspaces',
         storageProvider: 'local'
       } as any);
@@ -1080,6 +1081,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
     it('saves enabledSkills and enabledAgents during workspace creation', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        devDir: '/mock',
         workspacesDir: '/mock/workspaces',
         storageProvider: 'local'
       } as any);
@@ -1116,6 +1118,29 @@ describe('Server API Endpoints Unit Tests', () => {
           enabledCategories: [],
         }
       );
+    });
+
+    it('rejects workspace creation when repo path escapes devDir', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        devDir: '/mock/dev',
+        workspacesDir: '/mock/workspaces',
+        storageProvider: 'local',
+      } as any);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: 'escaped-ws',
+          description: 'Path escape test',
+          repos: [{ name: 'repo-1', path: '/etc/shadow' }],
+          assistants: ['antigravity'],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toBe('Invalid workspace path');
     });
 
     // XML context packing tests removed.

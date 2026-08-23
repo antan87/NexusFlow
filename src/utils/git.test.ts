@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execa } from 'execa';
-import { isGitRepo, gitFetch, detectDefaultBranch } from './git.js';
+import { isGitRepo, gitFetch, detectDefaultBranch, isValidBranchName } from './git.js';
 
 vi.mock('node:fs/promises');
 vi.mock('execa');
@@ -128,4 +128,40 @@ describe('git utilities', () => {
       expect(branch).toBe('main');
     });
   });
+
+  describe('isValidBranchName', () => {
+    it('accepts valid git branch names', () => {
+      expect(isValidBranchName('main')).toBe(true);
+      expect(isValidBranchName('feature/login-ui')).toBe(true);
+      expect(isValidBranchName('fix/issue-123_test')).toBe(true);
+      expect(isValidBranchName('user/alice/work')).toBe(true);
+    });
+
+    it('rejects invalid or unsafe branch names', () => {
+      expect(isValidBranchName('')).toBe(false);
+      expect(isValidBranchName('@')).toBe(false);
+      expect(isValidBranchName('-invalid')).toBe(false);
+      expect(isValidBranchName('feature/..')).toBe(false);
+      expect(isValidBranchName('feature//double-slash')).toBe(false);
+      expect(isValidBranchName('/leading-slash')).toBe(false);
+      expect(isValidBranchName('trailing-slash/')).toBe(false);
+      expect(isValidBranchName('dot-end.')).toBe(false);
+      expect(isValidBranchName('feature/.hidden')).toBe(false);
+      expect(isValidBranchName('branch.lock')).toBe(false);
+      expect(isValidBranchName('HEAD')).toBe(false);
+    });
+
+    it('rejects Windows reserved device names', () => {
+      expect(isValidBranchName('con')).toBe(false);
+      expect(isValidBranchName('PRN')).toBe(false);
+      expect(isValidBranchName('aux')).toBe(false);
+      expect(isValidBranchName('nul')).toBe(false);
+      expect(isValidBranchName('com1')).toBe(false);
+      expect(isValidBranchName('lpt9')).toBe(false);
+      expect(isValidBranchName('feature/con')).toBe(false);
+      expect(isValidBranchName('aux/branch')).toBe(false);
+      expect(isValidBranchName('con.patch')).toBe(false);
+    });
+  });
 });
+

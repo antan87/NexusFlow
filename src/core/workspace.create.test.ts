@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execa } from 'execa';
-import { createWorkspace, deleteWorkspace } from './workspace.js';
+import { createWorkspace, deleteWorkspace, addRepoToWorkspace } from './workspace.js';
 import * as worktree from './worktree.js';
 import type { Feature, RepoInfo, RepoSelection } from '../types.js';
 
@@ -11,6 +11,9 @@ vi.mock('execa');
 vi.mock('./worktree.js');
 vi.mock('./storage.js', () => ({
   deleteWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../generators/index.js', () => ({
+  generateContextFiles: vi.fn().mockResolvedValue(undefined),
 }));
 
 /** Unique temp workspace path per test (no Date.now/random needed). */
@@ -230,3 +233,55 @@ describe('deleteWorkspace (in-place)', () => {
     }
   });
 });
+
+describe('addRepoToWorkspace rollback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    counter += 1;
+    workspacePath = path.join(os.tmpdir(), `nexusflow-addrepo-test-${process.pid}-${counter}`);
+    vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
+    vi.mocked(worktree.removeWorktree).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    await fs.rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+  });
+
+  it('rolls back created worktree and branch if a subsequent step fails', async () => {
+    const { generateContextFiles } = await import('../generators/index.js');
+    vi.mocked(generateContextFiles).mockRejectedValueOnce(new Error('Generator failed'));
+
+    await fs.mkdir(workspacePath, { recursive: true });
+    const initialManifest: Feature = {
+      id: 'my-feature',
+      mode: 'worktree',
+      branchName: 'my-feature',
+      description: 'test',
+      repos: [path.join(workspacePath, 'api')],
+      originalRepos: ['/src/api'],
+      assistants: ['claude'],
+      workspacePath,
+      createdAt: '2026-07-04T00:00:00.000Z',
+    };
+    await fs.writeFile(path.join(workspacePath, 'nexusflow.json'), JSON.stringify(initialManifest), 'utf-8');
+
+    // createWorktree succeeds and creates a branch
+    vi.mocked(worktree.createWorktree).mockResolvedValue({ createdBranch: true });
+
+    await expect(addRepoToWorkspace(workspacePath, '/src/web')).rejects.toThrow(/Generator failed/);
+
+    // Verify rollback was invoked for the created worktree
+    expect(worktree.removeWorktree).toHaveBeenCalledWith('/src/web', path.join(workspacePath, 'web'), true);
+    // Verify run-created branch was cleaned up
+    expect(gitCalls()).toContainEqual(['branch', '-D', 'my-feature']);
+    // Verify workspace directory still exists (not destroyed like in createWorkspace)
+    expect(await fs.access(workspacePath).then(() => true).catch(() => false)).toBe(true);
+
+    // Verify manifest was reverted on disk to its original state (B2)
+    const manifestContent = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    const restoredManifest = JSON.parse(manifestContent);
+    expect(restoredManifest.repos).toEqual([path.join(workspacePath, 'api')]);
+    expect(restoredManifest.originalRepos).toEqual(['/src/api']);
+  });
+});
+

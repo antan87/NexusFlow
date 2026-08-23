@@ -10,6 +10,7 @@ import {
   pm2AppName,
   pm2Prefix,
   serviceLogFile,
+  showLogs,
   startService,
   stopService,
   stopServices,
@@ -237,4 +238,42 @@ describe('orchestration runner PM2 state handling', () => {
       expect(deleted).not.toContain(orchApp);
     });
   });
+
+  describe('showLogs', () => {
+    it('finds and outputs logs from nested service directories', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const logDir = path.join(process.cwd(), '.nexusflow-logs');
+
+      // Mock recursive directory entries
+      vi.mocked(fs.readdir).mockImplementation(async (dir: any, options?: any) => {
+        if (dir === logDir) {
+          return [
+            { name: 'api.log', isFile: () => true, isDirectory: () => false },
+            { name: 'repo-a', isFile: () => false, isDirectory: () => true },
+          ] as any;
+        }
+        if (dir === path.join(logDir, 'repo-a')) {
+          return [
+            { name: 'nested.log', isFile: () => true, isDirectory: () => false },
+          ] as any;
+        }
+        return [] as any;
+      });
+
+      vi.mocked(fs.readFile).mockImplementation(async (filePath: any) => {
+        if (filePath.includes('nested.log')) {
+          return 'nested service log line 1\nnested service log line 2';
+        }
+        return 'api service log output';
+      });
+
+      await showLogs('/fake/ws', logDir, 10);
+
+      // Verify nested service log was read and formatted
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('repo-a/nested'));
+      expect(consoleLogSpy).toHaveBeenCalledWith('nested service log line 1\nnested service log line 2');
+      consoleLogSpy.mockRestore();
+    });
+  });
 });
+

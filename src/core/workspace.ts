@@ -46,6 +46,32 @@ interface WorktreeRollbackAction {
 }
 
 /**
+ * Best-effort rollback of a single worktree action: removes the worktree
+ * (pruning on failure), and deletes the branch if this action created it.
+ * Rollback failures are warned, never thrown.
+ */
+async function rollbackWorktreeAction(action: WorktreeRollbackAction): Promise<void> {
+  try {
+    await removeWorktree(action.repoPath, action.worktreePath, true);
+  } catch (error) {
+    console.warn(`Warning: rollback failed to remove worktree ${action.worktreePath}:`, error);
+    try {
+      await execa('git', ['worktree', 'prune'], { cwd: action.repoPath });
+    } catch {
+      // Best-effort prune.
+    }
+  }
+  // Only delete a branch this run created — never a pre-existing one.
+  if (action.createdBranch) {
+    try {
+      await execa('git', ['branch', '-D', action.branchName], { cwd: action.repoPath });
+    } catch {
+      // The branch may already be gone with its worktree; ignore.
+    }
+  }
+}
+
+/**
  * Best-effort rollback of a partially-created workspace: removes each worktree
  * this run added (pruning on failure), deletes only branches this run created,
  * and removes the workspace directory. Rollback failures are warned, never
@@ -56,24 +82,7 @@ async function rollbackWorkspace(
   actions: WorktreeRollbackAction[],
 ): Promise<void> {
   for (const action of [...actions].reverse()) {
-    try {
-      await removeWorktree(action.repoPath, action.worktreePath, true);
-    } catch (error) {
-      console.warn(`Warning: rollback failed to remove worktree ${action.worktreePath}:`, error);
-      try {
-        await execa('git', ['worktree', 'prune'], { cwd: action.repoPath });
-      } catch {
-        // Best-effort prune.
-      }
-    }
-    // Only delete a branch this run created — never a pre-existing one.
-    if (action.createdBranch) {
-      try {
-        await execa('git', ['branch', '-D', action.branchName], { cwd: action.repoPath });
-      } catch {
-        // The branch may already be gone with its worktree; ignore.
-      }
-    }
+    await rollbackWorktreeAction(action);
   }
 
   try {
@@ -590,87 +599,115 @@ export async function addRepoToWorkspace(
     throw new Error(`A repository named "${newRepoInfo.name}" is already in the workspace`);
   }
 
-  // 1. Create the worktree (worktree mode only)
-  if (!inPlace) {
-    await createWorktree(
-      newRepoInfo.path,
-      repoEntry,
-      feature.branchName,
-      newRepoInfo.defaultBranch,
-    );
-  }
-
-  // 2. Update manifest
-  feature.repos.push(repoEntry);
-  if (!feature.originalRepos) {
-    feature.originalRepos = [];
-  }
-  feature.originalRepos.push(repoPath);
-  await saveFeatureConfig(workspacePath, feature);
-
-  // 3. Keep editor config in step: worktree mode ignores the new subdir in the
-  // root .gitignore; in both modes, .code-workspace includes the new repo folder.
-  if (!inPlace) {
-    try {
-      const gitignorePath = path.join(workspacePath, '.gitignore');
-      let gitignoreContent = '';
-      try {
-        gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-      } catch {}
-
-      const entry = `/${newRepoInfo.name}/`;
-      if (!gitignoreContent.includes(entry)) {
-        gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
-        await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
-      }
-    } catch (error) {
-      console.warn('Warning: Failed to update .gitignore:', error);
-    }
-  }
-
+  const originalRepos = [...feature.repos];
+  const originalOriginalRepos = feature.originalRepos ? [...feature.originalRepos] : undefined;
+  let rollbackAction: WorktreeRollbackAction | null = null;
   try {
-    const workspaceName = path.basename(workspacePath);
-    const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
-    let codeWorkspace: any;
-    try {
-      codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
-    } catch {
-      codeWorkspace = {
-        folders: [{ path: '.', name: `${workspaceName} (workspace)` }],
-        settings: { 'search.useIgnoreFiles': false },
+    // 1. Create the worktree (worktree mode only)
+    if (!inPlace) {
+      const { createdBranch } = await createWorktree(
+        newRepoInfo.path,
+        repoEntry,
+        feature.branchName,
+        newRepoInfo.defaultBranch,
+      );
+      rollbackAction = {
+        repoPath: newRepoInfo.path,
+        worktreePath: repoEntry,
+        branchName: feature.branchName,
+        createdBranch,
       };
     }
-    const folderPath = inPlace ? newRepoInfo.path : newRepoInfo.name;
-    const existingFolders = codeWorkspace.folders ?? [];
-    if (!existingFolders.some((f: any) => f.name === newRepoInfo.name || f.path === folderPath)) {
-      codeWorkspace.folders = [
-        ...existingFolders,
-        { path: folderPath, name: newRepoInfo.name },
-      ];
-      await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
+
+    // 2. Update manifest
+    feature.repos.push(repoEntry);
+    if (!feature.originalRepos) {
+      feature.originalRepos = [];
+    }
+    feature.originalRepos.push(repoPath);
+    await saveFeatureConfig(workspacePath, feature);
+
+    // 3. Keep editor config in step: worktree mode ignores the new subdir in the
+    // root .gitignore; in both modes, .code-workspace includes the new repo folder.
+    if (!inPlace) {
+      try {
+        const gitignorePath = path.join(workspacePath, '.gitignore');
+        let gitignoreContent = '';
+        try {
+          gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
+        } catch {}
+
+        const entry = `/${newRepoInfo.name}/`;
+        if (!gitignoreContent.includes(entry)) {
+          gitignoreContent = gitignoreContent.trim() + '\n' + entry + '\n';
+          await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+        }
+      } catch (error) {
+        console.warn('Warning: Failed to update .gitignore:', error);
+      }
+    }
+
+    try {
+      const workspaceName = path.basename(workspacePath);
+      const codeWorkspacePath = path.join(workspacePath, `${workspaceName}.code-workspace`);
+      let codeWorkspace: any;
+      try {
+        codeWorkspace = JSON.parse(await fs.readFile(codeWorkspacePath, 'utf-8'));
+      } catch {
+        codeWorkspace = {
+          folders: [{ path: '.', name: `${workspaceName} (workspace)` }],
+          settings: { 'search.useIgnoreFiles': false },
+        };
+      }
+      const folderPath = inPlace ? newRepoInfo.path : newRepoInfo.name;
+      const existingFolders = codeWorkspace.folders ?? [];
+      if (!existingFolders.some((f: any) => f.name === newRepoInfo.name || f.path === folderPath)) {
+        codeWorkspace.folders = [
+          ...existingFolders,
+          { path: folderPath, name: newRepoInfo.name },
+        ];
+        await fs.writeFile(codeWorkspacePath, JSON.stringify(codeWorkspace, null, 2) + '\n', 'utf-8');
+      }
+    } catch (error) {
+      console.warn('Warning: Failed to update .code-workspace file:', error);
+    }
+
+    // 4. Re-run analysis, update configs, and repack workspace
+    const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
+    const workspaceRepos = inPlace
+      ? allRepos
+      : allRepos.map((repo) => ({
+          ...repo,
+          path: path.join(workspacePath, repo.name),
+        }));
+    const analysis = await analyzeAllRepos(workspaceRepos);
+    const ctx: WorkspaceContext = {
+      feature,
+      repos: workspaceRepos,
+      analysis,
+    };
+
+    await generateContextFiles(ctx, feature.assistants, workspacePath);
+    if (!inPlace) {
+      await excludeNexusFlowFiles(workspacePath, feature);
     }
   } catch (error) {
-    console.warn('Warning: Failed to update .code-workspace file:', error);
-  }
-
-  // 4. Re-run analysis, update configs, and repack workspace
-  const allRepos = await Promise.all(feature.repos.map(resolveRepoInfo));
-  const workspaceRepos = inPlace
-    ? allRepos
-    : allRepos.map((repo) => ({
-        ...repo,
-        path: path.join(workspacePath, repo.name),
-      }));
-  const analysis = await analyzeAllRepos(workspaceRepos);
-  const ctx: WorkspaceContext = {
-    feature,
-    repos: workspaceRepos,
-    analysis,
-  };
-
-  await generateContextFiles(ctx, feature.assistants, workspacePath);
-  if (!inPlace) {
-    await excludeNexusFlowFiles(workspacePath, feature);
+    if (rollbackAction) {
+      await rollbackWorktreeAction(rollbackAction);
+    }
+    // Revert manifest back to its state prior to adding this repo
+    feature.repos = originalRepos;
+    if (originalOriginalRepos !== undefined) {
+      feature.originalRepos = originalOriginalRepos;
+    } else {
+      delete feature.originalRepos;
+    }
+    try {
+      await saveFeatureConfig(workspacePath, feature);
+    } catch (saveError) {
+      console.warn('Warning: rollback failed to revert workspace manifest:', saveError);
+    }
+    throw error;
   }
 }
 

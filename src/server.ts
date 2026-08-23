@@ -506,11 +506,12 @@ export function isAllowedUpdateUrl(candidate: string): boolean {
     const url = new URL(candidate);
     if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
+    if (host === 'github.com') {
+      return url.pathname.includes('/releases/download/');
+    }
     return (
-      host === 'github.com' ||
-      host.endsWith('.github.com') ||
-      host === 'githubusercontent.com' ||
-      host.endsWith('.githubusercontent.com')
+      host === 'objects.githubusercontent.com' ||
+      host === 'github-releases.githubusercontent.com'
     );
   } catch {
     return false;
@@ -1106,6 +1107,9 @@ app.post('/api/workspace', async (c) => {
       } else {
         if (r.name && !isValidProjectName(r.name)) {
           return c.json({ error: `Invalid repository name: ${JSON.stringify(r.name)}` }, 400);
+        }
+        if (r.path) {
+          assertWithin(devDir, path.resolve(r.path));
         }
       }
     }

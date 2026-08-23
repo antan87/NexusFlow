@@ -8,15 +8,19 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { AISession, ChatMessage } from '../types.js';
 
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Returns true if the given value is a canonical UUIDv4-shaped string. */
+export function isUuid(id: unknown): id is string {
+  return typeof id === 'string' && SESSION_ID_RE.test(id);
+}
 
 /** Enforce UUID format for session IDs interpolated into filesystem paths. */
 export function assertSafeSessionId(assistant: string, sessionId: string): void {
-  if (assistant === 'codex') {
-    if (!isCodexSessionId(sessionId)) throw new Error('Invalid Codex session id');
-    return;
-  }
-  if (!SESSION_ID_RE.test(sessionId)) {
+  if (!isUuid(sessionId)) {
+    if (assistant.toLowerCase() === 'codex') {
+      throw new Error('Invalid Codex session id');
+    }
     throw new Error(`Invalid ${assistant} session id`);
   }
 }
@@ -96,8 +100,7 @@ export function codexSessionId(record: any): string | null {
 }
 
 export function isCodexSessionId(id: unknown): id is string {
-  return typeof id === 'string'
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return isUuid(id);
 }
 
 /**
@@ -255,7 +258,7 @@ export async function canTransferClaudeSessionInWorkspace(
   sessionId: string,
   platform: NodeJS.Platform = process.platform,
 ): Promise<boolean> {
-  if (!isCodexSessionId(sessionId)) return false;
+  if (!isUuid(sessionId)) return false;
 
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const candidatePaths = [workspacePath, ...repoPaths];

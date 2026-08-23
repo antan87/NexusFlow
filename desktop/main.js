@@ -31,13 +31,22 @@ let readyTimer = null;
 // exiting on its own (e.g. the update hand-off, below).
 let appQuitting = false;
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function showBackendError(detail) {
   if (!mainWindow) return;
   const html = `<!doctype html><meta charset="utf-8">
     <style>body{font:14px system-ui;background:#1e1e1e;color:#ddd;padding:40px;line-height:1.6}
     code{background:#333;padding:2px 6px;border-radius:4px}</style>
     <h2>NexusFlow could not start its backend</h2>
-    <p>${detail}</p>
+    <p>${escapeHtml(detail)}</p>
     <p>In development the backend is run from <code>../dist</code> with <code>node</code>;
     a packaged build runs the bundled backend under <code>resources/backend</code>. If this
     persists, rebuild (<code>npm run build</code>) and relaunch.</p>`;

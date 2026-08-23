@@ -181,6 +181,8 @@ export async function listBranches(repoPath: string): Promise<RepoBranches> {
  * @param name - The branch name to validate.
  * @returns `true` if the branch name is valid.
  */
+const WINDOWS_RESERVED_DEVICE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
 export function isValidBranchName(name: string): boolean {
   if (!name || name.length === 0) {
     return false;
@@ -214,6 +216,9 @@ export function isValidBranchName(name: string): boolean {
       return false;
     }
     if (component === 'HEAD') {
+      return false;
+    }
+    if (WINDOWS_RESERVED_DEVICE_NAMES.test(component)) {
       return false;
     }
   }

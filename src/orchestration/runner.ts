@@ -408,8 +408,30 @@ export async function getServiceStatus(workspacePath: string): Promise<void> {
   }
 }
 
+/** Recursively collects all .log file paths within a directory. */
+async function collectLogFiles(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const subFiles = await collectLogFiles(fullPath);
+        results.push(...subFiles);
+      } else if (entry.isFile() && entry.name.endsWith('.log')) {
+        results.push(fullPath);
+      }
+    }
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') {
+      console.warn(chalk.yellow(`  Warning: could not read directory ${dir}: ${error?.message || error}`));
+    }
+  }
+  return results.sort((a, b) => a.localeCompare(b));
+}
+
 /**
- * Tails log files for all services in a workspace.
+ * Tails log files for all services in a workspace, including nested services.
  *
  * @param workspacePath - Workspace root path.
  * @param logDir        - Directory containing log files.
@@ -420,23 +442,15 @@ export async function showLogs(
   logDir: string,
   lines: number = 20,
 ): Promise<void> {
-  let entries: string[];
-  try {
-    entries = await fs.readdir(logDir);
-  } catch {
-    console.log(chalk.yellow('  No log directory found.'));
-    return;
-  }
-
-  const logFiles = entries.filter((e) => e.endsWith('.log'));
+  const logFiles = await collectLogFiles(logDir);
   if (logFiles.length === 0) {
     console.log(chalk.yellow('  No log files found.'));
     return;
   }
 
-  for (const logFile of logFiles) {
-    const serviceName = logFile.replace('.log', '');
-    const filePath = path.join(logDir, logFile);
+  for (const filePath of logFiles) {
+    const rel = path.relative(logDir, filePath);
+    const serviceName = rel.replace(/\.log$/i, '').replace(/\\/g, '/');
 
     try {
       const content = await fs.readFile(filePath, 'utf-8');
@@ -450,7 +464,7 @@ export async function showLogs(
         console.log(chalk.dim('  (no output yet)'));
       }
     } catch {
-      console.log(chalk.dim(`  Could not read ${logFile}`));
+      console.log(chalk.dim(`  Could not read ${rel}`));
     }
   }
 }
