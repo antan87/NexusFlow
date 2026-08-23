@@ -318,10 +318,10 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
               console.log(chalk.bold.cyan(`\nEntering interactive mode for "nexusflow ${cmd}"...\n`));
 
               try {
-                await execa('node', [script, ...args], {
+                await execa(process.execPath, [script, ...args], {
                   cwd: workspacePath,
                   stdio: 'inherit',
-                  shell: process.platform === 'win32',
+                  shell: false,
                 });
               } catch (err: any) {
                 console.error(chalk.red(`\n✖ Command failed: ${err.message}`));
