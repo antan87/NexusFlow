@@ -16,7 +16,6 @@ import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
-import { findExecutable } from '../agent/cliAvailability.js';
 
 import type { ProjectAnalysis } from '../types.js';
 
@@ -271,62 +270,26 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   }
 
   // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
-  const astMap: Record<string, string> = {
-    claude: 'claude',
-    codex: 'codex',
-    antigravity: 'agy',
-    copilot: 'copilot',
-    cursor: 'cursor-agent',
-  };
+  const isWin = process.platform === 'win32';
+  const astMap: Record<string, string> = { claude: 'claude', codex: 'codex', antigravity: 'agy' };
 
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
-      const bin = astMap[a.toLowerCase()] ?? a.toLowerCase();
-      const resolved = findExecutable(bin);
-      if (!resolved) {
-        warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
-        checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: `CLI binary "${bin}" is not on PATH` });
-      } else {
-        checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
-      }
-    }
-  }
-
-  // ── 8. System & OS Environment ──────────────────────────────────────────
-  const gitBin = findExecutable('git');
-  if (gitBin) {
-    try {
-      const gitVersionRes = await execa(gitBin, ['--version'], { reject: false });
-      const versionMatch = gitVersionRes.stdout.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
-      if (versionMatch) {
-        const major = parseInt(versionMatch[1]!, 10);
-        const minor = parseInt(versionMatch[2]!, 10);
-        if (major < 2 || (major === 2 && minor < 20)) {
-          warnings.push(`git version ${versionMatch[0]} is older than recommended (>= 2.20 recommended for worktree operations).`);
-          checks.push({ category: 'Environment', name: 'git', status: 'warn', message: `version ${versionMatch[0]} (>= 2.20 recommended)` });
-        } else {
-          checks.push({ category: 'Environment', name: 'git', status: 'pass', message: `version ${versionMatch[0]} (>= 2.20)` });
+      const bin = astMap[a.toLowerCase()];
+      if (bin) {
+        try {
+          const checkCmd = isWin ? 'where' : 'which';
+          const res = await execa(checkCmd, [bin], { reject: false });
+          if (res.exitCode !== 0) {
+            warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
+            checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: `CLI binary "${bin}" is not on PATH` });
+          } else {
+            checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
+          }
+        } catch {
+          // ignore
         }
-      } else {
-        warnings.push('git is installed but its version could not be determined.');
-        checks.push({ category: 'Environment', name: 'git', status: 'warn', message: 'installed on PATH (could not determine version)' });
       }
-    } catch {
-      warnings.push('git is installed but its version check failed.');
-      checks.push({ category: 'Environment', name: 'git', status: 'warn', message: 'installed on PATH (version check failed)' });
-    }
-  } else {
-    errors.push('git is not found on PATH. Git is required for workspace operations.');
-    checks.push({ category: 'Environment', name: 'git', status: 'fail', message: 'git is not on PATH' });
-  }
-
-  if (process.platform === 'linux') {
-    const xdgOpen = findExecutable('xdg-open');
-    if (xdgOpen) {
-      checks.push({ category: 'Environment', name: 'xdg-utils', status: 'pass', message: 'xdg-open is available for desktop integration' });
-    } else {
-      warnings.push('xdg-open is not installed. Installing xdg-utils is recommended for opening browsers and editors on Linux.');
-      checks.push({ category: 'Environment', name: 'xdg-utils', status: 'warn', message: 'xdg-open not found (install xdg-utils)' });
     }
   }
 

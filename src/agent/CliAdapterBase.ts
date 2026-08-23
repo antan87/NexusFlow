@@ -74,7 +74,7 @@ export abstract class CliAdapterBase extends EventEmitter {
    */
   protected failCurrentTurn(error: Error, terminateProcess = false): void {
     this.pendingTurnError ??= error;
-    if (terminateProcess) killTree(this.child, { detached: process.platform !== 'win32' });
+    if (terminateProcess) killTree(this.child);
   }
 
   public async start(cwd: string): Promise<void> {
@@ -99,7 +99,6 @@ export abstract class CliAdapterBase extends EventEmitter {
     return spawn(this.binary, args, {
       cwd: this.cwd,
       shell: this.useShell,
-      detached: process.platform !== 'win32',
       env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
     });
   }
@@ -164,72 +163,20 @@ export abstract class CliAdapterBase extends EventEmitter {
   public stop(): void {
     this.stopped = true;
     this.pendingTurnError = null;
-    killTree(this.child, { detached: process.platform !== 'win32' });
+    killTree(this.child);
     this.child = null;
     this.isProcessing = false;
     this.emit('close', 0);
   }
 }
 
-export interface KillTreeOptions {
-  detached?: boolean;
-  gracePeriodMs?: number;
-}
-
-// With shell:true or child subprocess trees, terminating a process requires killing
-// the whole tree. On Windows, taskkill /T /F handles this. On POSIX (Linux/macOS),
-// we send SIGTERM to the process group (when spawned detached) or direct child process,
-// with a graceful escalation to SIGKILL if still alive after the grace period.
-//
-// Notes on trade-offs:
-// - Direct PID liveness probe: process.kill(pid, 0) verifies the direct child. When
-//   spawned with detached: true, group signaling (-pid) cleanly terminates all child/grandchild
-//   processes. In non-detached fallback, only the direct child process is signaled.
-// - Unref'd escalation timer: setTimeout.unref() allows the host CLI/server process to exit
-//   naturally without being kept alive by pending escalation timers during clean shutdown.
-export function killTree(child: ChildProcess | null, options?: KillTreeOptions) {
-  if (!child || child.exitCode !== null || !child.pid) return;
-  const pid = child.pid;
+// With shell:true on Windows, child.kill() only kills the shell wrapper,
+// so take the whole tree down via taskkill.
+export function killTree(child: ChildProcess | null) {
+  if (!child || child.killed || child.exitCode !== null || !child.pid) return;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
   } else {
-    let signaled = false;
-    if (options?.detached) {
-      try {
-        process.kill(-pid, 'SIGTERM');
-        signaled = true;
-      } catch {}
-    }
-    if (!signaled) {
-      try {
-        child.kill('SIGTERM');
-      } catch {}
-    }
-
-    const gracePeriod = options?.gracePeriodMs ?? 3000;
-    const forceKillTimer = setTimeout(() => {
-      let alive = false;
-      try {
-        process.kill(pid, 0);
-        alive = true;
-      } catch (e: any) {
-        alive = e?.code === 'EPERM';
-      }
-      if (!alive) return;
-
-      if (options?.detached) {
-        try {
-          process.kill(-pid, 'SIGKILL');
-          return;
-        } catch {}
-      }
-      try {
-        child.kill('SIGKILL');
-      } catch {}
-    }, gracePeriod);
-    forceKillTimer.unref?.();
+    child.kill('SIGTERM');
   }
 }

@@ -292,10 +292,8 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         permissionMode: spec.permissionMode ?? "acceptEdits",
         maxTurns: spec.maxTurns,
         model: spec.model,
-        // Caller injects CLAUDE_CODE_PROJECT_DIR_NAME + CLAUDE_CONFIG_DIR here.
-        // TODO(spike-2): verify SDK env REPLACES process.env vs merges —
-        // if it replaces, callers must spread process.env themselves.
-        env: spec.env,
+        // Spike 1 finding: Agent SDK env REPLACES process.env, so callers must spread parent process.env.
+        env: spec.env ? { ...process.env, ...spec.env } : undefined,
         mcpServers: spec.mcpServers as any,
         canUseTool,
         includePartialMessages: true, // enables stream_event deltas below
