@@ -174,6 +174,18 @@ describe('Harness Abstraction Layer', () => {
       expect(status).toHaveProperty('method');
     });
 
+    it('detects credentials passed via env parameter (multi-tenant / per-spec)', async () => {
+      const adapter = getAdapter('claude-code');
+      const status = await adapter.authStatus(undefined, { ANTHROPIC_API_KEY: 'test-key' });
+      expect(status.configured).toBe(true);
+      expect(status.method).toBe('api-key');
+
+      const codexAdapter = getAdapter('codex');
+      const codexStatus = await codexAdapter.authStatus(undefined, { OPENAI_API_KEY: 'sk-test' });
+      expect(codexStatus.configured).toBe(true);
+      expect(codexStatus.method).toBe('api-key');
+    });
+
     it('throws AuthRequiredError on start() if unauthenticated', async () => {
       const origKey = process.env.ANTHROPIC_API_KEY;
       const origToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;

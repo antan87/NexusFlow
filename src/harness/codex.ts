@@ -57,7 +57,7 @@ export class CodexAdapter implements HarnessAdapter {
   private client: Codex;
 
   async start(spec: StartSpec): Promise<SessionHandle> {
-    const auth = await this.authStatus(spec.workspace);
+    const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
@@ -72,7 +72,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async resume(spec: ResumeSpec): Promise<SessionHandle> {
-    const auth = await this.authStatus(spec.workspace);
+    const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
@@ -89,8 +89,13 @@ export class CodexAdapter implements HarnessAdapter {
     return this.spawn(spec, thread);
   }
 
-  async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
-    const hasApiKey = Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY);
+  async authStatus(_workspace?: WorkspaceRef, env?: Record<string, string>): Promise<AuthStatus> {
+    const hasApiKey = Boolean(
+      env?.OPENAI_API_KEY ??
+      process.env.OPENAI_API_KEY ??
+      env?.CODEX_API_KEY ??
+      process.env.CODEX_API_KEY
+    );
     if (hasApiKey) {
       return {
         configured: true,
@@ -100,7 +105,7 @@ export class CodexAdapter implements HarnessAdapter {
     }
 
     // Probe Codex CLI authentication file
-    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const codexHome = env?.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
     const authFile = path.join(codexHome, "auth.json");
     if (fs.existsSync(authFile)) {
       return {
@@ -150,6 +155,8 @@ export class CodexAdapter implements HarnessAdapter {
       resolveId = res;
       rejectId = rej;
     });
+    // Armor against unhandled rejections if caller never attaches a handler before interrupt/dispose
+    sessionIdPromise.catch(() => {});
 
     const drain = async () => {
       if (draining || disposed) return;

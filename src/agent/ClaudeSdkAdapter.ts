@@ -121,6 +121,10 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               this.emit('system', event.ok ? `Tool completed: ${event.callId ?? ''}` : `Tool failed: ${event.callId ?? ''}`);
               break;
 
+            case 'file_changed':
+              this.emit('system', `File ${event.kind}: ${event.paths.join(', ')}`);
+              break;
+
             case 'approval_required':
               if (this.currentExecutionProfile === 'workspace-write') {
                 handle.respondToApproval(event.requestId, { behavior: 'allow' });

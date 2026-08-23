@@ -52,7 +52,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   constructor(private readonly sessionStore?: unknown) {}
 
   async start(spec: StartSpec): Promise<SessionHandle> {
-    const auth = await this.authStatus(spec.workspace);
+    const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
@@ -60,7 +60,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   async resume(spec: ResumeSpec): Promise<SessionHandle> {
-    const auth = await this.authStatus(spec.workspace);
+    const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
@@ -70,16 +70,21 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     });
   }
 
-  async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
-    const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
-    const hasOAuth = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+  async authStatus(_workspace?: WorkspaceRef, env?: Record<string, string>): Promise<AuthStatus> {
+    const hasApiKey = Boolean(env?.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY);
+    const hasOAuth = Boolean(
+      env?.CLAUDE_CODE_OAUTH_TOKEN ??
+      process.env.CLAUDE_CODE_OAUTH_TOKEN ??
+      env?.CLAUDE_CODE_SETUP_TOKEN ??
+      process.env.CLAUDE_CODE_SETUP_TOKEN
+    );
 
     // Anthropic documented precedence: API key bills first when both exist
     if (hasApiKey) {
       return {
         configured: true,
         method: "api-key",
-        hasApiKeyFallback: true,
+        hasApiKeyFallback: hasOAuth,
       };
     }
     if (hasOAuth) {
@@ -136,6 +141,8 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       resolveId = res;
       rejectId = rej;
     });
+    // Armor against unhandled rejections if caller never attaches a handler before interrupt/dispose
+    sessionIdPromise.catch(() => {});
 
     abort.signal.addEventListener(
       "abort",
