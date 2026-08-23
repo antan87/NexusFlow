@@ -10,6 +10,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../
 import { Separator } from '../components/ui/separator.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
+import { useVim } from '../lib/vim/vim.js';
 import type { DetectedEditor, NexusFlowConfig, StorageAdapterMeta } from '../types.js';
 
 
@@ -55,6 +56,7 @@ export function SettingsPage({
   fetchToolsStatus,
   handleUpdateTool,
 }: SettingsPageProps) {
+  const vim = useVim();
   if (!config) return null;
 
   const selectedEditor = editors.find((ed) => ed.command === config.defaultEditor);
@@ -62,7 +64,7 @@ export function SettingsPage({
 
 
   return (
-    <div className="mx-auto max-w-4xl animate-fade-in">
+    <div data-vim-scope="settings" className="mx-auto max-w-4xl animate-fade-in">
       <header className="mb-6">
         <h1 className="text-xl font-semibold text-foreground">Global Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -296,6 +298,25 @@ export function SettingsPage({
               );
             })()}
           </div>
+        </div>
+      </Card>
+
+      <Card className="mt-6 rounded-xl p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Vim Navigation Mode</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Enable keyboard navigation shortcuts (<code className="font-mono text-foreground">j/k</code> to move, <code className="font-mono text-foreground">:</code> for commands, <code className="font-mono text-foreground">?</code> for cheatsheet, <code className="font-mono text-foreground">\</code> to toggle).
+            </p>
+          </div>
+          <Label className="flex cursor-pointer items-center gap-3">
+            <Switch
+              checked={vim.enabled}
+              onCheckedChange={vim.toggle}
+              aria-label="Vim navigation toggle"
+            />
+            <span className="text-xs font-semibold">{vim.enabled ? 'Enabled' : 'Disabled'}</span>
+          </Label>
         </div>
       </Card>
 

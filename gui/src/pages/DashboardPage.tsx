@@ -306,7 +306,7 @@ export function DashboardPage({
   };
 
   return (
-    <div className="mx-auto max-w-6xl animate-fade-in space-y-5 pb-10">
+    <div data-vim-scope="overview" className="mx-auto max-w-6xl animate-fade-in space-y-5 pb-10">
       {/* Top Header & Environment Pulse */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
         <div>
@@ -548,6 +548,8 @@ export function DashboardPage({
               return (
                 <div
                   key={ws.id}
+                  data-vim-item
+                  tabIndex={-1}
                   onClick={() => onOpenWorkspace(ws.branchName)}
                   className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 px-4 py-3 items-center hover:bg-accent/40 transition-colors cursor-pointer text-xs"
                 >
@@ -636,6 +638,7 @@ export function DashboardPage({
                     <Button
                       size="xs"
                       variant="ghost"
+                      data-vim-action="open"
                       onClick={() => onOpenWorkspace(ws.branchName)}
                       className="gap-1 text-primary hover:text-primary"
                     >

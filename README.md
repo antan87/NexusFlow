@@ -384,9 +384,33 @@ The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm s
 - **Config panel** — edit NexusFlow settings from the browser
 
 
-The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
-
 The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serves a [React](https://react.dev) + [Vite](https://vite.dev) frontend.
+
+### ⌨️ Vim Navigation Mode
+
+NexusFlow includes a native keyboard-centric Vim navigation mode for seamless dashboard control:
+
+- **Modes**:
+  - `NORMAL` — navigate elements, cycle tabs, and execute workspace actions.
+  - `INSERT` — activated when typing in search inputs and text fields. Press `Esc` to return to `NORMAL`.
+  - `COMMAND` — command-line prompt opened with `:`. Execute commands such as `:start`, `:stop`, `:logs`, `:diff`, `:commit`, `:sync`, `:refresh`, `:doctor`, `:tab <name>`, `:w`, `:help`, and `:q`.
+- **Statusline & Cheatsheet**: Persistent bottom statusline displaying the current mode, active scope, pending chords, and messages. Press `?` to toggle the cheatsheet overlay.
+- **Toggle**: Press `\` from anywhere or toggle **Vim Navigation Mode** under the **Settings** panel.
+
+| Key | Action |
+|:---|:---|
+| `j` / `k` (with count, e.g. `3j`) | Next / previous item in active scope |
+| `h` / `l` | Previous / next tab |
+| `gg` / `G` | Jump to first / last item |
+| `gt` / `gT` / `g1`–`g9` | Cycle tabs forward / backward / jump to tab 1–9 |
+| `Enter` / `Space` | Activate focused element |
+| `i` | Focus nearest search/filter input (`INSERT` mode) |
+| `Esc` | Leave `INSERT` mode → `NORMAL`, dismiss overlays & clear focus |
+| `:` | Open command-line prompt (`:start`, `:stop`, `:logs`, `:diff`, `:commit`, `:sync`, `:refresh`, `:doctor`, `:tab <name>`, `:w`, `:help`, `:q`) |
+| `s` `S` `L` `o` `d` `c` `r` `f` | Quick actions: start, stop, logs, open, diff, commit, sync, refresh |
+| `Ctrl+d` / `Ctrl+u` | Half-page scroll down / up |
+| `?` | Toggle keybinding cheatsheet overlay |
+| `\` | Toggle Vim mode on / off |
 
 ## ⚙️ Configuration
 

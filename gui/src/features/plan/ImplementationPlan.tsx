@@ -51,11 +51,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           No implementation plan generated yet.
         </div>
       ) : viewMode === 'preview' ? (
-        <div className="max-h-[500px] overflow-auto rounded-md border border-border/70 bg-muted/20 p-4">
+        <div data-vim-scroll className="max-h-[500px] overflow-auto rounded-md border border-border/70 bg-muted/20 p-4">
           <ChatMarkdown content={planContent} />
         </div>
       ) : (
-        <div className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+        <div data-vim-scroll className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {planContent}
         </div>
       )}

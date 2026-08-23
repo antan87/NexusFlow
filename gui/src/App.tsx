@@ -32,6 +32,7 @@ const GettingStartedPage = lazy(() =>
 );
 import { API_BASE } from './lib/apiBase.js';
 import { apiFetch } from './lib/api/client.js';
+import { VimProvider, VimHelp, type VimCommands } from './lib/vim/vim.js';
 import {
   useAiDetect,
   useEditorDetect,
@@ -42,6 +43,9 @@ import {
   type WorkflowTemplate,
 } from './lib/api/queries.js';
 import { useQueryClient } from '@tanstack/react-query';
+
+const WORKSPACE_TABS = ['overview', 'changes', 'services', 'sessions', 'knowledge', 'plan', 'skills'];
+const TOP_TABS = ['overview', 'projects', 'skills', 'strategies', 'settings'];
 // Types canonicalized in ./types.ts — never redeclare them here.
 import type {
   AISession,
@@ -144,7 +148,9 @@ function AppInner() {
     enabled: configExists && !configLoading,
     intervalMs: onStatusRoute ? 15_000 : false,
   });
-  const workspaces: Feature[] = workspacesQuery.data ?? [];
+  const workspaces: Feature[] = Array.isArray(workspacesQuery.data)
+    ? workspacesQuery.data
+    : ((workspacesQuery.data as unknown as { workspaces?: Feature[] })?.workspaces ?? []);
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
 
@@ -829,6 +835,13 @@ Core Instructions:
     );
   }
 
+  const workspacePathParts = location.pathname.split('/').filter(Boolean);
+  const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
+  const routeWsId = isWorkspaceRoute && workspacePathParts[1] ? decodeURIComponent(workspacePathParts[1]) : activeWsId;
+  const routeSubTab = isWorkspaceRoute && workspacePathParts[2] && WORKSPACE_TABS.includes(workspacePathParts[2])
+    ? workspacePathParts[2]
+    : subTab;
+
   const dashboardPage = config ? (
     <DashboardPage
       workspaces={workspaces}
@@ -857,8 +870,8 @@ Core Instructions:
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
       fetchWorkspaces={fetchWorkspaces}
-      selectedId={activeWsId}
-      subTab={subTab}
+      selectedId={routeWsId}
+      subTab={routeSubTab as any}
       onSelect={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onSelectTab={(id, tab) => navigate(`/workspaces/${encodeURIComponent(id)}/${tab}`)}
       handleCopyPrompt={handleCopyPrompt}
@@ -901,18 +914,132 @@ Core Instructions:
   ) : null;
 
   const defaultWorkspaceBranch = activeWsId || (workspaces.length > 0 ? workspaces[0].branchName : null);
-  const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
+
+  const vimCommands: VimCommands = {
+    start: () => {
+      if (activeWsId) {
+        apiFetch(`/api/workspace/${encodeURIComponent(activeWsId)}/services`, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'start' }),
+        })
+          .then(() => {
+            showToast(`Started services for ${activeWsId}`, 'success');
+            queryClient.invalidateQueries({ queryKey: ['workspace-services', activeWsId] });
+          })
+          .catch((e) => showToast(String(e), 'error'));
+      } else {
+        showToast('Select a workspace to start services', 'info');
+      }
+    },
+    stop: () => {
+      if (activeWsId) {
+        apiFetch(`/api/workspace/${encodeURIComponent(activeWsId)}/services`, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'stop' }),
+        })
+          .then(() => {
+            showToast(`Stopped services for ${activeWsId}`, 'success');
+            queryClient.invalidateQueries({ queryKey: ['workspace-services', activeWsId] });
+          })
+          .catch((e) => showToast(String(e), 'error'));
+      } else {
+        showToast('Select a workspace to stop services', 'info');
+      }
+    },
+    logs: () => {
+      if (activeWsId) {
+        navigate(`/workspaces/${encodeURIComponent(activeWsId)}/services`);
+      } else {
+        navigate('/overview');
+      }
+    },
+    diff: () => {
+      if (activeWsId) {
+        navigate(`/workspaces/${encodeURIComponent(activeWsId)}/changes`);
+      } else {
+        showToast('Select a workspace to view diff', 'info');
+      }
+    },
+    commit: () => {
+      if (activeWsId) {
+        navigate(`/workspaces/${encodeURIComponent(activeWsId)}/changes`);
+        setShowCommitModal(true);
+      } else {
+        showToast('Select a workspace to commit changes', 'info');
+      }
+    },
+    sync: () => {
+      if (activeWsId) {
+        handleSyncAll(activeWsId);
+      } else {
+        showToast('Select a workspace to sync repositories', 'info');
+      }
+    },
+    refresh: () => {
+      queryClient.invalidateQueries();
+      fetchWorkspaces();
+      showToast('Refreshed workspace state', 'info');
+    },
+    doctor: () => {
+      showToast('All systems operational', 'info');
+    },
+    overview: () => navigate('/overview'),
+    workspaces: () => {
+      if (defaultWorkspaceBranch) navigate(`/workspaces/${encodeURIComponent(defaultWorkspaceBranch)}`);
+      else navigate('/new');
+    },
+    projects: () => navigate('/projects'),
+    skills: () => navigate('/skills'),
+    strategies: () => navigate('/strategies'),
+    settings: () => navigate('/settings'),
+    new: () => navigate('/new'),
+    create: () => navigate('/new'),
+  };
+
+  const currentScope = isWorkspaceRoute
+    ? routeSubTab
+    : (location.pathname.replace(/^\//, '').split('/')[0] || 'overview');
+  const currentTabs = isWorkspaceRoute ? WORKSPACE_TABS : TOP_TABS;
+  const currentActiveTab = isWorkspaceRoute
+    ? routeSubTab
+    : (location.pathname.replace(/^\//, '').split('/')[0] || 'overview');
+
+  const handleVimSwitchTab = (tab: string) => {
+    const wsId = routeWsId || defaultWorkspaceBranch || '';
+    if (isWorkspaceRoute) {
+      if (WORKSPACE_TABS.includes(tab)) {
+        navigate(`/workspaces/${encodeURIComponent(wsId)}/${tab}`);
+      } else if (TOP_TABS.includes(tab)) {
+        navigate(tab === 'workspaces' ? '/workspaces' : `/${tab}`);
+      }
+    } else {
+      if (TOP_TABS.includes(tab)) {
+        navigate(tab === 'workspaces' ? '/workspaces' : `/${tab}`);
+      } else if (WORKSPACE_TABS.includes(tab)) {
+        if (wsId) {
+          navigate(`/workspaces/${encodeURIComponent(wsId)}/${tab}`);
+        }
+      }
+    }
+  };
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <AppSidebar
-        appVersion={appVersion}
-        workspaces={workspaces}
-        workspaceStatuses={workspaceStatuses}
-        workspacesLoading={workspacesLoading}
-        activeWsId={activeWsId}
-        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
-      />
+    <VimProvider
+      scope={currentScope}
+      tabs={currentTabs}
+      activeTab={currentActiveTab}
+      onSwitchTab={handleVimSwitchTab}
+      commands={vimCommands}
+    >
+      <div className="flex min-h-screen bg-background text-foreground">
+        <AppSidebar
+          appVersion={appVersion}
+          workspaces={workspaces}
+          workspaceStatuses={workspaceStatuses}
+          workspacesLoading={workspacesLoading}
+          activeWsId={activeWsId}
+          onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+        />
 
       {/* Main Content Area */}
       <main className={cn('flex-1 min-w-0 h-screen', isWorkspaceRoute ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-3 sm:p-5 lg:p-6')}>
@@ -1062,11 +1189,13 @@ Core Instructions:
         loading={deleteWsLoading !== null}
       />
 
-      <ToastStack
-        toasts={toasts}
-        onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}
-      />
-    </div>
+        <ToastStack
+          toasts={toasts}
+          onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}
+        />
+        <VimHelp />
+      </div>
+    </VimProvider>
   );
 }
 

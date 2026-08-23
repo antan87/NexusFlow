@@ -76,7 +76,7 @@ export function StrategiesPage(props: StrategiesPageProps) {
     detectedHarnesses.find((ai) => ai.name === selectedInspectAssistant)?.displayName ?? 'No Harness Found';
 
   return (
-    <div className="mx-auto max-w-6xl animate-fade-in">
+    <div data-vim-scope="strategies" className="mx-auto max-w-6xl animate-fade-in text-left">
       <header className="mb-6">
         <h1 className="text-xl font-semibold text-foreground">Team Collaboration Strategies</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -110,6 +110,9 @@ export function StrategiesPage(props: StrategiesPageProps) {
                   return (
                     <div
                       key={template.id}
+                      data-vim-item
+                      data-vim-selected={isSelected || undefined}
+                      tabIndex={-1}
                       className={cn(
                         'flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors',
                         isSelected

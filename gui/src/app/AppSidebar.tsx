@@ -68,7 +68,10 @@ export function AppSidebar({
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
 
   const filteredWorkspaces = useMemo(() => {
-    let list = workspaces;
+    const wsList = Array.isArray(workspaces)
+      ? workspaces
+      : ((workspaces as unknown as { workspaces?: Feature[] })?.workspaces ?? []);
+    let list = wsList;
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((w) => `${w.branchName} ${w.description}`.toLowerCase().includes(q));
@@ -209,6 +212,7 @@ export function AppSidebar({
           <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
+            data-vim-search
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filter workspaces..."
@@ -247,6 +251,9 @@ export function AppSidebar({
               return (
                 <Link
                   key={w.id}
+                  data-vim-item
+                  data-vim-selected={isSelected || undefined}
+                  tabIndex={-1}
                   to={`/workspaces/${encodeURIComponent(w.branchName)}`}
                   onClick={() => onSelectWorkspace?.(w.branchName)}
                   className={cn(

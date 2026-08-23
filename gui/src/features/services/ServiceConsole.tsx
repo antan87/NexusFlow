@@ -84,7 +84,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
             {orchTools.map((tool) => {
               const running = runningOrchIds.has(tool.id);
               return (
-                <div key={tool.id} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 p-3">
+                <div key={tool.id} data-vim-item tabIndex={-1} className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 p-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${running ? 'bg-success' : 'bg-muted-foreground/40'}`} />
@@ -98,6 +98,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                       <Button
                         size="xs"
                         variant="destructive"
+                        data-vim-action="stop"
                         aria-label={`Stop ${tool.tool}`}
                         disabled={pending}
                         onClick={() => orchestratorAction.mutate({ action: 'stop', id: tool.id })}
@@ -107,6 +108,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                     ) : (
                       <Button
                         size="xs"
+                        data-vim-action="start"
                         aria-label={`Start ${tool.tool}`}
                         disabled={pending}
                         onClick={() => orchestratorAction.mutate({ action: 'start', id: tool.id })}
@@ -132,10 +134,10 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
           {isAnyRunning ? `${runningNames.size} process${runningNames.size === 1 ? '' : 'es'} active` : 'All processes offline'}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" disabled={isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'start' })}>
+          <Button size="sm" data-vim-action="start" disabled={isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'start' })}>
             <Play size={13} /> Start All Services
           </Button>
-          <Button size="sm" variant="destructive" disabled={!isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'stop' })}>
+          <Button size="sm" data-vim-action="stop" variant="destructive" disabled={!isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'stop' })}>
             <Square size={13} /> Stop All
           </Button>
         </div>
@@ -156,6 +158,9 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                 return (
                   <div
                     key={svc.name}
+                    data-vim-item
+                    data-vim-selected={isSelected || undefined}
+                    tabIndex={-1}
                     className={cn(
                       'flex cursor-pointer flex-col rounded-xl border p-3 transition-colors',
                       isSelected
@@ -175,6 +180,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                             <Button
                               size="icon-xs"
                               variant="ghost"
+                              data-vim-action="refresh"
                               aria-label={`Restart ${svc.name}`}
                               disabled={pending}
                               onClick={() => serviceAction.mutate({ action: 'restart', service: svc.name })}
@@ -184,6 +190,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                             <Button
                               size="icon-xs"
                               variant="ghost"
+                              data-vim-action="stop"
                               aria-label={`Stop ${svc.name}`}
                               disabled={pending}
                               onClick={() => serviceAction.mutate({ action: 'stop', service: svc.name })}
@@ -195,6 +202,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                           <Button
                             size="icon-xs"
                             variant="ghost"
+                            data-vim-action="start"
                             aria-label={`Start ${svc.name}`}
                             disabled={pending}
                             onClick={() => serviceAction.mutate({ action: 'start', service: svc.name })}
@@ -288,7 +296,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
               </div>
             </div>
 
-            <div className={cn('relative overflow-y-auto whitespace-pre-wrap p-5 font-mono text-[10.5px] leading-relaxed selection:bg-primary/20', themeClass, isExpanded ? 'h-[520px]' : 'h-80')}>
+            <div data-vim-scroll className={cn('relative overflow-y-auto whitespace-pre-wrap p-5 font-mono text-[10.5px] leading-relaxed selection:bg-primary/20', themeClass, isExpanded ? 'h-[520px]' : 'h-80')}>
               {logs.trim() ? logs : <span className="font-mono italic text-muted-foreground">(no log content yet)</span>}
               <div ref={logsEndRef} />
             </div>

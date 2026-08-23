@@ -378,6 +378,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
             <input
               type="text"
+              data-vim-search
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search chat sessions..."
@@ -544,6 +545,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             filteredSessions.map((sess) => (
               <div
                 key={sess.id}
+                data-vim-item
+                tabIndex={-1}
                 className="group flex flex-col gap-2 p-3 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -573,6 +576,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   <Button
                     size="xs"
                     variant="default"
+                    data-vim-action="open"
                     disabled={resumingTerminalId === sess.id}
                     onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
                     title={`Resume session in terminal (${sess.id})`}
@@ -584,6 +588,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   <Button
                     size="xs"
                     variant="outline"
+                    data-vim-action="logs"
                     onClick={() => {
                       setActiveSession(sess);
                       setTranscript([]);
@@ -722,6 +727,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                       harnessSessions.map((sess) => (
                         <div
                           key={sess.id}
+                          data-vim-item
+                          tabIndex={-1}
                           className="group flex flex-col gap-1.5 px-3.5 py-2.5 hover:bg-accent/40 transition-colors sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="min-w-0 flex-1">
@@ -744,6 +751,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                             <Button
                               size="xs"
                               variant="default"
+                              data-vim-action="open"
                               disabled={resumingTerminalId === sess.id}
                               onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
                               title={`Resume session in terminal (${sess.id})`}
@@ -755,6 +763,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                             <Button
                               size="xs"
                               variant="outline"
+                              data-vim-action="logs"
                               onClick={() => {
                                 setActiveSession(sess);
                                 setTranscript([]);

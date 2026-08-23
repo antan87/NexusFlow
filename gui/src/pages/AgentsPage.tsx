@@ -187,7 +187,7 @@ export function AgentsPage({ showToast }: AgentsPageProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-vim-scope="agents" className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-5">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-primary/10 p-2 text-primary"><Bot className="h-5 w-5" /></div>
@@ -232,11 +232,11 @@ export function AgentsPage({ showToast }: AgentsPageProps) {
       <div className="border-b border-border/60 bg-muted/20 px-6 py-3">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agents…" className="pl-9" />
+          <Input data-vim-search value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agents…" className="pl-9" />
         </div>
       </div>
 
-      <main className="min-h-0 flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-y-auto p-6">
         {loadingAgents || (isWorkspaceView && workspaceQuery.isLoading) ? (
           <div className="flex justify-center p-12"><Spinner /></div>
         ) : agentsError || (isWorkspaceView && workspaceQuery.isError) ? (
@@ -258,7 +258,7 @@ export function AgentsPage({ showToast }: AgentsPageProps) {
             {visibleAgents.map((agent) => {
               const enabled = enabledAgents.has(agent.id);
               return (
-                <Card key={agent.id} className={cn('flex flex-col gap-4 p-4', isWorkspaceView && !enabled && 'opacity-60')}>
+                <Card key={agent.id} data-vim-item tabIndex={-1} className={cn('flex flex-col gap-4 p-4', isWorkspaceView && !enabled && 'opacity-60')}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2"><h2 className="font-semibold">{agent.name}</h2><Badge variant="outline">Codex</Badge></div>

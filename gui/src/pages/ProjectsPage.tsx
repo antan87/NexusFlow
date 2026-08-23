@@ -134,7 +134,7 @@ export function ProjectsPage() {
   const saving = createProject.isPending || updateProject.isPending;
 
   return (
-    <div className="mx-auto max-w-4xl animate-fade-in">
+    <div data-vim-scope="projects" className="mx-auto max-w-4xl animate-fade-in">
       <header className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Projects</h1>
@@ -171,6 +171,8 @@ export function ProjectsPage() {
           {(projects.data ?? []).map((project) => (
             <li
               key={project.id}
+              data-vim-item
+              tabIndex={-1}
               className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/15"
             >
               <div className="flex items-start justify-between gap-4">
@@ -196,7 +198,7 @@ export function ProjectsPage() {
                   </ul>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <Button size="sm" onClick={() => navigate(`/new?project=${encodeURIComponent(project.id)}`)}>
+                  <Button size="sm" data-vim-action="start" onClick={() => navigate(`/new?project=${encodeURIComponent(project.id)}`)}>
                     <Play /> Start work
                   </Button>
                   <Button size="icon-sm" variant="ghost" aria-label={`Edit ${project.name}`} onClick={() => openEdit(project)}>

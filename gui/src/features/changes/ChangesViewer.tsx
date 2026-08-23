@@ -84,7 +84,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     }
     const lines = diffText.split('\n');
     return (
-      <pre className="custom-scrollbar max-h-[450px] overflow-x-auto overflow-y-auto rounded-xl border border-border bg-muted/40 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+      <pre data-vim-scroll className="custom-scrollbar max-h-[450px] overflow-x-auto overflow-y-auto rounded-xl border border-border bg-muted/40 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
         {lines.map((line, idx) => {
           let lineClass: string;
           if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -123,6 +123,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           <Button
             variant="outline"
             size="sm"
+            data-vim-action="refresh"
             onClick={() => fetchGitChanges(ws.branchName)}
             disabled={gitChangesLoading}
           >
@@ -132,6 +133,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             <Button
               variant="outline"
               size="sm"
+              data-vim-action="sync"
               onClick={() => handleSyncAll(ws.branchName)}
               disabled={syncLoading}
             >
@@ -140,6 +142,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           )}
           <Button
             size="sm"
+            data-vim-action="commit"
             onClick={() => setShowCommitModal(true)}
             disabled={gitChanges.every((repo) => repo.files.length === 0) || commitLoading}
           >
@@ -306,10 +309,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                       return (
                         <div
                           key={fileInfo.file}
+                          data-vim-item
+                          tabIndex={-1}
                           className="overflow-hidden rounded-xl border border-border bg-muted/20 transition-colors hover:border-foreground/15"
                         >
                           {/* File Header Row */}
                           <div
+                            data-vim-action="diff"
                             className="flex cursor-pointer select-none items-center justify-between px-4 py-3 transition-colors hover:bg-accent/50"
                             onClick={() => toggleFileExpansion(repo.repoName, fileInfo.file)}
                           >

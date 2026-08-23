@@ -434,7 +434,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-background text-foreground">
+    <div data-vim-scope="skills" className="flex-1 flex flex-col h-full overflow-hidden bg-background text-foreground">
       {/* Header Bar */}
       <div className="p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card/40 backdrop-blur-sm">
         <div>
@@ -517,6 +517,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            data-vim-search
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search skills by keyword, tag, or tool..."

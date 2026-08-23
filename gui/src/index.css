@@ -242,3 +242,103 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+/* ─── Vim Navigation & Statusline ─────────────────────────────────────────── */
+.vim-statusline {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  padding: 0 12px;
+  font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #10141b;
+  border-top: 1px solid #232a36;
+  color: #8b95a7;
+}
+.vim-statusline .badge {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.vim-statusline .badge-normal {
+  background: #2f81f7;
+  color: #fff;
+}
+.vim-statusline .badge-insert {
+  background: #3fb950;
+  color: #04260f;
+}
+.vim-statusline .badge-command {
+  background: #d29922;
+  color: #241a00;
+}
+.vim-statusline .pending {
+  color: #e6edf3;
+  font-weight: 700;
+}
+.vim-statusline .error {
+  color: #f85149;
+}
+.vim-statusline .spacer {
+  flex: 1;
+}
+.vim-statusline .hint {
+  font-size: 11px;
+  color: #6e7681;
+}
+.vim-cmdline {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e6edf3;
+  font: inherit;
+  margin-left: 4px;
+}
+.vim-focus {
+  outline: 2px solid #2f81f7 !important;
+  outline-offset: 2px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 4px rgba(47, 129, 247, 0.15) !important;
+}
+body {
+  padding-bottom: 26px;
+}
+.vim-help-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vim-help {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 20px 24px;
+  max-width: 520px;
+  width: 90%;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.vim-help td {
+  padding: 4px 14px 4px 0;
+  color: #c9d1d9;
+  font-size: 13px;
+}
+.vim-help kbd {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+

@@ -245,6 +245,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <div className="inline-flex h-8 items-center rounded-md border border-border bg-card shadow-xs">
                     <button
                       type="button"
+                      data-vim-action="open"
                       disabled={Boolean(openingEditor)}
                       onClick={() => void handleOpenEditor(primaryEditor.id)}
                       title={`Open workspace in ${primaryEditor.name}`}
@@ -284,6 +285,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <Button
                     variant="outline"
                     size="sm"
+                    data-vim-action="open"
                     disabled={Boolean(openingEditor)}
                     onClick={() => void handleOpenEditor(primaryEditor.id)}
                     title={`Open workspace in ${primaryEditor.name}`}
@@ -327,12 +329,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           >
             <TabsList className="max-w-full overflow-x-auto">
               {TABS.map((tab) => (
-                <TabsTab key={tab.value} value={tab.value}>
+                <TabsTab key={tab.value} value={tab.value} data-vim-tab={tab.value}>
                   {tab.value === 'sessions' ? 'AI & Sessions' : tab.label}
                 </TabsTab>
               ))}
             </TabsList>
-            <TabsPanel value={subTab} className="animate-fade-in pt-3">
+            <TabsPanel value={subTab} data-vim-scope={subTab} className="animate-fade-in pt-3">
               {subTab === 'overview' && (
                 <div className="flex flex-col gap-3">
                   {/* Unified Divided Overview Card */}
@@ -408,7 +410,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       </div>
                       <div className="divide-y divide-border/60">
                         {repoRows.map((r) => (
-                          <div key={r.name} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 text-xs">
+                          <div key={r.name} data-vim-item tabIndex={-1} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 text-xs">
                             <div className="flex items-center gap-2 font-mono min-w-0">
                               <span
                                 className={cn(
