@@ -31,14 +31,7 @@ let readyTimer = null;
 // exiting on its own (e.g. the update hand-off, below).
 let appQuitting = false;
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+import { escapeHtml } from './lib/html.js';
 
 function showBackendError(detail) {
   if (!mainWindow) return;

@@ -285,10 +285,13 @@ describe('isSensitiveFile', () => {
     expect(isSensitiveFile('secret.yaml')).toBe(true);
   });
 
-  it('allows standard source files', () => {
+  it('allows standard source files and avoids ancestor directory false positives', () => {
     expect(isSensitiveFile('src/index.ts')).toBe(false);
     expect(isSensitiveFile('package.json')).toBe(false);
     expect(isSensitiveFile('README.md')).toBe(false);
+    expect(isSensitiveFile('i18n/tokens/strings.json')).toBe(false);
+    expect(isSensitiveFile('locales/secrets/en.json')).toBe(false);
+    expect(isSensitiveFile('ui/credential-manager/component.tsx')).toBe(false);
   });
 });
 

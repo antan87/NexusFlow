@@ -9,7 +9,8 @@ export default defineConfig({
       '**/.{idea,git,cache,output,temp}/**',
       '**/scratch/**',
       '**/gui/**',
-      '**/desktop/**'
+      '**/desktop/*.js',
+      '**/desktop/e2e/**'
     ],
     testTimeout: 30000,
   }

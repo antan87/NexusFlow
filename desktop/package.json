@@ -24,6 +24,7 @@
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
+      "lib/**/*",
       "preload.js",
       "package.json"
     ],

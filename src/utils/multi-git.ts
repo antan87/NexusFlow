@@ -214,8 +214,14 @@ const SENSITIVE_FILE_PATTERNS = [
 ];
 
 /**
- * Checks whether a file path matches known sensitive file patterns
- * (e.g. .env, .envrc, private keys, credential files) to prevent accidental commit & push.
+ * Checks whether a file matches known sensitive file patterns (e.g. .env, .envrc,
+ * private keys, credential files) based on its basename.
+ *
+ * Note: Evaluation is intentionally scoped to the file basename (not parent directory paths)
+ * to prevent false positives on paths like `i18n/tokens/strings.json` or `locales/secrets/en.json`.
+ *
+ * @param filePath - Path to the file.
+ * @returns `true` if the file basename matches sensitive patterns.
  */
 export function isSensitiveFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -223,7 +229,7 @@ export function isSensitiveFile(filePath: string): boolean {
   if (/\.example($|\.)|\.template($|\.)|\.sample($|\.)/i.test(base)) {
     return false;
   }
-  return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(base) || pattern.test(normalized));
+  return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(base));
 }
 
 /**
@@ -601,6 +607,8 @@ export async function commitAndPush(
         );
       }
 
+      // Stage untracked files in non-atomic chunks of 50 to avoid command-line argv length
+      // limits on Windows. Staging is followed by a diff check before committing.
       const BATCH_SIZE = 50;
       for (let i = 0; i < safeUntracked.length; i += BATCH_SIZE) {
         const batch = safeUntracked.slice(i, i + BATCH_SIZE);
