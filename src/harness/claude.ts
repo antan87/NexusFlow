@@ -158,7 +158,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       approvals,
       resolveId,
       rejectId,
-      signal: abort.signal,
+      abortController: abort,
     });
 
     return {
@@ -186,9 +186,9 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     approvals: Map<string, (d: ApprovalDecision) => void>;
     resolveId: (s: string) => void;
     rejectId: (e: Error) => void;
-    signal: AbortSignal;
+    abortController: AbortController;
   }): Promise<void> {
-    const { spec, overrides, userInput, out, canUseTool } = args;
+    const { spec, overrides, userInput, out, canUseTool, abortController } = args;
     try {
       const options: Options = {
         cwd: spec.workspace.rootPath,
@@ -209,10 +209,13 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         ...(spec.nativeOptions as Partial<Options>),
       };
 
-      for await (const msg of query({
+      const queryHandle = query({
         prompt: userInput as any,
         options,
-      })) {
+        abortController,
+      });
+
+      for await (const msg of queryHandle) {
         this.mapMessage(msg, out, args);
       }
     } catch (err) {
