@@ -292,6 +292,23 @@
 .vim-statusline .hint {
   font-size: 11px;
   color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vim-btn-hint {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--foreground);
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.vim-btn-hint:hover {
+  background: var(--accent, rgba(255, 255, 255, 0.08));
+  color: var(--foreground);
 }
 .vim-cmdline {
   flex: 1;
@@ -319,20 +336,32 @@ body.vim-on {
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(2px);
 }
 .vim-help {
   background: var(--card);
   border: 1px solid var(--border);
   color: var(--card-foreground);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 20px 24px;
-  max-width: 520px;
-  width: 90%;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  max-width: 620px;
+  width: 92%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
 }
 .vim-help td {
   padding: 4px 14px 4px 0;
-  font-size: 13px;
+  font-size: 12px;
+}
+.vim-help-category {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  padding-top: 10px;
+  padding-bottom: 4px;
 }
 
 

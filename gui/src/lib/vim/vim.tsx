@@ -33,19 +33,62 @@ export interface VimKeymapEntry {
   description: string;
 }
 
-export const VIM_KEYMAP: VimKeymapEntry[] = [
-  { key: 'j / k', description: 'next / previous item in active view (prefix count: 3j)' },
-  { key: 'h / l', description: 'previous / next tab' },
-  { key: 'gg / G', description: 'first / last item in active view' },
-  { key: 'gt / gT / g1–g9', description: 'cycle forward / backward or jump to tab 1–9' },
-  { key: 'Enter / Space', description: 'activate focused item' },
-  { key: 'i', description: 'focus nearest filter or search input (ESC returns)' },
-  { key: 's S L o d c r f', description: 'start · stop · logs · open · diff · commit · sync · refresh' },
-  { key: ':', description: 'command line prompt (:help :start :logs :tab … :q)' },
-  { key: 'Ctrl+d / Ctrl+u', description: 'scroll down / up half page' },
-  { key: '?', description: 'toggle keybinding cheatsheet overlay' },
-  { key: 'Esc / \\', description: 'normal mode / toggle vim navigation on/off' },
+export interface VimKeymapSection {
+  category: string;
+  entries: VimKeymapEntry[];
+}
+
+export const VIM_KEYMAP_SECTIONS: VimKeymapSection[] = [
+  {
+    category: '🧭 Navigation & Scrolling',
+    entries: [
+      { key: 'j / k', description: 'Next / previous item in active view (clamped at top/bottom, prefix count: 3j)' },
+      { key: 'gg / G', description: 'Jump directly to first (top) / last (bottom) item' },
+      { key: 'Ctrl+d / Ctrl+u', description: 'Smooth scroll half-page down / up' },
+      { key: 'Enter / Space', description: 'Activate or click the focused item' },
+    ],
+  },
+  {
+    category: '📑 View & Tab Switching',
+    entries: [
+      { key: 'h / l', description: 'Switch to previous / next view tab or workspace subtab' },
+      { key: 'gt / gT', description: 'Cycle forward / backward through tabs' },
+      { key: 'g1 – g9', description: 'Jump directly to tab index 1–9' },
+    ],
+  },
+  {
+    category: '⚡ Quick Workspace Actions',
+    entries: [
+      { key: 's / S', description: 'Start / Stop workspace services' },
+      { key: 'L', description: 'Open workspace logs console' },
+      { key: 'o', description: 'Open workspace in editor / inspect' },
+      { key: 'd / c', description: 'View changes diff / Commit changes' },
+      { key: 'r / f', description: 'Sync repository changes / Refresh data' },
+    ],
+  },
+  {
+    category: '💬 Command Line Mode (:)',
+    entries: [
+      { key: ':help / :h', description: 'Open this commands cheatsheet dialog' },
+      { key: ':top / :bottom', description: 'Jump to top (first) / bottom (last) item' },
+      { key: ':start / :stop / :logs', description: 'Run workspace service controls' },
+      { key: ':diff / :commit / :sync', description: 'Run git operations (:w also commits)' },
+      { key: ':tab <name>', description: 'Switch to tab (e.g. :tab settings, :tab workspaces)' },
+      { key: ':refresh / :doctor', description: 'Refresh environment or check health' },
+      { key: ':q', description: 'Close cheatsheet / clear active focus' },
+    ],
+  },
+  {
+    category: '⌨️ Modes & Toggles',
+    entries: [
+      { key: 'i', description: 'Focus search or filter input (enters INSERT mode)' },
+      { key: 'Esc', description: 'Leave INSERT mode / clear pending chords / close dialogs' },
+      { key: '\\', description: 'Toggle Vim Navigation Mode on / off globally' },
+    ],
+  },
 ];
+
+export const VIM_KEYMAP: VimKeymapEntry[] = VIM_KEYMAP_SECTIONS.flatMap((s) => s.entries);
 
 const Ctx = createContext<VimCtx | null>(null);
 
@@ -112,7 +155,7 @@ export interface VimProviderProps {
 export function VimProvider(props: VimProviderProps) {
   const { scope, tabs, activeTab, onSwitchTab } = props;
 
-  const [enabled, setEnabled] = useState(() => localStorage.getItem(LS_KEY) !== 'off');
+  const [enabled, setEnabled] = useState(() => localStorage.getItem(LS_KEY) === 'on');
   const [mode, _setMode] = useState<VimMode>('normal');
   const [status, setStatus] = useState('');
   const [message, setMessage] = useState('');
@@ -200,9 +243,10 @@ export function VimProvider(props: VimProviderProps) {
       const curIdx = focusedRef.current ? list.indexOf(focusedRef.current) : -1;
       let next: number;
       if (curIdx === -1) {
-        next = delta > 0 ? (delta - 1) % list.length : (((delta % list.length) + list.length) % list.length);
+        next = delta > 0 ? 0 : list.length - 1;
       } else {
-        next = (((curIdx + delta) % list.length) + list.length) % list.length;
+        // Clamped at top and bottom boundaries — no accidental wrapping restart
+        next = Math.max(0, Math.min(list.length - 1, curIdx + delta));
       }
       setFocused(list[next]);
     },
@@ -247,6 +291,16 @@ export function VimProvider(props: VimProviderProps) {
         setHelpOpen(true);
         return;
       }
+      if (cmd === 'top' || cmd === 'first' || cmd === 'head') {
+        const list = itemsIn(scopeRef.current);
+        if (list.length > 0) setFocused(list[0]);
+        return;
+      }
+      if (cmd === 'bottom' || cmd === 'last' || cmd === 'tail') {
+        const list = itemsIn(scopeRef.current);
+        if (list.length > 0) setFocused(list[list.length - 1]);
+        return;
+      }
       if (cmd === 'tab' && arg) {
         const lowerArg = arg.toLowerCase();
         const matched = tabs.find((t) => t.toLowerCase() === lowerArg);
@@ -271,7 +325,7 @@ export function VimProvider(props: VimProviderProps) {
       }
       say(`Not an editor command: :${raw}`);
     },
-    [props.commands, tabs, onSwitchTab, runAction, say, setHelpOpen, clearFocus],
+    [props.commands, tabs, onSwitchTab, runAction, say, setHelpOpen, clearFocus, setFocused],
   );
 
   /* ---- keyboard event listener ---- */
@@ -545,7 +599,7 @@ function StatusLine({ onRunCommand }: { onRunCommand: (cmd: string) => void }) {
           ref={inputRef}
           className="vim-cmdline"
           spellCheck={false}
-          placeholder=":help  :start  :stop  :logs  :diff  :commit  :sync  :refresh  :tab <name>  :q"
+          placeholder=":help  :top  :bottom  :start  :stop  :logs  :diff  :commit  :sync  :refresh  :tab <name>  :q"
           onBlur={() => {
             vim.setMode('normal');
           }}
@@ -562,7 +616,24 @@ function StatusLine({ onRunCommand }: { onRunCommand: (cmd: string) => void }) {
         />
       )}
       <span className="spacer" />
-      <span className="hint">? keys · \ vim toggle</span>
+      <div className="hint">
+        <button
+          type="button"
+          onClick={() => vim.setHelpOpen(true)}
+          className="vim-btn-hint"
+          title="Open Vim commands cheatsheet (?)"
+        >
+          ? Help
+        </button>
+        <button
+          type="button"
+          onClick={vim.toggle}
+          className="vim-btn-hint"
+          title="Toggle Vim Mode (\)"
+        >
+          \ {vim.enabled ? 'VIM: ON' : 'VIM: OFF'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -578,33 +649,46 @@ export function VimHelp() {
       onClick={() => setHelpOpen(false)}
       role="dialog"
       aria-modal="true"
-      aria-label="Vim Keybindings Cheatsheet"
+      aria-label="Vim Keybindings & Commands Cheatsheet"
     >
       <div className="vim-help" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
-          <h3 className="font-bold text-foreground text-sm flex items-center gap-2">
-            NexusFlow — Vim Keys <Kbd>Esc</Kbd>
-          </h3>
+          <div>
+            <h3 className="font-bold text-foreground text-sm flex items-center gap-2">
+              NexusFlow — Vim Navigation & Commands
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Press <Kbd>Esc</Kbd> or click ✕ to close. Press <Kbd>\</Kbd> anytime to toggle Vim mode.
+            </p>
+          </div>
           <button
             onClick={() => setHelpOpen(false)}
             aria-label="Close help"
-            className="text-muted-foreground hover:text-foreground text-xs cursor-pointer"
+            className="text-muted-foreground hover:text-foreground text-xs cursor-pointer p-1 rounded hover:bg-accent"
           >
             ✕
           </button>
         </div>
-        <table className="w-full">
-          <tbody>
-            {VIM_KEYMAP.map((entry) => (
-              <tr key={entry.key}>
-                <td className="py-1 pr-3 text-xs font-mono">
-                  <Kbd>{entry.key}</Kbd>
-                </td>
-                <td className="py-1 text-xs text-foreground/90">{entry.description}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+        <div className="space-y-3">
+          {VIM_KEYMAP_SECTIONS.map((section) => (
+            <div key={section.category} className="border-b border-border/50 pb-2.5 last:border-b-0">
+              <div className="vim-help-category">{section.category}</div>
+              <table className="w-full">
+                <tbody>
+                  {section.entries.map((entry) => (
+                    <tr key={entry.key} className="hover:bg-accent/20 rounded">
+                      <td className="py-0.5 pr-3 text-xs font-mono w-44">
+                        <Kbd>{entry.key}</Kbd>
+                      </td>
+                      <td className="py-0.5 text-xs text-foreground/90">{entry.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
