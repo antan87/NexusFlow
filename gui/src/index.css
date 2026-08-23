@@ -266,6 +266,7 @@
   font-size: 10px;
   letter-spacing: 0.05em;
 }
+/* Intentional mode badge accent colors — exempt from token migration so mode distinction is instantly recognizable in both light and dark themes */
 .vim-statusline[data-mode="normal"] .badge-normal {
   background: #2f81f7;
   color: #fff;

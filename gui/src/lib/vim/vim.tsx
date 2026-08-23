@@ -30,22 +30,21 @@ export interface VimCtx {
 
 export interface VimKeymapEntry {
   key: string;
-  action: string;
   description: string;
 }
 
 export const VIM_KEYMAP: VimKeymapEntry[] = [
-  { key: 'j / k', action: 'next / previous item', description: 'next / previous item in active view (prefix count: 3j)' },
-  { key: 'h / l', action: 'previous / next tab', description: 'previous / next tab' },
-  { key: 'gg / G', action: 'first / last item', description: 'first / last item in active view' },
-  { key: 'gt / gT / g1–g9', action: 'cycle / jump to tab', description: 'cycle forward / backward or jump to tab 1–9' },
-  { key: 'Enter / Space', action: 'activate focused item', description: 'activate focused item' },
-  { key: 'i', action: 'filter / edit', description: 'focus nearest filter or search input (ESC returns)' },
-  { key: 's S L o d c r f', action: 'workspace actions', description: 'start · stop · logs · open · diff · commit · sync · refresh' },
-  { key: ':', action: 'command line', description: 'command line prompt (:help :start :logs :tab … :q)' },
-  { key: 'Ctrl+d / Ctrl+u', action: 'scroll half page', description: 'scroll down / up half page' },
-  { key: '?', action: 'keybinding cheatsheet', description: 'toggle keybinding cheatsheet overlay' },
-  { key: 'Esc / \\', action: 'normal mode / toggle', description: 'normal mode / toggle vim navigation on/off' },
+  { key: 'j / k', description: 'next / previous item in active view (prefix count: 3j)' },
+  { key: 'h / l', description: 'previous / next tab' },
+  { key: 'gg / G', description: 'first / last item in active view' },
+  { key: 'gt / gT / g1–g9', description: 'cycle forward / backward or jump to tab 1–9' },
+  { key: 'Enter / Space', description: 'activate focused item' },
+  { key: 'i', description: 'focus nearest filter or search input (ESC returns)' },
+  { key: 's S L o d c r f', description: 'start · stop · logs · open · diff · commit · sync · refresh' },
+  { key: ':', description: 'command line prompt (:help :start :logs :tab … :q)' },
+  { key: 'Ctrl+d / Ctrl+u', description: 'scroll down / up half page' },
+  { key: '?', description: 'toggle keybinding cheatsheet overlay' },
+  { key: 'Esc / \\', description: 'normal mode / toggle vim navigation on/off' },
 ];
 
 const Ctx = createContext<VimCtx | null>(null);
@@ -59,8 +58,12 @@ export const useVim = () => {
 
 /* ========================= dom helpers ========================= */
 const EDITABLE = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
+// Modal & dropdown blocking surfaces (tooltips/hovercards with role="tooltip" are deliberately excluded)
 const OVERLAY =
-  '[role="dialog"][data-state="open"], [data-radix-popper-content-wrapper], [data-portal], [role="alertdialog"][data-state="open"]';
+  '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], ' +
+  '[data-radix-popper-content-wrapper] [role="menu"], ' +
+  '[data-radix-popper-content-wrapper] [role="listbox"], ' +
+  '[data-radix-popper-content-wrapper] [role="dialog"]';
 const FOCUS_CLASS = 'vim-focus';
 const ACTION_KEYS: Record<string, string> = {
   s: 'start',
@@ -305,11 +308,10 @@ export function VimProvider(props: VimProviderProps) {
         return;
       }
 
-      // Radix / Modal overlay guard: if an open modal or dialog is detected, suspend Vim navigation
+      // Radix / Modal overlay guard: if an open modal or dropdown menu is detected, suspend Vim navigation
       const isOverlayOpen = !!document.querySelector(OVERLAY);
       if (isOverlayOpen) {
-        if (e.key === 'Escape') return; // let modal / Radix close natively
-        return; // suspend NORMAL mode navigation & actions
+        return; // suspend NORMAL mode navigation & actions; let Radix/modal handle events
       }
 
       /* INSERT mode: only ESC belongs to us, everything else is typing */
