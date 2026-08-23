@@ -1,8 +1,12 @@
-import { Codex, type ThreadEvent } from "@openai/codex-sdk";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { Codex, type Thread } from "@openai/codex-sdk";
 import {
   type HarnessAdapter,
   type SessionHandle,
   type SessionSummary,
+  AuthRequiredError,
   UnsupportedOperationError,
 } from "./interface.js";
 import { Pushable } from "./pushable.js";
@@ -10,13 +14,14 @@ import type {
   AuthStatus,
   HarnessEvent,
   NormalizedUsage,
+  PatchKind,
   ResumeSpec,
   SerializedError,
   StartSpec,
   WorkspaceRef,
 } from "./types.js";
 
-type Thread = ReturnType<Codex["startThread"]>;
+type ThreadEvent = Parameters<Parameters<Thread["runStreamed"]>[1] extends (e: infer E) => any ? E : any>[0];
 type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
 function serializeError(err: unknown): SerializedError {
@@ -30,12 +35,16 @@ function serializeError(err: unknown): SerializedError {
   return { message: String(err) };
 }
 
-function mapPatchKind(kind: string | undefined): "write" | "edit" | "delete" | string {
-  switch (kind) {
-    case "add": return "write";
-    case "update": return "edit";
-    case "delete": return "delete";
-    default: return kind ?? "edit";
+function mapPatchKind(rawKind?: string): PatchKind {
+  switch (rawKind) {
+    case "add":
+      return "write";
+    case "update":
+      return "edit";
+    case "delete":
+      return "delete";
+    default:
+      return (rawKind as PatchKind) ?? "edit";
   }
 }
 
@@ -48,10 +57,14 @@ export class CodexAdapter implements HarnessAdapter {
   private client: Codex;
 
   async start(spec: StartSpec): Promise<SessionHandle> {
+    const auth = await this.authStatus(spec.workspace);
+    if (!auth.configured) {
+      throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
+    }
     const thread = this.client.startThread({
       workingDirectory: spec.workspace.rootPath,
       // NexusFlow workspaces are multi-repo roots => usually NOT a git repo.
-      // Without this, Codex refuses to run. (Spike #4 validates.)
+      // Without this, Codex refuses to run. Caller nativeOptions can override if provided.
       skipGitRepoCheck: true,
       ...(spec.nativeOptions as Record<string, unknown>),
     });
@@ -59,6 +72,10 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async resume(spec: ResumeSpec): Promise<SessionHandle> {
+    const auth = await this.authStatus(spec.workspace);
+    if (!auth.configured) {
+      throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
+    }
     if (spec.mode === "fork") {
       // Known asymmetry: no native fork. Emulate later via NexusFlow-side
       // history replay onto a fresh thread. Until then, degrade loudly.
@@ -73,8 +90,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
-    const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
-    // TODO(spike-7): Probe Codex CLI session/auth configuration
+    const hasApiKey = Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY);
     if (hasApiKey) {
       return {
         configured: true,
@@ -82,10 +98,23 @@ export class CodexAdapter implements HarnessAdapter {
         hasApiKeyFallback: true,
       };
     }
+
+    // Probe Codex CLI authentication file
+    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const authFile = path.join(codexHome, "auth.json");
+    if (fs.existsSync(authFile)) {
+      return {
+        configured: true,
+        method: "chatgpt-signin",
+        hasApiKeyFallback: false,
+      };
+    }
+
     return {
-      configured: true,
-      method: "chatgpt-signin",
-      message: "Using Codex CLI authentication.",
+      configured: false,
+      method: "unauthenticated",
+      message:
+        "No OpenAI API key or Codex CLI authentication found (~/.codex/auth.json). Run 'codex login' or set OPENAI_API_KEY.",
     };
   }
 
@@ -106,6 +135,15 @@ export class CodexAdapter implements HarnessAdapter {
     let draining = false;
     let disposed = false;
 
+    const safePush = (ev: HarnessEvent) => {
+      if (disposed) return;
+      try {
+        out.push(ev);
+      } catch {
+        // Stream ended or disposed concurrently
+      }
+    };
+
     let resolveId!: (s: string) => void;
     let rejectId!: (e: Error) => void;
     const sessionIdPromise = new Promise<string>((res, rej) => {
@@ -119,7 +157,7 @@ export class CodexAdapter implements HarnessAdapter {
       try {
         while (turnQueue.length > 0 && !disposed) {
           const prompt = turnQueue.shift()!;
-          await this.runTurn(thread, prompt, out, spec, resolveId, rejectId);
+          await this.runTurn(thread, prompt, safePush, out, spec, resolveId, rejectId, () => disposed);
         }
       } finally {
         draining = false;
@@ -149,7 +187,9 @@ export class CodexAdapter implements HarnessAdapter {
       dispose: async () => {
         disposed = true;
         turnQueue.length = 0;
-        out.end();
+        try {
+          out.end();
+        } catch {}
       },
     };
   }
@@ -157,37 +197,42 @@ export class CodexAdapter implements HarnessAdapter {
   private async runTurn(
     thread: Thread,
     prompt: string,
+    safePush: (ev: HarnessEvent) => void,
     out: Pushable<HarnessEvent>,
     spec: BaseSpec,
     resolveId: (s: string) => void,
     rejectId: (e: Error) => void,
+    isDisposed: () => boolean,
   ): Promise<void> {
     try {
       const run = await thread.runStreamed(prompt);
       for await (const ev of run.events) {
-        this.mapEvent(ev as any, out, resolveId);
+        if (isDisposed()) break;
+        this.mapEvent(ev as any, safePush, resolveId);
         if (spec.debugMirrorRaw) {
-          out.push({ type: "raw", vendor: "codex", payload: ev });
+          safePush({ type: "raw", vendor: "codex", payload: ev });
         }
       }
     } catch (err) {
-      args_reject: {
+      try {
         rejectId(err instanceof Error ? err : new Error(String(err)));
-      }
-      out.push({ type: "turn_failed", error: serializeError(err), fatal: true });
-      out.end();
+      } catch {}
+      safePush({ type: "turn_failed", error: serializeError(err), fatal: true });
+      try {
+        out.end();
+      } catch {}
     }
   }
 
   private mapEvent(
     ev: ThreadEvent,
-    out: Pushable<HarnessEvent>,
+    push: (ev: HarnessEvent) => void,
     resolveId: (s: string) => void,
   ): void {
     switch (ev.type) {
       case "thread.started":
         resolveId((ev as any).thread_id);
-        out.push({ type: "session_started", sessionId: (ev as any).thread_id });
+        push({ type: "session_started", sessionId: (ev as any).thread_id });
         break;
 
       case "item.started":
@@ -196,39 +241,38 @@ export class CodexAdapter implements HarnessAdapter {
         break;
 
       case "item.completed":
-        this.mapItem((ev as any).item, out);
+        this.mapItem((ev as any).item, push);
         break;
 
       case "turn.completed":
-        out.push({ type: "turn_completed", usage: this.normalizeUsage((ev as any).usage) });
+        push({ type: "turn_completed", usage: this.normalizeUsage((ev as any).usage) });
         // Streams stay open across consecutive turns until explicit dispose()
         break;
 
       case "turn.failed":
-        out.push({
+        push({
           type: "turn_failed",
           error: { message: (ev as any).error?.message ?? "codex turn failed" },
           fatal: true,
         });
-        out.end();
         break;
     }
   }
 
-  private mapItem(item: { type: string } & Record<string, any>, out: Pushable<HarnessEvent>): void {
+  private mapItem(item: { type: string } & Record<string, any>, push: (ev: HarnessEvent) => void): void {
     switch (item.type) {
       case "agent_message":
-        out.push({ type: "assistant_message", text: item.text });
+        push({ type: "assistant_message", text: item.text });
         break;
       case "file_change":
-        out.push({
+        push({
           type: "file_changed",
           kind: mapPatchKind(item.changes?.[0]?.kind),
           paths: item.changes?.map((c: any) => c.path) ?? [],
         });
         break;
       case "command_execution":
-        out.push({
+        push({
           type: "tool_completed",
           callId: item.id,
           ok: item.exit_code === 0,
@@ -236,7 +280,7 @@ export class CodexAdapter implements HarnessAdapter {
         });
         break;
       case "mcp_tool_call":
-        out.push({ type: "tool_completed", callId: item.id, ok: !item.status || item.status === "success" });
+        push({ type: "tool_completed", callId: item.id, ok: !item.status || item.status === "success" });
         break;
       default:
         // reasoning / web_search / todo_list — pass-through only via raw mirroring

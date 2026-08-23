@@ -75,6 +75,8 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
   }
 
   private bindEvents(handle: SessionHandle): void {
+    let sawDeltaThisTurn = false;
+
     void (async () => {
       try {
         // Resolve lazy session ID
@@ -93,8 +95,12 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'text_delta':
+              sawDeltaThisTurn = true;
+              this.emit('data', event.text);
+              break;
+
             case 'assistant_message':
-              if (event.text) {
+              if (!sawDeltaThisTurn && event.text) {
                 this.emit('data', event.text);
               }
               break;
@@ -112,10 +118,12 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'turn_completed':
+              sawDeltaThisTurn = false;
               this.emit('idle');
               break;
 
             case 'turn_failed':
+              sawDeltaThisTurn = false;
               this.emit('error', new Error(event.error.message));
               this.emit('idle');
               break;

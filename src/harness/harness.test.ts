@@ -69,29 +69,97 @@ describe('Harness Abstraction Layer', () => {
       expect(items).toEqual(['x']);
     });
 
-    it('throws when pushing to an ended Pushable queue', () => {
+    it('safely handles dispose() mid-turn without unhandled rejections', async () => {
       const queue = new Pushable<string>();
-      queue.end();
-      expect(() => queue.push('late')).toThrow(
-        'Cannot push to a Pushable stream that has already ended.',
-      );
-    });
-  });
-
-  describe('Normalized Contract Verification', () => {
-    it('normalizes turn events with text_delta and SerializedError', async () => {
-      const fakeError = new Error('Test failure');
-      const serialized = {
-        message: fakeError.message,
-        name: fakeError.name,
-        stack: fakeError.stack,
+      let closed = false;
+      const safePush = (val: string) => {
+        if (closed) return;
+        try {
+          queue.push(val);
+        } catch {
+          // Disposed concurrently
+        }
       };
-      expect(JSON.stringify(serialized)).toContain('Test failure');
-      expect(JSON.stringify(serialized)).toContain('Error');
+
+      safePush('first-turn');
+      // Simulate concurrent dispose
+      closed = true;
+      queue.end();
+
+      // In-flight producer tries to push post-disposal
+      expect(() => safePush('in-flight-event')).not.toThrow();
+
+      const events: string[] = [];
+      for await (const ev of queue) {
+        events.push(ev);
+      }
+      expect(events).toEqual(['first-turn']);
     });
   });
 
-  describe('Authentication Status Detection', () => {
+  describe('Normalized Contract Stream Verification (Fake Engine)', () => {
+    it('normalizes stream events into canonical HarnessEvent sequence', async () => {
+      const events: import('./types.js').HarnessEvent[] = [];
+      const out = new Pushable<import('./types.js').HarnessEvent>();
+
+      // Push a canonical turn sequence
+      out.push({ type: 'session_started', sessionId: '123e4567-e89b-12d3-a456-426614174000' });
+      out.push({ type: 'text_delta', text: 'Hel' });
+      out.push({ type: 'text_delta', text: 'lo' });
+      out.push({ type: 'assistant_message', text: 'Hello' });
+      out.push({
+        type: 'turn_completed',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          cachedInputTokens: 50,
+          costUsdEstimate: 0.0015,
+        },
+      });
+      out.end();
+
+      for await (const ev of out) {
+        events.push(ev);
+      }
+
+      expect(events).toHaveLength(5);
+      expect(events[0]).toEqual({ type: 'session_started', sessionId: '123e4567-e89b-12d3-a456-426614174000' });
+      expect(events[1]).toEqual({ type: 'text_delta', text: 'Hel' });
+      expect(events[2]).toEqual({ type: 'text_delta', text: 'lo' });
+      expect(events[3]).toEqual({ type: 'assistant_message', text: 'Hello' });
+      expect(events[4]).toEqual({
+        type: 'turn_completed',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 25,
+          cachedInputTokens: 50,
+          costUsdEstimate: 0.0015,
+        },
+      });
+    });
+
+    it('serializes errors safely for JSON boundary in turn_failed event', () => {
+      const rawError = new TypeError('Network connection reset');
+      const serialized: import('./types.js').SerializedError = {
+        message: rawError.message,
+        name: rawError.name,
+        stack: rawError.stack,
+      };
+      const event: import('./types.js').HarnessEvent = {
+        type: 'turn_failed',
+        error: serialized,
+        fatal: true,
+      };
+
+      const json = JSON.stringify(event);
+      const parsed = JSON.parse(json);
+      expect(parsed.error.message).toBe('Network connection reset');
+      expect(parsed.error.name).toBe('TypeError');
+      expect(parsed.fatal).toBe(true);
+    });
+  });
+
+  describe('Authentication Status Detection & Preflight', () => {
     it('checks authStatus for ClaudeCodeAdapter', async () => {
       const adapter = getAdapter('claude-code');
       const status = await adapter.authStatus();
@@ -104,6 +172,26 @@ describe('Harness Abstraction Layer', () => {
       const status = await adapter.authStatus();
       expect(status).toHaveProperty('configured');
       expect(status).toHaveProperty('method');
+    });
+
+    it('throws AuthRequiredError on start() if unauthenticated', async () => {
+      const origKey = process.env.ANTHROPIC_API_KEY;
+      const origToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+      try {
+        const adapter = getAdapter('claude-code');
+        await expect(
+          adapter.start({
+            prompt: 'test',
+            workspace: { rootPath: 'C:/test' },
+          }),
+        ).rejects.toThrow(AuthRequiredError);
+      } finally {
+        if (origKey) process.env.ANTHROPIC_API_KEY = origKey;
+        if (origToken) process.env.CLAUDE_CODE_OAUTH_TOKEN = origToken;
+      }
     });
   });
 

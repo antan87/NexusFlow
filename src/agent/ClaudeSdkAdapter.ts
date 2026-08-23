@@ -13,6 +13,8 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
   private session: AgentSession | undefined;
   private active = false;
 
+  private currentExecutionProfile: AgentExecutionProfile = 'review';
+
   constructor(sessionStore?: unknown) {
     super();
     this.adapter = getAdapter('claude-code', { sessionStore });
@@ -30,8 +32,10 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
       return;
     }
 
+    this.currentExecutionProfile = executionProfile;
     const permissionMode: PermissionMode =
       executionProfile === 'workspace-write' ? 'acceptEdits' : 'default';
+    // Interim: folder name as workspace ID; key by NexusFlow workspace ID in multi-host production
     const workspaceId = path.basename(this.cwd);
 
     if (!this.handle) {
@@ -118,8 +122,14 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'approval_required':
-              // In workspace-write mode auto-allow, otherwise deny if unattended
-              handle.respondToApproval(event.requestId, { behavior: 'allow' });
+              if (this.currentExecutionProfile === 'workspace-write') {
+                handle.respondToApproval(event.requestId, { behavior: 'allow' });
+              } else {
+                handle.respondToApproval(event.requestId, {
+                  behavior: 'deny',
+                  message: 'Action denied: active execution profile is review-only.',
+                });
+              }
               break;
 
             case 'turn_completed':
