@@ -10,8 +10,14 @@ import { execa } from 'execa';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type { NexusFlowConfig } from '../types.js';
-import { loadFeatureConfig, isolateWorkspaceRepo } from '../core/workspace.js';
+import type { AIAssistant, Feature, NexusFlowConfig } from '../types.js';
+import {
+  loadFeatureConfig,
+  isolateWorkspaceRepo,
+  listWorkspaces,
+  createWorkspace,
+  resolveRepoInfos,
+} from '../core/workspace.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { syncWorkspace } from '../core/sync.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
@@ -429,12 +435,222 @@ export const tools: NexusFlowTool[] = [
         return errorResult(`Error isolating repository: ${error.message}`);
       }
     },
-  }
+  },
+  {
+    name: 'list_workspaces',
+    description:
+      'List all active NexusFlow workspaces with their branch names, paths, repositories, and mode. Read-only.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: {} },
+    handler: async (_args, ctx) => {
+      try {
+        const workspaces = await listWorkspaces(ctx.config.workspacesDir);
+        return json(
+          workspaces.map((w) => ({
+            id: w.id,
+            branchName: w.branchName,
+            mode: w.mode,
+            description: w.description,
+            reposCount: w.repos.length,
+            workspacePath: w.workspacePath,
+            createdAt: w.createdAt,
+          })),
+        );
+      } catch (error: any) {
+        return errorResult(`Error listing workspaces: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'list_repos',
+    description:
+      'List all repositories in the current or specified workspace with their worktree paths, source paths, branches, and isolation status. Read-only.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
+    handler: async (_args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const feature = await loadFeatureConfig(ctx.workspacePath);
+        if (!feature) throw new Error(`Workspace not found at ${ctx.workspacePath}`);
+        const reposInfo = [];
+        for (const repoPath of feature.repos) {
+          const repoName = path.basename(repoPath);
+          const worktreePath = resolveFeatureRepoPath(feature, ctx.workspacePath, repoPath);
+          let currentBranch = 'unknown';
+          try {
+            const { stdout } = await execa('git', ['branch', '--show-current'], { cwd: worktreePath, reject: false });
+            if (stdout) currentBranch = stdout.trim();
+          } catch {}
+          reposInfo.push({
+            name: repoName,
+            worktreePath,
+            sourcePath: repoPath,
+            branch: currentBranch,
+            isIsolated: worktreePath !== repoPath,
+          });
+        }
+        return json(reposInfo);
+      } catch (error: any) {
+        return errorResult(`Error listing repos: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'create_workspace',
+    description:
+      'Create a new multi-repo NexusFlow workspace with git worktrees or in-place mode. Automatically scaffolds the workspace, configures editor/MCP files, generates context documents, and initializes git worktrees.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branchName: {
+          type: 'string',
+          minLength: 1,
+          description: 'The feature branch name and workspace folder name (e.g. feat/user-auth)',
+        },
+        repos: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          description: 'List of repository directory names or paths to include',
+        },
+        mode: {
+          type: 'string',
+          enum: ['worktree', 'in-place'],
+          description: 'Workspace mode: worktree (default) creates dedicated checkouts; in-place edits source directly.',
+        },
+        description: {
+          type: 'string',
+          description: 'Brief description of the feature or workspace purpose.',
+        },
+        assistants: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Assistant configurations to initialize (e.g. ["claude", "codex", "antigravity"]).',
+        },
+      },
+      required: ['branchName', 'repos'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        const branchName = String(args.branchName || '').trim();
+        if (!branchName) return errorResult('branchName is required.');
+        const rawRepos = Array.isArray(args.repos) ? (args.repos as string[]) : [];
+        if (rawRepos.length === 0) return errorResult('At least one repo is required.');
+        const mode = (args.mode === 'in-place' ? 'in-place' : 'worktree') as 'worktree' | 'in-place';
+        const inPlace = mode === 'in-place';
+        const description = args.description ? String(args.description) : branchName;
+        const assistants = (Array.isArray(args.assistants)
+          ? args.assistants
+          : ['antigravity', 'claude', 'codex']) as AIAssistant[];
+
+        // Resolve repos against devDir
+        const resolvedRepoPaths: string[] = [];
+        for (const r of rawRepos) {
+          const trimmed = String(r).trim();
+          const candidatePath = path.isAbsolute(trimmed) ? trimmed : path.join(ctx.config.devDir, trimmed);
+          try {
+            await fs.access(candidatePath);
+            resolvedRepoPaths.push(candidatePath);
+          } catch {
+            return errorResult(`Repository not found at ${candidatePath}`);
+          }
+        }
+
+        const repoInfos = await resolveRepoInfos(resolvedRepoPaths);
+        const workspaceId = branchName;
+        const workspacePath = path.join(ctx.config.workspacesDir, workspaceId);
+
+        const feature: Feature = {
+          id: workspaceId,
+          mode,
+          branchName,
+          description,
+          repos: inPlace
+            ? repoInfos.map((r) => r.path)
+            : repoInfos.map((r) => path.join(workspacePath, r.name)),
+          originalRepos: repoInfos.map((r) => r.path),
+          assistants,
+          workspacePath,
+          createdAt: new Date().toISOString(),
+        };
+
+        await createWorkspace(feature, repoInfos);
+        await refreshWorkspace(workspacePath);
+
+        return json({
+          id: workspaceId,
+          workspacePath,
+          branchName,
+          mode,
+          repos: feature.repos,
+          status: 'created',
+          instruction: `Workspace created at '${workspacePath}'. Context files and MCP configs generated successfully.`,
+        });
+      } catch (error: any) {
+        return errorResult(`Error creating workspace: ${error.message}`);
+      }
+    },
+  },
 ];
 
-/** Returns the tools enabled for the given config. */
-export function enabledTools(config: NexusFlowConfig): NexusFlowTool[] {
-  return tools.filter((t) => !t.enabled || t.enabled(config));
+/** Agent execution role for scoped tool surfaces. */
+export type AgentRole = 'full' | 'developer' | 'interactive' | 'readonly' | 'review' | 'ci';
+
+/** Tool allowlists mapped per role. */
+export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
+  readonly: [
+    'search_workspace',
+    'workspace_status',
+    'get_workspace_diff',
+    'run_doctor',
+    'get_service_logs',
+    'list_workspaces',
+    'list_repos',
+  ],
+  review: [
+    'search_workspace',
+    'workspace_status',
+    'get_workspace_diff',
+    'run_doctor',
+    'get_service_logs',
+    'list_workspaces',
+    'list_repos',
+  ],
+  ci: [
+    'search_workspace',
+    'workspace_status',
+    'get_workspace_diff',
+    'run_doctor',
+    'get_service_logs',
+    'list_workspaces',
+    'list_repos',
+    'sync_workspace',
+  ],
+  developer: ['*'],
+  interactive: ['*'],
+  full: ['*'],
+};
+
+/** Returns the tools enabled for the given config and role/surface filters. */
+export function enabledTools(
+  config: NexusFlowConfig,
+  role?: AgentRole,
+  allowList?: string[],
+  denyList?: string[],
+): NexusFlowTool[] {
+  return tools.filter((t) => {
+    if (t.enabled && !t.enabled(config)) return false;
+    if (denyList && denyList.includes(t.name)) return false;
+    if (allowList && allowList.length > 0 && !allowList.includes(t.name) && !allowList.includes('*')) return false;
+    if (role && ROLE_TOOL_PERMISSIONS[role]) {
+      const permitted = ROLE_TOOL_PERMISSIONS[role];
+      if (!permitted.includes('*') && !permitted.includes(t.name)) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 /** Finds a tool by name (regardless of enabled state). */
