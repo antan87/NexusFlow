@@ -169,9 +169,65 @@ export async function getWorkspaceRepos(
 }
 
 /**
+ * Parses `git status --porcelain -z` NUL-delimited output.
+ * Handles renames (which emit an extra NUL-separated source path) and unquoted paths safely.
+ */
+export function parsePorcelainZ(stdout: string): RepoStatusFile[] {
+  if (!stdout) return [];
+  const entries: RepoStatusFile[] = [];
+  const parts = stdout.split('\0');
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    const code = part.slice(0, 2);
+    const pathStr = part.slice(3);
+    if (code.includes('R') || code.includes('C')) {
+      // In porcelain -z, a rename or copy record is immediately followed by the source path
+      i++;
+    }
+    if (pathStr) {
+      entries.push({ code, path: pathStr });
+    }
+  }
+  return entries;
+}
+
+const SENSITIVE_FILE_PATTERNS = [
+  /^\.env($|\..+)/i,
+  /.*\.pem$/i,
+  /.*\.key$/i,
+  /.*\.pfx$/i,
+  /.*\.p12$/i,
+  /.*\.pkcs12$/i,
+  /.*id_rsa($|\..*)/i,
+  /.*id_ed25519($|\..*)/i,
+  /.*id_dsa($|\..*)/i,
+  /.*id_ecdsa($|\..*)/i,
+  /.*credentials.*\.json$/i,
+  /.*secrets?.*\.json$/i,
+  /.*token.*\.json$/i,
+  /.*secret.*\.ya?ml$/i,
+  /.*credential.*\.ya?ml$/i,
+  /.*\.kdbx$/i,
+];
+
+/**
+ * Checks whether a file path matches known sensitive file patterns
+ * (e.g. .env, private keys, credential files) to prevent accidental commit & push.
+ */
+export function isSensitiveFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+  const base = path.posix.basename(normalized);
+  if (/\.example($|\.)|\.template($|\.)|\.sample($|\.)/i.test(base)) {
+    return false;
+  }
+  return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(base) || pattern.test(normalized));
+}
+
+/**
  * Inspects the working-tree status of a git repository.
  *
- * Runs `git status --porcelain` and parses the output to determine which
+ * Runs `git status --porcelain -z` and parses the output to determine which
  * files have been modified, added, or deleted.
  *
  * @param repoPath - Absolute path to the repo root.
@@ -179,15 +235,11 @@ export async function getWorkspaceRepos(
  */
 export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
   try {
-    const { stdout } = await execa('git', ['status', '--porcelain'], {
+    const { stdout } = await execa('git', ['status', '--porcelain', '-z'], {
       cwd: repoPath,
     });
 
-    const lines = stdout.trim().split('\n').filter(Boolean);
-    const files = lines.map((line) => ({
-      code: line.slice(0, 2),
-      path: line.slice(3).trim(),
-    }));
+    const files = parsePorcelainZ(stdout);
     const changedFiles = files.map((f) => f.path);
 
     return {
@@ -476,24 +528,80 @@ export async function rebaseRepo(
   return { success: true, status: rebaseStatus, message: rebaseMessage, stashed };
 }
 
+export interface CommitAndPushOptions {
+  /** Skip the push step. */
+  noPush?: boolean;
+  /** Explicit files to stage instead of auto-staging. */
+  files?: string[];
+}
+
 /**
- * Stages all changes, commits with the given message, and pushes to origin.
+ * Stages changes safely, commits with the given message, and pushes to origin.
+ * Excludes untracked sensitive files (e.g. .env, private keys, credential files)
+ * from being staged and pushed.
  *
  * @param repoPath   - Absolute path to the repo root.
  * @param message    - Commit message.
  * @param branchName - Branch to push to on origin.
- * @param options    - Optional flags to skip the push step.
+ * @param options    - Optional flags to skip the push step or specify files.
  * @returns Result with commit hash, file count, and outcome message.
  */
 export async function commitAndPush(
   repoPath: string,
   message: string,
   branchName: string,
-  options?: { noPush?: boolean },
+  options?: CommitAndPushOptions,
 ): Promise<CommitResult> {
   try {
-    // Stage everything.
-    await execa('git', ['add', '.'], { cwd: repoPath });
+    if (options?.files && options.files.length > 0) {
+      // Stage specific requested files
+      await execa('git', ['add', '--', ...options.files], { cwd: repoPath });
+    } else {
+      // 1. Stage all tracked changes
+      await execa('git', ['add', '-u', '.'], { cwd: repoPath });
+
+      // 2. Safely stage untracked files, filtering out any sensitive files (.env, keys, etc.)
+      const status = await getRepoStatus(repoPath);
+      const untrackedFiles = status.files
+        .filter((f) => f.code === '??')
+        .map((f) => f.path);
+
+      const safeUntracked: string[] = [];
+      const skippedSensitive: string[] = [];
+
+      for (const file of untrackedFiles) {
+        if (isSensitiveFile(file)) {
+          skippedSensitive.push(file);
+        } else {
+          safeUntracked.push(file);
+        }
+      }
+
+      if (skippedSensitive.length > 0) {
+        console.warn(
+          `[NexusFlow] Excluded ${skippedSensitive.length} untracked sensitive file(s) from commit: ${skippedSensitive.join(', ')}`,
+        );
+      }
+
+      if (safeUntracked.length > 0) {
+        await execa('git', ['add', '--', ...safeUntracked], { cwd: repoPath });
+      }
+    }
+
+    // Check if anything is staged to commit
+    const { stdout: stagedDiff } = await execa(
+      'git',
+      ['diff', '--cached', '--name-only'],
+      { cwd: repoPath },
+    );
+    if (!stagedDiff.trim()) {
+      return {
+        success: true,
+        commitHash: '',
+        filesChanged: 0,
+        message: 'Nothing staged to commit (working tree clean or sensitive files excluded)',
+      };
+    }
 
     // Commit.
     const { stdout: commitOutput } = await execa(

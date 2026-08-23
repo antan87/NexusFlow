@@ -6,6 +6,10 @@ import {
   getAheadBehind,
   getRemoteUrl,
   pushRepo,
+  getRepoStatus,
+  commitAndPush,
+  parsePorcelainZ,
+  isSensitiveFile,
 } from './multi-git.js';
 
 vi.mock('execa');
@@ -230,3 +234,91 @@ describe('pushRepo', () => {
     expect(result.message).toBe('fatal: no upstream');
   });
 });
+
+describe('parsePorcelainZ', () => {
+  it('parses standard modified and untracked records', () => {
+    const raw = ' M src/index.ts\0?? .env\0A  README.md\0';
+    const parsed = parsePorcelainZ(raw);
+    expect(parsed).toEqual([
+      { code: ' M', path: 'src/index.ts' },
+      { code: '??', path: '.env' },
+      { code: 'A ', path: 'README.md' },
+    ]);
+  });
+
+  it('correctly skips old path on renamed and copied files', () => {
+    const raw = 'R  new-name.ts\0old-name.ts\0 M other.ts\0';
+    const parsed = parsePorcelainZ(raw);
+    expect(parsed).toEqual([
+      { code: 'R ', path: 'new-name.ts' },
+      { code: ' M', path: 'other.ts' },
+    ]);
+  });
+
+  it('handles empty output', () => {
+    expect(parsePorcelainZ('')).toEqual([]);
+  });
+});
+
+describe('isSensitiveFile', () => {
+  it('detects .env files as sensitive', () => {
+    expect(isSensitiveFile('.env')).toBe(true);
+    expect(isSensitiveFile('.env.local')).toBe(true);
+    expect(isSensitiveFile('.env.production')).toBe(true);
+    expect(isSensitiveFile('subfolder/.env')).toBe(true);
+  });
+
+  it('allows template and example env files', () => {
+    expect(isSensitiveFile('.env.example')).toBe(false);
+    expect(isSensitiveFile('.env.template')).toBe(false);
+    expect(isSensitiveFile('.env.sample')).toBe(false);
+  });
+
+  it('detects key and certificate files as sensitive', () => {
+    expect(isSensitiveFile('server.key')).toBe(true);
+    expect(isSensitiveFile('cert.pem')).toBe(true);
+    expect(isSensitiveFile('id_rsa')).toBe(true);
+    expect(isSensitiveFile('id_ed25519')).toBe(true);
+    expect(isSensitiveFile('gcp-credentials.json')).toBe(true);
+    expect(isSensitiveFile('secret.yaml')).toBe(true);
+  });
+
+  it('allows standard source files', () => {
+    expect(isSensitiveFile('src/index.ts')).toBe(false);
+    expect(isSensitiveFile('package.json')).toBe(false);
+    expect(isSensitiveFile('README.md')).toBe(false);
+  });
+});
+
+describe('commitAndPush secret filtering', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('excludes untracked .env and stages only safe files', async () => {
+    vi.mocked(execa).mockImplementation(((file: any, args: any) => {
+      const sub = args[0];
+      if (sub === 'status') {
+        return Promise.resolve({ stdout: ' M src/app.ts\0?? .env\0?? src/new-feature.ts\0' });
+      }
+      if (sub === 'diff' && args[1] === '--cached') {
+        return Promise.resolve({ stdout: 'src/app.ts\nsrc/new-feature.ts\n' });
+      }
+      if (sub === 'commit') {
+        return Promise.resolve({ stdout: '[main abc1234] feat: safe commit\n 2 files changed' });
+      }
+      return Promise.resolve({ stdout: '' });
+    }) as any);
+
+    const result = await commitAndPush('/repo', 'feat: safe commit', 'main', { noPush: true });
+    expect(result.success).toBe(true);
+    expect(result.commitHash).toBe('abc1234');
+
+    const calls = gitCalls();
+    // Verify tracked files were staged
+    expect(calls).toContainEqual(['add', '-u', '.']);
+    // Verify safe untracked file was staged
+    expect(calls).toContainEqual(['add', '--', 'src/new-feature.ts']);
+    // Verify .env was NOT staged
+    expect(calls.some((c) => c.includes('.env'))).toBe(false);
+  });
+});
+

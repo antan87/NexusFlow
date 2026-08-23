@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ChildProcess } from 'node:child_process';
 import * as childProcess from 'node:child_process';
 
-import { killTree } from './CliAdapterBase.js';
+import { EventEmitter } from 'node:events';
+
+import { CliAdapterBase, killTree } from './CliAdapterBase.js';
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -234,3 +236,62 @@ describe('killTree', () => {
     }
   });
 });
+
+class FakeStdinStream extends EventEmitter {
+  write = vi.fn((_data: any) => {
+    // Simulate immediate EPIPE if desired
+    return true;
+  });
+  end = vi.fn();
+}
+
+class FakeTestProcess extends EventEmitter {
+  stdin = new FakeStdinStream();
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  killed = false;
+  exitCode: number | null = null;
+  pid = 12345;
+}
+
+class TestStdinAdapter extends CliAdapterBase {
+  readonly label = 'TestAdapter';
+  readonly binary = 'test-cli';
+  protected promptViaStdin = true;
+  public fakeProcess = new FakeTestProcess();
+
+  protected buildArgs(_isFirstTurn: boolean, _data: string): string[] {
+    return ['--turn'];
+  }
+
+  protected spawnProcess(_args: string[]): ChildProcess {
+    return this.fakeProcess as unknown as ChildProcess;
+  }
+}
+
+describe('CliAdapterBase promptViaStdin error handling', () => {
+  it('attaches an error handler to stdin and does not crash when stdin emits error', async () => {
+    const adapter = new TestStdinAdapter();
+    await adapter.start('/fake/cwd');
+
+    let errorEmitted = false;
+    adapter.on('error', () => {
+      errorEmitted = true;
+    });
+
+    await adapter.send('hello world');
+
+    // Verify stdin had error listener attached
+    expect(adapter.fakeProcess.stdin.listenerCount('error')).toBeGreaterThan(0);
+
+    // Emitting error on stdin directly should not throw unhandled exception
+    expect(() => {
+      adapter.fakeProcess.stdin.emit('error', new Error('EPIPE: broken pipe'));
+    }).not.toThrow();
+
+    // Settle the process with exit code 1
+    adapter.fakeProcess.emit('close', 1);
+    expect(errorEmitted).toBe(true);
+  });
+});
+

@@ -166,6 +166,7 @@ export function formatInterval(minutes: number): string {
  */
 export function isDue(job: ScheduledJob, now: Date = new Date()): boolean {
   if (!job.enabled) return false;
+  if (!Number.isFinite(job.intervalMinutes) || job.intervalMinutes <= 0) return false;
   if (!job.lastRunAt) return true;
 
   const last = Date.parse(job.lastRunAt);
@@ -179,6 +180,7 @@ export function isDue(job: ScheduledJob, now: Date = new Date()): boolean {
  */
 export function nextDueAt(job: ScheduledJob): Date | null {
   if (!job.enabled) return null;
+  if (!Number.isFinite(job.intervalMinutes) || job.intervalMinutes <= 0) return null;
   if (!job.lastRunAt) return new Date();
   const last = Date.parse(job.lastRunAt);
   if (Number.isNaN(last)) return new Date();
@@ -190,12 +192,18 @@ export function nextDueAt(job: ScheduledJob): Date | null {
  *
  * @param input - Workspace, task, and interval for the new job.
  * @returns The created job.
+ * @throws When intervalMinutes is <= 0 or not a finite number.
  */
 export async function addSchedule(input: {
   workspacePath: string;
   task: ScheduleTask;
   intervalMinutes: number;
 }): Promise<ScheduledJob> {
+  if (!Number.isFinite(input.intervalMinutes) || input.intervalMinutes <= 0) {
+    throw new Error(
+      `Invalid schedule interval: interval must be a positive number of minutes, got ${input.intervalMinutes}`,
+    );
+  }
   return mutateSchedules((store) => {
     const workspaceName = path.basename(input.workspacePath);
     const job: ScheduledJob = {

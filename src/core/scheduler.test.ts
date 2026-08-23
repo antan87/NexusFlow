@@ -153,6 +153,20 @@ describe('scheduler', () => {
       expect(written.jobs[0]!.intervalMinutes).toBe(120);
     });
 
+    it('addSchedule rejects degenerate or non-positive intervals', async () => {
+      await expect(
+        addSchedule({ workspacePath: '/ws', task: 'sync', intervalMinutes: 0 }),
+      ).rejects.toThrow(/Invalid schedule interval/);
+
+      await expect(
+        addSchedule({ workspacePath: '/ws', task: 'sync', intervalMinutes: -10 }),
+      ).rejects.toThrow(/Invalid schedule interval/);
+
+      await expect(
+        addSchedule({ workspacePath: '/ws', task: 'sync', intervalMinutes: Number.NaN }),
+      ).rejects.toThrow(/Invalid schedule interval/);
+    });
+
     it('removeSchedule deletes by id and reports misses', async () => {
       mockScheduleStore({ version: 1, jobs: [makeJob()] });
 
