@@ -13,9 +13,9 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
   private session: AgentSession | undefined;
   private active = false;
 
-  constructor() {
+  constructor(adapterOverride?: HarnessAdapter) {
     super();
-    this.adapter = getAdapter('codex');
+    this.adapter = adapterOverride ?? getAdapter('codex');
   }
 
   async start(cwd: string, session?: AgentSession): Promise<void> {
@@ -76,22 +76,24 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
 
   private bindEvents(handle: SessionHandle): void {
     let sawDeltaThisTurn = false;
+    let lastEmittedSessionId: string | null = null;
+
+    const emitSessionOnce = (id: string) => {
+      if (isValidSessionUuid(id) && id !== lastEmittedSessionId) {
+        lastEmittedSessionId = id;
+        this.emit('session', id);
+      }
+    };
 
     void (async () => {
       try {
         // Resolve lazy session ID
-        void handle.sessionId().then((id) => {
-          if (isValidSessionUuid(id)) {
-            this.emit('session', id);
-          }
-        }).catch(() => {});
+        void handle.sessionId().then(emitSessionOnce).catch(() => {});
 
         for await (const event of handle.events) {
           switch (event.type) {
             case 'session_started':
-              if (isValidSessionUuid(event.sessionId)) {
-                this.emit('session', event.sessionId);
-              }
+              emitSessionOnce(event.sessionId);
               break;
 
             case 'text_delta':
@@ -119,6 +121,7 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
 
             case 'turn_completed':
               sawDeltaThisTurn = false;
+              this.emit('usage', event.usage);
               this.emit('idle');
               break;
 
@@ -131,7 +134,10 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
         }
       } catch (err: any) {
         this.emit('error', err instanceof Error ? err : new Error(String(err)));
-        this.emit('idle');
+      } finally {
+        if (this.active) {
+          this.emit('idle');
+        }
       }
     })();
   }

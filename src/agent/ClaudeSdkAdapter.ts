@@ -15,9 +15,9 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
 
   private currentExecutionProfile: AgentExecutionProfile = 'review';
 
-  constructor(sessionStore?: unknown) {
+  constructor(sessionStore?: unknown, adapterOverride?: HarnessAdapter) {
     super();
-    this.adapter = getAdapter('claude-code', { sessionStore });
+    this.adapter = adapterOverride ?? getAdapter('claude-code', { sessionStore });
   }
 
   async start(cwd: string, session?: AgentSession): Promise<void> {
@@ -84,22 +84,24 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
 
   private bindEvents(handle: SessionHandle): void {
     let sawDeltaThisTurn = false;
+    let lastEmittedSessionId: string | null = null;
+
+    const emitSessionOnce = (id: string) => {
+      if (isValidSessionUuid(id) && id !== lastEmittedSessionId) {
+        lastEmittedSessionId = id;
+        this.emit('session', id);
+      }
+    };
 
     void (async () => {
       try {
         // Resolve lazy session ID
-        void handle.sessionId().then((id) => {
-          if (isValidSessionUuid(id)) {
-            this.emit('session', id);
-          }
-        }).catch(() => {});
+        void handle.sessionId().then(emitSessionOnce).catch(() => {});
 
         for await (const event of handle.events) {
           switch (event.type) {
             case 'session_started':
-              if (isValidSessionUuid(event.sessionId)) {
-                this.emit('session', event.sessionId);
-              }
+              emitSessionOnce(event.sessionId);
               break;
 
             case 'text_delta':
@@ -125,19 +127,37 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               this.emit('system', `File ${event.kind}: ${event.paths.join(', ')}`);
               break;
 
-            case 'approval_required':
+            case 'approval_required': {
               if (this.currentExecutionProfile === 'workspace-write') {
-                handle.respondToApproval(event.requestId, { behavior: 'allow' });
+                // Issue #173: Tool-class gating — auto-accept in-workspace file edits and common filesystem actions;
+                // deny arbitrary shell/command execution with actionable guidance.
+                const allowedTools = new Set([
+                  'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
+                  'Read', 'Glob', 'Grep', 'LS', 'View',
+                  'FileEdit', 'FileWrite',
+                ]);
+                if (allowedTools.has(event.tool)) {
+                  handle.respondToApproval(event.requestId, { behavior: 'allow' });
+                } else {
+                  handle.respondToApproval(event.requestId, {
+                    behavior: 'deny',
+                    message: `Command '${event.tool}' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.`,
+                  });
+                  this.emit('system', `Denied '${event.tool}' execution: unavailable in embedded chat.`);
+                }
               } else {
                 handle.respondToApproval(event.requestId, {
                   behavior: 'deny',
                   message: 'Action denied: active execution profile is review-only.',
                 });
+                this.emit('system', `Denied '${event.tool}' execution: active execution profile is review-only.`);
               }
               break;
+            }
 
             case 'turn_completed':
               sawDeltaThisTurn = false;
+              this.emit('usage', event.usage);
               this.emit('idle');
               break;
 
@@ -150,7 +170,10 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
         }
       } catch (err: any) {
         this.emit('error', err instanceof Error ? err : new Error(String(err)));
-        this.emit('idle');
+      } finally {
+        if (this.active) {
+          this.emit('idle');
+        }
       }
     })();
   }

@@ -277,6 +277,10 @@ app.get('/ws', async (c, next) => {
                 turnGate.settle();
                 ws.send(JSON.stringify({ type: 'close', code }));
               });
+              startedAgent.on('usage', (usage: any) => {
+                if (!isCurrentAgent()) return;
+                ws.send(JSON.stringify({ type: 'usage', usage }));
+              });
               startedAgent.on('error', (error: Error) => {
                 if (!isCurrentAgent()) return;
                 ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));

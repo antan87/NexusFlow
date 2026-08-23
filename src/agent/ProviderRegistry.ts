@@ -38,7 +38,7 @@ export interface ProviderCapabilities {
   sessionIdFormat?: 'uuid' | 'opaque';
 }
 
-export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session';
+export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session' | 'usage';
 
 export interface AgentHarness {
   start(cwd: string, session?: AgentSession): Promise<void>;
