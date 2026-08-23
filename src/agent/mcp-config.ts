@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentRole } from '../mcp/tools.js';
@@ -16,7 +17,16 @@ export function getLocalCliEntry(): string {
   const currentFile = fileURLToPath(import.meta.url);
   const baseDir = path.dirname(currentFile);
   const packageDir = path.resolve(baseDir, '..', '..');
-  return path.join(packageDir, 'dist', 'index.js');
+  const distIndex = path.join(packageDir, 'dist', 'index.js');
+
+  if (!fs.existsSync(distIndex)) {
+    const srcIndex = path.join(packageDir, 'src', 'index.ts');
+    if (!fs.existsSync(srcIndex)) {
+      throw new Error(`NexusFlow CLI entrypoint not found at ${distIndex}. Run "npm run build" to compile before starting SDK sessions.`);
+    }
+  }
+
+  return distIndex;
 }
 
 /**

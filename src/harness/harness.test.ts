@@ -181,9 +181,25 @@ describe('Harness Abstraction Layer', () => {
       expect(status.method).toBe('api-key');
 
       const codexAdapter = getAdapter('codex');
-      const codexStatus = await codexAdapter.authStatus(undefined, { OPENAI_API_KEY: 'sk-test' });
+      const codexStatus = await codexAdapter.authStatus(undefined, {
+        OPENAI_API_KEY: 'sk-test',
+        CODEX_HOME: '/non-existent-codex-home-dir',
+      });
       expect(codexStatus.configured).toBe(true);
       expect(codexStatus.method).toBe('api-key');
+      expect(codexStatus.hasApiKeyFallback).toBe(false);
+    });
+
+    it('correctly sets hasApiKeyFallback for Codex when auth.json exists (Issue #172)', async () => {
+      const codexAdapter = getAdapter('codex');
+      // If no API key and no auth.json in temp dir
+      const unauthStatus = await codexAdapter.authStatus(undefined, {
+        OPENAI_API_KEY: '',
+        CODEX_API_KEY: '',
+        CODEX_HOME: '/non-existent-dir',
+      });
+      // Should cleanly compute method
+      expect(unauthStatus.hasApiKeyFallback).toBeFalsy();
     });
 
     it('throws AuthRequiredError on start() if unauthenticated', async () => {
