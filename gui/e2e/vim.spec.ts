@@ -190,24 +190,34 @@ test.describe('Vim Navigation Mode', () => {
     await expect(vimToggle).not.toBeChecked();
   });
 
-  test('clears stale focus on route change and suspends navigation during modal overlays', async ({ page }) => {
-    await page.goto('/');
+  test('clears stale focus on route/scope change and selects new scope items without throwing', async ({ page }) => {
+    await page.goto('/#/workspaces/feature-alpha');
     const statusline = page.locator('.vim-statusline');
     await expect(statusline).toBeVisible();
-    await expect(page.getByText('feature-alpha').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'feature-alpha' })).toBeVisible();
 
-    // Focus an item on dashboard
+    // Focus an item on workspace overview
     await page.keyboard.press('j');
     await expect(page.locator('.vim-focus')).toBeVisible();
 
-    // Navigate to settings via command line
-    await page.keyboard.press(':');
-    await page.keyboard.type('tab settings');
-    await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(/#\/settings/);
+    // Switch tab to changes using l
+    await page.keyboard.press('l');
+    await expect(page).toHaveURL(/#\/workspaces\/feature-alpha\/changes/);
+    await expect(page.locator('[data-vim-scope="changes"]')).toBeVisible();
 
-    // Focus should be cleared on scope/route change
+    // Focus must be cleared (detached node reference avoided)
     await expect(page.locator('.vim-focus')).toHaveCount(0);
+
+    // Pressing j now cleanly focuses the first item in the new scope without throwing
+    await page.keyboard.press('j');
+    await expect(page.locator('.vim-focus')).toBeVisible();
+  });
+
+  test('suspends navigation and action triggers during modal overlays', async ({ page }) => {
+    await page.goto('/#/workspaces/feature-alpha');
+    const statusline = page.locator('.vim-statusline');
+    await expect(statusline).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'feature-alpha' })).toBeVisible();
 
     // Open help modal dialog
     await page.keyboard.press('?');
@@ -218,7 +228,12 @@ test.describe('Vim Navigation Mode', () => {
     await page.keyboard.press('j');
     await expect(page.locator('.vim-focus')).toHaveCount(0);
 
-    // Escape closes modal
+    // Press s inside open modal — action key must NOT trigger background workspace start action
+    await page.keyboard.press('s');
+    await expect(page.locator('.vim-focus')).toHaveCount(0);
+    await expect(helpModal).toBeVisible();
+
+    // Escape closes modal cleanly
     await page.keyboard.press('Escape');
     await expect(helpModal).not.toBeVisible();
   });
