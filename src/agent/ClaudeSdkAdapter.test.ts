@@ -9,6 +9,7 @@ function createMockHandle(events: HarnessEvent[], sessionIdVal = '11111111-1111-
 } {
   const approvals: Array<{ requestId: string; decision: any }> = [];
   const handle: SessionHandle = {
+    vendor: 'claude-code',
     sessionId: () => Promise.resolve(sessionIdVal),
     events: (async function* () {
       for (const ev of events) {

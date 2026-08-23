@@ -5,6 +5,7 @@ import type { HarnessEvent } from '../harness/types.js';
 
 function createMockHandle(events: HarnessEvent[], sessionIdVal = '22222222-2222-2222-2222-222222222222'): SessionHandle {
   return {
+    vendor: 'codex',
     sessionId: () => Promise.resolve(sessionIdVal),
     events: (async function* () {
       for (const ev of events) {
