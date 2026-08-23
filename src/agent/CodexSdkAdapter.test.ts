@@ -65,11 +65,11 @@ describe('CodexSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Diagnose issue');
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(emittedSessions).toEqual([sessionId]);
-    expect(usageEvents).toEqual([{ inputTokens: 20, outputTokens: 8 }]);
-    expect(idleCount).toBeGreaterThanOrEqual(1);
+    await vi.waitFor(() => {
+      expect(emittedSessions).toEqual([sessionId]);
+      expect(usageEvents).toEqual([{ inputTokens: 20, outputTokens: 8 }]);
+      expect(idleCount).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it('emits idle on silent stream termination', async () => {
@@ -86,8 +86,8 @@ describe('CodexSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Hi');
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(idleFired).toBe(true);
+    await vi.waitFor(() => {
+      expect(idleFired).toBe(true);
+    });
   });
 });

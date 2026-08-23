@@ -74,9 +74,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     const hasApiKey = Boolean(env?.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY);
     const hasOAuth = Boolean(
       env?.CLAUDE_CODE_OAUTH_TOKEN ??
-      process.env.CLAUDE_CODE_OAUTH_TOKEN ??
-      env?.CLAUDE_CODE_SETUP_TOKEN ??
-      process.env.CLAUDE_CODE_SETUP_TOKEN
+      process.env.CLAUDE_CODE_OAUTH_TOKEN
     );
 
     // Anthropic documented precedence: API key bills first when both exist

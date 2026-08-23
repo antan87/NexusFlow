@@ -209,7 +209,6 @@ const claudeSdkStatus = cachedStatus(() => {
   const hasCredential = Boolean(
     process.env.ANTHROPIC_API_KEY ||
     process.env.CLAUDE_CODE_OAUTH_TOKEN ||
-    process.env.CLAUDE_CODE_SETUP_TOKEN ||
     process.env.AWS_ACCESS_KEY_ID ||
     process.env.GOOGLE_APPLICATION_CREDENTIALS
   );
@@ -266,7 +265,7 @@ ProviderRegistry.register({
     {
       id: 'workspace-write',
       label: 'Edit workspace',
-      description: 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
+      description: 'Workspace-write sandbox (network/escalation denied). Approvals are configured at the Codex engine level.',
     },
   ],
   defaultExecutionProfile: 'review',
