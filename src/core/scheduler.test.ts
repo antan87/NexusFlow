@@ -165,6 +165,10 @@ describe('scheduler', () => {
       await expect(
         addSchedule({ workspacePath: '/ws', task: 'sync', intervalMinutes: Number.NaN }),
       ).rejects.toThrow(/Invalid schedule interval/);
+
+      await expect(
+        addSchedule({ workspacePath: '/ws', task: 'sync', intervalMinutes: Number.POSITIVE_INFINITY }),
+      ).rejects.toThrow(/Invalid schedule interval/);
     });
 
     it('removeSchedule deletes by id and reports misses', async () => {

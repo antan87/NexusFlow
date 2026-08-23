@@ -276,6 +276,12 @@ describe('addRepoToWorkspace rollback', () => {
     expect(gitCalls()).toContainEqual(['branch', '-D', 'my-feature']);
     // Verify workspace directory still exists (not destroyed like in createWorkspace)
     expect(await fs.access(workspacePath).then(() => true).catch(() => false)).toBe(true);
+
+    // Verify manifest was reverted on disk to its original state (B2)
+    const manifestContent = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    const restoredManifest = JSON.parse(manifestContent);
+    expect(restoredManifest.repos).toEqual([path.join(workspacePath, 'api')]);
+    expect(restoredManifest.originalRepos).toEqual(['/src/api']);
   });
 });
 

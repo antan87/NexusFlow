@@ -90,6 +90,8 @@ export interface CommitResult {
   filesChanged: number;
   /** Human-readable outcome message. */
   message: string;
+  /** Sensitive files withheld from staging to prevent secret exfiltration. */
+  withheldFiles?: string[];
 }
 
 /** Result of a diff summary. */
@@ -193,7 +195,7 @@ export function parsePorcelainZ(stdout: string): RepoStatusFile[] {
 }
 
 const SENSITIVE_FILE_PATTERNS = [
-  /^\.env($|\..+)/i,
+  /^\.env/i,
   /.*\.pem$/i,
   /.*\.key$/i,
   /.*\.pfx$/i,
@@ -213,7 +215,7 @@ const SENSITIVE_FILE_PATTERNS = [
 
 /**
  * Checks whether a file path matches known sensitive file patterns
- * (e.g. .env, private keys, credential files) to prevent accidental commit & push.
+ * (e.g. .env, .envrc, private keys, credential files) to prevent accidental commit & push.
  */
 export function isSensitiveFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -227,7 +229,7 @@ export function isSensitiveFile(filePath: string): boolean {
 /**
  * Inspects the working-tree status of a git repository.
  *
- * Runs `git status --porcelain -z` and parses the output to determine which
+ * Runs `git status --porcelain -z -uall` and parses the output to determine which
  * files have been modified, added, or deleted.
  *
  * @param repoPath - Absolute path to the repo root.
@@ -235,7 +237,7 @@ export function isSensitiveFile(filePath: string): boolean {
  */
 export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
   try {
-    const { stdout } = await execa('git', ['status', '--porcelain', '-z'], {
+    const { stdout } = await execa('git', ['status', '--porcelain', '-z', '-uall'], {
       cwd: repoPath,
     });
 
@@ -553,21 +555,37 @@ export async function commitAndPush(
   options?: CommitAndPushOptions,
 ): Promise<CommitResult> {
   try {
+    const skippedSensitive: string[] = [];
+
     if (options?.files && options.files.length > 0) {
-      // Stage specific requested files
-      await execa('git', ['add', '--', ...options.files], { cwd: repoPath });
+      // Stage specific requested files in chunks to avoid argv limit
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < options.files.length; i += BATCH_SIZE) {
+        const batch = options.files.slice(i, i + BATCH_SIZE);
+        await execa('git', ['add', '--', ...batch], { cwd: repoPath });
+      }
     } else {
+      const status = await getRepoStatus(repoPath);
+
+      // Warn if any modified tracked files match sensitive file patterns
+      const modifiedTrackedSensitive = status.files
+        .filter((f) => f.code !== '??' && isSensitiveFile(f.path))
+        .map((f) => f.path);
+      if (modifiedTrackedSensitive.length > 0) {
+        console.warn(
+          `[NexusFlow] Warning: tracked sensitive file(s) modified and will be committed: ${modifiedTrackedSensitive.join(', ')}`,
+        );
+      }
+
       // 1. Stage all tracked changes
       await execa('git', ['add', '-u', '.'], { cwd: repoPath });
 
-      // 2. Safely stage untracked files, filtering out any sensitive files (.env, keys, etc.)
-      const status = await getRepoStatus(repoPath);
+      // 2. Safely stage untracked files in batches, filtering out any sensitive files (.env, keys, etc.)
       const untrackedFiles = status.files
         .filter((f) => f.code === '??')
         .map((f) => f.path);
 
       const safeUntracked: string[] = [];
-      const skippedSensitive: string[] = [];
 
       for (const file of untrackedFiles) {
         if (isSensitiveFile(file)) {
@@ -583,8 +601,10 @@ export async function commitAndPush(
         );
       }
 
-      if (safeUntracked.length > 0) {
-        await execa('git', ['add', '--', ...safeUntracked], { cwd: repoPath });
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < safeUntracked.length; i += BATCH_SIZE) {
+        const batch = safeUntracked.slice(i, i + BATCH_SIZE);
+        await execa('git', ['add', '--', ...batch], { cwd: repoPath });
       }
     }
 
@@ -599,7 +619,10 @@ export async function commitAndPush(
         success: true,
         commitHash: '',
         filesChanged: 0,
-        message: 'Nothing staged to commit (working tree clean or sensitive files excluded)',
+        message: skippedSensitive.length > 0
+          ? `Nothing staged to commit (${skippedSensitive.length} sensitive file(s) excluded)`
+          : 'Nothing staged to commit (working tree clean)',
+        withheldFiles: skippedSensitive,
       };
     }
 
@@ -630,7 +653,13 @@ export async function commitAndPush(
       : canPush
         ? 'Committed and pushed'
         : 'Committed (detached HEAD — push skipped)';
-    return { success: true, commitHash, filesChanged, message: action };
+    return {
+      success: true,
+      commitHash,
+      filesChanged,
+      message: `${action} ${filesChanged} file${filesChanged === 1 ? '' : 's'} (${commitHash})`,
+      withheldFiles: skippedSensitive,
+    };
   } catch (error) {
     return {
       success: false,

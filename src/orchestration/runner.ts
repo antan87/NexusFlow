@@ -422,8 +422,12 @@ async function collectLogFiles(dir: string): Promise<string[]> {
         results.push(fullPath);
       }
     }
-  } catch {}
-  return results;
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') {
+      console.warn(chalk.yellow(`  Warning: could not read directory ${dir}: ${error?.message || error}`));
+    }
+  }
+  return results.sort((a, b) => a.localeCompare(b));
 }
 
 /**

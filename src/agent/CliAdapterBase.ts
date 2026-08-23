@@ -108,7 +108,7 @@ export abstract class CliAdapterBase extends EventEmitter {
     const cliProcess = this.spawnProcess(args);
     this.child = cliProcess;
     if (this.promptViaStdin) {
-      cliProcess.stdin?.on?.('error', () => {
+      cliProcess.stdin?.once?.('error', () => {
         // Ignore EPIPE / write errors on stdin; the process error or close event will settle the turn
       });
       cliProcess.stdin?.write(data);

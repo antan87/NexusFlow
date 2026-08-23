@@ -46,10 +46,9 @@ interface WorktreeRollbackAction {
 }
 
 /**
- * Best-effort rollback of a partially-created workspace: removes each worktree
- * this run added (pruning on failure), deletes only branches this run created,
- * and removes the workspace directory. Rollback failures are warned, never
- * thrown, so the caller can rethrow the original error.
+ * Best-effort rollback of a single worktree action: removes the worktree
+ * (pruning on failure), and deletes the branch if this action created it.
+ * Rollback failures are warned, never thrown.
  */
 async function rollbackWorktreeAction(action: WorktreeRollbackAction): Promise<void> {
   try {
@@ -600,6 +599,8 @@ export async function addRepoToWorkspace(
     throw new Error(`A repository named "${newRepoInfo.name}" is already in the workspace`);
   }
 
+  const originalRepos = [...feature.repos];
+  const originalOriginalRepos = feature.originalRepos ? [...feature.originalRepos] : undefined;
   let rollbackAction: WorktreeRollbackAction | null = null;
   try {
     // 1. Create the worktree (worktree mode only)
@@ -693,6 +694,18 @@ export async function addRepoToWorkspace(
   } catch (error) {
     if (rollbackAction) {
       await rollbackWorktreeAction(rollbackAction);
+    }
+    // Revert manifest back to its state prior to adding this repo
+    feature.repos = originalRepos;
+    if (originalOriginalRepos !== undefined) {
+      feature.originalRepos = originalOriginalRepos;
+    } else {
+      delete feature.originalRepos;
+    }
+    try {
+      await saveFeatureConfig(workspacePath, feature);
+    } catch (saveError) {
+      console.warn('Warning: rollback failed to revert workspace manifest:', saveError);
     }
     throw error;
   }

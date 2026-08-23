@@ -166,7 +166,10 @@ export function formatInterval(minutes: number): string {
  */
 export function isDue(job: ScheduledJob, now: Date = new Date()): boolean {
   if (!job.enabled) return false;
-  if (!Number.isFinite(job.intervalMinutes) || job.intervalMinutes <= 0) return false;
+  if (!Number.isFinite(job.intervalMinutes) || job.intervalMinutes <= 0) {
+    console.warn(`[NexusFlow] Schedule job ${job.id} has invalid interval (${job.intervalMinutes}), skipping.`);
+    return false;
+  }
   if (!job.lastRunAt) return true;
 
   const last = Date.parse(job.lastRunAt);

@@ -261,11 +261,13 @@ describe('parsePorcelainZ', () => {
 });
 
 describe('isSensitiveFile', () => {
-  it('detects .env files as sensitive', () => {
+  it('detects .env files and .envrc as sensitive', () => {
     expect(isSensitiveFile('.env')).toBe(true);
+    expect(isSensitiveFile('.envrc')).toBe(true);
     expect(isSensitiveFile('.env.local')).toBe(true);
     expect(isSensitiveFile('.env.production')).toBe(true);
     expect(isSensitiveFile('subfolder/.env')).toBe(true);
+    expect(isSensitiveFile('config/.envrc')).toBe(true);
   });
 
   it('allows template and example env files', () => {
@@ -311,6 +313,7 @@ describe('commitAndPush secret filtering', () => {
     const result = await commitAndPush('/repo', 'feat: safe commit', 'main', { noPush: true });
     expect(result.success).toBe(true);
     expect(result.commitHash).toBe('abc1234');
+    expect(result.withheldFiles).toEqual(['.env']);
 
     const calls = gitCalls();
     // Verify tracked files were staged
@@ -319,6 +322,85 @@ describe('commitAndPush secret filtering', () => {
     expect(calls).toContainEqual(['add', '--', 'src/new-feature.ts']);
     // Verify .env was NOT staged
     expect(calls.some((c) => c.includes('.env'))).toBe(false);
+  });
+
+  it('filters untracked sensitive files inside subdirectories (B1)', async () => {
+    vi.mocked(execa).mockImplementation(((file: any, args: any) => {
+      const sub = args[0];
+      if (sub === 'status') {
+        // -uall yields individual paths inside config/
+        return Promise.resolve({ stdout: '?? config/.env\0?? config/credentials.json\0?? config/app.json\0' });
+      }
+      if (sub === 'diff' && args[1] === '--cached') {
+        return Promise.resolve({ stdout: 'config/app.json\n' });
+      }
+      if (sub === 'commit') {
+        return Promise.resolve({ stdout: '[main def5678] feat: config\n 1 file changed' });
+      }
+      return Promise.resolve({ stdout: '' });
+    }) as any);
+
+    const result = await commitAndPush('/repo', 'feat: config', 'main', { noPush: true });
+    expect(result.success).toBe(true);
+    expect(result.withheldFiles).toEqual(['config/.env', 'config/credentials.json']);
+
+    const calls = gitCalls();
+    // Verify git status received -uall flag
+    expect(calls).toContainEqual(['status', '--porcelain', '-z', '-uall']);
+    // Verify only safe file config/app.json was staged
+    expect(calls).toContainEqual(['add', '--', 'config/app.json']);
+    // Verify config/.env and config/credentials.json were NOT staged
+    expect(calls.some((c) => c.includes('config/.env') || c.includes('config/credentials.json'))).toBe(false);
+  });
+
+  it('batches large numbers of untracked files into chunks of 50 (C1)', async () => {
+    const files = Array.from({ length: 120 }, (_, i) => `src/file_${i}.ts`);
+    const statusOutput = files.map((f) => `?? ${f}\0`).join('');
+
+    vi.mocked(execa).mockImplementation(((file: any, args: any) => {
+      const sub = args[0];
+      if (sub === 'status') {
+        return Promise.resolve({ stdout: statusOutput });
+      }
+      if (sub === 'diff' && args[1] === '--cached') {
+        return Promise.resolve({ stdout: files.join('\n') });
+      }
+      if (sub === 'commit') {
+        return Promise.resolve({ stdout: '[main 9999999] feat: batch\n 120 files changed' });
+      }
+      return Promise.resolve({ stdout: '' });
+    }) as any);
+
+    const result = await commitAndPush('/repo', 'feat: batch', 'main', { noPush: true });
+    expect(result.success).toBe(true);
+
+    const calls = gitCalls();
+    const addCalls = calls.filter((c) => c[0] === 'add' && c[1] === '--');
+    // 120 files in chunks of 50 -> 3 calls (50, 50, 20)
+    expect(addCalls).toHaveLength(3);
+    expect(addCalls[0]!.slice(2)).toHaveLength(50);
+    expect(addCalls[1]!.slice(2)).toHaveLength(50);
+    expect(addCalls[2]!.slice(2)).toHaveLength(20);
+  });
+
+  it('handles all-sensitive untracked tree reporting withheld outcome (C2)', async () => {
+    vi.mocked(execa).mockImplementation(((file: any, args: any) => {
+      const sub = args[0];
+      if (sub === 'status') {
+        return Promise.resolve({ stdout: '?? .env\0?? private.key\0' });
+      }
+      if (sub === 'diff' && args[1] === '--cached') {
+        return Promise.resolve({ stdout: '' });
+      }
+      return Promise.resolve({ stdout: '' });
+    }) as any);
+
+    const result = await commitAndPush('/repo', 'feat: only secrets', 'main', { noPush: true });
+    expect(result.success).toBe(true);
+    expect(result.commitHash).toBe('');
+    expect(result.filesChanged).toBe(0);
+    expect(result.withheldFiles).toEqual(['.env', 'private.key']);
+    expect(result.message).toContain('2 sensitive file(s) excluded');
   });
 });
 
