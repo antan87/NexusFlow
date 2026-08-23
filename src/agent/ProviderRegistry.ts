@@ -32,7 +32,7 @@ export interface ProviderSetupHelp {
 }
 
 export interface ProviderCapabilities {
-  transport: 'native-api' | 'cli-print' | 'acp';
+  transport: 'native-api' | 'cli-print' | 'acp' | 'sdk';
   sessionIdentity: 'none' | 'client-assigned' | 'provider-assigned';
   workspaceAccess: 'read-only' | 'workspace-write' | 'harness-managed';
   sessionIdFormat?: 'uuid' | 'opaque';

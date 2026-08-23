@@ -13,6 +13,8 @@ import { ClaudeCliAdapter } from './ClaudeCliAdapter.js';
 import { AntigravityCliAdapter } from './AntigravityCliAdapter.js';
 import { CodexCliAdapter } from './CodexCliAdapter.js';
 import { CopilotAcpAdapter } from './CopilotAcpAdapter.js';
+import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
+import { CodexSdkAdapter } from './CodexSdkAdapter.js';
 
 ProviderRegistry.register({
   id: 'claude-native',
@@ -201,6 +203,60 @@ ProviderRegistry.register({
   isConfigured: () => copilotCliStatus().usable,
   getStatusMessage: () => copilotCliStatus().message,
   createInstance: () => new CopilotAcpAdapter()
+});
+
+ProviderRegistry.register({
+  id: 'claude-sdk',
+  name: 'Claude Code (First-Party SDK)',
+  icon: 'Terminal',
+  accessLabel: 'Harness-managed access',
+  executionProfiles: [
+    { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
+    {
+      id: 'workspace-write',
+      label: 'Edit workspace',
+      description: 'Auto-accepts in-workspace file edits and common filesystem actions; other approval-requiring commands are unavailable in embedded chat.',
+    },
+  ],
+  defaultExecutionProfile: 'review',
+  capabilities: {
+    transport: 'sdk',
+    sessionIdentity: 'client-assigned',
+    workspaceAccess: 'harness-managed',
+    sessionIdFormat: 'uuid',
+  },
+  isConfigured: () => !!process.env.ANTHROPIC_API_KEY || claudeCliStatus().usable,
+  getStatusMessage: () => claudeCliStatus().message,
+  getSetupHelp: () => setupHelp(claudeCliStatus()),
+  invalidateStatus: () => claudeCliStatus.invalidate(),
+  createInstance: () => new ClaudeSdkAdapter()
+});
+
+ProviderRegistry.register({
+  id: 'codex-sdk',
+  name: 'Codex (First-Party SDK)',
+  icon: 'Terminal',
+  accessLabel: 'Workspace write',
+  executionProfiles: [
+    { id: 'review', label: 'Review only', description: 'Read-only sandbox; escalation is denied.' },
+    {
+      id: 'workspace-write',
+      label: 'Edit workspace',
+      description: 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
+    },
+  ],
+  defaultExecutionProfile: 'review',
+  capabilities: {
+    transport: 'sdk',
+    sessionIdentity: 'provider-assigned',
+    workspaceAccess: 'workspace-write',
+    sessionIdFormat: 'uuid',
+  },
+  isConfigured: () => !!process.env.OPENAI_API_KEY || !!process.env.CODEX_API_KEY || codexCliStatus().usable,
+  getStatusMessage: () => codexCliStatus().message,
+  getSetupHelp: () => setupHelp(codexCliStatus()),
+  invalidateStatus: () => codexCliStatus.invalidate(),
+  createInstance: () => new CodexSdkAdapter()
 });
 
 export { ProviderRegistry };
