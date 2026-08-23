@@ -4,13 +4,16 @@ export class Pushable<T> implements AsyncIterable<T> {
   private done = false;
 
   push(value: T): void {
-    if (this.done) return;
+    if (this.done) {
+      throw new Error("Cannot push to a Pushable stream that has already ended.");
+    }
     const w = this.waiters.shift();
     if (w) w({ value, done: false });
     else this.buffer.push(value);
   }
 
   end(): void {
+    if (this.done) return;
     this.done = true;
     for (const w of this.waiters.splice(0)) w({ value: undefined, done: true });
   }

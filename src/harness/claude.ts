@@ -23,6 +23,15 @@ import type {
   WorkspaceRef,
 } from "./types.js";
 
+interface SDKUserMessage {
+  type: "user";
+  message: {
+    role: "user";
+    content: Array<{ type: "text"; text: string } | string> | string;
+  };
+  parent_tool_use_id?: string | null;
+}
+
 type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
 
 function serializeError(err: unknown): SerializedError {
@@ -39,14 +48,7 @@ function serializeError(err: unknown): SerializedError {
 export class ClaudeCodeAdapter implements HarnessAdapter {
   readonly vendor = "claude-code" as const;
 
-  constructor(
-    /**
-     * Injected sessionStore implementation (InMemory dev / Postgres+S3 prod).
-     * Passed through nativeOptions at query time — TODO(spike-2): confirm
-     * sessionStore accepts the option bag position vs top-level in pinned version.
-     */
-    private readonly sessionStore: unknown,
-  ) {}
+  constructor(private readonly sessionStore?: unknown) {}
 
   async start(spec: StartSpec): Promise<SessionHandle> {
     return this.spawn(spec);
@@ -61,10 +63,12 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
 
   async authStatus(_workspace?: WorkspaceRef): Promise<AuthStatus> {
     const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
-    const hasOauthToken = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
-    // Tokens provisioned via `claude setup-token` (CLAUDE_CODE_OAUTH_TOKEN) report
-    // as subscription-oauth because they bill against the user's subscription plan.
-    if (hasOauthToken) {
+    const hasOAuth = Boolean(
+      process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+      process.env.CLAUDE_CODE_SETUP_TOKEN
+    );
+
+    if (hasOAuth) {
       return {
         configured: true,
         method: "subscription-oauth",
@@ -103,7 +107,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   ): SessionHandle {
     const out = new Pushable<HarnessEvent>();
     // Streaming-input mode: enables multi-turn `send()` without losing the session.
-    const userInput = new Pushable<{ type: "user"; prompt: string }>();
+    const userInput = new Pushable<SDKUserMessage>();
     const approvals = new Map<string, (d: ApprovalDecision) => void>();
     const abort = new AbortController();
 
@@ -114,8 +118,21 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       rejectId = rej;
     });
 
+    abort.signal.addEventListener(
+      "abort",
+      () => rejectId(new DOMException("aborted", "AbortError")),
+      { once: true },
+    );
+
     if (spec.prompt !== undefined && spec.prompt.length > 0) {
-      userInput.push({ type: "user", prompt: spec.prompt });
+      userInput.push({
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: spec.prompt }],
+        },
+        parent_tool_use_id: null,
+      });
     }
 
     // Approval bridge: canUseTool callback ↔ approval_required event + respondToApproval()
@@ -127,10 +144,16 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         tool: _toolName as string,
         input: _input,
       });
-      // TODO(policy): auto-deny on timeout so handles never hang forever —
-      // pairs with the orphaned-session startup sweep.
+      // Auto-deny on timeout so handles never hang indefinitely
       return await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          approvals.delete(requestId);
+          resolve({ behavior: "deny", message: "Approval request timed out after 5 minutes" });
+        }, 5 * 60 * 1000);
+
         approvals.set(requestId, (decision: ApprovalDecision) => {
+          clearTimeout(timer);
+          approvals.delete(requestId);
           if (decision.behavior === "allow") {
             resolve({
               behavior: "allow",
@@ -143,8 +166,15 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
             });
           }
         });
-        signal?.addEventListener("abort", () =>
-          resolve({ behavior: "deny", message: "interrupted" }),
+
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            approvals.delete(requestId);
+            resolve({ behavior: "deny", message: "interrupted" });
+          },
+          { once: true },
         );
       });
     };
@@ -165,7 +195,15 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       vendor: this.vendor,
       sessionId: () => sessionIdPromise,
       events: out,
-      send: (prompt) => userInput.push({ type: "user", prompt }),
+      send: (prompt) =>
+        userInput.push({
+          type: "user",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: prompt }],
+          },
+          parent_tool_use_id: null,
+        }),
       respondToApproval: (requestId, decision) =>
         approvals.get(requestId)?.(decision),
       interrupt: async () => abort.abort(),
@@ -180,7 +218,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   private async pump(args: {
     spec: BaseSpec;
     overrides: Partial<Options>;
-    userInput: Pushable<{ type: "user"; prompt: string }>;
+    userInput: Pushable<SDKUserMessage>;
     out: Pushable<HarnessEvent>;
     canUseTool: CanUseTool;
     approvals: Map<string, (d: ApprovalDecision) => void>;
@@ -204,6 +242,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         canUseTool,
         includePartialMessages: true, // enables stream_event deltas below
         sessionStore: this.sessionStore as any,
+        abortController,
         ...overrides,
         // ESCAPE HATCH — deliberately last, wins over everything above.
         ...(spec.nativeOptions as Partial<Options>),
@@ -212,7 +251,6 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       const queryHandle = query({
         prompt: userInput as any,
         options,
-        abortController,
       });
 
       for await (const msg of queryHandle) {

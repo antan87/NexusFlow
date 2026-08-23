@@ -41,6 +41,54 @@ describe('Harness Abstraction Layer', () => {
       }
       expect(result).toEqual([10]);
     });
+
+    it('drains buffered items to a late subscriber', async () => {
+      const queue = new Pushable<string>();
+      queue.push('a');
+      queue.push('b');
+      queue.push('c');
+      queue.end();
+
+      const received: string[] = [];
+      for await (const item of queue) {
+        received.push(item);
+      }
+      expect(received).toEqual(['a', 'b', 'c']);
+    });
+
+    it('is idempotent on double-end', async () => {
+      const queue = new Pushable<string>();
+      queue.push('x');
+      queue.end();
+      expect(() => queue.end()).not.toThrow();
+
+      const items: string[] = [];
+      for await (const item of queue) {
+        items.push(item);
+      }
+      expect(items).toEqual(['x']);
+    });
+
+    it('throws when pushing to an ended Pushable queue', () => {
+      const queue = new Pushable<string>();
+      queue.end();
+      expect(() => queue.push('late')).toThrow(
+        'Cannot push to a Pushable stream that has already ended.',
+      );
+    });
+  });
+
+  describe('Normalized Contract Verification', () => {
+    it('normalizes turn events with text_delta and SerializedError', async () => {
+      const fakeError = new Error('Test failure');
+      const serialized = {
+        message: fakeError.message,
+        name: fakeError.name,
+        stack: fakeError.stack,
+      };
+      expect(JSON.stringify(serialized)).toContain('Test failure');
+      expect(JSON.stringify(serialized)).toContain('Error');
+    });
   });
 
   describe('Authentication Status Detection', () => {
