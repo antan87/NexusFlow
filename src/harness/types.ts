@@ -50,6 +50,7 @@ export type StartSpec = {
    * Extra env vars for the child process.
    * Callers MUST inject CLAUDE_CODE_PROJECT_DIR_NAME=<workspaceId> (+ CLAUDE_CONFIG_DIR)
    * here for cross-host sessionStore keying (Phase 1 requirement).
+   * Note: Merged on top of process.env (spread-overrides); cannot unset host variables.
    */
   env?: Record<string, string>;
   mcpServers?: Record<string, unknown>;

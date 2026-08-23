@@ -102,8 +102,8 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   async listSessions(_workspace: WorkspaceRef): Promise<SessionSummary[]> {
-    // Requires CLAUDE_CODE_PROJECT_DIR_NAME=<workspaceId> to have been set at
-    // session start, so projectKey matches across hosts. TODO(spike-2).
+    // Requires CLAUDE_CODE_PROJECT_DIR_NAME=<workspaceId> and CLAUDE_CONFIG_DIR
+    // to have been set at session start so projectKey matches across hosts (verified in Spike 2).
     throw new UnsupportedOperationError(
       "claude-code",
       "listSessions",
