@@ -25,6 +25,8 @@ export interface LockOptions {
   /** How long to keep retrying before giving up. Zero fails immediately. */
   timeoutMs: number;
   timeoutMessage: string;
+  /** Optional custom heartbeat interval in ms. Defaults to half of staleMs (capped at 2000ms). */
+  heartbeatMs?: number;
 }
 
 /** Releases a held lock. Safe to call more than once. */
@@ -41,12 +43,50 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    return err.code === 'EPERM'; // Process exists but belongs to another user
+  }
+}
+
 async function clearStaleLock(lockPath: string, staleMs: number): Promise<boolean> {
   try {
-    const stat = await fs.stat(lockPath);
-    if (Date.now() - stat.mtimeMs <= staleMs) return false;
-    await fs.unlink(lockPath);
-    return true;
+    const handle = await fs.open(lockPath, 'r');
+    try {
+      const stat = await handle.stat();
+      const content = await handle.readFile('utf-8');
+
+      let lockPid: number | undefined;
+      try {
+        const data = JSON.parse(content);
+        if (typeof data.pid === 'number') {
+          lockPid = data.pid;
+        }
+      } catch {}
+
+      // If lock carries owning PID and process is dead, reclaim immediately
+      if (lockPid !== undefined && !isPidAlive(lockPid)) {
+        await handle.close().catch(() => {});
+        await fs.unlink(lockPath).catch(() => {});
+        return true;
+      }
+
+      // Fall back to mtime staleness check
+      if (Date.now() - stat.mtimeMs <= staleMs) {
+        await handle.close().catch(() => {});
+        return false;
+      }
+
+      await handle.close().catch(() => {});
+      await fs.unlink(lockPath).catch(() => {});
+      return true;
+    } catch (err) {
+      await handle.close().catch(() => {});
+      throw err;
+    }
   } catch (error) {
     // Vanishing while we looked at it is the outcome we wanted anyway.
     return getErrorCode(error) === 'ENOENT';
@@ -55,8 +95,8 @@ async function clearStaleLock(lockPath: string, staleMs: number): Promise<boolea
 
 /**
  * Acquires an exclusive lock by creating `lockPath` with `wx`, which fails if it
- * already exists. A lock older than `staleMs` is reclaimed, so a process killed
- * mid-run cannot wedge the resource permanently.
+ * already exists. A lock older than `staleMs` or owned by a deceased PID is reclaimed,
+ * and held locks are automatically heartbeated to prevent lock-stealing during long turns.
  *
  * @throws when the lock cannot be taken within `timeoutMs`.
  */
@@ -79,10 +119,26 @@ export async function acquireLock(lockPath: string, options: LockOptions): Promi
         throw error;
       }
 
+      // Auto-heartbeat mtime while lock is held so long turns are not stolen
+      const heartbeatInterval = options.heartbeatMs && options.heartbeatMs > 0
+        ? options.heartbeatMs
+        : Math.max(500, Math.min(2000, Math.floor(options.staleMs / 2)));
+
+      const heartbeatTimer = setInterval(() => {
+        const now = new Date();
+        fs.utimes(lockPath, now, now).catch(() => {});
+      }, heartbeatInterval);
+
+      // Unref heartbeat so it does not keep Node process alive
+      if (heartbeatTimer.unref) {
+        heartbeatTimer.unref();
+      }
+
       let released = false;
       return async () => {
         if (released) return;
         released = true;
+        clearInterval(heartbeatTimer);
         await handle.close().catch(() => {});
         await fs.unlink(lockPath).catch(() => {});
       };

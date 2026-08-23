@@ -76,7 +76,7 @@ describe('acquireLock', () => {
     await second();
   });
 
-  it('reclaims a lock left behind by a dead process', async () => {
+    it('reclaims a lock left behind by a dead process', async () => {
     // Without stale reclamation a killed run would wedge its resource forever.
     const lockPath = path.join(dir, 'e.lock');
     await fs.writeFile(lockPath, JSON.stringify({ pid: 999_999 }), 'utf-8');
@@ -86,6 +86,28 @@ describe('acquireLock', () => {
     const release = await acquireLock(lockPath, { ...OPTIONS, staleMs: 60_000, timeoutMs: 0 });
 
     expect(JSON.parse(await fs.readFile(lockPath, 'utf-8')).pid).toBe(process.pid);
+    await release();
+  });
+
+  it('reclaims a lock from a dead process immediately regardless of staleMs', async () => {
+    const lockPath = path.join(dir, 'dead-pid.lock');
+    // Write an invalid/dead PID with fresh mtime
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 999_999, createdAt: new Date().toISOString() }), 'utf-8');
+
+    const release = await acquireLock(lockPath, { ...OPTIONS, staleMs: 1_000_000, timeoutMs: 100 });
+    expect(JSON.parse(await fs.readFile(lockPath, 'utf-8')).pid).toBe(process.pid);
+    await release();
+  });
+
+  it('heartbeats lock mtime periodically while held to prevent lock-stealing', async () => {
+    const lockPath = path.join(dir, 'heartbeat.lock');
+    const release = await acquireLock(lockPath, { ...OPTIONS, staleMs: 100, heartbeatMs: 30 });
+
+    const initialStat = await fs.stat(lockPath);
+    await new Promise((r) => setTimeout(r, 90));
+    const laterStat = await fs.stat(lockPath);
+
+    expect(laterStat.mtimeMs).toBeGreaterThan(initialStat.mtimeMs);
     await release();
   });
 });
