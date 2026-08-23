@@ -43,10 +43,9 @@ function gitCalls(): string[][] {
 }
 
 describe('createWorkspace rollback', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    counter += 1;
-    workspacePath = path.join(os.tmpdir(), `nexusflow-create-test-${process.pid}-${counter}`);
+    workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-create-test-'));
     // Non-worktree git calls (init, branch -D, prune) just succeed.
     vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
     vi.mocked(worktree.removeWorktree).mockResolvedValue(undefined);
@@ -188,10 +187,9 @@ describe('createWorkspace rollback', () => {
 });
 
 describe('deleteWorkspace (in-place)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    counter += 1;
-    workspacePath = path.join(os.tmpdir(), `nexusflow-delete-test-${process.pid}-${counter}`);
+    workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-delete-test-'));
     vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
   });
 
@@ -201,8 +199,7 @@ describe('deleteWorkspace (in-place)', () => {
 
   it('removes only the workspace dir and never touches the source repos', async () => {
     // A stand-in source repo that must survive the delete.
-    const sourceRepo = path.join(os.tmpdir(), `nexusflow-delete-test-src-${process.pid}-${counter}`);
-    await fs.mkdir(sourceRepo, { recursive: true });
+    const sourceRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-delete-test-src-'));
     await fs.writeFile(path.join(sourceRepo, 'precious.txt'), 'keep me', 'utf-8');
 
     try {
@@ -235,10 +232,9 @@ describe('deleteWorkspace (in-place)', () => {
 });
 
 describe('addRepoToWorkspace rollback', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    counter += 1;
-    workspacePath = path.join(os.tmpdir(), `nexusflow-addrepo-test-${process.pid}-${counter}`);
+    workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-addrepo-test-'));
     vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
     vi.mocked(worktree.removeWorktree).mockResolvedValue(undefined);
   });

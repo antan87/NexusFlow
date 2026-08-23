@@ -223,7 +223,7 @@ export function isSensitiveFile(filePath: string): boolean {
   if (/\.example($|\.)|\.template($|\.)|\.sample($|\.)/i.test(base)) {
     return false;
   }
-  return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(base) || pattern.test(normalized));
+  return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(base));
 }
 
 /**

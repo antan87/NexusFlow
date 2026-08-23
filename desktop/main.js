@@ -31,7 +31,7 @@ let readyTimer = null;
 // exiting on its own (e.g. the update hand-off, below).
 let appQuitting = false;
 
-function escapeHtml(str) {
+export function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
