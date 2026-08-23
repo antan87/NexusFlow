@@ -5,6 +5,24 @@ import type { HarnessAdapter, SessionHandle } from '../harness/interface.js';
 import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
+import { getLocalMcpServerConfig } from './mcp-config.js';
+
+const CORE_ALLOWED_TOOLS = new Set([
+  'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
+  'Read', 'Glob', 'Grep', 'LS', 'View',
+  'FileEdit', 'FileWrite',
+]);
+
+const READONLY_MCP_TOOLS = new Set([
+  'search_workspace', 'workspace_status', 'get_workspace_diff',
+  'run_doctor', 'get_service_logs', 'list_workspaces', 'list_repos',
+  'add_knowledge', 'promote_knowledge', 'refresh_context',
+]);
+
+const MUTATING_LIFECYCLE_TOOLS = new Set([
+  'create_workspace', 'commit_workspace', 'finish_workspace',
+  'isolate_repo', 'sync_workspace',
+]);
 
 export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
   private readonly adapter: HarnessAdapter;
@@ -37,6 +55,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
       executionProfile === 'workspace-write' ? 'acceptEdits' : 'default';
     // Interim: folder name as workspace ID; key by NexusFlow workspace ID in multi-host production
     const workspaceId = path.basename(this.cwd);
+    const role = executionProfile === 'workspace-write' ? 'developer' : 'review';
 
     if (!this.handle) {
       try {
@@ -52,10 +71,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
             CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '.', '.claude'),
           },
           mcpServers: {
-            nexusflow: {
-              command: 'npx',
-              args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run', this.cwd],
-            },
+            nexusflow: getLocalMcpServerConfig(this.cwd, role),
           },
         };
 
@@ -135,24 +151,18 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
 
             case 'approval_required': {
               if (this.currentExecutionProfile === 'workspace-write') {
-                // Issue #173: Tool-class gating — auto-accept in-workspace file edits, common filesystem actions,
-                // and NexusFlow MCP workspace tools; deny arbitrary shell/command execution with actionable guidance.
-                const allowedTools = new Set([
-                  'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
-                  'Read', 'Glob', 'Grep', 'LS', 'View',
-                  'FileEdit', 'FileWrite',
-                  'search_workspace', 'workspace_status', 'get_workspace_diff',
-                  'commit_workspace', 'sync_workspace', 'refresh_context',
-                  'run_doctor', 'add_knowledge', 'promote_knowledge',
-                  'finish_workspace', 'get_service_logs', 'isolate_repo',
-                  'list_workspaces', 'list_repos', 'create_workspace',
-                ]);
-                const isAllowed = allowedTools.has(event.tool) ||
-                  event.tool.startsWith('mcp__nexusflow__') ||
-                  event.tool.startsWith('nexusflow__');
+                // Tool-class gating: auto-accept in-workspace file edits and read-only MCP coordination tools.
+                // Mutating lifecycle tools and arbitrary shell execution require approval (fail-closed).
+                const toolName = event.tool.replace(/^(mcp__nexusflow__|nexusflow__)/, '');
 
-                if (isAllowed) {
+                if (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName)) {
                   handle.respondToApproval(event.requestId, { behavior: 'allow' });
+                } else if (MUTATING_LIFECYCLE_TOOLS.has(toolName)) {
+                  handle.respondToApproval(event.requestId, {
+                    behavior: 'deny',
+                    message: `Workspace lifecycle tool '${toolName}' requires approval and is unavailable in embedded chat. Run in CLI, full terminal, or dashboard.`,
+                  });
+                  this.emit('system', `Denied '${event.tool}' execution: workspace lifecycle changes require dashboard or CLI.`);
                 } else {
                   handle.respondToApproval(event.requestId, {
                     behavior: 'deny',

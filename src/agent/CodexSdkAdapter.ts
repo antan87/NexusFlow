@@ -5,6 +5,7 @@ import type { HarnessAdapter, SessionHandle } from '../harness/interface.js';
 import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
+import { getLocalMcpServerConfig } from './mcp-config.js';
 
 export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
   private readonly adapter: HarnessAdapter;
@@ -33,6 +34,7 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
     const permissionMode: PermissionMode =
       executionProfile === 'workspace-write' ? 'acceptEdits' : 'default';
     const workspaceId = path.basename(this.cwd);
+    const role = executionProfile === 'workspace-write' ? 'developer' : 'review';
 
     if (!this.handle) {
       try {
@@ -43,6 +45,9 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
             rootPath: this.cwd,
           },
           permissionMode,
+          mcpServers: {
+            nexusflow: getLocalMcpServerConfig(this.cwd, role),
+          },
         };
 
         if (this.session && this.session.resume) {

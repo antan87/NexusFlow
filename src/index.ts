@@ -524,7 +524,10 @@ mcp
   .command('run')
   .description('Start the NexusFlow MCP Server (typically called automatically by AI assistants)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .action(runAction(mcpRunCommand));
+  .option('-r, --role <role>', 'Agent execution role for scoped tool surfaces (e.g. readonly, review, ci, developer, full)')
+  .option('--allow <tools...>', 'Explicit list of allowed tool names')
+  .option('--deny <tools...>', 'Explicit list of denied tool names')
+  .action(runAction((workspace, options) => mcpRunCommand(workspace, options)));
 
 mcp
   .command('setup')

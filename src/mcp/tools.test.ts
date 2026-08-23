@@ -196,4 +196,33 @@ describe('MCP tools', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('Repository name is required');
   });
+
+  it('rejects path traversal attempts in get_service_logs', async () => {
+    const tool = findTool('get_service_logs');
+    expect(tool).toBeDefined();
+
+    const result = await tool!.handler(
+      { serviceName: '../../etc/passwd' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/my-ws' },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('Invalid service name');
+  });
+
+  it('reads service logs successfully when serviceName is valid', async () => {
+    const tool = findTool('get_service_logs');
+    expect(tool).toBeDefined();
+
+    vi.mocked(fs.access).mockResolvedValue(undefined);
+    vi.mocked(fs.readFile).mockResolvedValue('line1\nline2\nline3\n');
+
+    const result = await tool!.handler(
+      { serviceName: 'frontend' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/my-ws' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]!.text).toContain('line1\nline2\nline3');
+  });
 });

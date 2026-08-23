@@ -101,7 +101,8 @@ describe('ClaudeSdkAdapter', () => {
       { type: 'approval_required', requestId: 'req-2', tool: 'Write', input: { path: 'new.ts' } },
       { type: 'approval_required', requestId: 'req-3', tool: 'LS', input: { path: '.' } },
       { type: 'approval_required', requestId: 'req-4', tool: 'mcp__nexusflow__list_repos', input: {} },
-      { type: 'approval_required', requestId: 'req-5', tool: 'Bash', input: { command: 'rm -rf /' } },
+      { type: 'approval_required', requestId: 'req-5', tool: 'mcp__nexusflow__create_workspace', input: { branchName: 'feat' } },
+      { type: 'approval_required', requestId: 'req-6', tool: 'Bash', input: { command: 'rm -rf /' } },
     ]);
 
     const mockAdapter = createMockAdapter(handle);
@@ -114,17 +115,28 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.send('Edit files and run commands', 'workspace-write');
 
     await vi.waitFor(() => {
-      expect(approvals).toHaveLength(5);
+      expect(approvals).toHaveLength(6);
     });
 
-    // Allowed file & fs tools and NexusFlow MCP tools
+    // Allowed file & fs tools and read-only NexusFlow MCP tools
     expect(approvals[0]).toEqual({ requestId: 'req-1', decision: { behavior: 'allow' } });
     expect(approvals[1]).toEqual({ requestId: 'req-2', decision: { behavior: 'allow' } });
     expect(approvals[2]).toEqual({ requestId: 'req-3', decision: { behavior: 'allow' } });
     expect(approvals[3]).toEqual({ requestId: 'req-4', decision: { behavior: 'allow' } });
-    // Denied shell execution with clear actionable explanation
+
+    // Denied mutating MCP lifecycle tool with dashboard/CLI guidance
     expect(approvals[4]).toEqual({
       requestId: 'req-5',
+      decision: {
+        behavior: 'deny',
+        message: "Workspace lifecycle tool 'create_workspace' requires approval and is unavailable in embedded chat. Run in CLI, full terminal, or dashboard.",
+      },
+    });
+    expect(systemMessages).toContain("Denied 'mcp__nexusflow__create_workspace' execution: workspace lifecycle changes require dashboard or CLI.");
+
+    // Denied shell execution with CLI guidance
+    expect(approvals[5]).toEqual({
+      requestId: 'req-6',
       decision: {
         behavior: 'deny',
         message: "Tool 'Bash' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.",

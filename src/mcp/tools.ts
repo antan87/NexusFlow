@@ -374,7 +374,11 @@ export const tools: NexusFlowTool[] = [
       required: ['serviceName'],
     },
     handler: async (args, ctx) => {
-      const serviceName = args.serviceName as string;
+      const rawName = String(args.serviceName ?? '').trim();
+      const serviceName = path.basename(rawName).replace(/\.log$/, '');
+      if (!serviceName || serviceName === '.' || rawName.includes('/') || rawName.includes('\\')) {
+        return errorResult(`Invalid service name "${rawName}": service name must be a simple identifier.`);
+      }
       const lines = (args.lines as number) || 50;
       try {
         const logFilePath = path.join(ctx.workspacePath, '.nexusflow-logs', `${serviceName}.log`);
