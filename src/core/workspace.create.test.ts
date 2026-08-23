@@ -16,8 +16,6 @@ vi.mock('../generators/index.js', () => ({
   generateContextFiles: vi.fn().mockResolvedValue(undefined),
 }));
 
-/** Unique temp workspace path per test (no Date.now/random needed). */
-let counter = 0;
 let workspacePath = '';
 
 function feature(repos: RepoInfo[]): Feature {
