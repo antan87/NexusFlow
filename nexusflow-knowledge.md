@@ -46,6 +46,15 @@ To prevent two agents in the same workspace from conflicting during file edits, 
 ### Decision: SessionStore Fail-Fast on Write Errors
 If a database/remote-backed `sessionStore` encounters write errors during a turn, fail the turn immediately with an explicit error rather than silently falling back to unbuffered local storage, preventing divergence between stored transcripts and runtime state.
 
+### Decision: Multi-Agent Subagent Asymmetry & Orchestration Pattern
+In Phase 3 multi-agent workflows, Claude Agent SDK supports first-class programmatic subagents (`define agents`, inspectable via `listSubagents()` and `getSubagentMessages()` in `sessionStore`). Codex SDK lacks first-class subagent primitives, so multi-agent orchestration for Codex is handled via NexusFlow-managed thread fan-out (`MultiAgentOrchestrator`) running distinct worker threads with independent session/thread IDs.
+
+### Decision: Workspace Mutation Lock & Worktree Isolation for Concurrent Multi-Agent Workflows
+When $\ge 2$ agents execute concurrently within the same workspace root without separate worktrees, `MultiAgentOrchestrator` acquires a workspace-level mutation lock (`.nexusflow-mutation.lock` via `acquireLock`) to serialize file operations and prevent clobbering. For parallel independent file edits, agents must be targeted to distinct git worktrees/branches.
+
+### Gotcha: Adapter-Contract Unit Tests vs Process Termination
+Contract tests in `src/harness/contract.test.ts` test adapter-level contract invariants (signal propagation, stream mapping, error translation, AbortError rejections) against injected engine fakes. They verify adapter wiring rather than testing live vendor OS process tree termination, which is covered by separate CLI-level `killTree` tests.
+
 ### Decision: Cost Estimation and BillingMode Distinction
 Anthropic's `total_cost_usd` is a local client-side estimate based on standard API rate tables, not authoritative billing data (and is emitted hypothetically even for subscription users). Map this field to `costUsdEstimate?: number` in `NormalizedUsage` and derive `BillingMode = "per-token" | "plan-included"` from the auth context. The dashboard renders raw tokens prominently for `plan-included` sessions and suppresses or explicitly labels dollar figures as estimates.
 
