@@ -48,8 +48,14 @@ function serializeError(err: unknown): SerializedError {
 
 export class ClaudeCodeAdapter implements HarnessAdapter {
   readonly vendor = "claude-code" as const;
+  private readonly queryFn: typeof query;
 
-  constructor(private readonly sessionStore?: unknown) {}
+  constructor(
+    private readonly sessionStore?: unknown,
+    queryFn?: typeof query,
+  ) {
+    this.queryFn = queryFn ?? query;
+  }
 
   async start(spec: StartSpec): Promise<SessionHandle> {
     const auth = await this.authStatus(spec.workspace, spec.env);
@@ -302,7 +308,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         ...(spec.nativeOptions as Partial<Options>),
       };
 
-      const queryHandle = query({
+      const queryHandle = this.queryFn({
         prompt: userInput as any,
         options,
       });
