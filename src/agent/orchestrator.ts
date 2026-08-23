@@ -29,6 +29,12 @@ export interface AgentExecutionStatus {
   error?: string;
 }
 
+export type TeamworkMode = 'parallel' | 'pipeline';
+
+export interface RunTeamOptions {
+  mode?: TeamworkMode;
+}
+
 export interface MultiAgentOrchestratorOptions {
   claudeAdapterFactory?: () => AgentHarness;
   codexAdapterFactory?: () => AgentHarness;
@@ -38,6 +44,9 @@ export interface TeamworkResult {
   workspacePath: string;
   agents: AgentExecutionStatus[];
   totalUsage: NormalizedUsage;
+  success: boolean;
+  partialSuccess: boolean;
+  failureReason?: string;
 }
 
 /**
@@ -46,7 +55,8 @@ export interface TeamworkResult {
  * Coordinates concurrent agents across Claude and Codex harnesses:
  * - Claude: Programmatic subagent definitions or isolated SDK sessions with independent UUIDs.
  * - Codex: Orchestrator-level thread fan-out with independent thread sessions.
- * - Concurrency: Enforces workspace mutation locks and worktree branch isolation to prevent file clobbering.
+ * - Concurrency: Enforces workspace mutation locks (for shared workspaces) and worktree branch isolation (when worktreePath is provided).
+ * - Pipelines: Supports sequential pipeline execution with fail-fast skip on upstream failure.
  */
 export class MultiAgentOrchestrator extends EventEmitter {
   private readonly workspacePath: string;
@@ -60,7 +70,7 @@ export class MultiAgentOrchestrator extends EventEmitter {
     this.options = options;
   }
 
-  async runTeam(specs: TeamAgentSpec[]): Promise<TeamworkResult> {
+  async runTeam(specs: TeamAgentSpec[], runOptions?: RunTeamOptions): Promise<TeamworkResult> {
     if (!specs || specs.length < 2) {
       throw new Error('Teamwork orchestration requires at least 2 agents (e.g. Lead Planner + Developer).');
     }
@@ -85,35 +95,91 @@ export class MultiAgentOrchestrator extends EventEmitter {
       });
     }
 
+    const mode = runOptions?.mode ?? 'parallel';
+
+    if (this.isInterrupted) {
+      for (const status of statuses.values()) {
+        status.status = 'cancelled';
+      }
+      return this.buildResult(statuses);
+    }
+
     // Enforce workspace-level mutation lock across concurrent agents in the same workspace root
     let releaseMutationLock: ReleaseLock | null = null;
     const isSharedWorktree = specs.every(s => !s.worktreePath || s.worktreePath === this.workspacePath);
     if (isSharedWorktree) {
       const lockPath = path.join(this.workspacePath, '.nexusflow-mutation.lock');
-      releaseMutationLock = await acquireLock(lockPath, {
-        staleMs: 60_000,
-        timeoutMs: 10_000,
-        timeoutMessage: 'Could not acquire multi-agent workspace mutation lock.',
-      });
+      try {
+        releaseMutationLock = await acquireLock(lockPath, {
+          staleMs: 60_000,
+          timeoutMs: 10_000,
+          timeoutMessage: 'Could not acquire multi-agent workspace mutation lock.',
+        });
+      } catch (err: any) {
+        if (this.isInterrupted) {
+          for (const status of statuses.values()) {
+            status.status = 'cancelled';
+          }
+          return this.buildResult(statuses);
+        }
+        throw err;
+      }
     }
 
     try {
-      // Fan out agents concurrently with independent session contexts
-      const promises = specs.map((spec) => this.executeAgent(spec, statuses));
-      await Promise.allSettled(promises);
+      if (mode === 'pipeline') {
+        // Sequential pipeline execution (e.g. Planner -> Implementer -> Reviewer)
+        for (const spec of specs) {
+          if (this.isInterrupted) {
+            statuses.get(spec.id)!.status = 'cancelled';
+            continue;
+          }
+          // If any previous agent failed or was cancelled, skip downstream phases
+          const previousFailure = Array.from(statuses.values()).find(
+            s => s.status === 'failed' || s.status === 'cancelled',
+          );
+          if (previousFailure) {
+            const status = statuses.get(spec.id)!;
+            status.status = 'cancelled';
+            status.error = `Skipped due to upstream phase failure in ${previousFailure.id} (${previousFailure.role})`;
+            continue;
+          }
+
+          await this.executeAgent(spec, statuses);
+        }
+      } else {
+        // Parallel fan-out with independent session contexts
+        const promises = specs.map((spec) => this.executeAgent(spec, statuses));
+        await Promise.allSettled(promises);
+      }
     } finally {
       if (releaseMutationLock) {
         await releaseMutationLock();
       }
     }
 
+    return this.buildResult(statuses);
+  }
+
+  private buildResult(statuses: Map<string, AgentExecutionStatus>): TeamworkResult {
     const results = Array.from(statuses.values());
     const totalUsage = this.aggregateUsage(results);
+    const completedCount = results.filter(r => r.status === 'completed').length;
+    const success = results.length > 0 && completedCount === results.length;
+    const partialSuccess = completedCount > 0 && !success;
+
+    const failedAgents = results.filter(r => r.status === 'failed' || r.status === 'cancelled');
+    const failureReason = failedAgents.length > 0
+      ? failedAgents.map(a => `${a.id} (${a.role}): ${a.error || a.status}`).join('; ')
+      : undefined;
 
     return {
       workspacePath: this.workspacePath,
       agents: results,
       totalUsage,
+      success,
+      partialSuccess,
+      failureReason,
     };
   }
 
@@ -162,17 +228,24 @@ export class MultiAgentOrchestrator extends EventEmitter {
         });
 
         adapter.on('error', (err: Error) => {
+          status.status = 'failed';
           status.error = err.message;
         });
 
         adapter.on('idle', () => {
-          status.status = 'completed';
+          if (status.status === 'running') {
+            status.status = 'completed';
+          }
           resolve();
         });
 
-        adapter.on('close', () => {
+        adapter.on('close', (code?: number) => {
           if (status.status === 'running') {
-            status.status = this.isInterrupted ? 'cancelled' : 'completed';
+            if (code !== undefined && code !== 0) {
+              status.status = 'failed';
+            } else {
+              status.status = this.isInterrupted ? 'cancelled' : 'completed';
+            }
           }
           resolve();
         });
