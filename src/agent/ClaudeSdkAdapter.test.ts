@@ -88,12 +88,11 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Hi');
 
-    // Wait for event loop to flush
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(emittedSessions).toEqual([sessionId]);
-    expect(usageEvents).toEqual([{ inputTokens: 10, outputTokens: 5 }]);
-    expect(idleCount).toBeGreaterThanOrEqual(1);
+    await vi.waitFor(() => {
+      expect(emittedSessions).toEqual([sessionId]);
+      expect(usageEvents).toEqual([{ inputTokens: 10, outputTokens: 5 }]);
+      expect(idleCount).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it('enforces tool-class approval gating in workspace-write profile (Issue #173)', async () => {
@@ -113,9 +112,10 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Edit files and run commands', 'workspace-write');
 
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() => {
+      expect(approvals).toHaveLength(4);
+    });
 
-    expect(approvals).toHaveLength(4);
     // Allowed file & fs tools
     expect(approvals[0]).toEqual({ requestId: 'req-1', decision: { behavior: 'allow' } });
     expect(approvals[1]).toEqual({ requestId: 'req-2', decision: { behavior: 'allow' } });
@@ -125,7 +125,7 @@ describe('ClaudeSdkAdapter', () => {
       requestId: 'req-4',
       decision: {
         behavior: 'deny',
-        message: "Command 'Bash' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.",
+        message: "Tool 'Bash' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.",
       },
     });
     expect(systemMessages).toContain("Denied 'Bash' execution: unavailable in embedded chat.");
@@ -142,17 +142,17 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Edit files', 'review');
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(approvals).toEqual([
-      {
-        requestId: 'req-1',
-        decision: {
-          behavior: 'deny',
-          message: 'Action denied: active execution profile is review-only.',
+    await vi.waitFor(() => {
+      expect(approvals).toEqual([
+        {
+          requestId: 'req-1',
+          decision: {
+            behavior: 'deny',
+            message: 'Action denied: active execution profile is review-only.',
+          },
         },
-      },
-    ]);
+      ]);
+    });
   });
 
   it('emits idle on silent stream termination (prevents turn gate lock)', async () => {
@@ -170,8 +170,8 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.start('C:/test/workspace');
     await adapter.send('Hi');
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(idleFired).toBe(true);
+    await vi.waitFor(() => {
+      expect(idleFired).toBe(true);
+    });
   });
 });

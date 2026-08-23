@@ -141,7 +141,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
                 } else {
                   handle.respondToApproval(event.requestId, {
                     behavior: 'deny',
-                    message: `Command '${event.tool}' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.`,
+                    message: `Tool '${event.tool}' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.`,
                   });
                   this.emit('system', `Denied '${event.tool}' execution: unavailable in embedded chat.`);
                 }
