@@ -2,12 +2,24 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import chalk from 'chalk';
-import { startMcpServer } from '../mcp/server.js';
+import { startMcpServer, type McpServerOptions } from '../mcp/server.js';
+import type { AgentRole } from '../mcp/tools.js';
 
-export async function mcpRunCommand(workspace?: string) {
+export interface McpRunOptions {
+  role?: AgentRole;
+  allow?: string[];
+  deny?: string[];
+}
+
+export async function mcpRunCommand(workspace?: string, options?: McpRunOptions) {
   // If not provided, it attempts to use process.cwd() or waits for workspaceId in MCP calls.
   // The startMcpServer function handles this.
-  await startMcpServer(workspace);
+  await startMcpServer({
+    workspacePath: workspace,
+    role: options?.role,
+    allowList: options?.allow,
+    denyList: options?.deny,
+  });
 }
 
 export async function mcpSetupCommand() {

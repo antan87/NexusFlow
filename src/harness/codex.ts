@@ -49,18 +49,30 @@ function mapPatchKind(rawKind?: string): PatchKind {
 
 export class CodexAdapter implements HarnessAdapter {
   readonly vendor = "codex" as const;
+  private clientOpts: NonNullable<ConstructorParameters<typeof Codex>[0]>;
+  private client: Codex;
 
   constructor(clientOpts: ConstructorParameters<typeof Codex>[0] = {}) {
-    this.client = new Codex(clientOpts);
+    this.clientOpts = clientOpts ?? {};
+    this.client = new Codex(this.clientOpts);
   }
-  private client: Codex;
 
   async start(spec: StartSpec): Promise<SessionHandle> {
     const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
-    const thread = this.client.startThread({
+    const client = spec.mcpServers
+      ? new Codex({
+          ...this.clientOpts,
+          config: {
+            ...this.clientOpts.config,
+            mcp_servers: spec.mcpServers as any,
+          },
+        })
+      : this.client;
+
+    const thread = client.startThread({
       workingDirectory: spec.workspace.rootPath,
       // NexusFlow workspaces are multi-repo roots => usually NOT a git repo.
       // Without this, Codex refuses to run (verified in Spike 4).
@@ -84,7 +96,17 @@ export class CodexAdapter implements HarnessAdapter {
         "no native fork; emulate via history replay (Phase 3)",
       );
     }
-    const thread = this.client.resumeThread(spec.sessionId);
+    const client = spec.mcpServers
+      ? new Codex({
+          ...this.clientOpts,
+          config: {
+            ...this.clientOpts.config,
+            mcp_servers: spec.mcpServers as any,
+          },
+        })
+      : this.client;
+
+    const thread = client.resumeThread(spec.sessionId);
     return this.spawn(spec, thread);
   }
 
