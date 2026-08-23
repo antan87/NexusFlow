@@ -54,22 +54,39 @@ function isPidAlive(pid: number): boolean {
 
 async function clearStaleLock(lockPath: string, staleMs: number): Promise<boolean> {
   try {
-    const stat = await fs.stat(lockPath);
-
-    // If lock carries owning PID and process is dead, reclaim immediately
+    const handle = await fs.open(lockPath, 'r');
     try {
-      const content = await fs.readFile(lockPath, 'utf-8');
-      const data = JSON.parse(content);
-      if (typeof data.pid === 'number' && !isPidAlive(data.pid)) {
+      const stat = await handle.stat();
+      const content = await handle.readFile('utf-8');
+
+      let lockPid: number | undefined;
+      try {
+        const data = JSON.parse(content);
+        if (typeof data.pid === 'number') {
+          lockPid = data.pid;
+        }
+      } catch {}
+
+      // If lock carries owning PID and process is dead, reclaim immediately
+      if (lockPid !== undefined && !isPidAlive(lockPid)) {
+        await handle.close().catch(() => {});
         await fs.unlink(lockPath).catch(() => {});
         return true;
       }
-    } catch {}
 
-    // Fall back to mtime staleness check
-    if (Date.now() - stat.mtimeMs <= staleMs) return false;
-    await fs.unlink(lockPath).catch(() => {});
-    return true;
+      // Fall back to mtime staleness check
+      if (Date.now() - stat.mtimeMs <= staleMs) {
+        await handle.close().catch(() => {});
+        return false;
+      }
+
+      await handle.close().catch(() => {});
+      await fs.unlink(lockPath).catch(() => {});
+      return true;
+    } catch (err) {
+      await handle.close().catch(() => {});
+      throw err;
+    }
   } catch (error) {
     // Vanishing while we looked at it is the outcome we wanted anyway.
     return getErrorCode(error) === 'ENOENT';

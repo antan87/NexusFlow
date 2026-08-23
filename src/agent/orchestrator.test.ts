@@ -5,7 +5,6 @@ import * as fs from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { MultiAgentOrchestrator, type TeamAgentSpec } from './orchestrator.js';
 import type { AgentHarness } from './ProviderRegistry.js';
-import { acquireLock } from '../core/locks.js';
 
 class MockHarness extends EventEmitter implements AgentHarness {
   public startedWithCwd = '';
