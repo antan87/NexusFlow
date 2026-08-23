@@ -205,6 +205,27 @@ ProviderRegistry.register({
   createInstance: () => new CopilotAcpAdapter()
 });
 
+const claudeSdkStatus = cachedStatus(() => {
+  const hasCredential = Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    process.env.CLAUDE_CODE_SETUP_TOKEN ||
+    process.env.AWS_ACCESS_KEY_ID ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS
+  );
+  if (hasCredential) return { usable: true };
+  return claudeCliStatus();
+});
+
+const codexSdkStatus = cachedStatus(() => {
+  const hasCredential = Boolean(
+    process.env.OPENAI_API_KEY ||
+    process.env.CODEX_API_KEY
+  );
+  if (hasCredential) return { usable: true };
+  return codexCliStatus();
+});
+
 ProviderRegistry.register({
   id: 'claude-sdk',
   name: 'Claude Code (First-Party SDK)',
@@ -225,10 +246,13 @@ ProviderRegistry.register({
     workspaceAccess: 'harness-managed',
     sessionIdFormat: 'uuid',
   },
-  isConfigured: () => !!process.env.ANTHROPIC_API_KEY || claudeCliStatus().usable,
-  getStatusMessage: () => claudeCliStatus().message,
-  getSetupHelp: () => setupHelp(claudeCliStatus()),
-  invalidateStatus: () => claudeCliStatus.invalidate(),
+  isConfigured: () => claudeSdkStatus().usable,
+  getStatusMessage: () => claudeSdkStatus().message,
+  getSetupHelp: () => setupHelp(claudeSdkStatus()),
+  invalidateStatus: () => {
+    claudeSdkStatus.invalidate();
+    claudeCliStatus.invalidate();
+  },
   createInstance: () => new ClaudeSdkAdapter()
 });
 
@@ -252,10 +276,13 @@ ProviderRegistry.register({
     workspaceAccess: 'workspace-write',
     sessionIdFormat: 'uuid',
   },
-  isConfigured: () => !!process.env.OPENAI_API_KEY || !!process.env.CODEX_API_KEY || codexCliStatus().usable,
-  getStatusMessage: () => codexCliStatus().message,
-  getSetupHelp: () => setupHelp(codexCliStatus()),
-  invalidateStatus: () => codexCliStatus.invalidate(),
+  isConfigured: () => codexSdkStatus().usable,
+  getStatusMessage: () => codexSdkStatus().message,
+  getSetupHelp: () => setupHelp(codexSdkStatus()),
+  invalidateStatus: () => {
+    codexSdkStatus.invalidate();
+    codexCliStatus.invalidate();
+  },
   createInstance: () => new CodexSdkAdapter()
 });
 
