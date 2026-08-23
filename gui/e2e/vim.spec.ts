@@ -119,7 +119,7 @@ test.describe('Vim Navigation Mode', () => {
     await expect(page.getByRole('heading', { name: 'feature-alpha' })).toBeVisible();
 
     // Initial subtab is overview
-    await expect(page.locator('[data-vim-tab="overview"]')).toBeVisible();
+    await expect(page.locator('[data-vim-scope="overview"]')).toBeVisible();
 
     // Press l to advance tab to changes
     await page.keyboard.press('l');
@@ -171,10 +171,12 @@ test.describe('Vim Navigation Mode', () => {
     // Press \ to disable vim mode
     await page.keyboard.press('\\');
     await expect(statusline).not.toBeVisible();
+    await expect(page.locator('body')).not.toHaveClass(/vim-on/);
 
     // Press \ to enable vim mode again
     await page.keyboard.press('\\');
     await expect(statusline).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/vim-on/);
 
     // Navigate to settings and check toggle
     await page.goto('/#/settings');
@@ -186,5 +188,38 @@ test.describe('Vim Navigation Mode', () => {
     await vimToggle.click();
     await expect(statusline).not.toBeVisible();
     await expect(vimToggle).not.toBeChecked();
+  });
+
+  test('clears stale focus on route change and suspends navigation during modal overlays', async ({ page }) => {
+    await page.goto('/');
+    const statusline = page.locator('.vim-statusline');
+    await expect(statusline).toBeVisible();
+    await expect(page.getByText('feature-alpha').first()).toBeVisible();
+
+    // Focus an item on dashboard
+    await page.keyboard.press('j');
+    await expect(page.locator('.vim-focus')).toBeVisible();
+
+    // Navigate to settings via command line
+    await page.keyboard.press(':');
+    await page.keyboard.type('tab settings');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/#\/settings/);
+
+    // Focus should be cleared on scope/route change
+    await expect(page.locator('.vim-focus')).toHaveCount(0);
+
+    // Open help modal dialog
+    await page.keyboard.press('?');
+    const helpModal = page.locator('.vim-help');
+    await expect(helpModal).toBeVisible();
+
+    // Press j inside open modal — normal navigation is suspended and focus does not leak to background
+    await page.keyboard.press('j');
+    await expect(page.locator('.vim-focus')).toHaveCount(0);
+
+    // Escape closes modal
+    await page.keyboard.press('Escape');
+    await expect(helpModal).not.toBeVisible();
   });
 });

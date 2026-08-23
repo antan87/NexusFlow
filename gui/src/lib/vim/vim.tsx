@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Kbd } from '../../components/ui/kbd.js';
 
 /* ============================ types ============================ */
 export type VimMode = 'normal' | 'insert' | 'command';
@@ -27,6 +28,26 @@ export interface VimCtx {
   setHelpOpen: (v: boolean) => void;
 }
 
+export interface VimKeymapEntry {
+  key: string;
+  action: string;
+  description: string;
+}
+
+export const VIM_KEYMAP: VimKeymapEntry[] = [
+  { key: 'j / k', action: 'next / previous item', description: 'next / previous item in active view (prefix count: 3j)' },
+  { key: 'h / l', action: 'previous / next tab', description: 'previous / next tab' },
+  { key: 'gg / G', action: 'first / last item', description: 'first / last item in active view' },
+  { key: 'gt / gT / g1–g9', action: 'cycle / jump to tab', description: 'cycle forward / backward or jump to tab 1–9' },
+  { key: 'Enter / Space', action: 'activate focused item', description: 'activate focused item' },
+  { key: 'i', action: 'filter / edit', description: 'focus nearest filter or search input (ESC returns)' },
+  { key: 's S L o d c r f', action: 'workspace actions', description: 'start · stop · logs · open · diff · commit · sync · refresh' },
+  { key: ':', action: 'command line', description: 'command line prompt (:help :start :logs :tab … :q)' },
+  { key: 'Ctrl+d / Ctrl+u', action: 'scroll half page', description: 'scroll down / up half page' },
+  { key: '?', action: 'keybinding cheatsheet', description: 'toggle keybinding cheatsheet overlay' },
+  { key: 'Esc / \\', action: 'normal mode / toggle', description: 'normal mode / toggle vim navigation on/off' },
+];
+
 const Ctx = createContext<VimCtx | null>(null);
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -38,6 +59,8 @@ export const useVim = () => {
 
 /* ========================= dom helpers ========================= */
 const EDITABLE = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
+const OVERLAY =
+  '[role="dialog"][data-state="open"], [data-radix-popper-content-wrapper], [data-portal], [role="alertdialog"][data-state="open"]';
 const FOCUS_CLASS = 'vim-focus';
 const ACTION_KEYS: Record<string, string> = {
   s: 'start',
@@ -128,6 +151,18 @@ export function VimProvider(props: VimProviderProps) {
     });
   }, []);
 
+  /* ---- body padding class management ---- */
+  useEffect(() => {
+    if (enabled) {
+      document.body.classList.add('vim-on');
+    } else {
+      document.body.classList.remove('vim-on');
+    }
+    return () => {
+      document.body.classList.remove('vim-on');
+    };
+  }, [enabled]);
+
   /* ---- focus management ---- */
   const clearFocus = useCallback(() => {
     focusedRef.current?.classList.remove(FOCUS_CLASS);
@@ -142,6 +177,11 @@ export function VimProvider(props: VimProviderProps) {
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     focusedRef.current = el;
   }, []);
+
+  /* ---- clear focus on route / scope change to avoid stale detached nodes ---- */
+  useEffect(() => {
+    clearFocus();
+  }, [scope, clearFocus]);
 
   const move = useCallback(
     (delta: number) => {
@@ -240,6 +280,11 @@ export function VimProvider(props: VimProviderProps) {
     };
 
     const onKey = (e: KeyboardEvent) => {
+      // IME composition guard: ignore events when typing in IME
+      if (e.isComposing || e.keyCode === 229) {
+        return;
+      }
+
       const t = e.target as HTMLElement | null;
       const inEditable = !!t?.closest?.(EDITABLE);
 
@@ -250,6 +295,22 @@ export function VimProvider(props: VimProviderProps) {
       }
 
       if (!enabled) return;
+
+      /* help cheatsheet overlay open: only Escape or ? close it, suspend normal navigation */
+      if (helpOpen) {
+        if (e.key === 'Escape' || e.key === '?' || e.key === 'q') {
+          setHelpOpen(false);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Radix / Modal overlay guard: if an open modal or dialog is detected, suspend Vim navigation
+      const isOverlayOpen = !!document.querySelector(OVERLAY);
+      if (isOverlayOpen) {
+        if (e.key === 'Escape') return; // let modal / Radix close natively
+        return; // suspend NORMAL mode navigation & actions
+      }
 
       /* INSERT mode: only ESC belongs to us, everything else is typing */
       if (modeRef.current === 'insert') {
@@ -309,7 +370,7 @@ export function VimProvider(props: VimProviderProps) {
         return; // unknown chord: swallow
       }
 
-      /* numeric count prefix */
+      /* numeric count prefix: 1-9 starts a count; 0 appends if count already in progress */
       if (/^[1-9]$/.test(e.key) || (countRef.current && /^[0-9]$/.test(e.key))) {
         countRef.current += e.key;
         setStatus(countRef.current);
@@ -381,8 +442,8 @@ export function VimProvider(props: VimProviderProps) {
         case 'Enter':
         case ' ':
           if (focusedRef.current) {
-            focusedRef.current.click();
             e.preventDefault();
+            focusedRef.current.click();
           }
           return;
         case 'i': {
@@ -472,7 +533,11 @@ function StatusLine({ onRunCommand }: { onRunCommand: (cmd: string) => void }) {
       <span className={`badge badge-${vim.mode}`}>{label}</span>
       <span className="font-semibold text-foreground/80">{vim.scope}</span>
       {vim.status && <span className="pending">{vim.status}</span>}
-      {vim.message && <span className="error">{vim.message}</span>}
+      {vim.message && (
+        <span className="error" role="status" aria-live="polite">
+          {vim.message}
+        </span>
+      )}
       {vim.mode === 'command' && (
         <input
           ref={inputRef}
@@ -504,24 +569,19 @@ function StatusLine({ onRunCommand }: { onRunCommand: (cmd: string) => void }) {
 export function VimHelp() {
   const { helpOpen, setHelpOpen } = useVim();
   if (!helpOpen) return null;
-  const rows: [string, string][] = [
-    ['j / k', 'next / previous item (prefix count: 3j)'],
-    ['h / l', 'previous / next tab'],
-    ['gg / G', 'first / last item'],
-    ['gt / gT / g1–g5', 'cycle / jump to tab'],
-    ['Enter / Space', 'activate focused item'],
-    ['i', 'edit / filter (ESC returns)'],
-    ['s S L o d c r f', 'start · stop · logs · open · diff · commit · sync · refresh'],
-    [':', 'command line (:help :start :logs :tab … :q)'],
-    ['Ctrl+d / Ctrl+u', 'scroll half page'],
-    ['Esc / \\', 'normal mode / toggle vim mode'],
-  ];
+
   return (
-    <div className="vim-help-backdrop" onClick={() => setHelpOpen(false)}>
+    <div
+      className="vim-help-backdrop"
+      onClick={() => setHelpOpen(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Vim Keybindings Cheatsheet"
+    >
       <div className="vim-help" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between pb-3 border-b border-[#30363d] mb-3">
+        <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
           <h3 className="font-bold text-foreground text-sm flex items-center gap-2">
-            NexusFlow — Vim Keys <kbd className="text-xs bg-[#21262d] px-1.5 py-0.5 rounded border border-[#30363d]">Esc</kbd>
+            NexusFlow — Vim Keys <Kbd>Esc</Kbd>
           </h3>
           <button
             onClick={() => setHelpOpen(false)}
@@ -533,12 +593,12 @@ export function VimHelp() {
         </div>
         <table className="w-full">
           <tbody>
-            {rows.map(([k, v]) => (
-              <tr key={k}>
+            {VIM_KEYMAP.map((entry) => (
+              <tr key={entry.key}>
                 <td className="py-1 pr-3 text-xs font-mono">
-                  <kbd className="bg-[#21262d] border border-[#30363d] rounded px-1.5 py-0.5 text-xs text-[#c9d1d9]">{k}</kbd>
+                  <Kbd>{entry.key}</Kbd>
                 </td>
-                <td className="py-1 text-xs text-[#c9d1d9]">{v}</td>
+                <td className="py-1 text-xs text-foreground/90">{entry.description}</td>
               </tr>
             ))}
           </tbody>
