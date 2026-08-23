@@ -100,7 +100,8 @@ describe('ClaudeSdkAdapter', () => {
       { type: 'approval_required', requestId: 'req-1', tool: 'Edit', input: { path: 'file.ts' } },
       { type: 'approval_required', requestId: 'req-2', tool: 'Write', input: { path: 'new.ts' } },
       { type: 'approval_required', requestId: 'req-3', tool: 'LS', input: { path: '.' } },
-      { type: 'approval_required', requestId: 'req-4', tool: 'Bash', input: { command: 'rm -rf /' } },
+      { type: 'approval_required', requestId: 'req-4', tool: 'mcp__nexusflow__list_repos', input: {} },
+      { type: 'approval_required', requestId: 'req-5', tool: 'Bash', input: { command: 'rm -rf /' } },
     ]);
 
     const mockAdapter = createMockAdapter(handle);
@@ -113,16 +114,17 @@ describe('ClaudeSdkAdapter', () => {
     await adapter.send('Edit files and run commands', 'workspace-write');
 
     await vi.waitFor(() => {
-      expect(approvals).toHaveLength(4);
+      expect(approvals).toHaveLength(5);
     });
 
-    // Allowed file & fs tools
+    // Allowed file & fs tools and NexusFlow MCP tools
     expect(approvals[0]).toEqual({ requestId: 'req-1', decision: { behavior: 'allow' } });
     expect(approvals[1]).toEqual({ requestId: 'req-2', decision: { behavior: 'allow' } });
     expect(approvals[2]).toEqual({ requestId: 'req-3', decision: { behavior: 'allow' } });
+    expect(approvals[3]).toEqual({ requestId: 'req-4', decision: { behavior: 'allow' } });
     // Denied shell execution with clear actionable explanation
-    expect(approvals[3]).toEqual({
-      requestId: 'req-4',
+    expect(approvals[4]).toEqual({
+      requestId: 'req-5',
       decision: {
         behavior: 'deny',
         message: "Tool 'Bash' requires approval and is unavailable in embedded chat. Run in CLI or full terminal.",

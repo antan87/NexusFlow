@@ -8,7 +8,14 @@ import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';
 import type { NexusFlowConfig } from '../types.js';
-import { enabledTools, findTool, type ToolContext } from './tools.js';
+import { enabledTools, findTool, type AgentRole, type ToolContext } from './tools.js';
+
+export interface McpServerOptions {
+  workspacePath?: string;
+  role?: AgentRole;
+  allowList?: string[];
+  denyList?: string[];
+}
 
 /**
  * Resolves the workspace path for a tool call.
@@ -38,7 +45,13 @@ function resolveWorkspacePath(
   return process.cwd();
 }
 
-export async function startMcpServer(workspacePath?: string) {
+export async function startMcpServer(optionsOrWorkspacePath?: string | McpServerOptions) {
+  const options: McpServerOptions = typeof optionsOrWorkspacePath === 'string'
+    ? { workspacePath: optionsOrWorkspacePath }
+    : optionsOrWorkspacePath ?? {};
+
+  const { workspacePath, role, allowList, denyList } = options;
+
   const server = new Server(
     {
       name: 'nexusflow-mcp',
@@ -54,7 +67,7 @@ export async function startMcpServer(workspacePath?: string) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const config = await loadConfig();
     return {
-      tools: enabledTools(config).map((t) => ({
+      tools: enabledTools(config, role, allowList, denyList).map((t) => ({
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema,
@@ -70,10 +83,11 @@ export async function startMcpServer(workspacePath?: string) {
     const { name, arguments: args } = request.params;
     const config = await loadConfig();
 
-    const tool = findTool(name);
-    if (!tool || (tool.enabled && !tool.enabled(config))) {
+    const available = enabledTools(config, role, allowList, denyList);
+    const tool = available.find((t) => t.name === name);
+    if (!tool) {
       return {
-        content: [{ type: 'text', text: `Tool not found: ${name}` }],
+        content: [{ type: 'text', text: `Tool not found or denied by execution policy: ${name}` }],
         isError: true,
       };
     }

@@ -51,6 +51,12 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
             CLAUDE_CODE_PROJECT_DIR_NAME: workspaceId,
             CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '.', '.claude'),
           },
+          mcpServers: {
+            nexusflow: {
+              command: 'npx',
+              args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run', this.cwd],
+            },
+          },
         };
 
         if (this.session && this.session.resume) {
@@ -129,14 +135,23 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
 
             case 'approval_required': {
               if (this.currentExecutionProfile === 'workspace-write') {
-                // Issue #173: Tool-class gating — auto-accept in-workspace file edits and common filesystem actions;
-                // deny arbitrary shell/command execution with actionable guidance.
+                // Issue #173: Tool-class gating — auto-accept in-workspace file edits, common filesystem actions,
+                // and NexusFlow MCP workspace tools; deny arbitrary shell/command execution with actionable guidance.
                 const allowedTools = new Set([
                   'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
                   'Read', 'Glob', 'Grep', 'LS', 'View',
                   'FileEdit', 'FileWrite',
+                  'search_workspace', 'workspace_status', 'get_workspace_diff',
+                  'commit_workspace', 'sync_workspace', 'refresh_context',
+                  'run_doctor', 'add_knowledge', 'promote_knowledge',
+                  'finish_workspace', 'get_service_logs', 'isolate_repo',
+                  'list_workspaces', 'list_repos', 'create_workspace',
                 ]);
-                if (allowedTools.has(event.tool)) {
+                const isAllowed = allowedTools.has(event.tool) ||
+                  event.tool.startsWith('mcp__nexusflow__') ||
+                  event.tool.startsWith('nexusflow__');
+
+                if (isAllowed) {
                   handle.respondToApproval(event.requestId, { behavior: 'allow' });
                 } else {
                   handle.respondToApproval(event.requestId, {
