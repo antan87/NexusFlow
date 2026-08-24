@@ -63,17 +63,20 @@ In addition to parallel execution, `MultiAgentOrchestrator` supports sequential 
 
 ### Decision: Model Selection Plumbing & Chat UI Picker
 Model selection is plumbed end-to-end:
-1. **Backend & Shared Catalog**: `src/agent/models.ts` and `gui/src/features/chat/models.ts` maintain verified current model catalogs (Claude: `claude-3-7-sonnet-latest`, `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`, `claude-3-opus-latest`; Codex: `gpt-5-codex`, `gpt-5`, `o3`, `o3-mini`, `gpt-4o`). Deprecated models (such as retired `gpt-4.5-preview`) are pruned.
-2. **Adapter & Engine Propagation**: `AgentSession.model` flows through `ClaudeSdkAdapter` / `CodexSdkAdapter` down to `StartSpec.model` into vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
+1. **Provider-Owned Catalog**: `src/agent/models.ts` supplies model metadata through `ProviderStatus` for each CLI/SDK pair. The renderer has no duplicate catalog and reconciles stale persisted selections against the status response.
+2. **Adapter & Engine Propagation**: `AgentSession.model` flows through `ClaudeSdkAdapter` / `CodexSdkAdapter` down to `StartSpec.model` into vendor engine options. Claude uses `query({ options: { model } })`; Codex applies `model` as a thread option on both `startThread` and `resumeThread`, never as a per-turn stream option.
 3. **Frontend UX**: The chat UI provides a per-provider model picker in the composer control bar, reflects the active model in the header status badge, stores preferences in `ChatStore.modelsByProvider`, and routes choices via `ChatLaunchIntent.model` and WebSocket `startPayload.model`.
-4. **Rejection UX**: If a vendor engine rejects an unknown model ID, `formatModelRejectionError` surfaces the rejected model string with explicit remediation instructions so the user can easily reselect.
+4. **Rejection UX**: The WebSocket boundary rejects model IDs absent from the selected provider's advertised catalog before adapter creation and returns remediation copy directing the user to a valid model or Automatic.
 
 ### Decision: Cross-Engine Chat Smoke Suite
-The scripted cross-engine smoke suite (`scripts/smoke-chat-engines.ts` / `test/smoke-chat.test.ts`) verifies end-to-end:
-- Model catalog currency and ID validity.
+The scripted cross-engine smoke suite (`scripts/smoke-chat-engines.ts` / `src/agent/smoke-chat.test.ts`) is explicitly a mocked contract smoke, not live vendor validation. It verifies:
+- Provider-owned catalog shape and CLI/SDK parity by reading `ProviderStatus`, without hardcoded model IDs.
 - Claude SDK model choice, approval gating (denial of mutating lifecycle tools with guidance copy), and usage extraction.
 - Codex SDK model override pass-through and usage frame emission.
 - Invalid-model rejection error frame surfacing.
+
+### Decision: Embedded Harness Chat General Availability
+The mounted **AI & Sessions** chat surface is generally available as of merge `c4e0384`. Promotion evidence includes protected cross-platform CI, fixed-SHA independent review, a live Codex SDK turn with `gpt-5.6-luna`, and provider-boundary rejection copy. A Claude live smoke remains a non-blocking follow-up for the next authenticated Claude session because aliases are vendor-owned and failures remain closed and actionable.
 
 ### Gotcha: Inter-Agent Context Injection & Trust Domain Boundary
 In pipeline mode, upstream phase output is threaded verbatim into downstream prompts (`## Context from Prior Phases:`). In today's architecture, all pipeline agents operate within a single trusted workspace domain. However, if teamwork workflows are extended across different trust profiles or accept untrusted inputs, unvalidated upstream text acts as an inter-agent prompt-injection channel and must be strictly sanitized or distilled.
@@ -138,5 +141,4 @@ Both Anthropic and OpenAI frequently ship breaking changes in their agent SDKs. 
 - [x] Phase 1 Core Harness Abstraction (`src/harness/`) implemented and tested
 - [x] Phase 1 Session Dispatcher Migration (`ClaudeSdkAdapter` and `CodexSdkAdapter` registered in `ProviderRegistry`)
 - [x] Phase 2 NexusFlow MCP Server Implementation (Full lifecycle tools: `create_workspace`, `list_workspaces`, `list_repos`, and role-based tool surface scoping)
-- [ ] Phase 3 Multi-Agent Orchestration & Contract Test Suite
-
+- [x] Phase 3 Multi-Agent Orchestration & Contract Test Suite

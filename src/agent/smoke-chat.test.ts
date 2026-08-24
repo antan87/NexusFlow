@@ -94,7 +94,7 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
     adapter.stop();
   });
 
-  it('Codex SDK: full chat loop, per-stream model honoring, and usage frames', async () => {
+  it('Codex SDK: full chat loop, thread-model propagation, and usage frames', async () => {
     let capturedSpec: StartSpec | null = null;
 
     async function* makeEvents(): AsyncIterable<HarnessEvent> {

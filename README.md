@@ -378,8 +378,7 @@ The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm s
 - **Skills & Agents tab** — manage reusable skills, categories, drag-and-drop boxes, and workspace skill assignments
 - **Team Strategies tab** — inspect and author coordination workflows and multi-agent roles
 - **Open with…** — launch the workspace directly in a detected Codex Desktop, Claude Desktop, VS Code, VS Code Insiders, Cursor, JetBrains IDE, or other supported editor; unavailable apps stay out of the primary picker
-- **Chat tab** — use local CLI harnesses directly; Codex reuses `codex login` for workspace-write chat and GitHub Copilot reuses `copilot login` for read-only ACP chat, so NexusFlow does not need their API keys
-- **Sessions tab** — view past AI conversation transcripts and resume sessions
+- **AI & Sessions (GA)** — use the embedded first-party Claude/Codex SDK or local CLI harnesses with provider-owned model selection, then inspect and resume recorded sessions; subscription sign-ins are reused when available
 - **Logs panel** — real-time aggregated service log output
 - **Config panel** — edit NexusFlow settings from the browser
 

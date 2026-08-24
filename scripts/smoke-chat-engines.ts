@@ -1,33 +1,78 @@
 #!/usr/bin/env node
 /**
- * Standalone cross-engine chat smoke test script.
- * Validates Claude and Codex harness initialization, model overrides,
- * approval gating, usage extraction, and invalid-model error surfacing.
+ * Standalone mocked cross-engine chat contract smoke.
+ *
+ * This script never contacts a vendor engine. It validates Claude and Codex
+ * harness initialization, provider-status model wiring, approval gating,
+ * usage extraction, and invalid-model error surfacing with injected fakes.
  */
 
 import { ClaudeSdkAdapter } from '../src/agent/ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from '../src/agent/CodexSdkAdapter.js';
-import { PROVIDER_MODELS, formatModelRejectionError } from '../src/agent/models.js';
+import { ProviderRegistry } from '../src/agent/adapters.js';
+import { formatModelRejectionError, type ModelOption } from '../src/agent/models.js';
+import type { ProviderStatus } from '../src/agent/ProviderRegistry.js';
 import type { HarnessAdapter, SessionHandle } from '../src/harness/interface.js';
 import type { HarnessEvent, StartSpec } from '../src/harness/types.js';
 
-async function runSmokeTests() {
-  console.log('--- Starting Cross-Engine Chat Smoke Test Suite ---');
+function requireModels(statuses: ProviderStatus[], providerId: string): readonly ModelOption[] {
+  const status = statuses.find(candidate => candidate.id === providerId);
+  if (!status) throw new Error(`ProviderStatus missing ${providerId}`);
+  if (!status.models || status.models.length < 2) {
+    throw new Error(`ProviderStatus for ${providerId} must advertise Automatic and at least one selectable model`);
+  }
+  return status.models;
+}
 
-  // 1. Verify Model Catalogs
-  console.log('[1/4] Verifying Model Catalogs...');
-  const claudeModels = PROVIDER_MODELS['claude-cli'];
-  const codexModels = PROVIDER_MODELS['codex-cli'];
-  if (!claudeModels?.some(m => m.id === 'claude-3-7-sonnet-latest')) {
-    throw new Error('Claude catalog missing claude-3-7-sonnet-latest');
+function verifyProviderCatalogPair(
+  statuses: ProviderStatus[],
+  cliProviderId: string,
+  sdkProviderId: string,
+): string {
+  const cliModels = requireModels(statuses, cliProviderId);
+  const sdkModels = requireModels(statuses, sdkProviderId);
+  const cliIds = cliModels.map(model => model.id);
+  const sdkIds = sdkModels.map(model => model.id);
+
+  if (cliIds[0] !== '' || sdkIds[0] !== '') {
+    throw new Error(`${cliProviderId}/${sdkProviderId} catalogs must start with Automatic`);
   }
-  if (!codexModels?.some(m => m.id === 'gpt-5-codex')) {
-    throw new Error('Codex catalog missing gpt-5-codex');
+  if (new Set(cliIds).size !== cliIds.length || new Set(sdkIds).size !== sdkIds.length) {
+    throw new Error(`${cliProviderId}/${sdkProviderId} catalogs contain duplicate model IDs`);
   }
-  if (codexModels?.some(m => m.id === 'gpt-4.5-preview')) {
-    throw new Error('Codex catalog still contains deprecated gpt-4.5-preview');
+  if (JSON.stringify(cliIds) !== JSON.stringify(sdkIds)) {
+    throw new Error(`${cliProviderId}/${sdkProviderId} ProviderStatus catalogs have drifted`);
   }
-  console.log('✓ Model catalogs verified active and pruned of deprecated models.');
+  for (const model of [...cliModels, ...sdkModels]) {
+    if (model.id !== model.id.trim()) {
+      throw new Error(`${cliProviderId}/${sdkProviderId} catalog contains a non-normalized model ID`);
+    }
+    if (!model.label.trim() || !model.description.trim()) {
+      throw new Error(`${cliProviderId}/${sdkProviderId} catalog contains incomplete model metadata`);
+    }
+  }
+
+  const selectedModel = cliModels.find(model => model.id)?.id
+    ?? (() => { throw new Error(`${cliProviderId} catalog has no selectable model`); })();
+  for (const providerId of [cliProviderId, sdkProviderId]) {
+    const provider = ProviderRegistry.getProvider(providerId);
+    if (!provider || ProviderRegistry.resolveModel(provider, selectedModel) !== selectedModel) {
+      throw new Error(`${providerId} does not resolve its advertised model '${selectedModel}' identically`);
+    }
+  }
+
+  return selectedModel;
+}
+
+async function runSmokeTests() {
+  console.log('=== MOCKED CONTRACT SMOKE — NO LIVE VENDOR CALLS ===');
+
+  // 1. Verify the same provider-owned metadata production sends to the GUI.
+  console.log('[1/4] Verifying ProviderStatus model catalogs...');
+  const statuses = ProviderRegistry.getAllStatus();
+  const claudeModel = verifyProviderCatalogPair(statuses, 'claude-cli', 'claude-sdk');
+  const codexModel = verifyProviderCatalogPair(statuses, 'codex-cli', 'codex-sdk');
+  console.log('✓ CLI and SDK ProviderStatus catalogs are complete, paired, and selectable.');
 
   // 2. Smoke Test Claude SDK with Model Choice + Approval Gate
   console.log('[2/4] Executing Claude SDK Adapter Smoke Turn (Model + Gating)...');
@@ -82,7 +127,7 @@ async function runSmokeTests() {
   claudeAdapter.start(process.cwd(), {
     id: '11111111-1111-1111-1111-111111111111',
     resume: false,
-    model: 'claude-3-7-sonnet-latest',
+    model: claudeModel,
   });
   claudeAdapter.send('Hello Claude', 'workspace-write');
 
@@ -90,7 +135,7 @@ async function runSmokeTests() {
   await new Promise(r => setTimeout(r, 100));
   claudeAdapter.stop();
 
-  if (claudeSpecReceived?.model !== 'claude-3-7-sonnet-latest') {
+  if (claudeSpecReceived?.model !== claudeModel) {
     throw new Error(`Claude model not forwarded: received ${claudeSpecReceived?.model}`);
   }
   if (!claudeApprovalDenied) {
@@ -142,20 +187,20 @@ async function runSmokeTests() {
   codexAdapter.start(process.cwd(), {
     id: '22222222-2222-2222-2222-222222222222',
     resume: false,
-    model: 'gpt-5-codex',
+    model: codexModel,
   });
   codexAdapter.send('Hello Codex', 'workspace-write');
 
   await new Promise(r => setTimeout(r, 100));
   codexAdapter.stop();
 
-  if (codexSpecReceived?.model !== 'gpt-5-codex') {
+  if (codexSpecReceived?.model !== codexModel) {
     throw new Error(`Codex model not forwarded: received ${codexSpecReceived?.model}`);
   }
   if (!codexUsageReceived) {
     throw new Error('Codex usage frame not received');
   }
-  console.log('✓ Codex SDK: model forwarded and honored, usage captured.');
+  console.log('✓ Codex SDK: model forwarded into the mocked harness contract, usage captured.');
 
   // 4. Test Invalid Model Error Frame
   console.log('[4/4] Testing Invalid Model Error Frame Surfacing...');
@@ -163,7 +208,7 @@ async function runSmokeTests() {
   const invalidModelHarness: HarnessAdapter = {
     vendor: 'codex',
     async start(spec: StartSpec): Promise<SessionHandle> {
-      throw new Error(formatModelRejectionError('codex-cli', spec.model || 'unknown', 'model_not_found'));
+      throw new Error(formatModelRejectionError('codex-sdk', spec.model || 'unknown', 'model_not_found'));
     },
     resume: viFn(),
     authStatus: async () => ({ configured: true }),
@@ -190,7 +235,7 @@ async function runSmokeTests() {
   }
   console.log('✓ Error frame properly surfaced rejected model name with remediation guidance.');
 
-  console.log('\n=== All Cross-Engine Chat Smoke Tests Passed Successfully ===');
+  console.log('\n=== MOCKED CONTRACT SMOKE PASSED — LIVE VALIDATION NOT PERFORMED ===');
 }
 
 function viFn(): any {
