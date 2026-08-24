@@ -198,6 +198,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
   test('offers current provider-owned models in the mounted SDK harness', async ({ page }) => {
     await page.addInitScript(() => {
       (window as any).__harnessFrames = [];
+      (window as any).__harnessSocketCloseCount = 0;
       class MockWebSocket {
         static readonly CONNECTING = 0;
         static readonly OPEN = 1;
@@ -222,6 +223,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
 
         close() {
           this.readyState = MockWebSocket.CLOSED;
+          (window as any).__harnessSocketCloseCount += 1;
         }
       }
       (window as any).WebSocket = MockWebSocket;
@@ -272,6 +274,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.getByRole('menuitem', { name: /GPT-5\.6 Luna/ }).click();
     await expect(page.getByLabel('Select model')).toContainText('GPT-5.6 Luna');
 
+    await page.getByPlaceholder('Start the agent or press Enter...').fill('Inspect the workspace');
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (
       (window as any).__harnessFrames.find((frame: { type?: string }) => frame.type === 'start')
@@ -281,6 +284,10 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       cwd: feature.workspacePath,
       model: 'gpt-5.6-luna',
     });
+
+    await page.getByRole('tab', { name: 'Changes' }).click();
+    await expect(page.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
+    expect(await page.evaluate(() => (window as any).__harnessSocketCloseCount)).toBe(0);
   });
 });
 

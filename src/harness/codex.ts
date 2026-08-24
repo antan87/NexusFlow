@@ -1,7 +1,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Codex, type CodexOptions, type Thread, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
+import {
+  Codex,
+  type CodexOptions,
+  type Thread,
+  type ThreadEvent,
+  type ThreadItem,
+  type ThreadOptions,
+} from "@openai/codex-sdk";
 import {
   type HarnessAdapter,
   type SessionHandle,
@@ -128,7 +135,10 @@ export class CodexAdapter implements HarnessAdapter {
             }))
       : this.client;
 
-    const thread = client.resumeThread(spec.sessionId);
+    const thread = client.resumeThread(spec.sessionId, {
+      ...(spec.model ? { model: spec.model } : {}),
+      ...(spec.nativeOptions as ThreadOptions),
+    });
     return this.spawn(spec, thread);
   }
 
@@ -267,10 +277,7 @@ export class CodexAdapter implements HarnessAdapter {
     isDisposed: () => boolean,
   ): Promise<void> {
     try {
-      const run = await thread.runStreamed(prompt, {
-        signal,
-        ...(spec.model ? { model: spec.model } : {}),
-      });
+      const run = await thread.runStreamed(prompt, { signal });
       for await (const ev of run.events) {
         if (isDisposed()) break;
         this.mapEvent(ev, safePush, resolveId);

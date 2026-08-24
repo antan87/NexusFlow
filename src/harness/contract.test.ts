@@ -339,6 +339,34 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       }
     });
 
+    it('applies model and native thread options when resuming a Codex thread', async () => {
+      const mockThread = {
+        id: 'codex-thread-resumed',
+        runStreamed: vi.fn(),
+      };
+      const mockClient = {
+        resumeThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+      const handle = await adapter.resume({
+        sessionId: 'codex-thread-resumed',
+        mode: 'resume',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+        model: 'gpt-5.6-terra',
+        nativeOptions: { sandboxMode: 'read-only' },
+      });
+
+      expect(mockClient.resumeThread).toHaveBeenCalledWith('codex-thread-resumed', {
+        model: 'gpt-5.6-terra',
+        sandboxMode: 'read-only',
+      });
+      expect(mockThread.runStreamed).not.toHaveBeenCalled();
+
+      await handle.dispose();
+    });
+
     it('cancels active Codex turn on handle.interrupt() via AbortSignal', async () => {
       let aborted = false;
 
