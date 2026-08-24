@@ -1,4 +1,5 @@
 import type { AgentSession } from './session.js';
+import type { ModelOption } from './models.js';
 
 export interface ProviderStatus {
   id: string;
@@ -12,6 +13,7 @@ export interface ProviderStatus {
   recoveryLabel?: string;
   executionProfiles?: readonly ProviderExecutionProfile[];
   defaultExecutionProfile?: AgentExecutionProfile;
+  models?: readonly ModelOption[];
   capabilities: ProviderCapabilities;
 }
 
@@ -65,6 +67,7 @@ export interface ProviderAdapter {
   capabilities: ProviderCapabilities;
   executionProfiles?: readonly ProviderExecutionProfile[];
   defaultExecutionProfile?: AgentExecutionProfile;
+  models?: readonly ModelOption[];
   isConfigured(): boolean;
   getStatusMessage(): string | undefined;
   getSetupHelp?(): ProviderSetupHelp | undefined;
@@ -92,6 +95,19 @@ class ProviderRegistryImpl {
     return profiles.some(profile => profile.id === requested) ? requested : null;
   }
 
+  /** Resolve an untyped renderer value against the provider-owned model catalog. */
+  resolveModel(provider: ProviderAdapter, requested: unknown): string | undefined | null {
+    if (requested === undefined || requested === null || requested === '') return undefined;
+    if (typeof requested !== 'string') return null;
+
+    const model = requested.trim();
+    if (!model || model.length > 100) return null;
+
+    const models = provider.models;
+    if (!models?.length) return model;
+    return models.some(option => option.id === model) ? model : null;
+  }
+
   getAllStatus(options: { refreshProviderId?: string } = {}): ProviderStatus[] {
     const providers = Array.from(this.providers.values());
     const refreshProvider = options.refreshProviderId
@@ -116,6 +132,7 @@ class ProviderRegistryImpl {
         capabilities: provider.capabilities,
         executionProfiles: provider.executionProfiles,
         defaultExecutionProfile: provider.defaultExecutionProfile,
+        models: provider.models,
         isConfigured: provider.isConfigured(),
         message: provider.getStatusMessage(),
         ...setup,

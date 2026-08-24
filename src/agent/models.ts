@@ -4,25 +4,29 @@ export interface ModelOption {
   description: string;
 }
 
-export const PROVIDER_MODELS: Record<string, ModelOption[]> = {
-  'claude-cli': [
-    { id: '', label: 'Default', description: 'Harness default (Claude 3.7 Sonnet)' },
-    { id: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet', description: 'Flagship hybrid reasoning and coding model' },
-    { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet', description: 'High-speed coding intelligence' },
-    { id: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku', description: 'Fastest turn completion and lightweight edits' },
-    { id: 'claude-3-opus-latest', label: 'Claude 3 Opus', description: 'Deep context reasoning and architecture planning' },
-  ],
-  'codex-cli': [
-    { id: '', label: 'Default', description: 'Harness default (gpt-5-codex / o3-mini)' },
-    { id: 'gpt-5-codex', label: 'GPT-5 Codex', description: 'Next-generation frontier coding and agentic execution' },
-    { id: 'gpt-5', label: 'GPT-5', description: 'Flagship multimodal reasoning and general intelligence' },
-    { id: 'o3', label: 'o3', description: 'Deep STEM and architectural reasoning model' },
-    { id: 'o3-mini', label: 'o3-mini', description: 'High-speed coding and mathematical reasoning' },
-    { id: 'gpt-4o', label: 'GPT-4o', description: 'Omni multi-modal fast model' },
-  ],
+const CLAUDE_MODELS = [
+  { id: '', label: 'Automatic', description: 'Use the default selected by Claude Code for this account and deployment.' },
+  { id: 'fable', label: 'Fable', description: 'Use the latest Fable model available to this Claude Code account.' },
+  { id: 'opus', label: 'Opus', description: 'Use the latest Opus model for complex reasoning and architecture work.' },
+  { id: 'sonnet', label: 'Sonnet', description: 'Use the latest Sonnet model for everyday coding tasks.' },
+  { id: 'haiku', label: 'Haiku', description: 'Use the latest Haiku model for fast, lightweight tasks.' },
+] as const satisfies readonly ModelOption[];
+
+const CODEX_MODELS = [
+  { id: '', label: 'Automatic', description: 'Use the model configured by the Codex account or local harness.' },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', description: 'Frontier capability for complex professional coding and reasoning.' },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: 'Balance intelligence, latency, and cost.' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', description: 'Cost-efficient model for high-volume and focused tasks.' },
+] as const satisfies readonly ModelOption[];
+
+export const PROVIDER_MODELS: Record<string, readonly ModelOption[]> = {
+  'claude-cli': CLAUDE_MODELS,
+  'claude-sdk': CLAUDE_MODELS,
+  'codex-cli': CODEX_MODELS,
+  'codex-sdk': CODEX_MODELS,
 };
 
-export function getAvailableModels(providerId: string): ModelOption[] {
+export function getAvailableModels(providerId: string): readonly ModelOption[] {
   return PROVIDER_MODELS[providerId] ?? [];
 }
 
@@ -35,5 +39,5 @@ export function isValidModelForProvider(providerId: string, modelId: string): bo
 
 export function formatModelRejectionError(providerId: string, model: string, details?: string): string {
   const detailStr = details ? ` (${details})` : '';
-  return `Model '${model}' was rejected by ${providerId}${detailStr}. Please select a valid model in chat settings or use the default model.`;
+  return `Model '${model}' was rejected by ${providerId}${detailStr}. Please select a valid model in chat settings or use Automatic.`;
 }

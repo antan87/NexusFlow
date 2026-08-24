@@ -15,6 +15,7 @@ import { CodexCliAdapter } from './CodexCliAdapter.js';
 import { CopilotAcpAdapter } from './CopilotAcpAdapter.js';
 import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from './CodexSdkAdapter.js';
+import { getAvailableModels } from './models.js';
 
 ProviderRegistry.register({
   id: 'claude-native',
@@ -120,6 +121,7 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
+  models: getAvailableModels('claude-cli'),
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'client-assigned',
@@ -176,6 +178,7 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
+  models: getAvailableModels('codex-cli'),
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'provider-assigned',
@@ -239,6 +242,7 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
+  models: getAvailableModels('claude-sdk'),
   capabilities: {
     transport: 'sdk',
     sessionIdentity: 'client-assigned',
@@ -269,6 +273,7 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
+  models: getAvailableModels('codex-sdk'),
   capabilities: {
     transport: 'sdk',
     sessionIdentity: 'provider-assigned',

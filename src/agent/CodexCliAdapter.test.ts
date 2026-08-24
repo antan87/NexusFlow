@@ -85,6 +85,21 @@ describe('buildCodexTurnArgs', () => {
       ID, '-',
     ]);
   });
+
+  it('passes the selected model on new and resumed Codex turns', () => {
+    expect(buildCodexTurnArgs(undefined, 'review', 'gpt-5.6-terra')).toEqual([
+      'exec', '--json', '--color', 'never', '--model', 'gpt-5.6-terra',
+      '-c', 'sandbox_mode="read-only"',
+      '-c', 'approval_policy="never"',
+      '-',
+    ]);
+    expect(buildCodexTurnArgs(ID, 'review', 'gpt-5.6-terra')).toEqual([
+      'exec', 'resume', '--json', '--model', 'gpt-5.6-terra',
+      '-c', 'sandbox_mode="read-only"',
+      '-c', 'approval_policy="never"',
+      ID, '-',
+    ]);
+  });
 });
 
 describe('Codex JSONL decoding', () => {
@@ -164,12 +179,13 @@ describe('Codex acknowledged thread lifecycle', () => {
   it('uses the requested resume id even when input follows start immediately', async () => {
     const adapter = new TestCodexCliAdapter();
 
-    const starting = adapter.start('C:\\workspace', { id: ID, resume: true });
+    const starting = adapter.start('C:\\workspace', { id: ID, resume: true, model: 'gpt-5.6-terra' });
     await adapter.send('Resume without waiting for transport setup');
     await starting;
 
     expect(adapter.processes).toHaveLength(1);
     expect(adapter.processes[0].args).toContain(ID);
+    expect(adapter.processes[0].args).toContain('gpt-5.6-terra');
     expect(adapter.processes[0].args.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
   });
 

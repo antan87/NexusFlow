@@ -71,14 +71,14 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
     adapter.start('/mock/workspace', {
       id: '11111111-1111-1111-1111-111111111111',
       resume: false,
-      model: 'claude-3-7-sonnet-latest',
+      model: 'sonnet',
     });
     adapter.send('Kickoff workspace task', 'workspace-write');
 
     await vi.waitFor(() => {
       expect(capturedSessionId).toBe('11111111-1111-1111-1111-111111111111');
       expect(streamChunks.join('')).toContain('Inspecting workspace auth endpoints');
-      expect(capturedSpec?.model).toBe('claude-3-7-sonnet-latest');
+      expect(capturedSpec?.model).toBe('sonnet');
       expect(approvalResponded).not.toBeNull();
       expect(approvalResponded?.decision.behavior).toBe('deny');
       expect(approvalResponded?.decision.message).toContain('requires approval and is unavailable in embedded chat');
@@ -144,14 +144,14 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
     adapter.start('/mock/workspace', {
       id: '22222222-2222-2222-2222-222222222222',
       resume: false,
-      model: 'gpt-5-codex',
+      model: 'gpt-5.6-sol',
     });
     adapter.send('Run diagnosis', 'workspace-write');
 
     await vi.waitFor(() => {
       expect(capturedSessionId).toBe('22222222-2222-2222-2222-222222222222');
       expect(streamChunks.join('')).toContain('Executing diagnosed test fixes on Codex');
-      expect(capturedSpec?.model).toBe('gpt-5-codex');
+      expect(capturedSpec?.model).toBe('gpt-5.6-sol');
       expect(capturedUsage).toEqual({
         inputTokens: 2400,
         outputTokens: 800,
@@ -190,7 +190,7 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
     await vi.waitFor(() => {
       expect(emittedError).not.toBeNull();
       expect(emittedError?.message).toContain("Model 'invalid-model-x' was rejected by codex-cli");
-      expect(emittedError?.message).toContain('Please select a valid model in chat settings or use the default model.');
+      expect(emittedError?.message).toContain('Please select a valid model in chat settings or use Automatic.');
     });
 
     adapter.stop();

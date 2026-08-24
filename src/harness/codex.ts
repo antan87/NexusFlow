@@ -1,7 +1,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Codex, type CodexOptions, type Thread, type ThreadEvent, type ThreadItem } from "@openai/codex-sdk";
+import {
+  Codex,
+  type CodexOptions,
+  type Thread,
+  type ThreadEvent,
+  type ThreadItem,
+  type ThreadOptions,
+} from "@openai/codex-sdk";
 import {
   type HarnessAdapter,
   type SessionHandle,
@@ -128,7 +135,10 @@ export class CodexAdapter implements HarnessAdapter {
             }))
       : this.client;
 
-    const thread = client.resumeThread(spec.sessionId);
+    const thread = client.resumeThread(spec.sessionId, {
+      ...(spec.model ? { model: spec.model } : {}),
+      ...(spec.nativeOptions as ThreadOptions),
+    });
     return this.spawn(spec, thread);
   }
 
@@ -212,8 +222,25 @@ export class CodexAdapter implements HarnessAdapter {
         while (turnQueue.length > 0 && !disposed) {
           const prompt = turnQueue.shift()!;
           currentAbort = new AbortController();
-          await this.runTurn(thread, prompt, safePush, out, spec, resolveId, rejectId, currentAbort.signal, () => disposed);
+          const canContinue = await this.runTurn(
+            thread,
+            prompt,
+            safePush,
+            out,
+            spec,
+            resolveId,
+            rejectId,
+            currentAbort.signal,
+            () => disposed,
+          );
           currentAbort = null;
+          if (!canContinue) {
+            // A fatal turn closes the public event stream. Make the handle
+            // terminal too, so queued or later prompts cannot run invisibly.
+            disposed = true;
+            turnQueue.length = 0;
+            break;
+          }
         }
       } finally {
         draining = false;
@@ -265,12 +292,9 @@ export class CodexAdapter implements HarnessAdapter {
     rejectId: (e: Error) => void,
     signal: AbortSignal,
     isDisposed: () => boolean,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
-      const run = await thread.runStreamed(prompt, {
-        signal,
-        ...(spec.model ? { model: spec.model } : {}),
-      });
+      const run = await thread.runStreamed(prompt, { signal });
       for await (const ev of run.events) {
         if (isDisposed()) break;
         this.mapEvent(ev, safePush, resolveId);
@@ -278,6 +302,7 @@ export class CodexAdapter implements HarnessAdapter {
           safePush({ type: "raw", vendor: "codex", payload: ev });
         }
       }
+      return true;
     } catch (err) {
       try {
         rejectId(err instanceof Error ? err : new Error(String(err)));
@@ -286,6 +311,7 @@ export class CodexAdapter implements HarnessAdapter {
       try {
         out.end();
       } catch {}
+      return false;
     }
   }
 

@@ -239,7 +239,14 @@ app.get('/ws', async (c, next) => {
               }
 
               let session: AgentSession | undefined;
-              const model = typeof payload.model === 'string' && payload.model.trim() ? payload.model.trim() : undefined;
+              const model = ProviderRegistry.resolveModel(provider, payload.model);
+              if (model === null) {
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: `The selected model is not available for ${provider.name}. Choose a model advertised by this provider or use Automatic.`,
+                }));
+                return;
+              }
               if (payload.sessionId !== undefined && payload.sessionId !== null) {
                 if (!isValidSessionUuid(payload.sessionId)) {
                   ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
@@ -601,10 +608,11 @@ app.post('/api/adapters/status/refresh', async (c) => {
   }
 
   const body = await c.req.json().catch(() => null) as { providerId?: unknown } | null;
-  if (body?.providerId !== 'claude-cli' && body?.providerId !== 'codex-cli') {
+  const providerId = typeof body?.providerId === 'string' ? body.providerId : '';
+  if (!['claude-cli', 'codex-cli', 'claude-sdk', 'codex-sdk'].includes(providerId)) {
     return c.json({ error: 'Only Claude Code and Codex status can be refreshed.' }, 400);
   }
-  return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: body.providerId }));
+  return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: providerId }));
 });
 
 // 1. Get current configuration

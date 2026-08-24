@@ -53,6 +53,7 @@ import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
+import { AgentChat } from '../features/chat/AgentChat.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
@@ -332,6 +333,23 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 </TabsTab>
               ))}
             </TabsList>
+            <section
+              aria-labelledby="embedded-harness-heading"
+              aria-hidden={subTab !== 'sessions'}
+              className={cn('space-y-2 pt-3', subTab !== 'sessions' && 'hidden')}
+            >
+              <div>
+                <h2 id="embedded-harness-heading" className="text-sm font-semibold text-foreground">
+                  Embedded harness
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Start a first-party SDK or local CLI session in this workspace and choose its execution profile and model.
+                </p>
+              </div>
+              <div className="h-[36rem] min-h-[28rem] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                <AgentChat key={selected.branchName} ws={selected} />
+              </div>
+            </section>
             <TabsPanel value={subTab} className="animate-fade-in pt-3">
               {subTab === 'overview' && (
                 <div className="flex flex-col gap-3">
@@ -520,7 +538,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </Card>
                 </div>
               )}
-              {subTab === 'sessions' && <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />}
+              {subTab === 'sessions' && (
+                <section aria-labelledby="session-history-heading" className="space-y-2">
+                  <div>
+                    <h2 id="session-history-heading" className="text-sm font-semibold text-foreground">
+                      Session history
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Inspect or resume sessions recorded by the installed harnesses.
+                    </p>
+                  </div>
+                  <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
+                </section>
+              )}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}

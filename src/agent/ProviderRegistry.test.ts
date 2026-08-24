@@ -123,4 +123,26 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.resolveExecutionProfile(provider, undefined)).toBeUndefined();
     expect(ProviderRegistry.resolveExecutionProfile(provider, 'review')).toBeNull();
   });
+
+  it('exposes provider-owned models and rejects stale renderer selections', () => {
+    const models = [
+      { id: '', label: 'Automatic', description: 'Provider default.' },
+      { id: 'current-model', label: 'Current', description: 'Current model.' },
+    ] as const;
+    const provider = makeProvider('mock-models', { models });
+    ProviderRegistry.register(provider);
+
+    expect(ProviderRegistry.getAllStatus().find(status => status.id === 'mock-models')?.models)
+      .toEqual(models);
+    expect(ProviderRegistry.resolveModel(provider, undefined)).toBeUndefined();
+    expect(ProviderRegistry.resolveModel(provider, '')).toBeUndefined();
+    expect(ProviderRegistry.resolveModel(provider, ' current-model ')).toBe('current-model');
+    expect(ProviderRegistry.resolveModel(provider, 'retired-model')).toBeNull();
+    expect(ProviderRegistry.resolveModel(provider, false)).toBeNull();
+  });
+
+  it('keeps custom providers without a catalog open to model overrides', () => {
+    const provider = makeProvider('mock-open-models');
+    expect(ProviderRegistry.resolveModel(provider, 'gateway/custom-model')).toBe('gateway/custom-model');
+  });
 });

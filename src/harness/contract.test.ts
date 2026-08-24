@@ -222,6 +222,151 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       await handle.dispose();
     });
 
+    it('keeps the handle stream open for a queued follow-up turn', async () => {
+      let finishFirstTurn!: () => void;
+      let finishSecondTurn!: () => void;
+      const firstTurnFinished = new Promise<void>((resolve) => {
+        finishFirstTurn = resolve;
+      });
+      const secondTurnFinished = new Promise<void>((resolve) => {
+        finishSecondTurn = resolve;
+      });
+
+      async function* firstTurn() {
+        try {
+          yield {
+            type: 'thread.started',
+            thread_id: 'codex-thread-multi-turn',
+          };
+          yield {
+            type: 'item.completed',
+            item: {
+              id: 'agent-msg-first',
+              type: 'agent_message',
+              text: 'First response',
+            },
+          };
+          yield {
+            type: 'turn.completed',
+            usage: { input_tokens: 10, output_tokens: 2 },
+          };
+        } finally {
+          finishFirstTurn();
+        }
+      }
+
+      async function* secondTurn() {
+        try {
+          yield {
+            type: 'item.completed',
+            item: {
+              id: 'agent-msg-second',
+              type: 'agent_message',
+              text: 'Second response',
+            },
+          };
+          yield {
+            type: 'turn.completed',
+            usage: { input_tokens: 12, output_tokens: 3 },
+          };
+        } finally {
+          finishSecondTurn();
+        }
+      }
+
+      const runStreamed = vi.fn()
+        .mockResolvedValueOnce({ events: firstTurn() })
+        .mockResolvedValueOnce({ events: secondTurn() });
+      const mockThread = {
+        id: 'codex-thread-multi-turn',
+        runStreamed,
+      };
+      const mockClient = {
+        startThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+      const handle = await adapter.start({
+        prompt: 'First prompt',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+      });
+      const events = handle.events[Symbol.asyncIterator]();
+
+      try {
+        await expect(events.next()).resolves.toEqual({
+          done: false,
+          value: { type: 'session_started', sessionId: 'codex-thread-multi-turn' },
+        });
+        await expect(events.next()).resolves.toEqual({
+          done: false,
+          value: { type: 'assistant_message', text: 'First response' },
+        });
+        await expect(events.next()).resolves.toMatchObject({
+          done: false,
+          value: { type: 'turn_completed' },
+        });
+
+        await firstTurnFinished;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        handle.send('Second prompt');
+
+        await expect(events.next()).resolves.toEqual({
+          done: false,
+          value: { type: 'assistant_message', text: 'Second response' },
+        });
+        await expect(events.next()).resolves.toMatchObject({
+          done: false,
+          value: { type: 'turn_completed' },
+        });
+        await secondTurnFinished;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(runStreamed).toHaveBeenNthCalledWith(1, 'First prompt', expect.any(Object));
+        expect(runStreamed).toHaveBeenNthCalledWith(2, 'Second prompt', expect.any(Object));
+
+        const pendingNext = events.next();
+        const stateBeforeDispose = await Promise.race([
+          pendingNext.then(() => 'settled' as const),
+          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+        ]);
+        expect(stateBeforeDispose).toBe('pending');
+
+        await handle.dispose();
+        await expect(pendingNext).resolves.toEqual({ done: true, value: undefined });
+      } finally {
+        await handle.dispose();
+      }
+    });
+
+    it('applies model and native thread options when resuming a Codex thread', async () => {
+      const mockThread = {
+        id: 'codex-thread-resumed',
+        runStreamed: vi.fn(),
+      };
+      const mockClient = {
+        resumeThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+      const handle = await adapter.resume({
+        sessionId: 'codex-thread-resumed',
+        mode: 'resume',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+        model: 'gpt-5.6-terra',
+        nativeOptions: { sandboxMode: 'read-only' },
+      });
+
+      expect(mockClient.resumeThread).toHaveBeenCalledWith('codex-thread-resumed', {
+        model: 'gpt-5.6-terra',
+        sandboxMode: 'read-only',
+      });
+      expect(mockThread.runStreamed).not.toHaveBeenCalled();
+
+      await handle.dispose();
+    });
+
     it('cancels active Codex turn on handle.interrupt() via AbortSignal', async () => {
       let aborted = false;
 
@@ -261,6 +406,71 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
 
       await handle.interrupt();
       expect(aborted).toBe(true);
+      await handle.dispose();
+    });
+
+    it('does not run queued or later prompts after an interrupted turn fails fatally', async () => {
+      let streamWaiting!: () => void;
+      const streamIsWaiting = new Promise<void>((resolve) => {
+        streamWaiting = resolve;
+      });
+
+      async function* interruptedStream(signal?: AbortSignal) {
+        yield {
+          type: 'thread.started',
+          thread_id: 'codex-thread-interrupted',
+        };
+        await new Promise<void>((_resolve, reject) => {
+          const fail = () => reject(new Error('turn aborted'));
+          if (signal?.aborted) {
+            fail();
+            return;
+          }
+          signal?.addEventListener('abort', fail, { once: true });
+          streamWaiting();
+        });
+      }
+
+      const runStreamed = vi.fn().mockImplementation((_prompt, opts) => (
+        Promise.resolve({ events: interruptedStream(opts?.signal) })
+      ));
+      const mockThread = {
+        id: 'codex-thread-interrupted',
+        runStreamed,
+      };
+      const mockClient = {
+        startThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+      const handle = await adapter.start({
+        prompt: 'Active prompt',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+      });
+      const events = handle.events[Symbol.asyncIterator]();
+
+      await expect(events.next()).resolves.toEqual({
+        done: false,
+        value: { type: 'session_started', sessionId: 'codex-thread-interrupted' },
+      });
+      await streamIsWaiting;
+
+      handle.send('Queued follow-up');
+      await handle.interrupt();
+
+      await expect(events.next()).resolves.toMatchObject({
+        done: false,
+        value: { type: 'turn_failed', fatal: true },
+      });
+      await expect(events.next()).resolves.toEqual({ done: true, value: undefined });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runStreamed).toHaveBeenCalledTimes(1);
+
+      handle.send('Prompt after fatal failure');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runStreamed).toHaveBeenCalledTimes(1);
+
       await handle.dispose();
     });
   });
