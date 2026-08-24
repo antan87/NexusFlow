@@ -8,7 +8,8 @@
 import { ClaudeSdkAdapter } from '../src/agent/ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from '../src/agent/CodexSdkAdapter.js';
 import { PROVIDER_MODELS, formatModelRejectionError } from '../src/agent/models.js';
-import type { HarnessAdapter, SessionHandle, HarnessEvent, StartSpec } from '../src/harness/types.js';
+import type { HarnessAdapter, SessionHandle } from '../src/harness/interface.js';
+import type { HarnessEvent, StartSpec } from '../src/harness/types.js';
 
 async function runSmokeTests() {
   console.log('--- Starting Cross-Engine Chat Smoke Test Suite ---');
@@ -45,18 +46,20 @@ async function runSmokeTests() {
     };
     yield {
       type: 'turn_completed',
-      usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      usage: { inputTokens: 100, outputTokens: 50, cachedInputTokens: 0 },
     };
   }
 
   const mockClaudeHarness: HarnessAdapter = {
+    vendor: 'claude-code',
     async start(spec: StartSpec): Promise<SessionHandle> {
       claudeSpecReceived = spec;
       return {
+        vendor: 'claude-code',
         sessionId: async () => '11111111-1111-1111-1111-111111111111',
         events: makeClaudeEvents(),
-        send: async () => {},
-        respondToApproval: async (_id, decision) => {
+        send: () => {},
+        respondToApproval: (_id, decision) => {
           if (decision.behavior === 'deny' && decision.message?.includes('unavailable in embedded chat')) {
             claudeApprovalDenied = true;
           }
@@ -65,7 +68,9 @@ async function runSmokeTests() {
         dispose: async () => {},
       };
     },
-    resume: async () => ({} as any),
+    resume: viFn(),
+    authStatus: async () => ({ configured: true }),
+    listSessions: async () => [],
   };
 
   const claudeAdapter = new ClaudeSdkAdapter(
@@ -106,23 +111,27 @@ async function runSmokeTests() {
     yield { type: 'text_delta', text: 'Codex stream response...' };
     yield {
       type: 'turn_completed',
-      usage: { inputTokens: 200, outputTokens: 80, totalTokens: 280 },
+      usage: { inputTokens: 200, outputTokens: 80, cachedInputTokens: 100 },
     };
   }
 
   const mockCodexHarness: HarnessAdapter = {
+    vendor: 'codex',
     async start(spec: StartSpec): Promise<SessionHandle> {
       codexSpecReceived = spec;
       return {
+        vendor: 'codex',
         sessionId: async () => '22222222-2222-2222-2222-222222222222',
         events: makeCodexEvents(),
-        send: async () => {},
-        respondToApproval: async () => {},
+        send: () => {},
+        respondToApproval: () => {},
         interrupt: async () => {},
         dispose: async () => {},
       };
     },
-    resume: async () => ({} as any),
+    resume: viFn(),
+    authStatus: async () => ({ configured: true }),
+    listSessions: async () => [],
   };
 
   const codexAdapter = new CodexSdkAdapter(
@@ -152,10 +161,13 @@ async function runSmokeTests() {
   console.log('[4/4] Testing Invalid Model Error Frame Surfacing...');
   let caughtErrorMsg = '';
   const invalidModelHarness: HarnessAdapter = {
+    vendor: 'codex',
     async start(spec: StartSpec): Promise<SessionHandle> {
       throw new Error(formatModelRejectionError('codex-cli', spec.model || 'unknown', 'model_not_found'));
     },
-    resume: async () => ({} as any),
+    resume: viFn(),
+    authStatus: async () => ({ configured: true }),
+    listSessions: async () => [],
   };
 
   const errAdapter = new CodexSdkAdapter(
@@ -179,6 +191,10 @@ async function runSmokeTests() {
   console.log('✓ Error frame properly surfaced rejected model name with remediation guidance.');
 
   console.log('\n=== All Cross-Engine Chat Smoke Tests Passed Successfully ===');
+}
+
+function viFn(): any {
+  return async () => ({} as any);
 }
 
 runSmokeTests().catch(err => {

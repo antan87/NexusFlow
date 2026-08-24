@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from './CodexSdkAdapter.js';
 import { formatModelRejectionError } from './models.js';
-import type { HarnessAdapter, SessionHandle, HarnessEvent, StartSpec } from '../harness/types.js';
+import type { HarnessAdapter, SessionHandle } from '../harness/interface.js';
+import type { HarnessEvent, StartSpec } from '../harness/types.js';
 
 describe('Cross-Engine Chat Smoke Test Suite', () => {
   it('Claude SDK: full chat loop, model override propagation, approval-gating, and usage frames', async () => {
@@ -26,20 +27,21 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
           inputTokens: 1200,
           outputTokens: 350,
           cachedInputTokens: 500,
-          totalTokens: 1550,
           costUsdEstimate: 0.012,
         },
       };
     }
 
     const fakeClaudeHarness: HarnessAdapter = {
+      vendor: 'claude-code',
       async start(spec: StartSpec): Promise<SessionHandle> {
         capturedSpec = spec;
         return {
+          vendor: 'claude-code',
           sessionId: async () => '11111111-1111-1111-1111-111111111111',
           events: makeEvents(),
-          send: vi.fn(async () => {}),
-          respondToApproval: vi.fn(async (requestId, decision) => {
+          send: vi.fn(),
+          respondToApproval: vi.fn((requestId, decision) => {
             approvalResponded = { id: requestId, decision };
           }),
           interrupt: vi.fn(async () => {}),
@@ -47,6 +49,8 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
         };
       },
       resume: vi.fn(),
+      authStatus: vi.fn(async () => ({ configured: true })),
+      listSessions: vi.fn(async () => []),
     };
 
     const adapter = new ClaudeSdkAdapter(
@@ -83,7 +87,6 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
         inputTokens: 1200,
         outputTokens: 350,
         cachedInputTokens: 500,
-        totalTokens: 1550,
         costUsdEstimate: 0.012,
       });
     });
@@ -103,24 +106,27 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
           inputTokens: 2400,
           outputTokens: 800,
           cachedInputTokens: 1200,
-          totalTokens: 3200,
         },
       };
     }
 
     const fakeCodexHarness: HarnessAdapter = {
+      vendor: 'codex',
       async start(spec: StartSpec): Promise<SessionHandle> {
         capturedSpec = spec;
         return {
+          vendor: 'codex',
           sessionId: async () => '22222222-2222-2222-2222-222222222222',
           events: makeEvents(),
-          send: vi.fn(async () => {}),
-          respondToApproval: vi.fn(async () => {}),
+          send: vi.fn(),
+          respondToApproval: vi.fn(),
           interrupt: vi.fn(async () => {}),
           dispose: vi.fn(async () => {}),
         };
       },
       resume: vi.fn(),
+      authStatus: vi.fn(async () => ({ configured: true })),
+      listSessions: vi.fn(async () => []),
     };
 
     const adapter = new CodexSdkAdapter(
@@ -150,7 +156,6 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
         inputTokens: 2400,
         outputTokens: 800,
         cachedInputTokens: 1200,
-        totalTokens: 3200,
       });
     });
 
@@ -159,10 +164,13 @@ describe('Cross-Engine Chat Smoke Test Suite', () => {
 
   it('Error Frame & Rejection Handling: surfaces model name and actionable guidance when engine rejects model', async () => {
     const invalidModelHarness: HarnessAdapter = {
+      vendor: 'codex',
       async start(spec: StartSpec): Promise<SessionHandle> {
         throw new Error(formatModelRejectionError('codex-cli', spec.model || 'unknown', 'model_not_found'));
       },
       resume: vi.fn(),
+      authStatus: vi.fn(async () => ({ configured: true })),
+      listSessions: vi.fn(async () => []),
     };
 
     const adapter = new CodexSdkAdapter(
