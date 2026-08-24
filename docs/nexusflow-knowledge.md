@@ -63,8 +63,17 @@ In addition to parallel execution, `MultiAgentOrchestrator` supports sequential 
 
 ### Decision: Model Selection Plumbing & Chat UI Picker
 Model selection is plumbed end-to-end:
-1. **Backend**: `AgentSession.model` -> `ClaudeSdkAdapter` / `CodexSdkAdapter` and `StartSpec.model` -> vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
-2. **Frontend**: The chat UI provides a per-provider model picker in the composer control bar, reflects the active model in the header status badge, stores preferences in `ChatStore.modelsByProvider`, and routes choices via `ChatLaunchIntent.model` and WebSocket `startPayload.model`.
+1. **Backend & Shared Catalog**: `src/agent/models.ts` and `gui/src/features/chat/models.ts` maintain verified current model catalogs (Claude: `claude-3-7-sonnet-latest`, `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`, `claude-3-opus-latest`; Codex: `gpt-5-codex`, `gpt-5`, `o3`, `o3-mini`, `gpt-4o`). Deprecated models (such as retired `gpt-4.5-preview`) are pruned.
+2. **Adapter & Engine Propagation**: `AgentSession.model` flows through `ClaudeSdkAdapter` / `CodexSdkAdapter` down to `StartSpec.model` into vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
+3. **Frontend UX**: The chat UI provides a per-provider model picker in the composer control bar, reflects the active model in the header status badge, stores preferences in `ChatStore.modelsByProvider`, and routes choices via `ChatLaunchIntent.model` and WebSocket `startPayload.model`.
+4. **Rejection UX**: If a vendor engine rejects an unknown model ID, `formatModelRejectionError` surfaces the rejected model string with explicit remediation instructions so the user can easily reselect.
+
+### Decision: Cross-Engine Chat Smoke Suite
+The scripted cross-engine smoke suite (`scripts/smoke-chat-engines.ts` / `test/smoke-chat.test.ts`) verifies end-to-end:
+- Model catalog currency and ID validity.
+- Claude SDK model choice, approval gating (denial of mutating lifecycle tools with guidance copy), and usage extraction.
+- Codex SDK model override pass-through and usage frame emission.
+- Invalid-model rejection error frame surfacing.
 
 ### Gotcha: Inter-Agent Context Injection & Trust Domain Boundary
 In pipeline mode, upstream phase output is threaded verbatim into downstream prompts (`## Context from Prior Phases:`). In today's architecture, all pipeline agents operate within a single trusted workspace domain. However, if teamwork workflows are extended across different trust profiles or accept untrusted inputs, unvalidated upstream text acts as an inter-agent prompt-injection channel and must be strictly sanitized or distilled.

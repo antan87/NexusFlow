@@ -29,6 +29,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:gui": "npm run test:e2e --prefix gui",
+    "smoke:chat": "npx tsx scripts/smoke-chat-engines.ts",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build",
     "extension:install": "npm install --prefix extension",

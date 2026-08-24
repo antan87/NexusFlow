@@ -11,6 +11,7 @@ import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
+import { PROVIDER_MODELS, modelLabelForId } from './models.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import AnsiImport from 'ansi-to-react';
@@ -48,29 +49,6 @@ interface ExecutionProfileOption {
   label: string;
   description: string;
 }
-
-export interface ModelOption {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export const PROVIDER_MODELS: Record<string, ModelOption[]> = {
-  'claude-cli': [
-    { id: '', label: 'Default (3.7 Sonnet)', description: 'Default model (Claude 3.7 Sonnet)' },
-    { id: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet', description: 'Highest capability hybrid reasoning model' },
-    { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet', description: 'Balanced speed and intelligence' },
-    { id: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku', description: 'Fastest turn completion' },
-    { id: 'claude-3-opus-latest', label: 'Claude 3 Opus', description: 'Deep context reasoning' },
-  ],
-  'codex-cli': [
-    { id: '', label: 'Default (o3-mini)', description: 'Default model (o3-mini)' },
-    { id: 'o3-mini', label: 'o3-mini', description: 'High-speed reasoning and STEM model' },
-    { id: 'o1', label: 'o1', description: 'Full reasoning model for complex architecture' },
-    { id: 'gpt-4o', label: 'GPT-4o', description: 'Omni multi-modal general intelligence' },
-    { id: 'gpt-4.5-preview', label: 'GPT-4.5 Preview', description: 'Flagship language model' },
-  ],
-};
 
 const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
   'claude-cli': new Set([
@@ -1177,7 +1155,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           <h3 className="font-semibold text-foreground">Chat</h3>
           <StatusBadge tone={connected ? 'running' : 'idle'} dot>
             {connected
-              ? `${currentProvider?.name || 'Connected'}${modelsByProvider[currentProvider?.id ?? ''] ? ` (${PROVIDER_MODELS[currentProvider?.id ?? '']?.find(m => m.id === modelsByProvider[currentProvider?.id ?? ''])?.label || modelsByProvider[currentProvider?.id ?? '']})` : ''}`
+              ? `${currentProvider?.name || 'Connected'}${modelsByProvider[currentProvider?.id ?? ''] ? ` (${modelLabelForId(currentProvider?.id ?? '', modelsByProvider[currentProvider?.id ?? ''])})` : ''}`
               : 'Disconnected'}
           </StatusBadge>
         </div>
@@ -1358,7 +1336,7 @@ export function AgentChat({ ws }: AgentChatProps) {
                     disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
                     className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                   >
-                    {PROVIDER_MODELS[currentProvider.id]?.find(m => m.id === (modelsByProvider[currentProvider.id] ?? ''))?.label || 'Model'}
+                    {modelLabelForId(currentProvider.id, modelsByProvider[currentProvider.id] ?? '')}
                   </MenuTrigger>
                   <MenuPopup align="start" side="top" className="max-w-80">
                     {PROVIDER_MODELS[currentProvider.id]?.map((m) => (

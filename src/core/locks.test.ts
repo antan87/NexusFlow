@@ -140,6 +140,18 @@ describe('acquireLock', () => {
     expect(JSON.parse(await fs.readFile(lockPath, 'utf-8')).pid).toBe(process.pid);
     await release();
   });
+
+  it('reclaims stale lock via open fd handle when PID is dead or mtime has expired', async () => {
+    const lockPath = path.join(dir, 'fd-reclaim.lock');
+    // Create an initial lock file with dead PID
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 999_999, ts: Date.now() - 5000 }), 'utf-8');
+
+    // Acquire lock should inspect through fd and reclaim immediately
+    const release = await acquireLock(lockPath, { ...OPTIONS, staleMs: 50, timeoutMs: 500 });
+    const content = JSON.parse(await fs.readFile(lockPath, 'utf-8'));
+    expect(content.pid).toBe(process.pid);
+    await release();
+  });
 });
 
 describe('createMutationQueue', () => {
