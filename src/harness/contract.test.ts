@@ -408,5 +408,70 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       expect(aborted).toBe(true);
       await handle.dispose();
     });
+
+    it('does not run queued or later prompts after an interrupted turn fails fatally', async () => {
+      let streamWaiting!: () => void;
+      const streamIsWaiting = new Promise<void>((resolve) => {
+        streamWaiting = resolve;
+      });
+
+      async function* interruptedStream(signal?: AbortSignal) {
+        yield {
+          type: 'thread.started',
+          thread_id: 'codex-thread-interrupted',
+        };
+        await new Promise<void>((_resolve, reject) => {
+          const fail = () => reject(new Error('turn aborted'));
+          if (signal?.aborted) {
+            fail();
+            return;
+          }
+          signal?.addEventListener('abort', fail, { once: true });
+          streamWaiting();
+        });
+      }
+
+      const runStreamed = vi.fn().mockImplementation((_prompt, opts) => (
+        Promise.resolve({ events: interruptedStream(opts?.signal) })
+      ));
+      const mockThread = {
+        id: 'codex-thread-interrupted',
+        runStreamed,
+      };
+      const mockClient = {
+        startThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+      const handle = await adapter.start({
+        prompt: 'Active prompt',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+      });
+      const events = handle.events[Symbol.asyncIterator]();
+
+      await expect(events.next()).resolves.toEqual({
+        done: false,
+        value: { type: 'session_started', sessionId: 'codex-thread-interrupted' },
+      });
+      await streamIsWaiting;
+
+      handle.send('Queued follow-up');
+      await handle.interrupt();
+
+      await expect(events.next()).resolves.toMatchObject({
+        done: false,
+        value: { type: 'turn_failed', fatal: true },
+      });
+      await expect(events.next()).resolves.toEqual({ done: true, value: undefined });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runStreamed).toHaveBeenCalledTimes(1);
+
+      handle.send('Prompt after fatal failure');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(runStreamed).toHaveBeenCalledTimes(1);
+
+      await handle.dispose();
+    });
   });
 });
