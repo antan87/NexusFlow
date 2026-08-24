@@ -1,50 +1,96 @@
 name: Release
 
 # One deliberate, coordinated release for every channel (npm + VS Code extension
-# + desktop installer), triggered by pushing a version tag:
+# + desktop installer), dispatched against protected default-branch workflow code:
 #
-#   npm version minor        # bumps + syncs every package, creates the vX.Y.Z tag
-#   git push --follow-tags   # pushing the tag runs this workflow
+#   npm version minor --no-git-tag-version  # bump + sync in a reviewed PR
+#   gh api repos/OWNER/REPO/dispatches \
+#     -f event_type=release -F client_payload[version]=X.Y.Z
 #
-# Prerelease tags (e.g. v1.2.0-rc.1) publish npm under the "next" dist-tag, mark
+# The repository_dispatch event always loads this workflow from the default
+# branch. The guard validates the requested version and creates the tag at that
+# protected source SHA before any publish job starts.
+#
+# Prerelease versions (e.g. 1.2.0-rc.1) publish npm under the "next" dist-tag, mark
 # the GitHub Release as a prerelease, and skip the Marketplace (which does not
 # support semver prerelease suffixes).
 
 on:
-  push:
-    tags:
-      - 'v*'
+  repository_dispatch:
+    types: [release]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  # ── Gate: the tag, the root version, and every synced file must agree ────────
+  # ── Gate: protected source, requested version, and synced files must agree ──
   guard:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release guard must prove the dispatched source belongs to the
+          # protected default-branch history before any irreversible publish.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
+      - name: Require dispatched source on protected default branch
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Dispatched source $GITHUB_SHA is not on origin/$DEFAULT_BRANCH. Merge through protected CI before releasing."
+            exit 1
+          fi
+          echo "Dispatched source is on protected origin/$DEFAULT_BRANCH history."
+
       - name: Resolve and validate version
         id: resolve
+        env:
+          REQUESTED: ${{ github.event.client_payload.version }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           PKG=$(node -p "require('./package.json').version")
-          echo "Tag version: $TAG / package.json version: $PKG"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "::error::Tag ($TAG) does not match package.json version ($PKG). Bump with 'npm version'."
+          echo "Requested version: $REQUESTED / package.json version: $PKG"
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" != "$PKG" ]; then
+            echo "::error::Requested version ($REQUESTED) does not match package.json version ($PKG). Merge a synchronized version bump first."
             exit 1
           fi
           node scripts/sync-version.mjs --check
           echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          echo "tag=v$PKG" >> "$GITHUB_OUTPUT"
           if [[ "$PKG" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create immutable release tag
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          REMOTE_SHA=$(git ls-remote --refs origin "refs/tags/$TAG" | awk '{print $1}')
+          if [ -n "$REMOTE_SHA" ]; then
+            if [ "$REMOTE_SHA" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $TAG already exists at $REMOTE_SHA, expected $GITHUB_SHA. Refusing to move it."
+              exit 1
+            fi
+            echo "Tag $TAG already exists at the protected source SHA; continuing idempotently."
+          else
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
           fi
 
   # ── npm ──────────────────────────────────────────────────────────────────────
@@ -192,7 +238,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ needs.guard.outputs.tag }}
           name: Release v${{ needs.guard.outputs.version }}
           generate_release_notes: true
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
