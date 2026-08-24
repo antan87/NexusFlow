@@ -1,0 +1,43 @@
+# Vim Navigation Mode Specification
+
+NexusFlow features a first-class, opt-in keyboard navigation layer modeled on Vim modal paradigms.
+
+---
+
+## ⌨️ Design Principles
+
+- **Modes like Vim**: `NORMAL` (navigation, cycling tabs, and quick actions), `INSERT` (typing in fields — full native pass-through except `Esc`), and `COMMAND` (`:` cmdline prompt).
+- **Never fight the user**: Keystrokes are intercepted only outside editable fields and active dialog overlays. Mouse interaction remains fully functional. Native `Tab` behavior is untouched.
+- **Opt-in with quick toggle**: Disabled by default (`localStorage["nf:vim-enabled"] === "on"`). Easily toggled on/off with `\` from anywhere, the statusline button, or the Settings toggle.
+- **Discoverability**: Persistent statusline at the bottom of the screen indicating active mode, scope, and pending chords, paired with an interactive keybinding cheatsheet (`?`).
+- **Mirror CLI verbs**: `s` (start), `S` (stop), `L` (logs), `o` (open), `d` (diff), `c` (commit), `r` (sync), `f` (refresh) align directly with `nexusflow start|stop|logs|diff|commit|sync|refresh`.
+
+---
+
+## 🗺️ Keymap Reference
+
+| Key | Action | Description |
+|:---|:---|:---|
+| `j` / `k` (with count, e.g. `3j`) | next / previous item | Move focus between items in the active view (or smooth scroll in document scopes) |
+| `h` / `l` | previous / next tab | Switch to previous / next view or workspace subtab |
+| `gg` / `G` | first / last item | Jump to first / last item in active scope or top / bottom of scroll regions |
+| `gt` / `gT` / `g1`–`g9` | cycle / jump to tab | Cycle tabs or jump directly to tab index 1–9 |
+| `Enter` / `Space` | activate focused item | Activate / click the focused element |
+| `i` | focus search/filter | Focus nearest search or filter input (`INSERT` mode) |
+| `Esc` | normal mode / dismiss | Leave `INSERT` mode, clear pending chords, close modals |
+| `:` | command line prompt | Open command line (`:help :start :stop :logs :diff :commit :sync :refresh :doctor :tab <name> :top :bottom :w :q`) |
+| `s` `S` `L` `o` `d` `c` `r` `f` | workspace actions | Quick actions: start, stop, logs, open, diff, commit, sync, refresh |
+| `Ctrl+d` / `Ctrl+u` | half-page scroll | Smoothly scroll half page down / up in active panel |
+| `?` | keybinding cheatsheet | Toggle keybinding cheatsheet overlay |
+| `\` | toggle vim mode | Toggle Vim navigation mode on / off globally |
+
+---
+
+## 🏗️ Architecture & Data Attributes
+
+- **`data-vim-scope="<name>"`**: Identifies the active navigational scope (e.g. `overview`, `changes`, `services`, `sessions`, `knowledge`, `plan`, `skills`, `projects`, `settings`, `new`).
+- **`data-vim-item`**: Identifies navigable rows, cards, or list entries.
+- **`data-vim-action="<action>"`**: Tags buttons for quick action triggers (`start`, `stop`, `logs`, `open`, `diff`, `commit`, `sync`, `refresh`).
+- **`data-vim-search`**: Marks view search and filter inputs for `i` focus.
+- **`data-vim-scroll`**: Marks scrollable output regions (e.g. terminal log viewer, diff pre, knowledge markdown).
+- **`data-vim-tab="<tab>"`**: Marks tab buttons for tab-switching chords.

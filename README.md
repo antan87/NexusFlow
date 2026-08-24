@@ -388,7 +388,7 @@ The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serv
 
 ### ⌨️ Vim Navigation Mode
 
-NexusFlow includes a native keyboard-centric Vim navigation mode for seamless dashboard control (disabled by default; toggle on with `\` or in Settings):
+NexusFlow includes a native keyboard-centric Vim navigation mode for seamless dashboard control (disabled by default; toggle on with `\` or in Settings). For the complete specification and design principles, see [docs/vim-keybindings.md](docs/vim-keybindings.md):
 
 - **Modes**:
   - `NORMAL` — navigate elements, cycle tabs, and execute workspace actions.
