@@ -110,6 +110,22 @@ describe('acquireLock', () => {
     expect(laterStat.mtimeMs).toBeGreaterThan(initialStat.mtimeMs);
     await release();
   });
+
+  it('prevents another process from stealing a lock during long holds via continuous heartbeats', async () => {
+    const lockPath = path.join(dir, 'long-turn.lock');
+    // Lock with 100ms staleness window and 30ms heartbeat
+    const release = await acquireLock(lockPath, { ...OPTIONS, staleMs: 100, heartbeatMs: 30 });
+
+    // Wait longer than the staleness window (180ms)
+    await new Promise((r) => setTimeout(r, 180));
+
+    // Try to acquire the lock immediately with 0 timeout from a second attempt - should fail because heartbeat kept it fresh
+    await expect(
+      acquireLock(lockPath, { ...OPTIONS, staleMs: 100, timeoutMs: 0, timeoutMessage: 'lock still actively held' }),
+    ).rejects.toThrow('lock still actively held');
+
+    await release();
+  });
 });
 
 describe('createMutationQueue', () => {

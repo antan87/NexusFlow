@@ -66,6 +66,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
             rootPath: this.cwd,
           },
           permissionMode,
+          model: this.session?.model || process.env.ANTHROPIC_MODEL || process.env.CLAUDE_MODEL || undefined,
           env: {
             CLAUDE_CODE_PROJECT_DIR_NAME: workspaceId,
             CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '.', '.claude'),

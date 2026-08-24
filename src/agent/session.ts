@@ -9,6 +9,7 @@ import type { AgentExecutionProfile } from './ProviderRegistry.js';
 export interface AgentSession {
   id: string;
   resume: boolean;
+  model?: string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
