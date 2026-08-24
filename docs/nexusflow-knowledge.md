@@ -58,8 +58,19 @@ To prevent long agent turns (>10s to minutes) from having their locks stolen by 
 ### Decision: Teamwork Pipeline Mode & Context Threading
 In addition to parallel execution, `MultiAgentOrchestrator` supports sequential pipeline mode (`mode: 'pipeline'`) for dependent workflows (e.g. Plan -> Implement -> Review). In pipeline mode, downstream phases automatically receive the accumulated text outputs of prior phases (`## Context from Prior Phases:`) unless explicitly opted out (`includePriorContext: false`). If an upstream phase fails or is cancelled, downstream phases are skipped fail-fast. `TeamworkResult` reports `success: boolean`, `partialSuccess: boolean`, and `failureReason?: string`.
 
-### Decision: Model Selection Plumbing Across Adapters
-Model selection is plumbed down from `AgentSession.model` through `ClaudeSdkAdapter` / `CodexSdkAdapter` and `StartSpec.model` into vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
+### Decision: Output Capping & Truncation in Multi-Agent Pipelines
+`MultiAgentOrchestrator` caps accumulated stream output per agent at 16KB (`MAX_OUTPUT_CAPTURE_CHARS = 16_000`) using `appendCappedOutput()` and inserts a `[... prior output truncated ...]` marker if the cap is exceeded. This prevents unbounded memory accumulation and saves context window space from being spent on raw tool output when threading results across pipeline phases.
+
+### Decision: Model Selection Plumbing & Chat UI Picker
+Model selection is plumbed end-to-end:
+1. **Backend**: `AgentSession.model` -> `ClaudeSdkAdapter` / `CodexSdkAdapter` and `StartSpec.model` -> vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
+2. **Frontend**: The chat UI provides a per-provider model picker in the composer control bar, reflects the active model in the header status badge, stores preferences in `ChatStore.modelsByProvider`, and routes choices via `ChatLaunchIntent.model` and WebSocket `startPayload.model`.
+
+### Gotcha: Inter-Agent Context Injection & Trust Domain Boundary
+In pipeline mode, upstream phase output is threaded verbatim into downstream prompts (`## Context from Prior Phases:`). In today's architecture, all pipeline agents operate within a single trusted workspace domain. However, if teamwork workflows are extended across different trust profiles or accept untrusted inputs, unvalidated upstream text acts as an inter-agent prompt-injection channel and must be strictly sanitized or distilled.
+
+### Gotcha: TOCTOU Race Condition Mitigation in Lock Staleness Checks
+To prevent time-of-check to time-of-use (TOCTOU) races where a lock file is deleted or modified concurrently during staleness inspection, `clearStaleLock` opens the file descriptor directly (`fs.open('r')`) and performs `fstat` and `read` on the open descriptor, safely ignoring `ENOENT` if the file vanished.
 
 ### Gotcha: PID Liveness Same-Host Boundary & Staleness Backstop
 Lock PID liveness checks (`process.kill(pid, 0)`) operate on the local OS process table. On distributed / shared network filesystems (NFS, SMB) or when PID numbers are recycled, the `staleMs` expiration acts as the authoritative backstop.

@@ -49,6 +49,29 @@ interface ExecutionProfileOption {
   description: string;
 }
 
+export interface ModelOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const PROVIDER_MODELS: Record<string, ModelOption[]> = {
+  'claude-cli': [
+    { id: '', label: 'Default (3.7 Sonnet)', description: 'Default model (Claude 3.7 Sonnet)' },
+    { id: 'claude-3-7-sonnet-latest', label: 'Claude 3.7 Sonnet', description: 'Highest capability hybrid reasoning model' },
+    { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet', description: 'Balanced speed and intelligence' },
+    { id: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku', description: 'Fastest turn completion' },
+    { id: 'claude-3-opus-latest', label: 'Claude 3 Opus', description: 'Deep context reasoning' },
+  ],
+  'codex-cli': [
+    { id: '', label: 'Default (o3-mini)', description: 'Default model (o3-mini)' },
+    { id: 'o3-mini', label: 'o3-mini', description: 'High-speed reasoning and STEM model' },
+    { id: 'o1', label: 'o1', description: 'Full reasoning model for complex architecture' },
+    { id: 'gpt-4o', label: 'GPT-4o', description: 'Omni multi-modal general intelligence' },
+    { id: 'gpt-4.5-preview', label: 'GPT-4.5 Preview', description: 'Flagship language model' },
+  ],
+};
+
 const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
   'claude-cli': new Set([
     'npm install -g @anthropic-ai/claude-code',
@@ -198,8 +221,9 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
 interface StartAgentOptions {
   firstMessage?: string | null;
   executionProfile?: ChatExecutionProfile;
+  model?: string;
   provider?: ChatProvider;
-  session?: { id: string; started: boolean };
+  session?: { id: string; started: boolean; model?: string };
   resetSession?: boolean;
   resetMessagesOnDispatch?: boolean;
   onDispatched?: () => void;
@@ -307,6 +331,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [turnOpen, setTurnOpen] = useState(false);
   const [agentName, setAgentName] = useState('');
   const [profilesByProvider, setProfilesByProvider] = useState(initialStore.profilesByProvider);
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, string>>(initialStore.modelsByProvider ?? {});
   const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [sessionRevision, setSessionRevision] = useState(0);
@@ -329,7 +354,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const turnOpenRef = useRef(false);
   const endedNoteRef = useRef(false);
   // Latest snapshot for the debounced/unmount flush.
-  const latestRef = useRef({ messages, agentName, profilesByProvider });
+  const latestRef = useRef({ messages, agentName, profilesByProvider, modelsByProvider });
   const profilesByProviderRef = useRef(profilesByProvider);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedIntentRef = useRef<string | null>(null);
@@ -341,9 +366,9 @@ export function AgentChat({ ws }: AgentChatProps) {
   const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
 
   useEffect(() => {
-    latestRef.current = { messages, agentName, profilesByProvider };
+    latestRef.current = { messages, agentName, profilesByProvider, modelsByProvider };
     profilesByProviderRef.current = profilesByProvider;
-  }, [messages, agentName, profilesByProvider]);
+  }, [messages, agentName, profilesByProvider, modelsByProvider]);
 
   const flushPersist = useCallback(() => {
     persistTimer.current = null;
@@ -352,6 +377,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       sessions: sessionsRef.current,
       providerId: latestRef.current.agentName || initialStore.providerId,
       profilesByProvider: latestRef.current.profilesByProvider,
+      modelsByProvider: latestRef.current.modelsByProvider,
       messages: latestRef.current.messages,
     });
   }, [ws.branchName, initialStore.providerId]);
@@ -609,6 +635,10 @@ export function AgentChat({ ws }: AgentChatProps) {
         // generated context files live (see src/utils/feature.ts).
         cwd: ws.workspacePath,
       };
+      const selectedModel = options.model ?? modelsByProvider[providerId];
+      if (selectedModel) {
+        startPayload.model = selectedModel;
+      }
       const nextSessions = { ...sessionsRef.current };
       if (options.resetSession) delete nextSessions[providerId];
       if (options.session) nextSessions[providerId] = options.session;
@@ -1039,6 +1069,12 @@ export function AgentChat({ ws }: AgentChatProps) {
       ...current,
       [launchIntent.providerId]: launchIntent.executionProfile,
     }));
+    if (launchIntent.model) {
+      setModelsByProvider(current => ({
+        ...current,
+        [launchIntent.providerId]: launchIntent.model!,
+      }));
+    }
     if (!provider?.isConfigured) {
       appendSystemNote(
         provider?.message ?? 'The selected local CLI is unavailable. Install it and sign in, then try again.',
@@ -1140,7 +1176,9 @@ export function AgentChat({ ws }: AgentChatProps) {
         <div className="flex items-center gap-3 min-w-0">
           <h3 className="font-semibold text-foreground">Chat</h3>
           <StatusBadge tone={connected ? 'running' : 'idle'} dot>
-            {connected ? currentProvider?.name || 'Connected' : 'Disconnected'}
+            {connected
+              ? `${currentProvider?.name || 'Connected'}${modelsByProvider[currentProvider?.id ?? ''] ? ` (${PROVIDER_MODELS[currentProvider?.id ?? '']?.find(m => m.id === modelsByProvider[currentProvider?.id ?? ''])?.label || modelsByProvider[currentProvider?.id ?? '']})` : ''}`
+              : 'Disconnected'}
           </StatusBadge>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -1310,6 +1348,36 @@ export function AgentChat({ ws }: AgentChatProps) {
               <span className="text-xs text-muted-foreground">
                 {currentProvider?.accessLabel ?? 'Harness-managed access'}
               </span>
+            )}
+            {currentProvider && PROVIDER_MODELS[currentProvider.id] && (
+              <>
+                <div className="h-4 w-px bg-border"></div>
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Select model"
+                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {PROVIDER_MODELS[currentProvider.id]?.find(m => m.id === (modelsByProvider[currentProvider.id] ?? ''))?.label || 'Model'}
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="top" className="max-w-80">
+                    {PROVIDER_MODELS[currentProvider.id]?.map((m) => (
+                      <MenuItem
+                        key={m.id}
+                        onClick={() => setModelsByProvider(current => ({
+                          ...current,
+                          [currentProvider.id]: m.id,
+                        }))}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium">{m.label}</span>
+                          <span className="text-xs text-muted-foreground">{m.description}</span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              </>
             )}
           </div>
           <div className="flex items-end gap-2 p-2">

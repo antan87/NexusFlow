@@ -8,6 +8,7 @@ export interface ChatLaunchIntent {
   providerId: EmbeddedHarnessProvider;
   assistant?: EmbeddedHarnessAssistant;
   sessionId?: string;
+  model?: string;
   kickoff?: string;
   executionProfile: ChatExecutionProfile;
 }
@@ -47,7 +48,7 @@ export function assistantLabel(assistant: EmbeddedHarnessAssistant): string {
 
 export function createChatLaunchIntent(
   assistant: EmbeddedHarnessAssistant,
-  options: { sessionId?: string; kickoff?: string; executionProfile?: ChatExecutionProfile } = {},
+  options: { sessionId?: string; model?: string; kickoff?: string; executionProfile?: ChatExecutionProfile } = {},
 ): ChatLaunchIntent {
   return {
     nonce: globalThis.crypto.randomUUID(),
@@ -77,6 +78,9 @@ export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
     return null;
   }
 
+  if (value.model !== undefined && (typeof value.model !== 'string' || value.model.length > 100)) {
+    return null;
+  }
   if (value.assistant !== undefined && providerForAssistant(value.assistant) !== value.providerId) return null;
   if (value.sessionId !== undefined) {
     if (!UUID_RE.test(value.sessionId)) return null;
