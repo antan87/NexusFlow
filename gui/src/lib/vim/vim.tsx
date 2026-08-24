@@ -111,7 +111,6 @@ const FOCUS_CLASS = 'vim-focus';
 const ACTION_KEYS: Record<string, string> = {
   s: 'start',
   S: 'stop',
-  l: 'logs',
   L: 'logs',
   o: 'open',
   O: 'open',
