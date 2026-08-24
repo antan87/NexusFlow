@@ -388,14 +388,14 @@ The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serv
 
 ### ⌨️ Vim Navigation Mode
 
-NexusFlow includes a native keyboard-centric Vim navigation mode for seamless dashboard control:
+NexusFlow includes a native keyboard-centric Vim navigation mode for seamless dashboard control (disabled by default; toggle on with `\` or in Settings):
 
 - **Modes**:
   - `NORMAL` — navigate elements, cycle tabs, and execute workspace actions.
   - `INSERT` — activated when typing in search inputs and text fields. Press `Esc` to return to `NORMAL`.
   - `COMMAND` — command-line prompt opened with `:`. Execute commands such as `:start`, `:stop`, `:logs`, `:diff`, `:commit`, `:sync`, `:refresh`, `:doctor`, `:tab <name>`, `:w`, `:help`, and `:q`.
 - **Statusline & Cheatsheet**: Persistent bottom statusline displaying the current mode, active scope, pending chords, and messages. Press `?` to toggle the cheatsheet overlay.
-- **Toggle**: Press `\` from anywhere or toggle **Vim Navigation Mode** under the **Settings** panel.
+- **Toggle**: Disabled by default. Press `\` from anywhere, click the statusline button, or toggle **Vim Navigation Mode** under the **Settings** panel.
 
 | Key | Action |
 |:---|:---|

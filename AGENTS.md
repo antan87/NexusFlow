@@ -9,6 +9,7 @@ NexusFlow is a multi-repo workspace manager for AI-assisted development that cre
 ### Design Principles
 - **Modes like Vim**: `NORMAL` (navigation, cycling tabs, and quick actions), `INSERT` (typing in fields — full native pass-through except `Esc`), and `COMMAND` (`:` cmdline prompt).
 - **Never fight the user**: Keystrokes are intercepted only outside editable fields and active dialog overlays. Mouse interaction remains fully functional. Native `Tab` behavior is untouched.
+- **Opt-in with quick toggle**: Disabled by default (`localStorage["nf:vim-enabled"] === "on"`). Easily toggled on/off with `\` from anywhere, the statusline button, or the Settings toggle.
 - **Discoverability**: Persistent statusline at the bottom of the screen indicating active mode, scope, and pending chords, paired with a visual keybinding cheatsheet (`?`).
 - **Mirror CLI verbs**: `s` (start), `S` (stop), `L` (logs), `o` (open), `d` (diff), `c` (commit), `r` (sync), `f` (refresh) align directly with `nexusflow start|stop|logs|diff|commit|sync|refresh`.
 
