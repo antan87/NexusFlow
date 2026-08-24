@@ -340,7 +340,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   {/* Unified Divided Overview Card */}
                   <Card className="divide-y divide-border overflow-hidden surface-card">
                     {/* Section 1: AI Assistant & Fast Action Header */}
-                    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between bg-muted/20">
+                    <div
+                      data-vim-item
+                      tabIndex={-1}
+                      className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between bg-muted/20 hover:bg-muted/30 transition-colors"
+                    >
                       <div className="flex items-center gap-3">
                         <span className="grid size-9 place-items-center rounded-lg border border-border bg-card text-foreground shadow-xs">
                           {selected.assistants[0] === 'claude' ? (
@@ -368,6 +372,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <Button
                         size="sm"
                         variant="default"
+                        data-vim-action="open"
                         onClick={() => onSelectTab(selected.branchName, 'sessions')}
                       >
                         AI Sessions & Harnesses →
@@ -376,7 +381,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
                     {/* Section 2: Workspace Description (if present) */}
                     {selected.description && (
-                      <div className="p-4">
+                      <div className="p-4" data-vim-item tabIndex={-1}>
                         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                           Description
                         </h4>
@@ -410,7 +415,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       </div>
                       <div className="divide-y divide-border/60">
                         {repoRows.map((r) => (
-                          <div key={r.name} data-vim-item tabIndex={-1} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 text-xs">
+                          <div
+                            key={r.name}
+                            data-vim-item
+                            tabIndex={-1}
+                            className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 text-xs hover:bg-accent/30 px-2 rounded-md transition-colors"
+                          >
                             <div className="flex items-center gap-2 font-mono min-w-0">
                               <span
                                 className={cn(
@@ -437,7 +447,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     </div>
 
                     {/* Section 4: Workspace Active Skills & Capabilities */}
-                    <div className="p-4">
+                    <div data-vim-item tabIndex={-1} className="p-4 hover:bg-muted/20 transition-colors">
                       <div className="mb-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -455,6 +465,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         <Button
                           size="xs"
                           variant="outline"
+                          data-vim-action="open"
                           onClick={() => onSelectTab(selected.branchName, 'skills')}
                           className="text-xs gap-1.5"
                         >
@@ -476,10 +487,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <Button
                             size="xs"
                             variant="ghost"
+                            data-vim-action="open"
                             onClick={() => onSelectTab(selected.branchName, 'skills')}
                             className="shrink-0 text-primary hover:text-primary mt-2 sm:mt-0 font-medium"
                           >
-                            Configure Skills →
+                            <span>Browse Skills Catalog →</span>
                           </Button>
                         </div>
                       ) : (
@@ -503,7 +515,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                     'text-[10px] font-mono uppercase px-1 py-0.5 rounded border shrink-0',
                                     skill.custom
                                       ? 'border-purple-500/20 bg-purple-500/10 text-purple-400'
-                                      : 'border-border/70 bg-muted text-muted-foreground'
+                                      : 'border-border/70 bg-muted text-muted-foreground',
                                   )}
                                 >
                                   {skill.custom ? 'Custom' : 'Template'}

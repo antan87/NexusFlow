@@ -329,7 +329,7 @@ export function StartWorkPage() {
 
   // ── The form ─────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-xl animate-fade-in">
+    <div data-vim-scope="new" className="mx-auto max-w-xl animate-fade-in">
       <header className="mb-6">
         <h1 className="text-xl font-semibold">Start work</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -678,7 +678,7 @@ export function StartWorkPage() {
             <FolderGit2 className="size-3.5" />
             {selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'} selected
           </p>
-          <Button onClick={submit} disabled={!formValid || createWorkspace.isPending}>
+          <Button data-vim-item data-vim-action="start" onClick={submit} disabled={!formValid || createWorkspace.isPending}>
             {createWorkspace.isPending ? <Spinner /> : null}
             {inPlace ? 'Start working' : 'Create workspace'}
           </Button>

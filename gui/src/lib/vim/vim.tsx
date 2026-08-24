@@ -133,13 +133,25 @@ const visible = (el: Element) => {
 };
 
 const itemsIn = (scope: string) => {
-  const scoped = [
+  return [
     ...document.querySelectorAll<HTMLElement>(
       `[data-vim-scope="${scope}"] [data-vim-item], [data-vim-scope="${scope}"][data-vim-item]`,
     ),
   ].filter(visible);
-  if (scoped.length > 0) return scoped;
-  return [...document.querySelectorAll<HTMLElement>('[data-vim-item]')].filter(visible);
+};
+
+const getActiveScroller = (scope: string): HTMLElement | null => {
+  return (
+    document.querySelector<HTMLElement>(`[data-vim-scope="${scope}"] [data-vim-scroll]`) ??
+    document.querySelector<HTMLElement>(`[data-vim-scope="${scope}"] .overflow-auto`) ??
+    document.querySelector<HTMLElement>(`[data-vim-scope="${scope}"] pre`) ??
+    document.querySelector<HTMLElement>('[data-vim-scroll]') ??
+    document.querySelector<HTMLElement>('main.overflow-y-auto') ??
+    (document.querySelector<HTMLElement>('main')?.scrollHeight &&
+    document.querySelector<HTMLElement>('main')!.scrollHeight > document.querySelector<HTMLElement>('main')!.clientHeight
+      ? document.querySelector<HTMLElement>('main')
+      : null)
+  );
 };
 
 /* =========================== provider ========================== */
@@ -232,13 +244,16 @@ export function VimProvider(props: VimProviderProps) {
 
   const move = useCallback(
     (delta: number) => {
-      // No discrete items? treat scope as a scroll region (Logs panel).
-      const list = itemsIn(scope);
+      const currentScope = scopeRef.current;
+      // No discrete items? treat scope as a scroll region (Logs panel, markdown, page).
+      const list = itemsIn(currentScope);
       if (list.length === 0) {
-        const scroller = document.querySelector<HTMLElement>(
-          `[data-vim-scope="${scope}"] [data-vim-scroll], [data-vim-scroll]`,
-        );
-        if (scroller) scroller.scrollTop += delta * 32;
+        const scroller = getActiveScroller(currentScope);
+        if (scroller) {
+          scroller.scrollTop += delta * 48;
+        } else {
+          window.scrollBy({ top: delta * 48, behavior: 'smooth' });
+        }
         return;
       }
       const curIdx = focusedRef.current ? list.indexOf(focusedRef.current) : -1;
@@ -251,7 +266,7 @@ export function VimProvider(props: VimProviderProps) {
       }
       setFocused(list[next]);
     },
-    [scope, setFocused],
+    [setFocused],
   );
 
   /* ---- actions & commands ---- */
@@ -294,22 +309,26 @@ export function VimProvider(props: VimProviderProps) {
       }
       if (cmd === 'top' || cmd === 'first' || cmd === 'head') {
         const list = itemsIn(scopeRef.current);
-        if (list.length > 0) setFocused(list[0]);
+        if (list.length > 0) {
+          setFocused(list[0]);
+        } else {
+          const scroller = getActiveScroller(scopeRef.current);
+          if (scroller) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+        }
         return;
       }
       if (cmd === 'bottom' || cmd === 'last' || cmd === 'tail') {
         const list = itemsIn(scopeRef.current);
-        if (list.length > 0) setFocused(list[list.length - 1]);
+        if (list.length > 0) {
+          setFocused(list[list.length - 1]);
+        } else {
+          const scroller = getActiveScroller(scopeRef.current);
+          if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+        }
         return;
       }
       if (cmd === 'tab' && arg) {
-        const lowerArg = arg.toLowerCase();
-        const matched = tabs.find((t) => t.toLowerCase() === lowerArg);
-        if (matched) {
-          onSwitchTab(matched);
-        } else {
-          say(`No such tab: ${arg}`);
-        }
+        onSwitchTab(arg.toLowerCase());
         return;
       }
       if (cmd === 'w' || cmd === 'write') {
@@ -322,6 +341,10 @@ export function VimProvider(props: VimProviderProps) {
       }
       if (['start', 'stop', 'logs', 'open', 'diff', 'commit', 'sync', 'refresh'].includes(cmd)) {
         runAction(cmd);
+        return;
+      }
+      if (['overview', 'workspaces', 'projects', 'skills', 'strategies', 'settings', 'new', 'changes', 'services', 'sessions', 'knowledge', 'plan'].includes(cmd)) {
+        onSwitchTab(cmd);
         return;
       }
       say(`Not an editor command: :${raw}`);
@@ -366,10 +389,10 @@ export function VimProvider(props: VimProviderProps) {
       // Radix / Modal overlay guard: if an open modal or dropdown menu is detected, suspend Vim navigation
       const isOverlayOpen = !!document.querySelector(OVERLAY);
       if (isOverlayOpen) {
-        return; // suspend NORMAL mode navigation & actions; let Radix/modal handle events
+        return;
       }
 
-      /* INSERT mode: only ESC belongs to us, everything else is typing */
+      /* INSERT mode: only ESC belongs to us, everything else is native typing */
       if (modeRef.current === 'insert') {
         if (e.key === 'Escape') {
           (document.activeElement as HTMLElement | null)?.blur();
@@ -382,7 +405,7 @@ export function VimProvider(props: VimProviderProps) {
       /* caret sitting in a field in NORMAL mode: hands off, except ESC */
       if (inEditable) {
         if (e.key === 'Escape') {
-          t?.blur();
+          t!.blur();
           e.preventDefault();
         }
         return;
@@ -395,33 +418,38 @@ export function VimProvider(props: VimProviderProps) {
       /* g-chords: gg gt gT g1..g9 */
       if (pendingRef.current === 'g') {
         finish();
-        const t = tabsRef.current;
-        const curTab = activeTabRef.current;
-        const switchTab = onSwitchTabRef.current;
         if (/^[1-9]$/.test(e.key)) {
           const i = +e.key - 1;
-          if (t[i]) switchTab(t[i]);
+          const t = tabsRef.current;
+          if (t[i]) onSwitchTabRef.current(t[i]);
           return;
         }
         if (e.key === 't') {
+          const t = tabsRef.current;
           if (t.length > 0) {
-            const cur = t.indexOf(curTab);
+            const cur = t.indexOf(activeTabRef.current);
             const next = cur === -1 ? 0 : (cur + 1) % t.length;
-            switchTab(t[next]);
+            onSwitchTabRef.current(t[next]);
           }
           return;
         }
         if (e.key === 'T') {
+          const t = tabsRef.current;
           if (t.length > 0) {
-            const cur = t.indexOf(curTab);
+            const cur = t.indexOf(activeTabRef.current);
             const prev = cur === -1 ? t.length - 1 : (cur - 1 + t.length) % t.length;
-            switchTab(t[prev]);
+            onSwitchTabRef.current(t[prev]);
           }
           return;
         }
         if (e.key === 'g') {
-          const items = itemsIn(scopeRef.current);
-          if (items.length > 0) setFocused(items[0]);
+          const l = itemsIn(scopeRef.current);
+          if (l.length > 0) {
+            setFocused(l[0]);
+          } else {
+            const scroller = getActiveScroller(scopeRef.current);
+            if (scroller) scroller.scrollTo({ top: 0, behavior: 'smooth' });
+          }
           return;
         }
         return; // unknown chord: swallow
@@ -470,7 +498,12 @@ export function VimProvider(props: VimProviderProps) {
           return;
         case 'G': {
           const l = itemsIn(scopeRef.current);
-          if (l.length > 0) setFocused(l[l.length - 1]);
+          if (l.length > 0) {
+            setFocused(l[l.length - 1]);
+          } else {
+            const scroller = getActiveScroller(scopeRef.current);
+            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+          }
           finish();
           return;
         }
@@ -505,7 +538,7 @@ export function VimProvider(props: VimProviderProps) {
           return;
         case 'i': {
           const inp =
-            document.querySelector<HTMLInputElement>(`[data-vim-scope="${scope}"] [data-vim-search]`) ??
+            document.querySelector<HTMLInputElement>(`[data-vim-scope="${scopeRef.current}"] [data-vim-search]`) ??
             document.querySelector<HTMLInputElement>('[data-vim-search]') ??
             focusedRef.current?.querySelector<HTMLInputElement>('input, textarea');
           if (inp) {
@@ -518,7 +551,14 @@ export function VimProvider(props: VimProviderProps) {
         case 'd':
         case 'u':
           if (e.ctrlKey) {
-            window.scrollBy({ top: (window.innerHeight / 2) * (e.key === 'd' ? 1 : -1), behavior: 'smooth' });
+            const scroller = getActiveScroller(scopeRef.current);
+            const amount =
+              (scroller?.clientHeight ? scroller.clientHeight / 2 : innerHeight / 2) * (e.key === 'd' ? 1 : -1);
+            if (scroller) {
+              scroller.scrollBy({ top: amount, behavior: 'smooth' });
+            } else {
+              window.scrollBy({ top: amount, behavior: 'smooth' });
+            }
             e.preventDefault();
             return;
           }

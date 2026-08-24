@@ -139,7 +139,7 @@ test.describe('Vim Navigation Mode', () => {
 
       const statusline = page.locator('.vim-statusline');
       await expect(statusline).toBeVisible();
-      await expect(page.getByText('feature-alpha').first()).toBeVisible();
+      await expect(page.locator('[data-vim-scope="overview"] [data-vim-item]').first()).toBeVisible();
 
       // Navigate down with j
       await page.keyboard.press('j');

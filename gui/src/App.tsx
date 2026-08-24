@@ -1005,21 +1005,18 @@ Core Instructions:
     : (location.pathname.replace(/^\//, '').split('/')[0] || 'overview');
 
   const handleVimSwitchTab = (tab: string) => {
+    const lower = tab.toLowerCase();
     const wsId = routeWsId || defaultWorkspaceBranch || '';
-    if (isWorkspaceRoute) {
-      if (WORKSPACE_TABS.includes(tab)) {
-        navigate(`/workspaces/${encodeURIComponent(wsId)}/${tab}`);
-      } else if (TOP_TABS.includes(tab)) {
-        navigate(tab === 'workspaces' ? '/workspaces' : `/${tab}`);
+    if (WORKSPACE_TABS.includes(lower)) {
+      if (wsId) {
+        navigate(`/workspaces/${encodeURIComponent(wsId)}/${lower}`);
+      } else {
+        navigate(lower === 'overview' ? '/overview' : `/${lower}`);
       }
+    } else if (TOP_TABS.includes(lower) || lower === 'new' || lower === 'start' || lower === 'guide') {
+      navigate(lower === 'workspaces' ? '/workspaces' : lower === 'start' ? '/new' : `/${lower}`);
     } else {
-      if (TOP_TABS.includes(tab)) {
-        navigate(tab === 'workspaces' ? '/workspaces' : `/${tab}`);
-      } else if (WORKSPACE_TABS.includes(tab)) {
-        if (wsId) {
-          navigate(`/workspaces/${encodeURIComponent(wsId)}/${tab}`);
-        }
-      }
+      showToast(`Unknown tab or view: ${tab}`, 'info');
     }
   };
 

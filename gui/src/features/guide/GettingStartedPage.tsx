@@ -14,7 +14,7 @@ export function GettingStartedPage({
   onModifySettings,
 }: GettingStartedPageProps) {
   return (
-    <div className="max-w-4xl mx-auto animate-fade-in">
+    <div data-vim-scope="guide" className="max-w-4xl mx-auto animate-fade-in">
       <header className="mb-10">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-semibold uppercase tracking-wider mb-4">
           Getting Started Guide
@@ -96,12 +96,16 @@ export function GettingStartedPage({
 
           <div className="pt-6 border-t border-border flex flex-col gap-2">
             <Button
+              data-vim-item
+              data-vim-action="open"
               className="w-full gap-2"
               onClick={onCreateWorkspace}
             >
               <PlusCircle size={14} /> Create a Workspace
             </Button>
             <Button
+              data-vim-item
+              data-vim-action="open"
               variant="outline"
               className="w-full gap-2"
               onClick={onModifySettings}

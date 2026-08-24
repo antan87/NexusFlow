@@ -598,8 +598,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                 >
                   {/* Category Box Header */}
                   <div
+                    data-vim-item
+                    tabIndex={-1}
                     role="button"
-                    tabIndex={0}
                     aria-expanded={!isCollapsed}
                     onClick={() => toggleCategoryCollapse(category.id)}
                     onKeyDown={(e) => {
@@ -722,13 +723,15 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                             return (
                               <Card
                                 key={skill.id}
+                                data-vim-item
+                                data-vim-action="open"
                                 draggable={!isWorkspaceView && !!skill.custom}
                                 onDragStart={(e) => {
                                   if (!isWorkspaceView && skill.custom) handleDragStart(e, skill.id);
                                 }}
                                 onClick={() => handleOpenSkillModal(skill)}
                                 role="button"
-                                tabIndex={0}
+                                tabIndex={-1}
                                 onKeyDown={(event) => {
                                   if (event.key === 'Enter' || event.key === ' ') {
                                     event.preventDefault();

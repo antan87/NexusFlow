@@ -645,6 +645,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
               <Card key={harness.id} className="overflow-hidden surface-card">
                 {/* Sleek Minimal Harness Header Bar */}
                 <div
+                  data-vim-item
+                  tabIndex={-1}
                   className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between bg-muted/20 hover:bg-muted/35 transition-colors cursor-pointer select-none"
                   onClick={() => toggleHarness(harness.id)}
                 >
@@ -679,6 +681,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                     <Button
                       size="xs"
                       variant="default"
+                      data-vim-action="start"
                       disabled={launchingNewAssistant === harness.id}
                       onClick={() => void startNewSession(harness.id)}
                       title={`Launch new ${harness.cliCommand} session in terminal`}

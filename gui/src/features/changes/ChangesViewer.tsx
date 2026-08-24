@@ -115,7 +115,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
   return (
     <div className="animate-fade-in">
-      <header className="flex justify-between items-center mb-6 flex-wrap gap-3">
+      <header data-vim-item tabIndex={-1} className="flex justify-between items-center mb-6 flex-wrap gap-3 p-3 rounded-lg bg-card/60 border border-border/70 hover:bg-card transition-colors">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
           <FolderGit2 size={16} className="text-primary" /> Active Workspace Git Diffs
         </h4>

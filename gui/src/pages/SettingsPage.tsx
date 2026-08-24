@@ -83,7 +83,7 @@ export function SettingsPage({
         </Alert>
       )}
 
-      <Card className="mb-6 rounded-xl p-6 shadow-sm">
+      <Card data-vim-item tabIndex={-1} className="mb-6 rounded-xl p-6 shadow-sm">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm">Development Directory</Label>
@@ -301,7 +301,7 @@ export function SettingsPage({
         </div>
       </Card>
 
-      <Card className="mt-6 rounded-xl p-6 shadow-sm">
+      <Card data-vim-item tabIndex={-1} className="mt-6 rounded-xl p-6 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-foreground">Vim Navigation Mode</h3>
