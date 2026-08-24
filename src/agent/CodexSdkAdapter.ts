@@ -45,6 +45,7 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
             rootPath: this.cwd,
           },
           permissionMode,
+          model: this.session?.model || process.env.OPENAI_MODEL || process.env.CODEX_MODEL || undefined,
           mcpServers: {
             nexusflow: getLocalMcpServerConfig(this.cwd, role),
           },

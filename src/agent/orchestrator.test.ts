@@ -268,4 +268,51 @@ describe('MultiAgentOrchestrator (Phase 3)', () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it('threads prior phase output into subsequent agent prompts in pipeline mode', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-orch-pipe-thread-'));
+    try {
+      const plannerMock = new MockHarness('planner-uuid', { inputTokens: 50, outputTokens: 20 });
+      const coderMock = new MockHarness('coder-uuid', { inputTokens: 50, outputTokens: 20 });
+      const reviewerMock = new MockHarness('reviewer-uuid', { inputTokens: 50, outputTokens: 20 });
+
+      let claudeCount = 0;
+      const orchestrator = new MultiAgentOrchestrator(tmpDir, {
+        claudeAdapterFactory: () => {
+          claudeCount++;
+          if (claudeCount === 1) return plannerMock;
+          return reviewerMock;
+        },
+        codexAdapterFactory: () => coderMock,
+      });
+
+      const specs: TeamAgentSpec[] = [
+        { id: 'plan', name: 'Planner', role: 'lead', vendor: 'claude-code', prompt: 'Create plan for auth API' },
+        { id: 'impl', name: 'Implementer', role: 'developer', vendor: 'codex', prompt: 'Implement the planned endpoints' },
+        { id: 'rev', name: 'Reviewer', role: 'reviewer', vendor: 'claude-code', prompt: 'Review implementation for security vulnerabilities' },
+      ];
+
+      const result = await orchestrator.runTeam(specs, { mode: 'pipeline' });
+
+      expect(result.success).toBe(true);
+      expect(result.agents).toHaveLength(3);
+
+      // Verify planner output was captured
+      expect(result.agents[0]!.lastOutput).toContain('Done: Create plan for auth API');
+
+      // Verify coder prompt received planner context
+      expect(coderMock.sentPrompts[0]).toContain('Implement the planned endpoints');
+      expect(coderMock.sentPrompts[0]).toContain('Context from Prior Phases:');
+      expect(coderMock.sentPrompts[0]).toContain('Planner (lead)');
+      expect(coderMock.sentPrompts[0]).toContain('Done: Create plan for auth API');
+
+      // Verify reviewer prompt received planner + coder context
+      expect(reviewerMock.sentPrompts[0]).toContain('Review implementation for security vulnerabilities');
+      expect(reviewerMock.sentPrompts[0]).toContain('Context from Prior Phases:');
+      expect(reviewerMock.sentPrompts[0]).toContain('Planner (lead)');
+      expect(reviewerMock.sentPrompts[0]).toContain('Implementer (developer)');
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });

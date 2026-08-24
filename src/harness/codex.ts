@@ -90,6 +90,7 @@ export class CodexAdapter implements HarnessAdapter {
       // NexusFlow workspaces are multi-repo roots => usually NOT a git repo.
       // Without this, Codex refuses to run (verified in Spike 4).
       skipGitRepoCheck: true,
+      ...(spec.model ? { model: spec.model } : {}),
       ...(spec.nativeOptions as Record<string, unknown>),
     });
     return this.spawn(spec, thread);
@@ -266,7 +267,10 @@ export class CodexAdapter implements HarnessAdapter {
     isDisposed: () => boolean,
   ): Promise<void> {
     try {
-      const run = await thread.runStreamed(prompt, { signal });
+      const run = await thread.runStreamed(prompt, {
+        signal,
+        ...(spec.model ? { model: spec.model } : {}),
+      });
       for await (const ev of run.events) {
         if (isDisposed()) break;
         this.mapEvent(ev, safePush, resolveId);

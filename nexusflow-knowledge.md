@@ -55,8 +55,14 @@ When $\ge 2$ agents execute concurrently within the same workspace root without 
 ### Decision: Lock Heartbeat & Process-Liveness Check
 To prevent long agent turns (>10s to minutes) from having their locks stolen by concurrent runs, `acquireLock` automatically heartbeats the lock file's `mtime` while held. In addition, lock staleness reclamation inspects the owner PID (`process.kill(pid, 0)`) to reclaim abandoned locks immediately upon process death without waiting for `staleMs`.
 
-### Decision: Teamwork Pipeline Mode & Partial Failure Semantics
-In addition to parallel execution, `MultiAgentOrchestrator` supports sequential pipeline mode (`mode: 'pipeline'`) for dependent workflows (e.g. Plan -> Implement -> Review). If an upstream phase fails or is cancelled, downstream phases are skipped fail-fast. `TeamworkResult` reports `success: boolean`, `partialSuccess: boolean`, and `failureReason?: string` to ensure the UI surfaces partial failures accurately.
+### Decision: Teamwork Pipeline Mode & Context Threading
+In addition to parallel execution, `MultiAgentOrchestrator` supports sequential pipeline mode (`mode: 'pipeline'`) for dependent workflows (e.g. Plan -> Implement -> Review). In pipeline mode, downstream phases automatically receive the accumulated text outputs of prior phases (`## Context from Prior Phases:`) unless explicitly opted out (`includePriorContext: false`). If an upstream phase fails or is cancelled, downstream phases are skipped fail-fast. `TeamworkResult` reports `success: boolean`, `partialSuccess: boolean`, and `failureReason?: string`.
+
+### Decision: Model Selection Plumbing Across Adapters
+Model selection is plumbed down from `AgentSession.model` through `ClaudeSdkAdapter` / `CodexSdkAdapter` and `StartSpec.model` into vendor engine options (`query({ options: { model } })` for Claude; `startThread({ model })` and `runStreamed(prompt, { model })` for Codex), with fallback to environment variables (`ANTHROPIC_MODEL` / `OPENAI_MODEL`).
+
+### Gotcha: PID Liveness Same-Host Boundary & Staleness Backstop
+Lock PID liveness checks (`process.kill(pid, 0)`) operate on the local OS process table. On distributed / shared network filesystems (NFS, SMB) or when PID numbers are recycled, the `staleMs` expiration acts as the authoritative backstop.
 
 ### Gotcha: Adapter-Contract Unit Tests vs Process Termination
 Contract tests in `src/harness/contract.test.ts` test adapter-level contract invariants (signal propagation, stream mapping, error translation, AbortError rejections) against injected engine fakes. They verify adapter wiring rather than testing live vendor OS process tree termination, which is covered by separate CLI-level `killTree` tests.

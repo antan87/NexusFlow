@@ -16,6 +16,8 @@ export interface TeamAgentSpec {
   executionProfile?: AgentExecutionProfile;
   prompt: string;
   worktreePath?: string;
+  /** Whether to thread prior phases' outputs into this agent's kickoff in pipeline mode (defaults to true). */
+  includePriorContext?: boolean;
 }
 
 export interface AgentExecutionStatus {
@@ -27,6 +29,7 @@ export interface AgentExecutionStatus {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   usage?: NormalizedUsage;
   error?: string;
+  lastOutput?: string;
 }
 
 export type TeamworkMode = 'parallel' | 'pipeline';
@@ -129,6 +132,7 @@ export class MultiAgentOrchestrator extends EventEmitter {
     try {
       if (mode === 'pipeline') {
         // Sequential pipeline execution (e.g. Planner -> Implementer -> Reviewer)
+        let accumulatedContext = '';
         for (const spec of specs) {
           if (this.isInterrupted) {
             statuses.get(spec.id)!.status = 'cancelled';
@@ -145,7 +149,17 @@ export class MultiAgentOrchestrator extends EventEmitter {
             continue;
           }
 
-          await this.executeAgent(spec, statuses);
+          const shouldIncludeContext = spec.includePriorContext !== false;
+          const effectivePrompt = (shouldIncludeContext && accumulatedContext)
+            ? `${spec.prompt}\n\n## Context from Prior Phases:\n${accumulatedContext.trim()}`
+            : spec.prompt;
+
+          await this.executeAgent({ ...spec, prompt: effectivePrompt }, statuses);
+
+          const completedStatus = statuses.get(spec.id);
+          if (completedStatus && completedStatus.status === 'completed' && completedStatus.lastOutput) {
+            accumulatedContext += `### Phase Output: ${spec.name} (${spec.role})\n${completedStatus.lastOutput.trim()}\n\n`;
+          }
         }
       } else {
         // Parallel fan-out with independent session contexts
@@ -220,6 +234,11 @@ export class MultiAgentOrchestrator extends EventEmitter {
         adapter.on('session', (sessionId: string) => {
           status.sessionId = sessionId;
           this.emit('agent_session', { agentId: spec.id, sessionId });
+        });
+
+        adapter.on('data', (chunk: string) => {
+          status.lastOutput = (status.lastOutput ?? '') + chunk;
+          this.emit('agent_data', { agentId: spec.id, data: chunk });
         });
 
         adapter.on('usage', (usage: NormalizedUsage) => {
