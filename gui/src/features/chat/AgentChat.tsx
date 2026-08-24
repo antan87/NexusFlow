@@ -11,7 +11,7 @@ import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
-import { PROVIDER_MODELS, modelLabelForId, type ModelOption } from './models.js';
+import { PROVIDER_MODELS, modelLabelForId } from './models.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import AnsiImport from 'ansi-to-react';

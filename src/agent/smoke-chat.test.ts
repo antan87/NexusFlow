@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ClaudeSdkAdapter } from '../src/agent/ClaudeSdkAdapter.js';
-import { CodexSdkAdapter } from '../src/agent/CodexSdkAdapter.js';
-import { formatModelRejectionError } from '../src/agent/models.js';
-import type { HarnessAdapter, SessionHandle, HarnessEvent, StartSpec } from '../src/harness/types.js';
+import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
+import { CodexSdkAdapter } from './CodexSdkAdapter.js';
+import { formatModelRejectionError } from './models.js';
+import type { HarnessAdapter, SessionHandle, HarnessEvent, StartSpec } from '../harness/types.js';
 
 describe('Cross-Engine Chat Smoke Test Suite', () => {
   it('Claude SDK: full chat loop, model override propagation, approval-gating, and usage frames', async () => {
