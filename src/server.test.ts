@@ -151,7 +151,7 @@ describe('Server API Endpoints Unit Tests', () => {
       status.mockRestore();
     });
 
-    it('refreshes only an allowlisted CLI for a same-origin request', async () => {
+    it('refreshes an allowlisted harness provider for a same-origin request', async () => {
       const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
 
       const response = await app.request('/api/adapters/status/refresh', {
@@ -163,6 +163,20 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:4173');
       expect(status).toHaveBeenCalledWith({ refreshProviderId: 'codex-cli' });
+      status.mockRestore();
+    });
+
+    it('refreshes an allowlisted first-party SDK status', async () => {
+      const status = vi.spyOn(ProviderRegistry, 'getAllStatus').mockReturnValue([]);
+
+      const response = await app.request('/api/adapters/status/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4173' },
+        body: JSON.stringify({ providerId: 'codex-sdk' }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(status).toHaveBeenCalledWith({ refreshProviderId: 'codex-sdk' });
       status.mockRestore();
     });
 

@@ -45,13 +45,14 @@ export function buildClaudeTurnArgs(
     '--permission-mode',
     executionProfile === 'workspace-write' ? 'acceptEdits' : 'plan',
   ];
+  const modelArgs = session?.model ? ['--model', session.model] : [];
   if (!session) {
     return isFirstTurn
       ? ['-p', ...outputArgs, ...permissionArgs]
       : ['-c', '-p', ...outputArgs, ...permissionArgs];
   }
   if (!session.resume && isFirstTurn) {
-    return ['-p', ...outputArgs, ...permissionArgs, '--session-id', session.id];
+    return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, '--session-id', session.id];
   }
-  return ['-p', ...outputArgs, ...permissionArgs, '--resume', session.id];
+  return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, '--resume', session.id];
 }

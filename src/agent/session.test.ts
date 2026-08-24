@@ -49,6 +49,16 @@ describe('buildClaudeTurnArgs', () => {
       '-p', ...STREAM_ARGS, '--permission-mode', 'acceptEdits', '--resume', ID,
     ]);
   });
+
+  it('passes the selected model on new and resumed Claude turns', () => {
+    const session = { id: ID, resume: false, model: 'sonnet' };
+    expect(buildClaudeTurnArgs(true, session)).toEqual([
+      '-p', ...STREAM_ARGS, '--permission-mode', 'plan', '--model', 'sonnet', '--session-id', ID,
+    ]);
+    expect(buildClaudeTurnArgs(false, session)).toEqual([
+      '-p', ...STREAM_ARGS, '--permission-mode', 'plan', '--model', 'sonnet', '--resume', ID,
+    ]);
+  });
 });
 
 describe('isValidSessionUuid', () => {

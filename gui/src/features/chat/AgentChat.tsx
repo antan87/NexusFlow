@@ -11,7 +11,6 @@ import { API_BASE } from '../../lib/apiBase.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
-import { PROVIDER_MODELS, modelLabelForId } from './models.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import AnsiImport from 'ansi-to-react';
@@ -23,7 +22,7 @@ interface AgentChatProps {
 }
 
 interface ProviderCapabilities {
-  transport: 'native-api' | 'cli-print' | 'acp';
+  transport: 'native-api' | 'cli-print' | 'acp' | 'sdk';
   sessionIdentity: 'none' | 'client-assigned' | 'provider-assigned';
   workspaceAccess: 'read-only' | 'workspace-write' | 'harness-managed';
   sessionIdFormat?: 'uuid' | 'opaque';
@@ -41,7 +40,14 @@ interface ChatProvider {
   recoveryLabel?: string;
   executionProfiles?: ExecutionProfileOption[];
   defaultExecutionProfile?: ChatExecutionProfile;
+  models?: ModelOption[];
   capabilities: ProviderCapabilities;
+}
+
+interface ModelOption {
+  id: string;
+  label: string;
+  description: string;
 }
 
 interface ExecutionProfileOption {
@@ -56,14 +62,24 @@ const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
     'claude auth login',
     'claude auth status --json',
   ]),
+  'claude-sdk': new Set([
+    'npm install -g @anthropic-ai/claude-code',
+    'claude auth login',
+    'claude auth status --json',
+  ]),
   'codex-cli': new Set([
+    'npm install -g @openai/codex',
+    'codex login',
+    'codex login status',
+  ]),
+  'codex-sdk': new Set([
     'npm install -g @openai/codex',
     'codex login',
     'codex login status',
   ]),
 };
 
-const PROVIDER_TRANSPORTS = new Set(['native-api', 'cli-print', 'acp']);
+const PROVIDER_TRANSPORTS = new Set(['native-api', 'cli-print', 'acp', 'sdk']);
 const PROVIDER_SESSION_IDENTITIES = new Set(['none', 'client-assigned', 'provider-assigned']);
 const PROVIDER_WORKSPACE_ACCESS = new Set(['read-only', 'workspace-write', 'harness-managed']);
 const PROVIDER_SESSION_ID_FORMATS = new Set(['uuid', 'opaque']);
@@ -147,6 +163,32 @@ function decodeChatProvider(value: unknown): ChatProvider | null {
   if (executionProfiles && value.defaultExecutionProfile === undefined) return null;
   if (!executionProfiles && value.defaultExecutionProfile !== undefined) return null;
 
+  let models: ModelOption[] | undefined;
+  if (value.models !== undefined) {
+    if (!Array.isArray(value.models) || value.models.length === 0) return null;
+    models = [];
+    const seen = new Set<string>();
+    for (const candidate of value.models) {
+      if (!isRecord(candidate)
+        || typeof candidate.id !== 'string'
+        || candidate.id.length > 100
+        || typeof candidate.label !== 'string'
+        || candidate.label.length === 0
+        || candidate.label.length > 100
+        || typeof candidate.description !== 'string'
+        || candidate.description.length > 300
+        || seen.has(candidate.id)) {
+        return null;
+      }
+      seen.add(candidate.id);
+      models.push({
+        id: candidate.id,
+        label: candidate.label,
+        description: candidate.description,
+      });
+    }
+  }
+
   const hasAnySetup = value.setupIssue !== undefined
     || value.recoveryCommand !== undefined
     || value.recoveryLabel !== undefined;
@@ -172,6 +214,7 @@ function decodeChatProvider(value: unknown): ChatProvider | null {
     ...(value.defaultExecutionProfile === undefined
       ? {}
       : { defaultExecutionProfile: value.defaultExecutionProfile }),
+    ...(models === undefined ? {} : { models }),
   };
 }
 
@@ -194,6 +237,28 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
     command: provider.recoveryCommand,
     label: provider.recoveryLabel ?? 'Copy recovery command',
   };
+}
+
+function modelLabelForId(provider: ChatProvider, modelId: string): string {
+  const found = provider.models?.find(model => model.id === modelId);
+  if (found) return found.label;
+  return modelId || 'Automatic';
+}
+
+function reconcileModelSelections(
+  current: Record<string, string>,
+  providers: ChatProvider[],
+): Record<string, string> {
+  let changed = false;
+  const next = { ...current };
+  for (const provider of providers) {
+    const selected = current[provider.id];
+    if (selected && provider.models && !provider.models.some(model => model.id === selected)) {
+      delete next[provider.id];
+      changed = true;
+    }
+  }
+  return changed ? next : current;
 }
 
 interface StartAgentOptions {
@@ -372,7 +437,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     // history); debounce so a burst of chunks writes at most once.
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(flushPersist, 400);
-  }, [messages, agentName, profilesByProvider, sessionRevision, flushPersist]);
+  }, [messages, agentName, profilesByProvider, modelsByProvider, sessionRevision, flushPersist]);
 
   useEffect(() => {
     // pagehide fires on a hard window/tab close where React's unmount cleanup
@@ -407,6 +472,7 @@ export function AgentChat({ ws }: AgentChatProps) {
         const nextProviders = decodeChatProviders(providerData);
         if (!nextProviders) throw new Error('Invalid provider status response');
         setProviders(nextProviders);
+        setModelsByProvider(current => reconcileModelSelections(current, nextProviders));
         setProfilesByProvider(current => {
           let changed = false;
           const next = { ...current };
@@ -573,6 +639,14 @@ export function AgentChat({ ws }: AgentChatProps) {
       options.onFailure?.();
       return false;
     }
+    const selectedModel = options.model ?? modelsByProvider[providerId];
+    if (selectedModel
+      && selectedProvider.models
+      && !selectedProvider.models.some(model => model.id === selectedModel)) {
+      appendSystemNote('Select a model advertised by this provider before starting the harness.', 'error');
+      options.onFailure?.();
+      return false;
+    }
 
     // Convert API_BASE to ws:// or wss://
     let wsUrl = API_BASE;
@@ -613,7 +687,6 @@ export function AgentChat({ ws }: AgentChatProps) {
         // generated context files live (see src/utils/feature.ts).
         cwd: ws.workspacePath,
       };
-      const selectedModel = options.model ?? modelsByProvider[providerId];
       if (selectedModel) {
         startPayload.model = selectedModel;
       }
@@ -820,7 +893,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, noteSessionEnded, profileForProvider, providers, ws.repos, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
@@ -976,6 +1049,7 @@ export function AgentChat({ ws }: AgentChatProps) {
         if (!nextProviders) throw new Error('Invalid provider status response');
         if (!mountedRef.current) return false;
         setProviders(nextProviders);
+        setModelsByProvider(current => reconcileModelSelections(current, nextProviders));
         freshProvider = nextProviders.find((provider) => provider.id === claim.providerId);
         const canTryUnverified = allowUnverified
           && (freshProvider?.setupIssue === 'signed-out' || freshProvider?.setupIssue === 'probe-failed');
@@ -1155,7 +1229,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           <h3 className="font-semibold text-foreground">Chat</h3>
           <StatusBadge tone={connected ? 'running' : 'idle'} dot>
             {connected
-              ? `${currentProvider?.name || 'Connected'}${modelsByProvider[currentProvider?.id ?? ''] ? ` (${modelLabelForId(currentProvider?.id ?? '', modelsByProvider[currentProvider?.id ?? ''])})` : ''}`
+              ? `${currentProvider?.name || 'Connected'}${currentProvider && modelsByProvider[currentProvider.id] ? ` (${modelLabelForId(currentProvider, modelsByProvider[currentProvider.id])})` : ''}`
               : 'Disconnected'}
           </StatusBadge>
         </div>
@@ -1327,19 +1401,19 @@ export function AgentChat({ ws }: AgentChatProps) {
                 {currentProvider?.accessLabel ?? 'Harness-managed access'}
               </span>
             )}
-            {currentProvider && PROVIDER_MODELS[currentProvider.id] && (
+            {currentProvider?.models?.length && (
               <>
                 <div className="h-4 w-px bg-border"></div>
                 <Menu>
                   <MenuTrigger
                     aria-label="Select model"
-                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
                     className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                   >
-                    {modelLabelForId(currentProvider.id, modelsByProvider[currentProvider.id] ?? '')}
+                    {modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}
                   </MenuTrigger>
                   <MenuPopup align="start" side="top" className="max-w-80">
-                    {PROVIDER_MODELS[currentProvider.id]?.map((m) => (
+                    {currentProvider.models.map((m) => (
                       <MenuItem
                         key={m.id}
                         onClick={() => setModelsByProvider(current => ({

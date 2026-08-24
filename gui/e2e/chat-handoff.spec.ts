@@ -93,6 +93,10 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     },
   });
 
+  test.beforeEach(async ({ page }) => {
+    await mockProviderStatus(page, []);
+  });
+
   test('displays sessions list and allows switching between AI harnesses', async ({ page }) => {
     const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
     await page.route('**/api/workspace/feature-x/sessions*', async (route) => {
@@ -189,6 +193,94 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
 
     // Verify copy CLI command button is available
     await expect(page.getByRole('button', { name: /Copy CLI Command/i })).toBeVisible();
+  });
+
+  test('offers current provider-owned models in the mounted SDK harness', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as any).__harnessFrames = [];
+      class MockWebSocket {
+        static readonly CONNECTING = 0;
+        static readonly OPEN = 1;
+        static readonly CLOSING = 2;
+        static readonly CLOSED = 3;
+        readyState = MockWebSocket.CONNECTING;
+        onopen: ((event: Event) => void) | null = null;
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onclose: ((event: CloseEvent) => void) | null = null;
+        onerror: ((event: Event) => void) | null = null;
+
+        constructor(_url: string) {
+          setTimeout(() => {
+            this.readyState = MockWebSocket.OPEN;
+            this.onopen?.(new Event('open'));
+          }, 0);
+        }
+
+        send(data: string) {
+          (window as any).__harnessFrames.push(JSON.parse(data));
+        }
+
+        close() {
+          this.readyState = MockWebSocket.CLOSED;
+        }
+      }
+      (window as any).WebSocket = MockWebSocket;
+    });
+    await page.unroute('**/api/adapters/status');
+    await mockProviderStatus(page, [{
+      id: 'codex-sdk',
+      name: 'Codex (First-Party SDK)',
+      isConfigured: true,
+      accessLabel: 'Workspace write',
+      executionProfiles: [
+        { id: 'review', label: 'Review only', description: 'Read-only sandbox.' },
+        { id: 'workspace-write', label: 'Edit workspace', description: 'Workspace-write sandbox.' },
+      ],
+      defaultExecutionProfile: 'review',
+      models: [
+        { id: '', label: 'Automatic', description: 'Use the configured default.' },
+        { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', description: 'Frontier capability.' },
+        { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: 'Balanced.' },
+        { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', description: 'Cost-efficient.' },
+      ],
+      capabilities: {
+        transport: 'sdk',
+        sessionIdentity: 'provider-assigned',
+        workspaceAccess: 'workspace-write',
+        sessionIdFormat: 'uuid',
+      },
+    }]);
+    await page.route('**/api/workspace/feature-x/sessions*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sessions: [] }),
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x/sessions');
+
+    await expect(page.getByRole('heading', { name: 'Embedded harness' })).toBeVisible();
+    await expect(page.getByLabel('Select Provider')).toContainText('Codex (First-Party SDK)');
+
+    await page.getByLabel('Select model').click();
+    await expect(page.getByRole('menuitem', { name: /GPT-5\.6 Sol/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /GPT-5\.6 Terra/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /GPT-5\.6 Luna/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /GPT-5 Codex/ })).toHaveCount(0);
+
+    await page.getByRole('menuitem', { name: /GPT-5\.6 Luna/ }).click();
+    await expect(page.getByLabel('Select model')).toContainText('GPT-5.6 Luna');
+
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (
+      (window as any).__harnessFrames.find((frame: { type?: string }) => frame.type === 'start')
+    ))).toMatchObject({
+      type: 'start',
+      command: 'codex-sdk',
+      cwd: feature.workspacePath,
+      model: 'gpt-5.6-luna',
+    });
   });
 });
 

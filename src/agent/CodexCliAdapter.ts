@@ -116,12 +116,14 @@ function codexRunConfig(executionProfile: AgentExecutionProfile): string[] {
 export function buildCodexTurnArgs(
   sessionId?: string,
   executionProfile: AgentExecutionProfile = 'review',
+  model?: string,
 ): string[] {
   const runConfig = codexRunConfig(executionProfile);
+  const modelArgs = model ? ['--model', model] : [];
   if (sessionId) {
-    return ['exec', 'resume', '--json', ...runConfig, sessionId, '-'];
+    return ['exec', 'resume', '--json', ...modelArgs, ...runConfig, sessionId, '-'];
   }
-  return ['exec', '--json', '--color', 'never', ...runConfig, '-'];
+  return ['exec', '--json', '--color', 'never', ...modelArgs, ...runConfig, '-'];
 }
 
 export class CodexCliAdapter extends CliAdapterBase {
@@ -171,7 +173,7 @@ export class CodexCliAdapter extends CliAdapterBase {
     const sessionId = isFirstTurn
       ? (this.requestedSession?.resume ? this.requestedSession.id : undefined)
       : this.activeSessionId;
-    return buildCodexTurnArgs(sessionId, executionProfile);
+    return buildCodexTurnArgs(sessionId, executionProfile, this.requestedSession?.model);
   }
 
   protected handleStdout(text: string): boolean {
