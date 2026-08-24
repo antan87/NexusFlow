@@ -32,6 +32,21 @@ export interface AgentExecutionStatus {
   lastOutput?: string;
 }
 
+export const MAX_OUTPUT_CAPTURE_CHARS = 16_000;
+
+export function appendCappedOutput(
+  existing: string | undefined,
+  chunk: string,
+  maxChars = MAX_OUTPUT_CAPTURE_CHARS,
+): string {
+  const combined = (existing ?? '') + chunk;
+  if (combined.length <= maxChars) {
+    return combined;
+  }
+  const truncated = combined.slice(combined.length - maxChars);
+  return `[... prior output truncated ...]\n${truncated}`;
+}
+
 export type TeamworkMode = 'parallel' | 'pipeline';
 
 export interface RunTeamOptions {
@@ -237,7 +252,7 @@ export class MultiAgentOrchestrator extends EventEmitter {
         });
 
         adapter.on('data', (chunk: string) => {
-          status.lastOutput = (status.lastOutput ?? '') + chunk;
+          status.lastOutput = appendCappedOutput(status.lastOutput, chunk);
           this.emit('agent_data', { agentId: spec.id, data: chunk });
         });
 

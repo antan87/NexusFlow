@@ -18,11 +18,13 @@ export interface ChatMessage {
 export interface ChatStore {
   v: 4;
   /** Resumable session identity scoped to each CLI provider. */
-  sessions: Record<string, { id: string; started: boolean }>;
+  sessions: Record<string, { id: string; started: boolean; model?: string }>;
   /** Last used provider id. */
   providerId: string | null;
   /** Last explicitly selected profile, scoped to each profile-aware provider. */
   profilesByProvider: Record<string, ChatExecutionProfile>;
+  /** Last explicitly selected model, scoped to each provider. */
+  modelsByProvider?: Record<string, string>;
   messages: ChatMessage[];
 }
 
@@ -33,6 +35,7 @@ const emptyStore = (): ChatStore => ({
   sessions: {},
   providerId: null,
   profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'review' },
+  modelsByProvider: {},
   messages: [],
 });
 
@@ -58,11 +61,18 @@ export function loadChatStore(branchName: string): ChatStore {
         Object.entries(parsed.profilesByProvider ?? {})
           .filter((entry): entry is [string, ChatExecutionProfile] => isChatExecutionProfile(entry[1])),
       );
+      const modelsByProvider = typeof parsed.modelsByProvider === 'object' && parsed.modelsByProvider !== null
+        ? Object.fromEntries(
+            Object.entries(parsed.modelsByProvider)
+              .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
+          )
+        : {};
       return {
         ...emptyStore(),
         sessions: parsed.sessions,
         providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
         profilesByProvider: { ...emptyStore().profilesByProvider, ...profilesByProvider },
+        modelsByProvider,
         messages: parsed.messages,
       };
     }

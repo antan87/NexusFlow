@@ -315,4 +315,16 @@ describe('MultiAgentOrchestrator (Phase 3)', () => {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
+
+  it('caps accumulated stream output and inserts truncation marker when exceeding MAX_OUTPUT_CAPTURE_CHARS', async () => {
+    const { appendCappedOutput } = await import('./orchestrator.js');
+    const smallChunk = 'Hello world\n';
+    expect(appendCappedOutput(undefined, smallChunk, 50)).toBe('Hello world\n');
+
+    // Overflow max chars
+    const largeChunk = 'A'.repeat(60);
+    const capped = appendCappedOutput('initial ', largeChunk, 20);
+    expect(capped).toContain('[... prior output truncated ...]');
+    expect(capped.endsWith('A'.repeat(20))).toBe(true);
+  });
 });

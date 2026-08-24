@@ -126,6 +126,20 @@ describe('acquireLock', () => {
 
     await release();
   });
+
+  it('handles vanishing or concurrently unlinked lock files during staleness check without crashing (TOCTOU safety)', async () => {
+    const lockPath = path.join(dir, 'toctou.lock');
+    // Create an initial lock file
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 999_999 }), 'utf-8');
+
+    // Simulate concurrent unlinking while acquireLock runs
+    const acquirePromise = acquireLock(lockPath, { ...OPTIONS, staleMs: 50, timeoutMs: 1_000 });
+    await fs.unlink(lockPath).catch(() => {});
+
+    const release = await acquirePromise;
+    expect(JSON.parse(await fs.readFile(lockPath, 'utf-8')).pid).toBe(process.pid);
+    await release();
+  });
 });
 
 describe('createMutationQueue', () => {

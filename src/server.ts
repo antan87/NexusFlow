@@ -239,12 +239,15 @@ app.get('/ws', async (c, next) => {
               }
 
               let session: AgentSession | undefined;
+              const model = typeof payload.model === 'string' && payload.model.trim() ? payload.model.trim() : undefined;
               if (payload.sessionId !== undefined && payload.sessionId !== null) {
                 if (!isValidSessionUuid(payload.sessionId)) {
                   ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
                   return;
                 }
-                session = { id: payload.sessionId, resume: Boolean(payload.resume) };
+                session = { id: payload.sessionId, resume: Boolean(payload.resume), model };
+              } else if (model) {
+                session = { id: crypto.randomUUID(), resume: false, model };
               }
 
               const startedAgent = provider.createInstance();
