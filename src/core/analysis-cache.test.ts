@@ -33,11 +33,7 @@ describe('analysis-cache', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-    vi.mocked(fs.lstat).mockResolvedValue({
-      isSymbolicLink: () => false,
-      isFile: () => true,
-      mode: 0o644,
-    } as any);
+    vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error('not a link'), { code: 'EINVAL' }));
   });
 
   describe('loadAnalysisCache', () => {
@@ -157,6 +153,19 @@ describe('analysis-cache', () => {
       const after = await getRepoFingerprint('/ws/repo-1');
 
       expect(after).not.toBe(before);
+    });
+
+    it('hashes a symlink target without reading through the link', async () => {
+      vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
+        if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
+        return { stdout: ' M src/link.ts\0' };
+      }) as any);
+      vi.mocked(fs.readlink).mockResolvedValue('../outside/secret' as any);
+
+      const fp = await getRepoFingerprint('/ws/repo-1');
+
+      expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      expect(fs.readFile).not.toHaveBeenCalled();
     });
 
     it('returns null when git fails', async () => {

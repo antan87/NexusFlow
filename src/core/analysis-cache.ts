@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -181,18 +181,20 @@ export async function getRepoFingerprint(
       dirty.update(entry.code).update('\0').update(entry.path).update('\0');
       const filePath = path.join(repoPath, entry.path);
       try {
-        const stat = await fs.lstat(filePath);
-        if (stat.isSymbolicLink()) {
-          dirty.update('symlink\0').update(await fs.readlink(filePath));
-        } else if (stat.isFile()) {
-          dirty.update('file\0').update(await fs.readFile(filePath));
-        } else {
-          dirty.update(`other:${stat.mode}\0`);
-        }
+        // Reading the link itself never follows it. For ordinary files, the
+        // no-follow flag closes the lstat/read race where an untrusted worktree
+        // could swap a checked file for a symlink before its bytes were read.
+        const target = await fs.readlink(filePath);
+        dirty.update('symlink\0').update(target);
       } catch {
-        // Deletions have no bytes to read; their status and path above are the
-        // complete retained state that must invalidate the snapshot.
-        dirty.update('missing\0');
+        try {
+          const flags = constants.O_RDONLY | constants.O_NOFOLLOW;
+          dirty.update('file\0').update(await fs.readFile(filePath, { flag: flags }));
+        } catch {
+          // Deletions have no bytes to read; their status and path above are the
+          // complete retained state that must invalidate the snapshot.
+          dirty.update('missing\0');
+        }
       }
       dirty.update('\0');
     }

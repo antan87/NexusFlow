@@ -10,7 +10,7 @@ import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
-import { readWorkspaceFile, writeWorkspaceFile, workspaceFileExists, baseFileExists } from '../core/storage.js';
+import { readWorkspaceFile, writeWorkspaceFile, workspaceFileExists } from '../core/storage.js';
 import {
   captureGenerationSnapshot,
   GENERATED_SNAPSHOT_HEADER,
