@@ -126,7 +126,7 @@ function StepRow({ step }: { step: CreationStep }) {
 
 export function StartWorkPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const projects = useProjects();
   const repos = useRepos();
   const aiDetect = useAiDetect();
@@ -135,6 +135,7 @@ export function StartWorkPage() {
   const agentsQuery = useAgents();
   const createWorkspace = useCreateWorkspace();
   const { progress, start, reset } = useCreationStream();
+  const creationJobId = searchParams.get('job');
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
@@ -156,6 +157,33 @@ export function StartWorkPage() {
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (creationJobId) {
+      start(creationJobId);
+    } else {
+      reset();
+    }
+  }, [creationJobId, reset, start]);
+
+  const returnToForm = () => {
+    reset();
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params);
+      next.delete('job');
+      return next;
+    }, { replace: true });
+  };
+
+  const startOver = () => {
+    const url = new URL(window.location.href);
+    url.hash = '#/new';
+    window.location.replace(url.toString());
+  };
+
+  const retryObservation = () => {
+    if (creationJobId) start(creationJobId);
+  };
 
   // Seed the assistant selection from detection exactly ONCE — a background
   // refetch must never overwrite a deliberately emptied selection.
@@ -248,6 +276,11 @@ export function StartWorkPage() {
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
       start(jobId);
+      setSearchParams((params) => {
+        const next = new URLSearchParams(params);
+        next.set('job', jobId);
+        return next;
+      }, { replace: true });
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -256,69 +289,95 @@ export function StartWorkPage() {
   };
 
   // ── Creation progress / result panel ─────────────────────────────────────
-  if (progress.status !== 'idle') {
-    const failedStep = progress.steps.find((s) => s.status === 'failed');
+  const displayedProgress = progress.status === 'idle' && creationJobId
+    ? { status: 'running' as const, steps: [] }
+    : progress;
+
+  if (displayedProgress.status !== 'idle') {
+    const failedStep = displayedProgress.steps.find((s) => s.status === 'failed');
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
-          {progress.status === 'running'
+          {displayedProgress.status === 'running'
             ? 'Setting up your workspace…'
-            : progress.status === 'completed'
+            : displayedProgress.status === 'completed'
               ? 'Workspace ready'
-              : 'Workspace creation failed'}
+              : displayedProgress.status === 'failed'
+                ? 'Workspace creation failed'
+                : 'Unable to reconnect to workspace setup'}
         </h1>
         <ul
           aria-live="polite"
           aria-relevant="additions text"
           className="mt-6 divide-y divide-border rounded-xl border border-border bg-card px-4"
         >
-          {progress.steps.map((step) => (
-            <StepRow key={step.id} step={step} />
-          ))}
+          {displayedProgress.steps.length > 0 ? (
+            displayedProgress.steps.map((step) => <StepRow key={step.id} step={step} />)
+          ) : (
+            <li className="flex items-center gap-3 py-3.5">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Spinner className="size-3" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Connecting to workspace setup…</p>
+                <p className="text-xs text-muted-foreground">Waiting for creation progress…</p>
+              </div>
+            </li>
+          )}
         </ul>
-        {progress.status === 'failed' && (
+        {(displayedProgress.status === 'failed' || displayedProgress.status === 'unavailable') && (
           <p className="mt-4 text-sm text-destructive-foreground">
-            {failedStep?.message ?? progress.error ?? 'Something went wrong.'}
+            {failedStep?.message ?? displayedProgress.error ?? 'Something went wrong.'}
           </p>
         )}
-        {progress.status === 'completed' && progress.workspacePath && (
-          <p className="mt-4 truncate font-mono text-xs text-muted-foreground">{progress.workspacePath}</p>
+        {displayedProgress.status === 'completed' && displayedProgress.workspacePath && (
+          <p className="mt-4 truncate font-mono text-xs text-muted-foreground">{displayedProgress.workspacePath}</p>
         )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {progress.status === 'completed' && progress.workspaceId && (
+          {displayedProgress.status === 'completed' && displayedProgress.workspaceId && (
             <>
               <Button
                 className="w-full min-w-0 whitespace-normal sm:w-auto"
-                onClick={() => navigate(`/workspaces/${encodeURIComponent(progress.workspaceId!)}`)}
+                onClick={() => navigate(`/workspaces/${encodeURIComponent(displayedProgress.workspaceId!)}`)}
               >
                 Open workspace
               </Button>
-              {progress.workspacePath && (
+              {displayedProgress.workspacePath && (
                 <WorkspaceLauncher
-                  workspaceId={progress.workspaceId}
-                  workspacePath={progress.workspacePath}
+                  workspaceId={displayedProgress.workspaceId}
+                  workspacePath={displayedProgress.workspacePath}
                   isVsCode={isVsCode}
                   className="w-full min-w-0 whitespace-normal sm:w-auto"
                 />
               )}
             </>
           )}
-          {progress.status === 'failed' && (
+          {displayedProgress.status === 'failed' && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="default" onClick={reset}>
+              <Button variant="default" onClick={returnToForm}>
                 Back to form (edit & retry)
               </Button>
-              <Button variant="outline" onClick={() => window.location.reload()}>
+              <Button variant="outline" onClick={startOver}>
                 Start over (clear form)
               </Button>
             </div>
           )}
-          {progress.status === 'running' && (
+          {displayedProgress.status === 'unavailable' && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="default" onClick={retryObservation}>
+                Try reconnecting
+              </Button>
+              <Button variant="outline" onClick={returnToForm}>
+                Back to form
+              </Button>
+            </div>
+          )}
+          {displayedProgress.status === 'running' && (
             <div className="flex items-center justify-between gap-4">
               <p className="text-sm text-muted-foreground">This can take a moment for large repositories.</p>
-              <Button variant="outline" size="sm" onClick={reset}>
-                Cancel creation
+              <Button variant="outline" size="sm" onClick={returnToForm}>
+                Return to form
               </Button>
             </div>
           )}

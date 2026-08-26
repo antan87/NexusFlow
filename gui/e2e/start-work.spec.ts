@@ -40,6 +40,145 @@ async function mockCompletedCreationStream(page: Page) {
   });
 }
 
+async function mockRunningCreationStream(page: Page) {
+  await page.addInitScript(() => {
+    class MockEventSource {
+      url: string;
+      listeners: Record<string, Array<(e: MessageEvent) => void>> = {};
+      onerror: ((e: Event) => void) | null = null;
+      closed = false;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          if (this.closed) return;
+          const eventPayload = {
+            status: 'running',
+            progress: 17,
+            steps: [
+              { id: 'workspace', name: 'Register Workspace', status: 'running', message: 'Registering workspace...' },
+              { id: 'analysis', name: 'Analyze Repositories', status: 'pending', message: 'Waiting...' },
+              { id: 'context', name: 'Generate AI Context Files', status: 'pending', message: 'Waiting...' },
+            ],
+          };
+          const progressEvent = new MessageEvent('progress', { data: JSON.stringify(eventPayload) });
+          this.listeners.progress?.forEach((cb) => cb(progressEvent));
+        }, 500);
+      }
+
+      addEventListener(type: string, cb: (e: MessageEvent) => void) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(cb);
+      }
+
+      close() {
+        this.closed = true;
+      }
+    }
+
+    (window as any).EventSource = MockEventSource;
+  });
+}
+
+async function mockFailedCreationReplay(page: Page) {
+  await page.addInitScript(() => {
+    class MockEventSource {
+      url: string;
+      listeners: Record<string, Array<(e: MessageEvent) => void>> = {};
+      onerror: ((e: Event) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          const eventPayload = {
+            status: 'failed',
+            error: 'Workspace setup could not be resumed.',
+            steps: [
+              { id: 'workspace', name: 'Register Workspace', status: 'failed', message: 'Workspace setup could not be resumed.' },
+            ],
+          };
+          const progressEvent = new MessageEvent('progress', { data: JSON.stringify(eventPayload) });
+          this.listeners.progress?.forEach((cb) => cb(progressEvent));
+        }, 0);
+      }
+
+      addEventListener(type: string, cb: (e: MessageEvent) => void) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(cb);
+      }
+
+      close() {}
+    }
+
+    (window as any).EventSource = MockEventSource;
+  });
+}
+
+async function mockStaleCreationStream(page: Page) {
+  await page.addInitScript(() => {
+    class MockEventSource {
+      url: string;
+      listeners: Record<string, Array<(e: MessageEvent) => void>> = {};
+      onerror: ((e: Event) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        const jobId = decodeURIComponent(url.split('/').pop() ?? 'unknown');
+        const eventPayload = jobId === 'first-job'
+          ? {
+              status: 'completed',
+              workspacePath: 'C:\\mock-dev\\workspaces\\first-job',
+              feature: { id: 'first-job' },
+              steps: [{ id: 'workspace', name: 'First job', status: 'completed', message: 'Done' }],
+            }
+          : {
+              status: 'running',
+              steps: [{ id: 'workspace', name: 'Second job', status: 'running', message: 'Still working' }],
+            };
+        setTimeout(() => {
+          const progressEvent = new MessageEvent('progress', { data: JSON.stringify(eventPayload) });
+          this.listeners.progress?.forEach((cb) => cb(progressEvent));
+        }, jobId === 'first-job' ? 150 : 20);
+      }
+
+      addEventListener(type: string, cb: (e: MessageEvent) => void) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(cb);
+      }
+
+      close() {}
+    }
+
+    (window as any).EventSource = MockEventSource;
+  });
+}
+
+async function mockFailedCreationStream(page: Page) {
+  await page.addInitScript(() => {
+    class MockEventSource {
+      static CLOSED = 2;
+      url: string;
+      listeners: Record<string, Array<(e: MessageEvent) => void>> = {};
+      onerror: ((e: Event) => void) | null = null;
+      readyState = MockEventSource.CLOSED;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => this.onerror?.(new Event('error')), 0);
+      }
+
+      addEventListener(type: string, cb: (e: MessageEvent) => void) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(cb);
+      }
+
+      close() {}
+    }
+
+    (window as any).EventSource = MockEventSource;
+  });
+}
+
 test.describe('NexusFlow E2E GUI Tests', () => {
   test.use({
     configData: {
@@ -231,6 +370,104 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page.getByRole('button', { name: 'Open workspace' })).toBeVisible();
     await page.getByRole('button', { name: 'Open workspace' }).click();
     await expect(page).toHaveURL(/#\/workspaces\/demo-worktree/);
+  });
+
+  test('keeps the setup screen visible after a creation-page reload', async ({ page }) => {
+    await mockRunningCreationStream(page);
+    await page.route('**/api/workspace', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, jobId: 'running-workspace' }),
+      });
+    });
+
+    await page.goto('/#/new');
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await page.getByLabel('Workspace name').fill('Running workspace');
+    await page.getByLabel('What are you building?').fill('Keep setup progress visible');
+    await page.getByRole('button', { name: 'Start working' }).click();
+
+    await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
+    await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
+    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
+    await expect(page.getByText('Register Workspace')).toBeVisible();
+
+    await page.reload();
+
+    await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
+    await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
+    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
+    await expect(page.getByText('Register Workspace')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Return to form' }).click();
+    await expect(page).toHaveURL(/#\/new$/);
+    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+  });
+
+  test('renders a replayed failed creation job with its server error', async ({ page }) => {
+    await mockFailedCreationReplay(page);
+
+    await page.goto('/#/new?job=failed-workspace');
+
+    await expect(page.getByRole('heading', { name: 'Workspace creation failed' })).toBeVisible();
+    await expect(page.getByText('Workspace setup could not be resumed.').last()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Back to form (edit & retry)' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Start over (clear form)' }).click();
+    await expect(page).toHaveURL(/#\/new$/);
+    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+  });
+
+  test('renders a replayed completed creation job opened directly', async ({ page }) => {
+    await mockCompletedCreationStream(page);
+
+    await page.goto('/#/new?job=completed-workspace');
+
+    await expect(page).toHaveURL(/#\/new\?job=completed-workspace/);
+    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open workspace' })).toBeVisible();
+  });
+
+  test('ignores a late event from a replaced creation stream', async ({ page }) => {
+    await mockStaleCreationStream(page);
+
+    await page.goto('/#/new?job=first-job');
+    await page.evaluate(() => {
+      window.location.hash = '#/new?job=second-job';
+    });
+
+    await expect(page).toHaveURL(/#\/new\?job=second-job/);
+    await expect(page.getByText('Second job')).toBeVisible();
+    await page.waitForTimeout(200);
+    await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
+    await expect(page.getByText('Second job')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeHidden();
+  });
+
+  test('shows an honest recovery state when the creation stream closes', async ({ page }) => {
+    await mockFailedCreationStream(page);
+    await page.route('**/api/workspace', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, jobId: 'missing-workspace' }),
+      });
+    });
+
+    await page.goto('/#/new');
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await page.getByLabel('Workspace name').fill('Missing workspace');
+    await page.getByLabel('What are you building?').fill('Show a recovery state');
+    await page.getByRole('button', { name: 'Start working' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Unable to reconnect to workspace setup' })).toBeVisible();
+    await expect(page.getByText('Unable to reconnect to the creation stream. The workspace may still have been created.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try reconnecting' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Back to form' }).click();
+    await expect(page).toHaveURL(/#\/new$/);
+    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
   });
 
   test('should create an in-place workspace without showing branch fields', async ({ page }) => {
