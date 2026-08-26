@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -70,6 +71,21 @@ describe('generation lock', () => {
     expect(result.fresh).toBe(false);
     expect(result.drift).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'repo', name: 'repo' })]));
     expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain('STALE NEXUSFLOW CONTEXT');
+  });
+
+  it('keeps generation usable when dirty files cannot be safely fingerprinted', async () => {
+    await fs.writeFile(path.join(repoPath, 'README.md'), '# dirty\n');
+    const snapshot = await captureGenerationSnapshot([
+      { name: 'repo', path: repoPath, defaultBranch: 'main' },
+    ]);
+
+    if (typeof constants.O_NOFOLLOW === 'number') {
+      expect(snapshot.repos.repo!.fingerprint).toContain('+');
+      expect(renderFreshnessBanner(snapshot)).not.toContain('CANNOT BE VERIFIED');
+    } else {
+      expect(snapshot.repos.repo!.fingerprint).toMatch(/^uncacheable:/);
+      expect(renderFreshnessBanner(snapshot)).toContain('CANNOT BE VERIFIED');
+    }
   });
 
   it('detects edits outside the mutable freshness banner', async () => {
