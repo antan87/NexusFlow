@@ -11,7 +11,7 @@ export interface CreationStep {
 }
 
 export interface CreationProgress {
-  status: 'idle' | 'running' | 'completed' | 'failed';
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'unavailable';
   steps: CreationStep[];
   error?: string;
   workspacePath?: string;
@@ -27,18 +27,23 @@ const IDLE: CreationProgress = { status: 'idle', steps: [] };
 export function useCreationStream() {
   const [progress, setProgress] = useState<CreationProgress>(IDLE);
   const sourceRef = useRef<EventSource | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
   const close = useCallback(() => {
     sourceRef.current?.close();
     sourceRef.current = null;
+    activeJobIdRef.current = null;
   }, []);
 
   useEffect(() => close, [close]);
 
   const start = useCallback(
     (jobId: string) => {
+      if (sourceRef.current && activeJobIdRef.current === jobId) return;
+
       close();
+      activeJobIdRef.current = jobId;
       setProgress({ status: 'running', steps: [] });
 
       const source = new EventSource(
@@ -48,6 +53,8 @@ export function useCreationStream() {
 
       let errorCount = 0;
       source.addEventListener('progress', (event) => {
+        if (sourceRef.current !== source) return;
+
         // Any successful frame proves the connection healed — reset the
         // failure budget so long jobs survive repeated idle-timeout drops.
         errorCount = 0;
@@ -71,6 +78,8 @@ export function useCreationStream() {
       });
 
       source.onerror = () => {
+        if (sourceRef.current !== source) return;
+
         // EventSource reconnects automatically, and on reconnect the server
         // replays the job's CURRENT state as the initial frame — so transient
         // drops self-heal (errorCount resets on every received frame). Give up
@@ -81,10 +90,16 @@ export function useCreationStream() {
         if (source.readyState !== EventSource.CLOSED && errorCount < 5) return;
         setProgress((prev) =>
           prev.status === 'running'
-            ? { ...prev, status: 'failed', error: prev.error ?? 'Lost connection to the creation stream.' }
+            ? {
+                ...prev,
+                status: 'unavailable',
+                error: prev.error ?? 'Unable to reconnect to the creation stream. The workspace may still have been created.',
+              }
             : prev,
         );
         close();
+        queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+        queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
       };
     },
     [close, queryClient],
