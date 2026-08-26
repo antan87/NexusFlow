@@ -62,6 +62,7 @@ import {
   readWorkspaceKnowledge,
   addWorkspaceKnowledge,
   addBaseKnowledge,
+  KnowledgeRepositoryError,
   type KnowledgeEntryType,
 } from './core/knowledge.js';
 import {
@@ -468,7 +469,7 @@ export function resolveRepoPath(workspacePath: string, repoName: string): string
 
 /** Consistent error response; path-containment violations map to 400. */
 function errorResponse(c: any, error: unknown) {
-  if (error instanceof PathAccessError) {
+  if (error instanceof PathAccessError || error instanceof KnowledgeRepositoryError) {
     return c.json({ error: error.message }, 400);
   }
   if (error instanceof ResourceConflictError || error instanceof WorkspaceResourceRevisionError) {

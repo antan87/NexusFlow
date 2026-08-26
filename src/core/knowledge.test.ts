@@ -120,7 +120,7 @@ describe('formatEntry', () => {
 describe('entry length cap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat' } as never);
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat', repos: ['/repos/repo-a'] } as never);
     vi.mocked(storage.workspaceFileExists).mockResolvedValue(false);
     vi.mocked(storage.baseFileExists).mockResolvedValue(false);
     vi.mocked(storage.writeWorkspaceFile).mockResolvedValue(undefined as never);
@@ -256,7 +256,7 @@ describe('knowledge I/O', () => {
     vi.mocked(locks.acquireLock).mockResolvedValue(vi.fn().mockResolvedValue(undefined));
     vi.mocked(fs.access).mockRejectedValue(missingGitRepository());
 
-    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat' } as any);
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat', repos: ['/repos/api'] } as any);
     vi.mocked(generators.buildBaseKnowledgeContent).mockImplementation(
       (repo: string) =>
         `# Base Codebase Knowledge — ${repo}\n\n## Discovered Gotchas & Watch-outs\n- None recorded yet.\n\n## Architecture Decisions\n- None recorded yet.\n`,
@@ -339,6 +339,18 @@ describe('knowledge I/O', () => {
     const content = base.get('api/nexusflow-knowledge.md')!;
     expect(content).toContain('## Discovered Gotchas & Watch-outs');
     expect(content).toContain('flaky test on CI');
+  });
+
+  it('rejects traversal and unknown repo names before touching base storage', async () => {
+    await expect(addBaseKnowledge('/wsp', '../outside', {
+      type: 'gotcha', title: 'Traversal', message: 'must stay contained',
+    })).rejects.toThrow(/Invalid repository name/);
+    await expect(addBaseKnowledge('/wsp', 'unknown', {
+      type: 'gotcha', title: 'Unknown', message: 'must be configured',
+    })).rejects.toThrow(/not in this workspace/);
+
+    expect(storage.baseFileExists).not.toHaveBeenCalled();
+    expect(storage.writeBaseFile).not.toHaveBeenCalled();
   });
 
   it('promotes a gotcha to base knowledge (copy leaves the workspace entry)', async () => {

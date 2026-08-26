@@ -171,10 +171,15 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
   }
 
   if (!contextRefreshed) {
-    const freshness = await checkGenerationLock(workspacePath);
-    if (!freshness.fresh) {
-      await refreshWorkspace(workspacePath);
-      contextRefreshed = true;
+    try {
+      const freshness = await checkGenerationLock(workspacePath);
+      if (!freshness.fresh) {
+        await refreshWorkspace(workspacePath);
+        contextRefreshed = true;
+      }
+    } catch {
+      // Context reconciliation is best-effort too. A completed rebase must not
+      // be reported as a failed sync just because generation remains stale.
     }
   }
 

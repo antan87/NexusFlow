@@ -107,6 +107,27 @@ describe('MCP tools', () => {
     expect(content[1]?.name).toBe('web');
   });
 
+  it('rejects a base-knowledge repo traversal at the MCP boundary', async () => {
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+      id: 'feat-auth',
+      branchName: 'feat-auth',
+      description: 'test',
+      repos: ['/dev/workspaces/feat-auth/api'],
+      assistants: ['claude'],
+      workspacePath: '/dev/workspaces/feat-auth',
+      createdAt: '2026-08-23T00:00:00Z',
+    });
+    const tool = findTool('add_knowledge')!;
+
+    const result = await tool.handler(
+      { type: 'gotcha', title: 'Traversal', message: 'must stay contained', repo: '../outside' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-auth' },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toMatch(/Invalid repository name/);
+  });
+
   it('executes create_workspace tool handler successfully', async () => {
     const tool = findTool('create_workspace');
     expect(tool).toBeDefined();

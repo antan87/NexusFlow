@@ -23,12 +23,11 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
   if (!workspacePath) return;
 
   if (options?.json) {
-    const [repositories, services, generatedContext] = await Promise.all([
-      getWorkspaceStatusReport(workspacePath),
-      loadRunningState(workspacePath),
-      checkGenerationLock(workspacePath),
-    ]);
-    console.log(JSON.stringify({ repositories, services, generatedContext }, null, 2));
+    // Preserve the established machine-readable contract. Repository and
+    // generated-context detail is additive in the human view below; changing
+    // this top-level JSON shape would break existing scripts.
+    const runningState = await loadRunningState(workspacePath);
+    console.log(JSON.stringify(runningState, null, 2));
     return;
   }
 

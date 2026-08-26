@@ -137,4 +137,21 @@ describe('syncWorkspace', () => {
     expect(report.contextRefreshed).toBe(false);
     expect(report.syncedCount).toBe(2);
   });
+
+  it('does not fail a completed rebase when stale-context reconciliation also fails', async () => {
+    vi.mocked(multiGit.rebaseRepo).mockResolvedValue(rebase('rebased'));
+    vi.mocked(generators.generateContextFiles).mockRejectedValue(new Error('gen boom'));
+    vi.mocked(generationLock.checkGenerationLock).mockResolvedValue({
+      fresh: false,
+      lock: null,
+      drift: [{ kind: 'missing-lock', name: 'nexusflow.lock', message: 'missing' }],
+    });
+    vi.mocked(refresh.refreshWorkspace).mockRejectedValue(new Error('refresh boom'));
+
+    const report = await syncWorkspace('/ws');
+
+    expect(report.contextRefreshed).toBe(false);
+    expect(report.syncedCount).toBe(2);
+    expect(refresh.refreshWorkspace).toHaveBeenCalledWith('/ws');
+  });
 });

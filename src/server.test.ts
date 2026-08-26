@@ -1015,6 +1015,25 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({ error: 'A short knowledge title is required.' });
     });
+
+    it('rejects a base-knowledge repo traversal at the HTTP boundary', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        repos: ['/mock/workspaces/test-ws/api'],
+      } as any);
+
+      const response = await app.request('/api/workspace/test-ws/knowledge/entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'gotcha', title: 'Traversal', message: 'must stay contained', repo: '../outside',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringMatching(/Invalid repository name/) });
+    });
   });
 
   describe('GET /api/workspace/:id/plan', () => {

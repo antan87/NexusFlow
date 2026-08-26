@@ -105,6 +105,43 @@ export interface PromoteResult {
   commitFailures?: string[];
 }
 
+/** Raised when base knowledge is addressed with a repo outside the workspace manifest. */
+export class KnowledgeRepositoryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KnowledgeRepositoryError';
+  }
+}
+
+/**
+ * Resolve a base-knowledge key from the manifest, never directly from caller
+ * input. Storage adapters commonly map this value to a directory name, so an
+ * unchecked slash, absolute path, or `..` would otherwise escape the base
+ * knowledge root.
+ */
+async function requireConfiguredRepoName(workspacePath: string, repoName: string): Promise<string> {
+  const candidate = repoName.trim();
+  if (!candidate || candidate.includes('/') || candidate.includes('\\') || candidate === '.' || candidate === '..') {
+    throw new KnowledgeRepositoryError(`Invalid repository name "${repoName}".`);
+  }
+
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    throw new KnowledgeRepositoryError(`Workspace configuration not found at ${workspacePath}.`);
+  }
+
+  const matches = feature.repos
+    .map((repoPath) => path.basename(repoPath))
+    .filter((name) => name === candidate);
+  if (matches.length === 0) {
+    throw new KnowledgeRepositoryError(`Repository "${candidate}" is not in this workspace.`);
+  }
+  if (matches.length > 1) {
+    throw new KnowledgeRepositoryError(`Repository name "${candidate}" is ambiguous in this workspace.`);
+  }
+  return matches[0]!;
+}
+
 /**
  * Heading aliases per entry type for the workspace and base knowledge files.
  * The first alias is the canonical heading used when the section is missing.
@@ -464,10 +501,11 @@ export async function readBaseKnowledge(
   workspacePath: string,
   repoName: string,
 ): Promise<string | null> {
-  if (!(await baseFileExists(workspacePath, repoName, KNOWLEDGE_FILE))) {
+  const configuredRepo = await requireConfiguredRepoName(workspacePath, repoName);
+  if (!(await baseFileExists(workspacePath, configuredRepo, KNOWLEDGE_FILE))) {
     return null;
   }
-  return readBaseFile(workspacePath, repoName, KNOWLEDGE_FILE);
+  return readBaseFile(workspacePath, configuredRepo, KNOWLEDGE_FILE);
 }
 
 /** Appends a formatted entry to the workspace knowledge file (creating it if missing). */
@@ -558,9 +596,10 @@ export async function addBaseKnowledge(
   repoName: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
+  const configuredRepo = await requireConfiguredRepoName(workspacePath, repoName);
   return withKnowledgeLock(workspacePath, async () => {
     const checked = validateNewEntry(entry);
-    return insertIntoBase(workspacePath, repoName, checked.type, formatEntry(checked, 'base'));
+    return insertIntoBase(workspacePath, configuredRepo, checked.type, formatEntry(checked, 'base'));
   });
 }
 
@@ -574,7 +613,11 @@ export async function promoteKnowledge(
   workspacePath: string,
   options: PromoteOptions,
 ): Promise<PromoteResult> {
-  return withKnowledgeLock(workspacePath, () => promoteKnowledgeUnlocked(workspacePath, options));
+  const repoName = await requireConfiguredRepoName(workspacePath, options.repoName);
+  return withKnowledgeLock(workspacePath, () => promoteKnowledgeUnlocked(
+    workspacePath,
+    { ...options, repoName },
+  ));
 }
 
 async function promoteKnowledgeUnlocked(
