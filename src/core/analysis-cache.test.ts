@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 import {
@@ -109,7 +110,11 @@ describe('analysis-cache', () => {
 
       const fp = await getRepoFingerprint('/ws/repo-1');
 
-      expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      } else {
+        expect(fp).toBeNull();
+      }
     });
 
     it('invalidates every cached fingerprint when the version changes', async () => {
@@ -137,8 +142,13 @@ describe('analysis-cache', () => {
       vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('second') as any);
       const after = await getRepoFingerprint('/ws/repo-1');
 
-      expect(before).not.toBe(after);
-      expect(before).not.toBe('abc123');
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(before).not.toBe(after);
+        expect(before).not.toBe('abc123');
+      } else {
+        expect(before).toBeNull();
+        expect(after).toBeNull();
+      }
     });
 
     it('changes when content inside an untracked directory changes without directory metadata changing', async () => {
@@ -152,7 +162,12 @@ describe('analysis-cache', () => {
       vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('bbbb') as any);
       const after = await getRepoFingerprint('/ws/repo-1');
 
-      expect(after).not.toBe(before);
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(after).not.toBe(before);
+      } else {
+        expect(before).toBeNull();
+        expect(after).toBeNull();
+      }
     });
 
     it('hashes a symlink target without reading through the link', async () => {

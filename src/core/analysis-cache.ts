@@ -142,7 +142,9 @@ export async function saveAnalysisCache(
  * commit SHA, and a hash of each dirty path plus its actual bytes (or symlink
  * target) when the tree is not clean. Editing, adding, or deleting an
  * uncommitted file therefore changes the fingerprint even when its size and
- * directory metadata stay unchanged.
+ * directory metadata stay unchanged. Platforms without a no-follow file-open
+ * flag fail closed for dirty regular files and return `null`, forcing analysis
+ * instead of reusing a cache based on an unsafe read.
  *
  * The version is part of the key so that upgrading NexusFlow re-runs the
  * analysis the generators read from. Keyed on repo content alone, an upgrade that
@@ -187,6 +189,12 @@ export async function getRepoFingerprint(
         const target = await fs.readlink(filePath);
         dirty.update('symlink\0').update(target);
       } catch {
+        if (typeof constants.O_NOFOLLOW !== 'number') {
+          // Windows does not expose O_NOFOLLOW. An ordinary read after the
+          // failed readlink probe would reintroduce a symlink-swap race, so
+          // disable cache reuse for this dirty snapshot and reanalyze it.
+          return null;
+        }
         try {
           const flags = constants.O_RDONLY | constants.O_NOFOLLOW;
           dirty.update('file\0').update(await fs.readFile(filePath, { flag: flags }));
