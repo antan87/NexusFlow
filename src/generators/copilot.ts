@@ -7,7 +7,7 @@
 import path from 'node:path';
 import fse from 'fs-extra';
 import type { WorkspaceContext } from '../types.js';
-import { buildContextContent } from './base.js';
+import { GENERATED_SNAPSHOT_HEADER, GENERATED_VIEW_HEADER } from '../core/generation-lock.js';
 
 /**
  * Generates a `.github/copilot-instructions.md` file at the workspace root.
@@ -21,7 +21,8 @@ export async function generateCopilotConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const baseContent = await buildContextContent(ctx);
+  const canonical = (await fse.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8'))
+    .replace(`${GENERATED_SNAPSHOT_HEADER}\n\n`, '');
 
   const copilotExtra = `
 ---
@@ -42,7 +43,7 @@ export async function generateCopilotConfig(
   \`\`\`
 `;
 
-  const content = baseContent + copilotExtra;
+  const content = `${GENERATED_VIEW_HEADER}\n\n${canonical}${copilotExtra}`;
   const githubDir = path.join(workspacePath, '.github');
   const filePath = path.join(githubDir, 'copilot-instructions.md');
 

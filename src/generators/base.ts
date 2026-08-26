@@ -9,6 +9,7 @@ import type { WorkspaceContext } from '../types.js';
 import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import { isInPlace } from '../utils/feature.js';
 import { getConventionalTestCommand } from '../utils/test-command.js';
+import { renderFreshnessBanner } from '../core/generation-lock.js';
 
 /** How a repo relates to its siblings in this workspace. */
 export interface RepoRelations {
@@ -221,7 +222,9 @@ ${rows.join('\n')}
 ${structureRule}${startHint}`
     : `This workspace has no repositories yet — add one with \`nexusflow add-repo\`.`;
 
-  return `# ${feature.id}
+  const freshness = ctx.generation ? `${renderFreshnessBanner(ctx.generation)}\n\n` : '';
+
+  return `${freshness}# ${feature.id}
 
 ${feature.description}
 
@@ -229,7 +232,7 @@ ${reposSection}
 
 ## Where to look
 
-- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha -m "..."\`, keeping each entry to a rule and its reason
-- \`nexusflow-plan.md\` — phase order when a change spans repos
+- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha --title "..." -m "..."\`, keeping each entry to a rule and its reason
+- \`nexusflow-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
 ${ownInstructions}${customCommands}${teamwork}`;
 }

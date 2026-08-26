@@ -9,12 +9,20 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { loadConfig, saveConfig, ensureConfigDir } from '../core/config.js';
+import { commitWorkspaceArtifacts, ensureWorkspaceGitRepository } from '../core/workspace-git.js';
 
 /**
  * Initializes NexusFlow configuration interactively.
  * Creates ~/.nexusflow/config.json with user preferences.
  */
-export async function initCommand(): Promise<void> {
+export async function initCommand(options: { workspace?: string | boolean } = {}): Promise<void> {
+  if (options.workspace) {
+    const workspacePath = path.resolve(typeof options.workspace === 'string' ? options.workspace : process.cwd());
+    await ensureWorkspaceGitRepository(workspacePath);
+    const result = await commitWorkspaceArtifacts(workspacePath, 'chore(nexusflow): adopt workspace artifacts');
+    console.log(chalk.green(result.committed ? `✔ Initialized and committed workspace artifacts at ${workspacePath}.` : `✔ Workspace artifact repository is already clean at ${workspacePath}.`));
+    return;
+  }
   console.log(chalk.bold.cyan('\n⚙️  NexusFlow — Initialize\n'));
 
   await ensureConfigDir();

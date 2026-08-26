@@ -9,6 +9,7 @@ import { checkbox, select } from '@inquirer/prompts';
 
 import { getWorkspaceRepos } from '../utils/multi-git.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
+import { loadFeatureConfig } from '../core/workspace.js';
 import {
   addWorkspaceKnowledge,
   addBaseKnowledge,
@@ -21,7 +22,7 @@ import {
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
 
-const VALID_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'progress', 'assumption', 'question'];
+const VALID_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption', 'question'];
 /** Types that exist in the per-repo base knowledge file. */
 const PROMOTABLE_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption'];
 
@@ -29,20 +30,49 @@ interface AddOptions {
   type: string;
   message: string;
   title?: string;
+  scope?: string;
+  evidence?: string;
   repo?: string;
 }
 
 interface ShowOptions {
   section?: string;
   repo?: string;
+  scope?: string;
 }
 
 interface PromoteOptions {
   repo?: string;
   type?: string;
   message?: string;
+  title?: string;
   move?: boolean;
   all?: boolean;
+}
+
+export function contractMatchesScope(
+  contract: { from: string; to: string; kind: string },
+  scope: string,
+): boolean {
+  const separator = scope.indexOf(':');
+  if (separator < 1) return false;
+  const scopeKind = scope.slice(0, separator).toLowerCase();
+  const requested = scope.slice(separator + 1).toLowerCase();
+  const from = contract.from.toLowerCase();
+  const to = contract.to.toLowerCase();
+  if (scopeKind === 'seam' && contract.kind.toLowerCase() === requested) return true;
+  return from === requested || to === requested ||
+    from.startsWith(`${requested}/`) || to.startsWith(`${requested}/`) ||
+    requested.startsWith(`${from}/`) || requested.startsWith(`${to}/`);
+}
+
+function reportKnowledgeDurability(result: { duplicate?: boolean; commit?: { status: string; message?: string } }): void {
+  if (result.duplicate) console.log(chalk.dim('  Existing identical entry reused; no duplicate was appended.'));
+  if (result.commit?.status === 'failed') {
+    console.warn(chalk.yellow(`  ⚠ Entry was recorded but Git auto-commit failed: ${result.commit.message ?? 'unknown error'}`));
+  } else if (result.commit?.status === 'skipped' && result.commit.message) {
+    console.log(chalk.dim(`  ${result.commit.message}`));
+  }
 }
 
 /** Validates a `--type` value, returning it typed or `null` (after printing an error). */
@@ -115,6 +145,10 @@ export async function knowledgeAddCommand(workspaceArg: string | undefined, opti
     console.error(chalk.red('✖ A message is required (-m "...").'));
     return;
   }
+  if (!options.title || !options.title.trim()) {
+    console.error(chalk.red('✖ A short title is required (--title "...").'));
+    return;
+  }
 
   // Checked before the workspace prompt, so an over-long entry fails immediately
   // rather than after picking a workspace.
@@ -138,9 +172,12 @@ export async function knowledgeAddCommand(workspaceArg: string | undefined, opti
       type,
       message: options.message,
       title: options.title,
+      scope: options.scope,
+      evidence: options.evidence,
     });
     console.log(chalk.green(`  ✔ Added to ${chalk.bold(options.repo)} base knowledge under "${res.section}"`));
     console.log(chalk.dim(`  ${res.location}`));
+    reportKnowledgeDurability(res);
     return;
   }
 
@@ -148,11 +185,14 @@ export async function knowledgeAddCommand(workspaceArg: string | undefined, opti
     type,
     message: options.message,
     title: options.title,
+    scope: options.scope,
+    evidence: options.evidence,
   });
   console.log(
     chalk.green(`  ✔ Recorded under "${res.section}"${res.createdFile ? ' (created knowledge file)' : ''}`),
   );
   console.log(chalk.dim(`  ${res.location}`));
+  reportKnowledgeDurability(res);
 }
 
 /** `knowledge show` — print the workspace knowledge file (or a repo's base file). */
@@ -172,6 +212,25 @@ export async function knowledgeShowCommand(workspaceArg: string | undefined, opt
           : 'No workspace knowledge recorded yet.',
       ),
     );
+    return;
+  }
+
+  if (options.scope) {
+    const needle = `**scope:** \`${options.scope.toLowerCase()}\``;
+    const feature = await loadFeatureConfig(workspacePath);
+    const contractEntries = new Set(
+      (feature?.contracts ?? [])
+        .filter((contract) => contractMatchesScope(contract, options.scope!))
+        .map((contract) => contract.entry.replace(/^(\d{4}-\d{2}-\d{2})-/, '$1 — ')),
+    );
+    const entries = parseKnowledgeEntries(content).filter((entry) =>
+      entry.text.toLowerCase().includes(needle) || [...contractEntries].some((id) => entry.text.includes(`### ${id}`)),
+    );
+    if (entries.length === 0) {
+      console.log(chalk.yellow(`No knowledge entries match scope "${options.scope}".`));
+      return;
+    }
+    console.log(entries.map((entry) => entry.text).join('\n\n'));
     return;
   }
 
@@ -224,9 +283,14 @@ export async function knowledgePromoteCommand(
       return;
     }
     if (!checkEntryLength(options.message)) return;
-    const res = await addBaseKnowledge(workspacePath, options.repo, { type, message: options.message });
+    if (!options.title?.trim()) {
+      console.error(chalk.red('✖ --title is required when promoting a new message directly.'));
+      return;
+    }
+    const res = await addBaseKnowledge(workspacePath, options.repo, { type, message: options.message, title: options.title });
     console.log(chalk.green(`  ✔ Promoted to ${chalk.bold(options.repo)} base knowledge under "${res.section}"`));
     console.log(chalk.dim(`  ${res.location}`));
+    reportKnowledgeDurability(res);
     return;
   }
 
@@ -275,4 +339,7 @@ export async function knowledgePromoteCommand(
     ),
   );
   console.log(chalk.dim(`  ${res.baseLocation}`));
+  for (const failure of res.commitFailures ?? []) {
+    console.warn(chalk.yellow(`  ⚠ Knowledge was promoted but Git auto-commit failed: ${failure}`));
+  }
 }

@@ -17,6 +17,7 @@
 
 import type { WorkspaceContext } from '../types.js';
 import { writeWorkspaceFile } from '../core/storage.js';
+import { GENERATED_VIEW_HEADER } from '../core/generation-lock.js';
 
 /**
  * Writes a `CLAUDE.md` that imports `AGENTS.md`, plus anything Claude-specific.
@@ -34,7 +35,9 @@ export async function generateClaudeConfig(
   ctx: WorkspaceContext,
   workspacePath: string,
 ): Promise<void> {
-  const content = `@AGENTS.md
+  const content = `${GENERATED_VIEW_HEADER}
+
+@AGENTS.md
 
 <!-- AGENTS.md holds the workspace context and is read by every other agent
      tool. Claude Code does not read it, so this file imports it: @-imports are

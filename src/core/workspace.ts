@@ -134,12 +134,17 @@ async function scaffoldWorkspaceDir(
   try {
     await execa('git', ['init'], { cwd: workspacePath });
 
-    // Write a .gitignore to ignore the sub-repositories. In-place workspaces
-    // have no repo subdirectories, so there is nothing to ignore.
-    if (!inPlace) {
-      const gitignoreContent = repos.map((repo) => `/${repo.name}/`).join('\n') + '\n';
-      await fs.writeFile(path.join(workspacePath, '.gitignore'), gitignoreContent, 'utf-8');
-    }
+    // Track durable artifacts while excluding nested worktrees and ephemeral
+    // analysis/runtime state from the workspace artifact repository.
+    const gitignoreLines = [
+      ...(!inPlace ? repos.map((repo) => `/${repo.name}/`) : []),
+      '/.nexusflow-analysis-cache.json',
+      '/.nexusflow/workspace-state.json',
+      '/.nexusflow/*.lock',
+      '/.nexusflow/resource-staging-*',
+      '/.nexusflow/logs/',
+    ];
+    await fs.writeFile(path.join(workspacePath, '.gitignore'), gitignoreLines.join('\n') + '\n', 'utf-8');
   } catch (error) {
     // Silently ignore or log warning if git init fails
     console.warn('Warning: Failed to initialize git repository at workspace root:', error);

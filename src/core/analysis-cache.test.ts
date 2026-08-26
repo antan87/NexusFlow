@@ -33,6 +33,11 @@ describe('analysis-cache', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fs.lstat).mockResolvedValue({
+      isSymbolicLink: () => false,
+      isFile: () => true,
+      mode: 0o644,
+    } as any);
   });
 
   describe('loadAnalysisCache', () => {
@@ -102,9 +107,9 @@ describe('analysis-cache', () => {
     it('extends the SHA with a dirty-files hash when the tree is dirty', async () => {
       vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
         if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
-        return { stdout: ' M src/file1.ts\n' };
+        return { stdout: ' M src/file1.ts\0' };
       }) as any);
-      vi.mocked(fs.stat).mockResolvedValue({ size: 100, mtimeMs: 1000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('first') as any);
 
       const fp = await getRepoFingerprint('/ws/repo-1');
 
@@ -127,17 +132,31 @@ describe('analysis-cache', () => {
     it('changes the fingerprint when a dirty file is edited', async () => {
       vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
         if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
-        return { stdout: ' M src/file1.ts\n' };
+        return { stdout: ' M src/file1.ts\0' };
       }) as any);
 
-      vi.mocked(fs.stat).mockResolvedValue({ size: 100, mtimeMs: 1000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('first') as any);
       const before = await getRepoFingerprint('/ws/repo-1');
 
-      vi.mocked(fs.stat).mockResolvedValue({ size: 150, mtimeMs: 2000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('second') as any);
       const after = await getRepoFingerprint('/ws/repo-1');
 
       expect(before).not.toBe(after);
       expect(before).not.toBe('abc123');
+    });
+
+    it('changes when content inside an untracked directory changes without directory metadata changing', async () => {
+      vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
+        if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
+        return { stdout: '?? newdir/source.ts\0' };
+      }) as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('aaaa') as any);
+      const before = await getRepoFingerprint('/ws/repo-1');
+
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('bbbb') as any);
+      const after = await getRepoFingerprint('/ws/repo-1');
+
+      expect(after).not.toBe(before);
     });
 
     it('returns null when git fails', async () => {

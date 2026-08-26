@@ -13,6 +13,7 @@ import {
   getRemoteUrl,
   type RepoStatusFile,
 } from '../utils/multi-git.js';
+import { execa } from 'execa';
 
 /** Full status for a single repo in a workspace. */
 export interface RepoStatusReport {
@@ -20,6 +21,8 @@ export interface RepoStatusReport {
   path: string;
   /** Current branch, or `null` when the repo is in a detached-HEAD state. */
   branch: string | null;
+  /** Live HEAD commit identity. */
+  headSha?: string | null;
   /** The feature branch the workspace expects every repo to be on. */
   expectedBranch: string;
   onExpectedBranch: boolean;
@@ -59,17 +62,21 @@ export async function getWorkspaceStatusReport(
 
   const reports: RepoStatusReport[] = await Promise.all(
     repos.map(async (repo): Promise<RepoStatusReport> => {
-      const [branch, status, remoteUrl, aheadBehind] = await Promise.all([
+      const [branch, status, remoteUrl, aheadBehind, headSha] = await Promise.all([
         getRepoBranch(repo.path),
         getRepoStatus(repo.path),
         getRemoteUrl(repo.path),
         getAheadBehind(repo.path, repo.branchName),
+        execa('git', ['rev-parse', 'HEAD'], { cwd: repo.path })
+          .then((result) => result.stdout.trim())
+          .catch(() => null),
       ]);
 
       return {
         name: repo.name,
         path: repo.path,
         branch,
+        headSha,
         expectedBranch: repo.branchName,
         onExpectedBranch: branch === repo.branchName,
         dirty: status.hasChanges,

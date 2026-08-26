@@ -30,6 +30,11 @@ import {
   resolveBaseFileUrl,
 } from './storage.js';
 import { buildBaseKnowledgeContent } from '../generators/index.js';
+import { slugify } from '../utils/slug.js';
+import { commitExactWorkspaceArtifacts } from './workspace-git.js';
+import * as fs from 'node:fs/promises';
+import { getActiveStorageProvider } from './adapters/registry.js';
+import { acquireLock } from './locks.js';
 
 /** The knowledge filename used for both the workspace and base layers. */
 const KNOWLEDGE_FILE = 'nexusflow-knowledge.md';
@@ -48,6 +53,10 @@ export interface KnowledgeEntry {
   message: string;
   /** Short title, used for the heading of a `decision` entry. */
   title?: string;
+  /** Optional applicability selector: repo:<name>, path:<repo/path>, or seam:<name>. */
+  scope?: string;
+  /** Optional short evidence pointer such as a commit SHA or repro document. */
+  evidence?: string;
   /** ISO timestamp; defaults to now. */
   timestamp?: string;
 }
@@ -60,6 +69,15 @@ export interface KnowledgeWriteResult {
   section: string;
   /** True when the file did not exist and was created. */
   createdFile: boolean;
+  /** True when an idempotent retry found the exact dated entry already present. */
+  duplicate?: boolean;
+  /** Git persistence result after the storage write succeeded. */
+  commit: KnowledgeCommitResult;
+}
+
+export interface KnowledgeCommitResult {
+  status: 'committed' | 'already-committed' | 'skipped' | 'failed';
+  message?: string;
 }
 
 /** A parsed existing entry, used when promoting learnings. */
@@ -84,6 +102,7 @@ export interface PromoteOptions {
 export interface PromoteResult {
   promotedCount: number;
   baseLocation: string;
+  commitFailures?: string[];
 }
 
 /**
@@ -132,9 +151,39 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function truncateHeading(text: string, max = 60): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim();
-  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max).trimEnd()}…`;
+export const MAX_TITLE_CHARS = 60;
+export const MAX_EVIDENCE_CHARS = 200;
+
+export function knowledgeTitleSlug(title: string): string {
+  const normalized = (title ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) throw new Error('Knowledge entry title is required.');
+  if (normalized.length > MAX_TITLE_CHARS) {
+    throw new Error(`Knowledge entry title is ${normalized.length} characters; the limit is ${MAX_TITLE_CHARS}. Titles are rejected rather than truncated.`);
+  }
+  const slug = slugify(normalized);
+  if (!slug) throw new Error('Knowledge entry title must contain at least one letter or number.');
+  return slug;
+}
+
+function normaliseScope(scope?: string): string | undefined {
+  if (!scope) return undefined;
+  const normalized = scope.replace(/\s+/g, ' ').trim();
+  if (!/^(repo|path|seam):[^\s].*$/i.test(normalized)) {
+    throw new Error('Knowledge scope must use repo:<name>, path:<repo/path>, or seam:<name>.');
+  }
+  if (normalized.includes('..') || path.isAbsolute(normalized.slice(normalized.indexOf(':') + 1))) {
+    throw new Error('Knowledge scope cannot contain parent traversal or an absolute path.');
+  }
+  return normalized;
+}
+
+function normaliseEvidence(evidence?: string): string | undefined {
+  if (!evidence) return undefined;
+  const normalized = evidence.replace(/\s+/g, ' ').trim();
+  if (normalized.length > MAX_EVIDENCE_CHARS) {
+    throw new Error(`Knowledge evidence is ${normalized.length} characters; the limit is ${MAX_EVIDENCE_CHARS}.`);
+  }
+  return normalized || undefined;
 }
 
 /**
@@ -146,30 +195,12 @@ function truncateHeading(text: string, max = 60): string {
 export function formatEntry(entry: KnowledgeEntry, _target: 'workspace' | 'base'): string {
   const date = (entry.timestamp ?? new Date().toISOString()).slice(0, 10);
   const msg = entry.message.trim();
-
-  switch (entry.type) {
-    case 'decision': {
-      const heading = entry.title?.trim() ? entry.title.trim() : truncateHeading(msg);
-      return `### ${date} — ${heading}\n**Decision:** ${msg}`;
-    }
-    case 'progress':
-      return `- [x] ${date} — ${msg}`;
-    case 'gotcha':
-    case 'assumption':
-    case 'question':
-    default: {
-      // Lead with the title when there is one, so the file stays skimmable: it
-      // only grows, and a reader must be able to judge relevance from the first
-      // few words rather than by reading every entry.
-      //
-      // Without a title, fall back to leading with the date. Deriving a label
-      // from the message instead printed its first 60 characters twice — once as
-      // the bold label and again in the body — which is pure waste in the one
-      // file this project is trying to keep small.
-      const title = entry.title?.trim();
-      return title ? `- **${title}** (${date}) — ${msg}` : `- **${date}:** ${msg}`;
-    }
-  }
+  const slug = knowledgeTitleSlug(entry.title ?? '');
+  const label = entry.type[0].toUpperCase() + entry.type.slice(1);
+  const metadata: string[] = [];
+  if (entry.scope) metadata.push(`**Scope:** \`${entry.scope}\``);
+  if (entry.evidence) metadata.push(`**Evidence:** ${entry.evidence}`);
+  return [`### ${date} — ${slug}`, `**${label}:** ${msg}`, ...metadata].join('\n');
 }
 
 /**
@@ -358,6 +389,67 @@ function normaliseMessage(message: string): string {
   return normalised;
 }
 
+function validateNewEntry(entry: KnowledgeEntry): KnowledgeEntry {
+  if (entry.type === 'progress') {
+    throw new Error('Progress is derived from live git state and cannot be authored as knowledge. Use `nexusflow progress`.');
+  }
+  return {
+    ...entry,
+    message: normaliseMessage(entry.message),
+    title: knowledgeTitleSlug(entry.title ?? ''),
+    scope: normaliseScope(entry.scope),
+    evidence: normaliseEvidence(entry.evidence),
+  };
+}
+
+function assertNoHeadingConflict(content: string, entryMarkdown: string): void {
+  const heading = entryMarkdown.split(/\r?\n/, 1)[0] ?? '';
+  if (heading.startsWith('### ') && content.split(/\r?\n/).includes(heading) && !content.includes(entryMarkdown)) {
+    throw new Error(`Knowledge heading "${heading.slice(4)}" already exists with different content. Choose a distinct title.`);
+  }
+}
+
+async function commitKnowledgeArtifact(
+  workspacePath: string,
+  message: string,
+  relativePath: string,
+): Promise<KnowledgeCommitResult> {
+  // A non-local adapter owns its own durability. Do not turn a successful
+  // adapter write into an error by trying to commit a different local path.
+  if (getActiveStorageProvider().meta.name !== 'local') {
+    return { status: 'skipped', message: 'Active storage adapter is not local; Git auto-commit was skipped.' };
+  }
+  try {
+    await fs.access(path.join(workspacePath, '.git'));
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'skipped', message: 'Workspace artifact repository is not initialized.' };
+    }
+    return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+  }
+  try {
+    const result = await commitExactWorkspaceArtifacts(workspacePath, message, [relativePath]);
+    return { status: result.committed ? 'committed' : 'already-committed' };
+  } catch (error) {
+    // The knowledge write is already durable. Returning its precise partial
+    // state prevents callers from retrying and appending a duplicate entry.
+    return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function withKnowledgeLock<T>(workspacePath: string, operation: () => Promise<T>): Promise<T> {
+  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'knowledge.lock'), {
+    staleMs: 60_000,
+    timeoutMs: 30_000,
+    timeoutMessage: 'Another NexusFlow operation is updating workspace knowledge.',
+  });
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+
 /** Reads the workspace knowledge file, or `null` when it does not exist. */
 export async function readWorkspaceKnowledge(workspacePath: string): Promise<string | null> {
   const featureId = await resolveFeatureId(workspacePath);
@@ -383,7 +475,14 @@ export async function addWorkspaceKnowledge(
   workspacePath: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
+  return withKnowledgeLock(workspacePath, () => addWorkspaceKnowledgeUnlocked(workspacePath, entry));
+}
+
+async function addWorkspaceKnowledgeUnlocked(
+  workspacePath: string,
+  entry: KnowledgeEntry,
+): Promise<KnowledgeWriteResult> {
+  const checked = validateNewEntry(entry);
   const featureId = await resolveFeatureId(workspacePath);
   const exists = await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE);
   const content = exists
@@ -391,13 +490,25 @@ export async function addWorkspaceKnowledge(
     : `# Workspace Knowledge — ${featureId}\n`;
 
   const aliases = SECTION_ALIASES[checked.type].workspace;
-  const updated = insertUnderHeading(content, aliases, formatEntry(checked, 'workspace'));
-  await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, updated);
+  const entryMarkdown = formatEntry(checked, 'workspace');
+  assertNoHeadingConflict(content, entryMarkdown);
+  const duplicate = content.includes(entryMarkdown);
+  if (!duplicate) {
+    const updated = insertUnderHeading(content, aliases, entryMarkdown);
+    await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, updated);
+  }
+  const commit = await commitKnowledgeArtifact(
+    workspacePath,
+    `docs(knowledge): remember ${checked.title}`,
+    KNOWLEDGE_FILE,
+  );
 
   return {
     location: resolveWorkspaceFileUrl(workspacePath, featureId, KNOWLEDGE_FILE),
     section: aliases[0],
     createdFile: !exists,
+    duplicate,
+    commit,
   };
 }
 
@@ -420,13 +531,24 @@ async function insertIntoBase(
     ? await readBaseFile(workspacePath, repoName, KNOWLEDGE_FILE)
     : buildBaseKnowledgeContent(repoName);
 
-  const updated = insertUnderHeading(content, aliases, entryMarkdown);
-  await writeBaseFile(workspacePath, repoName, KNOWLEDGE_FILE, updated);
+  assertNoHeadingConflict(content, entryMarkdown);
+  const duplicate = content.includes(entryMarkdown);
+  if (!duplicate) {
+    const updated = insertUnderHeading(content, aliases, entryMarkdown);
+    await writeBaseFile(workspacePath, repoName, KNOWLEDGE_FILE, updated);
+  }
+  const commit = await commitKnowledgeArtifact(
+    workspacePath,
+    `docs(knowledge): remember ${repoName} learning`,
+    path.join('.nexusflow', 'base', repoName, KNOWLEDGE_FILE),
+  );
 
   return {
     location: resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE),
     section: aliases[0],
     createdFile: !exists,
+    duplicate,
+    commit,
   };
 }
 
@@ -436,8 +558,10 @@ export async function addBaseKnowledge(
   repoName: string,
   entry: KnowledgeEntry,
 ): Promise<KnowledgeWriteResult> {
-  const checked: KnowledgeEntry = { ...entry, message: normaliseMessage(entry.message) };
-  return insertIntoBase(workspacePath, repoName, checked.type, formatEntry(checked, 'base'));
+  return withKnowledgeLock(workspacePath, async () => {
+    const checked = validateNewEntry(entry);
+    return insertIntoBase(workspacePath, repoName, checked.type, formatEntry(checked, 'base'));
+  });
 }
 
 /**
@@ -450,10 +574,18 @@ export async function promoteKnowledge(
   workspacePath: string,
   options: PromoteOptions,
 ): Promise<PromoteResult> {
+  return withKnowledgeLock(workspacePath, () => promoteKnowledgeUnlocked(workspacePath, options));
+}
+
+async function promoteKnowledgeUnlocked(
+  workspacePath: string,
+  options: PromoteOptions,
+): Promise<PromoteResult> {
   const { repoName, entries, mode = 'copy' } = options;
   const promotable = entries.filter((e) => e.type && SECTION_ALIASES[e.type].base);
 
   let baseLocation = resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE);
+  const commitFailures: string[] = [];
   for (const e of promotable) {
     // Preserve the entry's original markdown rather than reformatting it: `text`
     // is a whole bullet line or `### ` block, so running it back through
@@ -464,6 +596,9 @@ export async function promoteKnowledge(
     // free text rather than a parsed entry must cap it themselves.
     const res = await insertIntoBase(workspacePath, repoName, e.type!, e.text);
     baseLocation = res.location;
+    if (res.commit.status === 'failed') {
+      commitFailures.push(res.commit.message ?? 'Base knowledge commit failed.');
+    }
   }
 
   if (mode === 'move' && promotable.length > 0) {
@@ -478,8 +613,20 @@ export async function promoteKnowledge(
         );
       }
       await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, content);
+      const commit = await commitKnowledgeArtifact(
+        workspacePath,
+        `docs(knowledge): promote to ${repoName}`,
+        KNOWLEDGE_FILE,
+      );
+      if (commit.status === 'failed') {
+        commitFailures.push(commit.message ?? 'Workspace knowledge commit failed.');
+      }
     }
   }
 
-  return { promotedCount: promotable.length, baseLocation };
+  return {
+    promotedCount: promotable.length,
+    baseLocation,
+    ...(commitFailures.length ? { commitFailures } : {}),
+  };
 }

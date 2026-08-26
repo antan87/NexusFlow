@@ -1004,6 +1004,17 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.success).toBe(true);
     });
+
+    it('returns a compatibility-friendly 400 when a structured entry omits its required title', async () => {
+      const response = await app.request('/api/workspace/test-ws/knowledge/entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'decision', message: 'Use explicit titles.' }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: 'A short knowledge title is required.' });
+    });
   });
 
   describe('GET /api/workspace/:id/plan', () => {

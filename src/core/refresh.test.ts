@@ -5,12 +5,16 @@ import * as workspace from './workspace.js';
 import * as analyzers from '../analyzers/index.js';
 import * as generators from '../generators/index.js';
 import * as handoff from '../commands/handoff.js';
+import * as generationLock from './generation-lock.js';
+import * as locks from './locks.js';
 
 vi.mock('node:fs/promises');
 vi.mock('./workspace.js');
 vi.mock('../analyzers/index.js');
 vi.mock('../generators/index.js');
 vi.mock('../commands/handoff.js');
+vi.mock('./generation-lock.js');
+vi.mock('./locks.js');
 
 const feature = {
   id: 'feat',
@@ -33,6 +37,8 @@ describe('refreshWorkspace', () => {
     vi.mocked(analyzers.analyzeAllReposCached).mockResolvedValue({ analysis: new Map(), analyzed: ['a'], reused: ['b'] } as any);
     vi.mocked(generators.generateContextFiles).mockResolvedValue(undefined);
     vi.mocked(handoff.handoffCommand).mockResolvedValue(undefined);
+    vi.mocked(generationLock.checkGenerationLock).mockResolvedValue({ fresh: true, lock: null, drift: [] });
+    vi.mocked(locks.acquireLock).mockResolvedValue(vi.fn().mockResolvedValue(undefined));
     // No handoff bundle by default.
     vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));
   });
@@ -66,6 +72,27 @@ describe('refreshWorkspace', () => {
     expect(analyzers.analyzeAllReposCached).toHaveBeenCalledWith(
       expect.any(Array), '/ws', { force: true },
     );
+  });
+
+  it('serializes refresh and generated-file mutation with a workspace lock', async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(locks.acquireLock).mockResolvedValue(release);
+
+    await refreshWorkspace('/ws');
+
+    expect(locks.acquireLock).toHaveBeenCalledWith(
+      expect.stringMatching(/[\\/]\.nexusflow[\\/]generation\.lock$/),
+      expect.objectContaining({ timeoutMs: 30_000 }),
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('checks provenance without analyzing or regenerating', async () => {
+    const report = await refreshWorkspace('/ws', { check: true });
+    expect(report.check?.fresh).toBe(true);
+    expect(generationLock.checkGenerationLock).toHaveBeenCalledWith('/ws', { markDocuments: true });
+    expect(analyzers.analyzeAllReposCached).not.toHaveBeenCalled();
+    expect(generators.generateContextFiles).not.toHaveBeenCalled();
   });
 
   it('refreshes the handoff bundle when it exists', async () => {

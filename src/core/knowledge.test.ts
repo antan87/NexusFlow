@@ -12,10 +12,23 @@ import {
 import * as storage from './storage.js';
 import * as workspace from './workspace.js';
 import * as generators from '../generators/index.js';
+import * as fs from 'node:fs/promises';
+import * as workspaceGit from './workspace-git.js';
+import * as locks from './locks.js';
 
 vi.mock('./storage.js');
 vi.mock('./workspace.js');
 vi.mock('../generators/index.js');
+vi.mock('./workspace-git.js');
+vi.mock('./locks.js');
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, access: vi.fn() };
+});
+
+function missingGitRepository(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+}
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
 
@@ -80,7 +93,7 @@ describe('formatEntry', () => {
 
   it('formats a decision with a title as a dated ### block', () => {
     const out = formatEntry({ type: 'decision', message: 'use worktrees', title: 'Worktrees', timestamp: ts }, 'workspace');
-    expect(out).toBe('### 2026-07-04 — Worktrees\n**Decision:** use worktrees');
+    expect(out).toBe('### 2026-07-04 — worktrees\n**Decision:** use worktrees');
   });
 
   it('leads a gotcha with its title so the file stays skimmable', () => {
@@ -90,19 +103,17 @@ describe('formatEntry', () => {
       { type: 'gotcha', title: 'EBUSY on Windows', message: 'fs.rm needs maxRetries', timestamp: ts },
       'workspace',
     );
-    expect(out).toBe('- **EBUSY on Windows** (2026-07-04) — fs.rm needs maxRetries');
+    expect(out).toBe('### 2026-07-04 — ebusy-on-windows\n**Gotcha:** fs.rm needs maxRetries');
   });
 
-  it('leads with the date when a gotcha has no title, rather than repeating it', () => {
-    // Deriving the label from the message printed its opening twice — once bold,
-    // once in the body — in the one file this project is trying to keep small.
-    const out = formatEntry({ type: 'gotcha', message: 'EBUSY on Windows', timestamp: ts }, 'workspace');
-    expect(out).toBe('- **2026-07-04:** EBUSY on Windows');
+  it('rejects a missing title instead of deriving and truncating a heading', () => {
+    expect(() => formatEntry({ type: 'gotcha', message: 'EBUSY on Windows', timestamp: ts }, 'workspace'))
+      .toThrow(/title is required/);
   });
 
-  it('formats progress as a checked item', () => {
-    const out = formatEntry({ type: 'progress', message: 'shipped rollback', timestamp: ts }, 'workspace');
-    expect(out).toBe('- [x] 2026-07-04 — shipped rollback');
+  it('does not format legacy progress without a searchable title', () => {
+    expect(() => formatEntry({ type: 'progress', message: 'shipped rollback', timestamp: ts }, 'workspace'))
+      .toThrow(/title is required/);
   });
 });
 
@@ -115,6 +126,9 @@ describe('entry length cap', () => {
     vi.mocked(storage.writeWorkspaceFile).mockResolvedValue(undefined as never);
     vi.mocked(storage.writeBaseFile).mockResolvedValue(undefined as never);
     vi.mocked(generators.buildBaseKnowledgeContent).mockReturnValue('# Base\n');
+    vi.mocked(workspaceGit.commitExactWorkspaceArtifacts).mockResolvedValue({ committed: false });
+    vi.mocked(locks.acquireLock).mockResolvedValue(vi.fn().mockResolvedValue(undefined));
+    vi.mocked(fs.access).mockRejectedValue(missingGitRepository());
   });
 
   const tooLong = 'x'.repeat(MAX_ENTRY_CHARS + 1);
@@ -145,7 +159,7 @@ describe('entry length cap', () => {
 
   it('accepts an entry at the limit', async () => {
     await expect(
-      addWorkspaceKnowledge('/ws', { type: 'decision', message: 'x'.repeat(MAX_ENTRY_CHARS) }),
+      addWorkspaceKnowledge('/ws', { type: 'decision', title: 'At limit', message: 'x'.repeat(MAX_ENTRY_CHARS) }),
     ).resolves.toBeTruthy();
   });
 
@@ -160,7 +174,7 @@ describe('entry length cap', () => {
     });
 
     const written = vi.mocked(storage.writeWorkspaceFile).mock.calls[0]![3] as string;
-    expect(written).toContain('- **Spacing** (2026-07-04) — keep it on one line');
+    expect(written).toContain('### 2026-07-04 — spacing\n**Gotcha:** keep it on one line');
     expect(written).not.toMatch(/keep {2,}it/);
   });
 
@@ -168,6 +182,31 @@ describe('entry length cap', () => {
     await expect(
       addWorkspaceKnowledge('/ws', { type: 'decision', message: '   ' }),
     ).rejects.toThrow(/cannot be empty/);
+  });
+
+  it('requires a title and rejects rather than truncating long titles', async () => {
+    await expect(addWorkspaceKnowledge('/ws', { type: 'gotcha', message: 'rule' }))
+      .rejects.toThrow(/title is required/);
+    await expect(addWorkspaceKnowledge('/ws', { type: 'gotcha', title: 'x'.repeat(61), message: 'rule' }))
+      .rejects.toThrow(/rejected rather than truncated/);
+  });
+
+  it('rejects authored progress and invalid scope traversal', async () => {
+    await expect(addWorkspaceKnowledge('/ws', { type: 'progress', title: 'Done', message: 'done' }))
+      .rejects.toThrow(/derived from live git state/);
+    await expect(addWorkspaceKnowledge('/ws', { type: 'gotcha', title: 'Scope', scope: 'path:../secret', message: 'rule' }))
+      .rejects.toThrow(/parent traversal/);
+  });
+
+  it('renders scope and evidence as searchable metadata', async () => {
+    await addWorkspaceKnowledge('/ws', {
+      type: 'gotcha', title: 'BFF error encoding', scope: 'seam:bff-spa', evidence: 'commit abc123', message: 'Decode once.',
+      timestamp: '2026-08-25T00:00:00.000Z',
+    });
+    const written = vi.mocked(storage.writeWorkspaceFile).mock.calls.at(-1)![3] as string;
+    expect(written).toContain('### 2026-08-25 — bff-error-encoding');
+    expect(written).toContain('**Scope:** `seam:bff-spa`');
+    expect(written).toContain('**Evidence:** commit abc123');
   });
 });
 
@@ -213,6 +252,9 @@ describe('knowledge I/O', () => {
     vi.clearAllMocks();
     ws.clear();
     base.clear();
+    vi.mocked(workspaceGit.commitExactWorkspaceArtifacts).mockResolvedValue({ committed: false });
+    vi.mocked(locks.acquireLock).mockResolvedValue(vi.fn().mockResolvedValue(undefined));
+    vi.mocked(fs.access).mockRejectedValue(missingGitRepository());
 
     vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat' } as any);
     vi.mocked(generators.buildBaseKnowledgeContent).mockImplementation(
@@ -248,6 +290,43 @@ describe('knowledge I/O', () => {
     expect(content).toContain('**Decision:** store knowledge via the adapter');
   });
 
+  it('treats an identical retry as success without appending a duplicate', async () => {
+    const entry = {
+      type: 'decision' as const,
+      message: 'store knowledge once',
+      title: 'Idempotent remember',
+      timestamp: '2026-08-26T00:00:00.000Z',
+    };
+    await addWorkspaceKnowledge('/wsp', entry);
+    const retry = await addWorkspaceKnowledge('/wsp', entry);
+
+    expect(retry.duplicate).toBe(true);
+    expect(ws.get('feat/nexusflow-knowledge.md')!.match(/### 2026-08-26 — idempotent-remember/g)).toHaveLength(1);
+  });
+
+  it('rejects a same-day title collision with different content', async () => {
+    await addWorkspaceKnowledge('/wsp', {
+      type: 'decision', title: 'Stable identity', message: 'first rule', timestamp: '2026-08-26T00:00:00.000Z',
+    });
+
+    await expect(addWorkspaceKnowledge('/wsp', {
+      type: 'decision', title: 'Stable identity', message: 'different rule', timestamp: '2026-08-26T01:00:00.000Z',
+    })).rejects.toThrow(/already exists with different content/);
+  });
+
+  it('reports a Git commit failure without failing the completed knowledge write', async () => {
+    vi.mocked(fs.access).mockResolvedValue(undefined);
+    vi.mocked(workspaceGit.commitExactWorkspaceArtifacts).mockRejectedValue(new Error('index locked'));
+
+    const result = await addWorkspaceKnowledge('/wsp', {
+      type: 'gotcha', title: 'Commit recovery', message: 'Keep the durable adapter write.',
+      timestamp: '2026-08-26T00:00:00.000Z',
+    });
+
+    expect(result.commit).toEqual({ status: 'failed', message: 'index locked' });
+    expect(ws.get('feat/nexusflow-knowledge.md')).toContain('Keep the durable adapter write.');
+  });
+
   it('rejects an empty message', async () => {
     await expect(
       addWorkspaceKnowledge('/wsp', { type: 'gotcha', message: '   ' }),
@@ -255,7 +334,7 @@ describe('knowledge I/O', () => {
   });
 
   it('adds to a repo base file, bootstrapping it from the template', async () => {
-    const result = await addBaseKnowledge('/wsp', 'api', { type: 'gotcha', message: 'flaky test on CI' });
+    const result = await addBaseKnowledge('/wsp', 'api', { type: 'gotcha', title: 'Flaky CI test', message: 'flaky test on CI' });
     expect(result.createdFile).toBe(true);
     const content = base.get('api/nexusflow-knowledge.md')!;
     expect(content).toContain('## Discovered Gotchas & Watch-outs');

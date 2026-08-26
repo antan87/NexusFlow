@@ -152,9 +152,12 @@ describe('createWorkspace rollback', () => {
 
     await createWorkspace(inPlaceFeature, repos);
 
-    // No git worktrees, no repo-subdir .gitignore.
+    // No git worktrees. The artifact repo still ignores ephemeral NexusFlow state,
+    // but it must not ignore source repos because in-place repos live elsewhere.
     expect(worktree.createWorktree).not.toHaveBeenCalled();
-    await expect(fs.access(path.join(workspacePath, '.gitignore'))).rejects.toBeTruthy();
+    const gitignore = await fs.readFile(path.join(workspacePath, '.gitignore'), 'utf-8');
+    expect(gitignore).toContain('/.nexusflow-analysis-cache.json');
+    expect(gitignore).not.toContain('/api/');
 
     // The manifest records the mode and the source repo paths.
     const manifest = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8'));

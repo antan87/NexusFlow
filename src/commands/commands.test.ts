@@ -8,6 +8,7 @@ import * as workspace from '../core/workspace.js';
 import * as multiGit from '../utils/multi-git.js';
 import * as analyzers from '../analyzers/index.js';
 import * as generators from '../generators/index.js';
+import * as locks from '../core/locks.js';
 
 vi.mock('node:fs/promises');
 vi.mock('execa');
@@ -15,6 +16,7 @@ vi.mock('../core/workspace.js');
 vi.mock('../utils/multi-git.js');
 vi.mock('../analyzers/index.js');
 vi.mock('../generators/index.js');
+vi.mock('../core/locks.js');
 
 describe('NexusFlow CLI New Commands unit tests', () => {
   const mockWorkspacePath = path.resolve('/mock/workspace');
@@ -22,6 +24,7 @@ describe('NexusFlow CLI New Commands unit tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(locks.acquireLock).mockResolvedValue(vi.fn().mockResolvedValue(undefined));
   });
 
   describe('handoffCommand', () => {

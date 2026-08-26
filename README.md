@@ -19,8 +19,9 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories
 - **Project registry** — save named, persistent repo groups in `~/.nexusflow/projects.json` and reuse them from the CLI or API
 - **The full feature loop** — `create` opens a workspace, `finish` closes it: commit + push every repo, open PRs (or print compare links), promote learnings, and optionally clean up
-- **Knowledge that accumulates** — capture decisions and gotchas as you work with `nexusflow knowledge add`, then `promote` the reusable ones into per-repo memory that survives across features
-- **AI context generation** — automatically writes `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, and `.cursor/rules/nexusflow.mdc`
+- **Knowledge that accumulates durably** — titled, scoped decisions and gotchas are auto-committed to the workspace artifact repository, then reusable entries can be promoted into per-repo memory
+- **Provenance-checked AI context** — `nexusflow.lock` records repo fingerprints and generated-view hashes; `nexusflow refresh --check` and `doctor` expose stale or modified context loudly
+- **Single-source AI context generation** — `AGENTS.md` is canonical; stamped Claude, Copilot, Cursor, and skill views are generated artifacts
 - **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
 - **Resource Library** — create and administer reusable Agent Skill folders and Codex-native custom agents, then assign them to workspaces
@@ -116,7 +117,7 @@ Removing a project only edits the registry — it never deletes repositories or 
 | **Isolated worktrees** | The classic flow: NexusFlow creates a feature branch and git worktree per repo inside the workspace directory. |
 | **In-place** | NexusFlow works directly in the source repositories. No branches or worktrees are created; you provide a workspace name, and the workspace directory only holds `nexusflow.json` plus generated AI context files. |
 
-In in-place workspaces, `nexusflow sync` is a deliberate no-op because you manage branches yourself. `nexusflow finish` commits and pushes each repo's current branch, and only offers PR/compare links when that branch differs from the default branch. Deleting an in-place workspace never touches the source repositories, `nexusflow list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
+In in-place workspaces, `nexusflow sync` never mutates source-repo branches because you manage them yourself; it only reconciles stale generated views. `nexusflow finish` commits and pushes each repo's current branch, and only offers PR/compare links when that branch differs from the default branch. Deleting an in-place workspace never touches the source repositories, `nexusflow list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
 
 For API callers, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
@@ -163,18 +164,20 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `nexusflow remove` | Delete a workspace and prune its git worktrees when present (alias: `rm`) |
 | `nexusflow start` | Start all services in a workspace (auto-detected) |
 | `nexusflow stop` | Stop all running services |
-| `nexusflow status` | Show running/stopped status and PIDs |
+| `nexusflow status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
+| `nexusflow progress` | Derive implementation progress from live branch, push, and available PR state |
 | `nexusflow logs` | Tail aggregated logs from all services |
 | `nexusflow ui` | Start the dashboard server — the backend the desktop app embeds (`--port`, `--open`, `--strict-port`) |
 | `nexusflow dashboard` | Open the dashboard in your browser (alias: `dash`) |
 | `nexusflow tui` | Open the interactive terminal (TUI) dashboard |
 | `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
 | `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
-| `nexusflow sync` | Rebase worktree-mode repositories with default base branches; deliberate no-op for in-place workspaces |
+| `nexusflow sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
 | `nexusflow finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
 | `nexusflow review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
-| `nexusflow knowledge` | Capture & manage workspace learnings: `add` (decision/gotcha/progress/…), `show`, `promote` into per-repo base knowledge |
-| `nexusflow refresh`| Regenerate maps, plan, and AI context files — only re-analyzes changed repos (`--force` for a full pass) |
+| `nexusflow knowledge` | Capture titled decisions/gotchas/assumptions/questions with optional `--scope` and `--evidence`; `show`, `promote` into per-repo base knowledge |
+| `nexusflow refresh`| Regenerate plan and AI context files; use `--check` for a non-regenerating CI/pre-commit freshness gate |
+| `nexusflow remote` | Add, push, or pull the workspace artifact repository remote without touching child repo remotes |
 | `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
 | `nexusflow schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
 | `nexusflow doctor` | Run health checks and diagnostics to verify workspace integrity |
@@ -203,11 +206,11 @@ NexusFlow is built around a single loop:
 1. **`nexusflow create`** — open a worktree or in-place workspace with AI context files generated. Along the way you can **scaffold a brand-new project** (a fresh local git repo in your dev directory) and, per repo, **check out an existing branch** — local or remote — instead of creating the feature branch.
 2. **Work** — your AI assistant edits code across repos. As it goes, it records learnings:
    ```bash
-   nexusflow knowledge add -t decision -m "Chose worktrees over submodules for isolation"
-   nexusflow knowledge add -t gotcha   -m "fs.rm needs maxRetries on Windows (EBUSY)"
-   nexusflow knowledge add -t progress -m "Rollback-on-failure implemented"
+   nexusflow knowledge add -t decision --title "worktree isolation" -m "Chose worktrees over submodules for isolation"
+   nexusflow knowledge add -t gotcha --title "windows ebusy" --scope "path:src/core/workspace.ts" -m "fs.rm needs maxRetries on Windows (EBUSY)"
+   nexusflow progress
    ```
-   Entries land under the right heading in `nexusflow-knowledge.md` (routed through your storage adapter — local or central vault — so the GUI and the generators all see the same file). No hand-editing, no accidental overwrites.
+   Entries land under searchable dated slug headings in `nexusflow-knowledge.md`. Identical retries are idempotent. If the storage write succeeds but Git auto-commit fails, NexusFlow reports "recorded but not committed" instead of inviting a duplicate retry. Git auto-commit applies to local workspace storage; custom adapters retain their own durability contract. The 300-character body cap remains enforced; implementation progress is never authored and is derived live instead.
 3. **`nexusflow finish`** — close it out:
    - Shows a preflight status table (branch, dirty files, unpushed commits) per repo.
    - Commits any remaining changes and pushes every branch; worktree-mode repos on the wrong branch or in a detached HEAD are skipped, while in-place workspaces use each repo's current branch.
@@ -233,7 +236,7 @@ NexusFlow is built around a single loop:
 | `sync_workspace` | Rebase every repo onto its base branch (auto-stashes dirty trees) |
 | `refresh_context` | Regenerate maps/plan/context (only re-analyzes changed repos) |
 | `run_doctor` | Structured workspace health diagnostics |
-| `add_knowledge` | Record a decision / gotcha / progress note — the preferred way to persist learnings |
+| `add_knowledge` | Record a titled decision, gotcha, assumption, or question with optional scope/evidence |
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
 | `get_service_logs` | Tail a running service's logs |

@@ -18,7 +18,7 @@ import { suggestWorkflow } from '../utils/workflow-advisor.js';
  * @param workspaceArg - Optional workspace path.
  */
 export async function refreshCommand(
-  options: { force?: boolean; strategy?: string },
+  options: { force?: boolean; strategy?: string; check?: boolean },
   workspaceArg?: string,
 ): Promise<void> {
   console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
@@ -63,16 +63,28 @@ export async function refreshCommand(
     await saveFeatureConfig(workspacePath, feature);
   }
 
-  console.log('Refreshing context for all repositories...');
+  if (options.check) console.log('Checking generated context provenance and hashes...');
+  else console.log('Refreshing context for all repositories...');
   if (options.force) {
     console.log(chalk.dim('Force mode: ignoring analysis cache.'));
   }
 
   let report;
   try {
-    report = await refreshWorkspace(workspacePath, { force: options.force });
+    report = await refreshWorkspace(workspacePath, { force: options.force, check: options.check });
   } catch (error) {
     console.error(chalk.red(`✖ Failed to refresh: ${error instanceof Error ? error.message : String(error)}`));
+    return;
+  }
+
+  if (report.check) {
+    if (report.check.fresh) {
+      console.log(chalk.bold.green('\n✅ Generated context is fresh and unmodified.\n'));
+    } else {
+      console.error(chalk.bold.red('\n✖ Generated context is stale or drifted:'));
+      for (const item of report.check.drift) console.error(chalk.red(`  - ${item.message}`));
+      process.exitCode = 1;
+    }
     return;
   }
 

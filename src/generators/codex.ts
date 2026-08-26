@@ -8,6 +8,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import type { WorkspaceContext } from '../types.js';
 import { buildContextContent } from './base.js';
+import { GENERATED_SNAPSHOT_HEADER } from '../core/generation-lock.js';
 
 /**
  * Generates an `AGENTS.md` file at the workspace root.
@@ -36,7 +37,7 @@ export async function generateCodexConfig(
   review each change before applying.
 `;
 
-  const content = baseContent + codexExtra;
+  const content = `${GENERATED_SNAPSHOT_HEADER}\n\n${baseContent}${codexExtra}`;
   const filePath = path.join(workspacePath, 'AGENTS.md');
 
   try {

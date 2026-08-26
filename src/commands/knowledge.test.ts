@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { checkEntryLength, knowledgeAddCommand } from './knowledge.js';
+import { checkEntryLength, contractMatchesScope, knowledgeAddCommand } from './knowledge.js';
 import * as knowledge from '../core/knowledge.js';
 import { MAX_ENTRY_CHARS } from '../core/knowledge.js';
 import * as resolve from '../utils/resolve-workspace.js';
@@ -82,14 +82,30 @@ describe('knowledge entry length cap', () => {
         location: '/ws/nexusflow-knowledge.md',
         section: 'Architecture Decisions',
         createdFile: false,
+        commit: { status: 'committed' },
       });
 
       await knowledgeAddCommand('/ws', {
         type: 'decision',
+        title: 'Generate only unique context',
         message: 'Generate only what an agent cannot grep — derived facts go stale.',
       });
 
       expect(knowledge.addWorkspaceKnowledge).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('contract scope matching', () => {
+  const contract = { from: 'apps/bff', to: 'apps/spa', kind: 'http-envelope' };
+
+  it('matches either side, nested paths, and the named seam', () => {
+    expect(contractMatchesScope(contract, 'repo:apps/bff')).toBe(true);
+    expect(contractMatchesScope(contract, 'path:apps/spa/errors')).toBe(true);
+    expect(contractMatchesScope(contract, 'seam:http-envelope')).toBe(true);
+  });
+
+  it('does not surface an unrelated contract', () => {
+    expect(contractMatchesScope(contract, 'repo:worker')).toBe(false);
   });
 });
