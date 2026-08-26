@@ -5,6 +5,8 @@ import * as workspaceState from './workspace-state.js';
 import * as multiGit from '../utils/multi-git.js';
 import * as analyzers from '../analyzers/index.js';
 import * as generators from '../generators/index.js';
+import * as generationLock from './generation-lock.js';
+import * as refresh from './refresh.js';
 import type { RebaseResult, WorkspaceRepo } from '../utils/multi-git.js';
 import type { SyncStatus } from '../types.js';
 
@@ -13,6 +15,8 @@ vi.mock('./workspace-state.js');
 vi.mock('../utils/multi-git.js');
 vi.mock('../analyzers/index.js');
 vi.mock('../generators/index.js');
+vi.mock('./generation-lock.js');
+vi.mock('./refresh.js');
 
 const feature = {
   id: 'feat',
@@ -44,6 +48,8 @@ describe('syncWorkspace', () => {
     vi.mocked(multiGit.getWorkspaceRepos).mockResolvedValue([wsRepo('a'), wsRepo('b')]);
     vi.mocked(analyzers.analyzeAllReposCached).mockResolvedValue({ analysis: new Map(), analyzed: ['a'], reused: ['b'] } as any);
     vi.mocked(generators.generateContextFiles).mockResolvedValue(undefined);
+    vi.mocked(generationLock.checkGenerationLock).mockResolvedValue({ fresh: true, lock: null, drift: [] });
+    vi.mocked(refresh.refreshWorkspace).mockResolvedValue({ workspacePath: '/ws', analyzedRepos: [], reusedRepos: [], refreshedHandoff: false });
   });
 
   it('throws when the workspace manifest is missing', async () => {
@@ -113,6 +119,14 @@ describe('syncWorkspace', () => {
     expect(generators.generateContextFiles).toHaveBeenCalled();
   });
 
+  it('reconciles stale generated views even when repos are already current', async () => {
+    vi.mocked(multiGit.rebaseRepo).mockResolvedValue(rebase('up-to-date'));
+    vi.mocked(generationLock.checkGenerationLock).mockResolvedValue({ fresh: false, lock: null, drift: [{ kind: 'missing-lock', name: 'nexusflow.lock', message: 'missing' }] });
+    const report = await syncWorkspace('/ws');
+    expect(refresh.refreshWorkspace).toHaveBeenCalledWith('/ws');
+    expect(report.contextRefreshed).toBe(true);
+  });
+
   it('tolerates a generator failure without failing the sync', async () => {
     vi.mocked(multiGit.rebaseRepo).mockResolvedValue(rebase('rebased'));
     vi.mocked(generators.generateContextFiles).mockRejectedValue(new Error('gen boom'));
@@ -122,5 +136,22 @@ describe('syncWorkspace', () => {
     // The rebases already happened; a regen failure just leaves contextRefreshed false.
     expect(report.contextRefreshed).toBe(false);
     expect(report.syncedCount).toBe(2);
+  });
+
+  it('does not fail a completed rebase when stale-context reconciliation also fails', async () => {
+    vi.mocked(multiGit.rebaseRepo).mockResolvedValue(rebase('rebased'));
+    vi.mocked(generators.generateContextFiles).mockRejectedValue(new Error('gen boom'));
+    vi.mocked(generationLock.checkGenerationLock).mockResolvedValue({
+      fresh: false,
+      lock: null,
+      drift: [{ kind: 'missing-lock', name: 'nexusflow.lock', message: 'missing' }],
+    });
+    vi.mocked(refresh.refreshWorkspace).mockRejectedValue(new Error('refresh boom'));
+
+    const report = await syncWorkspace('/ws');
+
+    expect(report.contextRefreshed).toBe(false);
+    expect(report.syncedCount).toBe(2);
+    expect(refresh.refreshWorkspace).toHaveBeenCalledWith('/ws');
   });
 });

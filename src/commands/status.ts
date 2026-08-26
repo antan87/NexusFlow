@@ -9,6 +9,8 @@ import { select } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getServiceStatus, loadRunningState } from '../orchestration/index.js';
+import { getWorkspaceStatusReport } from '../core/status.js';
+import { checkGenerationLock } from '../core/generation-lock.js';
 
 /**
  * Shows status of running services for a workspace.
@@ -21,12 +23,23 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
   if (!workspacePath) return;
 
   if (options?.json) {
+    // Preserve the established machine-readable contract. Repository and
+    // generated-context detail is additive in the human view below; changing
+    // this top-level JSON shape would break existing scripts.
     const runningState = await loadRunningState(workspacePath);
     console.log(JSON.stringify(runningState, null, 2));
     return;
   }
 
-  console.log(chalk.bold.cyan('\n📊 NexusFlow — Service Status\n'));
+  console.log(chalk.bold.cyan('\n📊 NexusFlow — Live Workspace Status\n'));
+  const repositories = await getWorkspaceStatusReport(workspacePath);
+  console.log(chalk.bold('Repositories:'));
+  for (const repo of repositories.repos) {
+    console.log(`  ${repo.name}: ${repo.branch ?? 'detached'} @ ${repo.headSha?.slice(0, 12) ?? 'unknown'}; ${repo.dirty ? 'dirty' : 'clean'}; ${repo.ahead === null ? 'not pushed' : `${repo.ahead} ahead / ${repo.behind} behind`}`);
+  }
+  const freshness = await checkGenerationLock(workspacePath);
+  console.log(`\n${freshness.fresh ? chalk.green('Generated context: fresh') : chalk.red(`Generated context: stale/drifted (${freshness.drift.length})`)}`);
+  console.log(chalk.bold('\nServices:'));
   await getServiceStatus(workspacePath);
   console.log();
 }

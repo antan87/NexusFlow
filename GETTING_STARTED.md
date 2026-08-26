@@ -77,7 +77,7 @@ The add flags are `-n/--name`, `-r/--repos <paths...>`, and `-d/--description`; 
 | **Isolated worktrees** | The classic flow: a feature branch and git worktree per repo inside the workspace directory. |
 | **In-place** | NexusFlow works directly in the source repositories. No branches or worktrees are created; the workspace directory holds only `nexusflow.json` and generated AI context files. |
 
-In-place workspaces expect you to manage branches yourself: `nexusflow sync` is a deliberate no-op, `nexusflow finish` commits and pushes each repo's current branch, and PR/compare links are only offered when that branch differs from the default branch. `nexusflow list` tags them with `[in-place]`, deleting one never touches the source repositories, and agent sessions for single-repo in-place workspaces run in the repo root.
+In-place workspaces expect you to manage branches yourself: `nexusflow sync` skips source-repo mutation and only reconciles stale generated views, `nexusflow finish` commits and pushes each repo's current branch, and PR/compare links are only offered when that branch differs from the default branch. `nexusflow list` tags them with `[in-place]`, deleting one never touches the source repositories, and agent sessions for single-repo in-place workspaces run in the repo root.
 
 For API users, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
@@ -127,8 +127,8 @@ Equip your AI assistants with reusable resources using the **Resource Library**:
 ### 7. Capture Learnings as You Go
 As you (or your AI assistant) make decisions and hit gotchas, record them so they aren't lost between sessions:
 ```bash
-nexusflow knowledge add -t decision -m "Switched auth to short-lived tokens"
-nexusflow knowledge add -t gotcha   -m "The worker needs REDIS_URL set locally"
+nexusflow knowledge add -t decision --title "short-lived auth tokens" -m "Switched auth to short-lived tokens"
+nexusflow knowledge add -t gotcha --title "worker redis requirement" --scope "repo:worker" -m "The worker needs REDIS_URL set locally"
 ```
 Entries are filed under the right section of `nexusflow-knowledge.md` automatically. Your AI assistant can do the same through the `add_knowledge` MCP tool.
 
@@ -156,13 +156,15 @@ Here is a summary of the command-line interface:
 | **`nexusflow start`** | `nexusflow start [path]` | Starts background processes for all projects in the workspace. |
 | **`nexusflow stop`** | `nexusflow stop [path]` | Kills all running processes for the workspace. |
 | **`nexusflow logs`** | `nexusflow logs [path] [-n <lines>]` | Tails output log files for all service processes in the workspace. |
-| **`nexusflow status`** | `nexusflow status [path]` | Displays running/stopped statuses and PIDs for each service. |
-| **`nexusflow init`** | `nexusflow init` | Creates or edits the global config file. |
+| **`nexusflow status`** | `nexusflow status [path]` | Displays live repo state, context freshness, and service status. |
+| **`nexusflow progress`** | `nexusflow progress [path]` | Derives expected-branch alignment, push, and available PR progress from live state; push/PR state is omitted on the wrong branch. |
+| **`nexusflow init`** | `nexusflow init` / `nexusflow init --workspace [path]` | Edits global config or adopts an existing workspace as a git-backed artifact. |
 | **`nexusflow project`** | `nexusflow project add` / `list` / `show` / `remove` | Manages registered repo groups (alias: `proj`). |
 | **`nexusflow diff`** | `nexusflow diff` | Displays pending code changes across all active workspace repositories. |
 | **`nexusflow commit`** | `nexusflow commit` | Automates cross-repository git commit and branch pushes in the workspace. |
-| **`nexusflow sync`** | `nexusflow sync` | Syncs and rebases worktree-mode workspaces; deliberate no-op for in-place workspaces. |
+| **`nexusflow sync`** | `nexusflow sync` | Rebases worktree-mode repos and reconciles generated views; in-place mode skips repo mutation. |
 | **`nexusflow finish`** | `nexusflow finish [-m <msg>] [--cleanup] [--dry-run]` | Closes out a feature: commits & pushes all repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
-| **`nexusflow knowledge`** | `nexusflow knowledge add -t <type> -m <msg>` / `show` / `promote` | Captures workspace learnings and promotes reusable ones into per-repo base knowledge. |
-| **`nexusflow refresh`**| `nexusflow refresh` | Regenerates architecture maps, task plans, and AI context files. |
+| **`nexusflow knowledge`** | `nexusflow knowledge add -t <type> --title <title> -m <msg> [--scope ...]` / `show` / `promote` | Captures searchable scoped learnings; identical retries do not duplicate entries, and local Git commit failures are reported separately from successful storage writes. |
+| **`nexusflow refresh`**| `nexusflow refresh [--check]` | Regenerates context or checks `nexusflow.lock` and generated-view drift. |
+| **`nexusflow remote`** | `nexusflow remote add|push|pull` | Synchronizes the workspace artifact repository without touching child repo remotes. |
 | **`nexusflow doctor`** | `nexusflow doctor` | Assesses and reports diagnostics of the current workspace setup. |

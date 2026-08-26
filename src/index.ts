@@ -35,6 +35,8 @@ import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 
 import { refreshCommand } from './commands/refresh.js';
+import { progressCommand } from './commands/progress.js';
+import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
 import { doctorCommand } from './commands/doctor.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
@@ -122,7 +124,8 @@ program
 program
   .command('init')
   .description('Initialize NexusFlow configuration')
-  .action(runAction(initCommand));
+  .option('--workspace [path]', 'Initialize or adopt a git-backed workspace artifact repository')
+  .action(runAction(async (options: { workspace?: string | boolean }) => initCommand(options)));
 
 program
   .command('start')
@@ -156,6 +159,15 @@ program
   .option('--json', 'Output in JSON format')
   .action(runAction(async (workspace: string | undefined, options: { json?: boolean }) => {
     await statusCommand(workspace, options);
+  }));
+
+program
+  .command('progress')
+  .description('Show implementation progress derived from live git and available PR state')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: { json?: boolean }) => {
+    await progressCommand(workspace, options);
   }));
 
 program
@@ -264,8 +276,9 @@ program
   .description('Refresh workspace context, plan and handoff files (re-analyzes only changed repos)')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-f, --force', 'Ignore the analysis cache and re-analyze every repository')
+  .option('--check', 'Check provenance and generated-view hashes without regenerating')
   .option('-s, --strategy <id>', 'Update the teamwork strategy (use template ID, or "auto" for AI suggestion)')
-  .action(runAction(async (workspace: string | undefined, options: { force?: boolean; strategy?: string }) => {
+  .action(runAction(async (workspace: string | undefined, options: { force?: boolean; strategy?: string; check?: boolean }) => {
     await refreshCommand(options, workspace);
   }));
 
@@ -295,27 +308,63 @@ program
 const knowledgeCmd = program
   .command('knowledge')
   .alias('know')
-  .description('Capture and manage workspace learnings (decisions, gotchas, progress)');
+  .description('Capture and manage workspace learnings (decisions, gotchas, assumptions, questions)');
 
 knowledgeCmd
   .command('add')
   .description('Append a timestamped learning to the workspace knowledge file')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
-  .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | progress | assumption | question')
+  .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | assumption | question')
   .requiredOption('-m, --message <msg>', 'The learning to record, as a rule plus its reason (max 300 chars)')
-  .option('--title <title>', 'Short title (used for decision headings)')
+  .requiredOption('--title <title>', 'Short title used to create the searchable heading slug (max 60 chars)')
+  .option('--scope <scope>', 'Applicability: repo:<name>, path:<repo/path>, or seam:<name>')
+  .option('--evidence <evidence>', 'Short evidence pointer such as a commit SHA or repro document')
   .option('-r, --repo <repo>', "Write to this repo's persistent base knowledge instead")
-  .action(runAction(async (workspace: string | undefined, options: { type: string; message: string; title?: string; repo?: string }) => {
+  .action(runAction(async (workspace: string | undefined, options: { type: string; message: string; title: string; scope?: string; evidence?: string; repo?: string }) => {
     await knowledgeAddCommand(workspace, options);
   }));
+
+program
+  .command('remember')
+  .description('Record and auto-commit a titled workspace learning')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .requiredOption('-t, --type <type>', 'Entry type: decision | gotcha | assumption | question')
+  .requiredOption('-m, --message <msg>', 'The learning to record, as a rule plus its reason (max 300 chars)')
+  .requiredOption('--title <title>', 'Short title used to create the searchable heading slug (max 60 chars)')
+  .option('--scope <scope>', 'Applicability: repo:<name>, path:<repo/path>, or seam:<name>')
+  .option('--evidence <evidence>', 'Short evidence pointer such as a commit SHA or repro document')
+  .action(runAction(async (workspace: string | undefined, options: { type: string; message: string; title: string; scope?: string; evidence?: string }) => {
+    await knowledgeAddCommand(workspace, options);
+  }));
+
+const remoteCmd = program
+  .command('remote')
+  .description('Manage the workspace artifact repository remote (never child repo remotes)');
+
+remoteCmd
+  .command('add')
+  .argument('<url>', 'Git remote URL')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(runAction(async (url: string, workspace?: string) => remoteAddCommand(url, workspace)));
+
+remoteCmd
+  .command('push')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(runAction(async (workspace?: string) => remotePushCommand(workspace)));
+
+remoteCmd
+  .command('pull')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(runAction(async (workspace?: string) => remotePullCommand(workspace)));
 
 knowledgeCmd
   .command('show')
   .description("Print the workspace knowledge file (or a repo's base knowledge)")
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-s, --section <name>', 'Only show one section')
+  .option('--scope <scope>', 'Only show entries for an exact scope')
   .option('-r, --repo <repo>', "Show the repo's base knowledge file instead")
-  .action(runAction(async (workspace: string | undefined, options: { section?: string; repo?: string }) => {
+  .action(runAction(async (workspace: string | undefined, options: { section?: string; scope?: string; repo?: string }) => {
     await knowledgeShowCommand(workspace, options);
   }));
 
@@ -326,9 +375,10 @@ knowledgeCmd
   .option('-r, --repo <repo>', 'Target repository (skips the repo prompt)')
   .option('-t, --type <type>', 'Entry type when promoting a message non-interactively')
   .option('-m, --message <msg>', 'Promote this text directly (non-interactive)')
+  .option('--title <title>', 'Short title required with --message')
   .option('--move', 'Remove the entry from the workspace file after promoting (default: copy)')
   .option('--all', 'Promote all decisions, gotchas and assumptions without prompting')
-  .action(runAction(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; move?: boolean; all?: boolean }) => {
+  .action(runAction(async (workspace: string | undefined, options: { repo?: string; type?: string; message?: string; title?: string; move?: boolean; all?: boolean }) => {
     await knowledgePromoteCommand(workspace, options);
   }));
 

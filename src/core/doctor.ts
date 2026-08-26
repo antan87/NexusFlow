@@ -17,6 +17,8 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists, baseFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
+import { checkGenerationLock } from './generation-lock.js';
+import { readWorkspaceKnowledge } from './knowledge.js';
 
 import type { ProjectAnalysis } from '../types.js';
 
@@ -96,6 +98,50 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
 
   // ── 2. Analysis (feeds later checks) ───────────────────────────────────
   const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
+
+  // Explicit runtime seams complement the package graph. Validate them here so
+  // a typo cannot leave a contract pointing at nonexistent evidence.
+  if (feature.contracts?.length) {
+    const knowledge = await readWorkspaceKnowledge(workspacePath) ?? '';
+    const endpointExists = async (value: string): Promise<boolean> => {
+      if (allRepos.some((repo) => repo.name === value || repo.path === value || path.basename(repo.path) === value)) {
+        return true;
+      }
+      for (const repo of allRepos) {
+        try {
+          const candidate = path.resolve(repo.path, value);
+          const relative = path.relative(repo.path, candidate);
+          if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+          await fs.access(candidate);
+          return true;
+        } catch {
+          // Try the next repository root.
+        }
+      }
+      return false;
+    };
+    for (const contract of feature.contracts) {
+      const values = [contract.from, contract.to];
+      const invalidPath = values.some((value) => !value || value.includes('..') || path.isAbsolute(value));
+      const validEntry = /^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(contract.entry);
+      const heading = contract.entry.replace(/^(\d{4}-\d{2}-\d{2})-/, '$1 — ');
+      if (invalidPath || !contract.kind || !validEntry) {
+        const message = `Invalid explicit contract ${contract.from || '?'} -> ${contract.to || '?'}.`;
+        errors.push(message);
+        checks.push({ category: 'Explicit Contracts', name: contract.kind || 'contract', status: 'fail', message });
+      } else if (!(await endpointExists(contract.from)) || !(await endpointExists(contract.to))) {
+        const message = `Contract ${contract.from} -> ${contract.to} references a repository or path that does not exist.`;
+        errors.push(message);
+        checks.push({ category: 'Explicit Contracts', name: contract.kind, status: 'fail', message });
+      } else if (!knowledge.includes(`### ${heading}`)) {
+        const message = `Contract ${contract.from} -> ${contract.to} references missing knowledge entry ${contract.entry}.`;
+        warnings.push(message);
+        checks.push({ category: 'Explicit Contracts', name: contract.kind, status: 'warn', message });
+      } else {
+        checks.push({ category: 'Explicit Contracts', name: contract.kind, status: 'pass', message: `${contract.from} -> ${contract.to} is backed by ${contract.entry}` });
+      }
+    }
+  }
 
   // ── 3. Branch Alignment & Git Status ───────────────────────────────────
   for (const repo of allRepos) {
@@ -232,6 +278,7 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     { name: 'WORKSPACE.md', exists: () => workspaceFileExists(workspacePath, featureId, 'WORKSPACE.md') },
     { name: 'nexusflow-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-knowledge.md') },
     { name: 'nexusflow-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-plan.md') },
+    { name: 'nexusflow.lock', exists: async () => fs.access(path.join(workspacePath, 'nexusflow.lock')).then(() => true).catch(() => false) },
   ];
   // Per-repo architecture maps are no longer generated — everything they held
   // came from the repo's package.json — so their absence is not a fault.
@@ -242,6 +289,16 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     } else {
       warnings.push(`Missing core workspace artifact: "${file.name}".`);
       checks.push({ category: 'Core Artifacts', name: file.name, status: 'warn', message: 'is missing' });
+    }
+  }
+
+  const generation = await checkGenerationLock(workspacePath, { markDocuments: true });
+  if (generation.fresh) {
+    checks.push({ category: 'Generated Context', name: 'provenance', status: 'pass', message: 'repo snapshot and generated-view hashes match nexusflow.lock' });
+  } else {
+    for (const item of generation.drift) {
+      warnings.push(item.message);
+      checks.push({ category: 'Generated Context', name: item.name, status: 'warn', message: item.message });
     }
   }
 

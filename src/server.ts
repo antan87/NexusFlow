@@ -56,11 +56,13 @@ import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';
 import { refreshWorkspace } from './core/refresh.js';
+import { checkGenerationLock } from './core/generation-lock.js';
 import { writeWorkspaceFile } from './core/storage.js';
 import {
   readWorkspaceKnowledge,
   addWorkspaceKnowledge,
   addBaseKnowledge,
+  KnowledgeRepositoryError,
   type KnowledgeEntryType,
 } from './core/knowledge.js';
 import {
@@ -236,6 +238,13 @@ app.get('/ws', async (c, next) => {
               if (!safeCwd) {
                 ws.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
                 return;
+              }
+              const freshness = await checkGenerationLock(safeCwd, { markDocuments: true });
+              if (!freshness.fresh) {
+                ws.send(JSON.stringify({
+                  type: 'system',
+                  message: `⚠ NexusFlow generated context is stale or drifted. ${freshness.drift.map((item) => item.message).join(' ')}`,
+                }));
               }
 
               let session: AgentSession | undefined;
@@ -460,7 +469,7 @@ export function resolveRepoPath(workspacePath: string, repoName: string): string
 
 /** Consistent error response; path-containment violations map to 400. */
 function errorResponse(c: any, error: unknown) {
-  if (error instanceof PathAccessError) {
+  if (error instanceof PathAccessError || error instanceof KnowledgeRepositoryError) {
     return c.json({ error: error.message }, 400);
   }
   if (error instanceof ResourceConflictError || error instanceof WorkspaceResourceRevisionError) {
@@ -1461,6 +1470,8 @@ app.post('/api/workspace/:id/terminal', async (c) => {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
+    await checkGenerationLock(workspacePath, { markDocuments: true });
+
     const res = await launchWorkspaceTerminal(workspacePath, {
       command: typeof command === 'string' ? command : undefined,
       assistant: typeof assistant === 'string' ? assistant : undefined,
@@ -1930,9 +1941,17 @@ app.post('/api/workspace/:id/knowledge/entry', async (c) => {
     const body = (await c.req.json()) as {
       type: KnowledgeEntryType;
       message: string;
-      title?: string;
+      title: string;
+      scope?: string;
+      evidence?: string;
       repo?: string;
     };
+    if (!body.title?.trim()) {
+      return c.json({ error: 'A short knowledge title is required.' }, 400);
+    }
+    if (!body.message?.trim()) {
+      return c.json({ error: 'A knowledge message is required.' }, 400);
+    }
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
@@ -1941,11 +1960,15 @@ app.post('/api/workspace/:id/knowledge/entry', async (c) => {
           type: body.type,
           message: body.message,
           title: body.title,
+          scope: body.scope,
+          evidence: body.evidence,
         })
       : await addWorkspaceKnowledge(workspacePath, {
           type: body.type,
           message: body.message,
           title: body.title,
+          scope: body.scope,
+          evidence: body.evidence,
         });
 
     return c.json({ success: true, ...result });
@@ -2763,7 +2786,7 @@ app.post('/api/workspace/:id/refresh', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
     const body = await c.req.json().catch(() => ({}));
-    const report = await refreshWorkspace(workspacePath, { force: Boolean(body.force) });
+    const report = await refreshWorkspace(workspacePath, { force: Boolean(body.force), check: Boolean(body.check) });
     return c.json({ report });
   } catch (error) {
     return errorResponse(c, error);

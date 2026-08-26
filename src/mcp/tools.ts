@@ -143,7 +143,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'workspace_status',
     description:
-      'Report the git status of every repo in the workspace: current branch, whether it matches the feature branch, dirty files, commits ahead/behind origin, and remote URL. Read-only; use this before committing or finishing.',
+      'Report live git state for every repo: HEAD SHA, current branch, branch alignment, dirty files, commits ahead/behind origin, and remote URL. Read-only; use this instead of generated prose for volatile facts.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
     handler: async (_args, ctx) => {
@@ -228,6 +228,7 @@ export const tools: NexusFlowTool[] = [
       type: 'object',
       properties: {
         force: { type: 'boolean', description: 'Ignore the analysis cache and re-analyze every repo.' },
+        check: { type: 'boolean', description: 'Check nexusflow.lock and generated-view hashes without regenerating. Stale docs receive a bounded warning banner.' },
         ...workspaceIdProp,
       },
     },
@@ -235,7 +236,7 @@ export const tools: NexusFlowTool[] = [
       try {
         await requireWorkspace(ctx);
         return json(
-          await refreshWorkspace(ctx.workspacePath, { force: Boolean(args.force) }),
+          await refreshWorkspace(ctx.workspacePath, { force: Boolean(args.force), check: Boolean(args.check) }),
         );
       } catch (error: any) {
         return errorResult(`Error refreshing context: ${error.message}`);
@@ -260,18 +261,20 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'add_knowledge',
     description:
-      'Record a learning in the workspace knowledge file (or a repo base file with `repo`). Use this whenever you make an architecture decision, discover a gotcha, complete a milestone, or note an assumption — it is the preferred way to persist learnings instead of editing nexusflow-knowledge.md directly.',
+      'Record a titled, searchable learning in the workspace knowledge file (or a repo base file with `repo`). Use this for architecture decisions, gotchas, questions, and assumptions; implementation progress is derived live by `nexusflow progress`.',
     annotations: { readOnlyHint: false, destructiveHint: false },
     inputSchema: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['decision', 'gotcha', 'progress', 'assumption', 'question'], description: 'The kind of learning.' },
+        type: { type: 'string', enum: ['decision', 'gotcha', 'assumption', 'question'], description: 'The kind of learning.' },
         message: { type: 'string', description: 'The learning to record.' },
-        title: { type: 'string', description: 'Short title (used for decision headings).' },
+        title: { type: 'string', description: 'Required short title used to create the searchable heading slug.' },
+        scope: { type: 'string', description: 'Optional applicability: repo:<name>, path:<repo/path>, or seam:<name>.' },
+        evidence: { type: 'string', description: 'Optional short evidence pointer such as a commit SHA or repro document.' },
         repo: { type: 'string', description: "Write to this repo's persistent base knowledge instead of the workspace file (decision/gotcha/assumption only)." },
         ...workspaceIdProp,
       },
-      required: ['type', 'message'],
+      required: ['type', 'message', 'title'],
     },
     handler: async (args, ctx) => {
       try {
@@ -279,7 +282,13 @@ export const tools: NexusFlowTool[] = [
         const type = args.type as KnowledgeEntryType;
         const message = String(args.message ?? '').trim();
         if (!message) return errorResult('A knowledge message is required.');
-        const entry = { type, message, title: args.title ? String(args.title) : undefined };
+        const entry = {
+          type,
+          message,
+          title: String(args.title ?? ''),
+          scope: args.scope ? String(args.scope) : undefined,
+          evidence: args.evidence ? String(args.evidence) : undefined,
+        };
         const result = args.repo
           ? await addBaseKnowledge(ctx.workspacePath, String(args.repo), entry)
           : await addWorkspaceKnowledge(ctx.workspacePath, entry);
@@ -300,10 +309,11 @@ export const tools: NexusFlowTool[] = [
         repo: { type: 'string', description: 'Target repository (by directory name).' },
         type: { type: 'string', enum: ['decision', 'gotcha', 'assumption'], description: 'The kind of learning to promote.' },
         text: { type: 'string', description: 'The learning text to store in base knowledge.' },
+        title: { type: 'string', description: 'Required short title used to create the searchable heading slug.' },
         move: { type: 'boolean', description: 'Reserved; base promotion is additive. Default false.' },
         ...workspaceIdProp,
       },
-      required: ['repo', 'type', 'text'],
+      required: ['repo', 'type', 'text', 'title'],
     },
     handler: async (args, ctx) => {
       try {
@@ -319,6 +329,7 @@ export const tools: NexusFlowTool[] = [
         const result = await addBaseKnowledge(ctx.workspacePath, String(args.repo), {
           type,
           message: textValue,
+          title: String(args.title ?? ''),
         });
         return json(result);
       } catch (error: any) {

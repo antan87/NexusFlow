@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import fse from 'fs-extra';
+import { execa } from 'execa';
 
 import { generateContextFiles } from '../generators/index.js';
 import {
@@ -97,12 +98,27 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
       analysis: mockAnalysis,
     };
 
+    for (const repo of ctx.repos) {
+      await fs.mkdir(repo.path, { recursive: true });
+      await execa('git', ['init'], { cwd: repo.path });
+      await execa('git', ['config', 'user.name', 'NexusFlow Test'], { cwd: repo.path });
+      await execa('git', ['config', 'user.email', 'nexusflow-test@local'], { cwd: repo.path });
+      await fs.writeFile(path.join(repo.path, 'README.md'), `# ${repo.name}\n`, 'utf-8');
+      await execa('git', ['add', 'README.md'], { cwd: repo.path });
+      await execa('git', ['commit', '-m', 'test fixture'], { cwd: repo.path });
+    }
+
     await saveWorkspaceSkillsConfig(tempWorkspace, {
       enabledSkills: DEFAULT_SKILLS.map((skill) => skill.id),
     });
 
     // 1. Run the workspace generation pipeline
     await generateContextFiles(ctx, assistants, tempWorkspace);
+    const artifactCommit = await execa('git', ['log', '-1', '--format=%s'], { cwd: tempWorkspace });
+    expect(artifactCommit.stdout).toBe('chore(nexusflow): refresh workspace artifacts');
+    const generationLock = JSON.parse(await fs.readFile(path.join(tempWorkspace, 'nexusflow.lock'), 'utf-8'));
+    expect(generationLock.outputs).toHaveProperty('AGENTS.md');
+    expect(Object.keys(generationLock.outputs)).toContain('.agents/skills/pr-review-toolkit/SKILL.md');
 
     // 2. Verify Google Antigravity tooling (.agents/skills/)
     const agyPrSkill = path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit', 'SKILL.md');

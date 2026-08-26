@@ -16,11 +16,15 @@ import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import type { WorkspaceContext } from '../types.js';
+import { checkGenerationLock, type GenerationCheck } from './generation-lock.js';
+import { acquireLock } from './locks.js';
 
 /** Options for a headless refresh run. */
 export interface RefreshOptions {
   /** Ignore the analysis cache and re-analyze every repo. */
   force?: boolean;
+  /** Check provenance/output hashes without regenerating; stale docs receive a bounded warning banner. */
+  check?: boolean;
 }
 
 /** Outcome of a headless refresh run. */
@@ -33,6 +37,8 @@ export interface RefreshReport {
   reusedRepos: string[];
   /** Whether the handoff bundle was refreshed too. */
   refreshedHandoff: boolean;
+  /** Present for --check runs. */
+  check?: GenerationCheck;
 }
 
 /**
@@ -52,11 +58,38 @@ export async function refreshWorkspace(
   workspacePath: string,
   options: RefreshOptions = {},
 ): Promise<RefreshReport> {
+  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'generation.lock'), {
+    staleMs: 5 * 60_000,
+    timeoutMs: 30_000,
+    timeoutMessage: 'Another NexusFlow generation or refresh is already updating this workspace.',
+  });
+  try {
+    return await refreshWorkspaceUnlocked(workspacePath, options);
+  } finally {
+    await release();
+  }
+}
+
+async function refreshWorkspaceUnlocked(
+  workspacePath: string,
+  options: RefreshOptions,
+): Promise<RefreshReport> {
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
     throw new Error(
       `Failed to load workspace configuration. Ensure nexusflow.json exists at ${workspacePath}.`,
     );
+  }
+
+  if (options.check) {
+    const check = await checkGenerationLock(workspacePath, { markDocuments: true });
+    return {
+      workspacePath,
+      analyzedRepos: [],
+      reusedRepos: [],
+      refreshedHandoff: false,
+      check,
+    };
   }
 
   const resolvedPaths = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));

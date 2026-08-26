@@ -15,6 +15,8 @@ import { getWorkspaceRepos, rebaseRepo } from '../utils/multi-git.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import type { SyncStatus, WorkspaceContext } from '../types.js';
+import { checkGenerationLock } from './generation-lock.js';
+import { refreshWorkspace } from './refresh.js';
 
 /** Sync outcome for a single repo. */
 export interface RepoSyncReport {
@@ -77,6 +79,12 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
   // worktrees, only those isolated worktrees are synced against their base.
   const hasIsolated = isInPlace(feature) && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
   if (isInPlace(feature) && !hasIsolated) {
+    const freshness = await checkGenerationLock(workspacePath);
+    let contextRefreshed = false;
+    if (!freshness.fresh) {
+      await refreshWorkspace(workspacePath);
+      contextRefreshed = true;
+    }
     return {
       workspacePath,
       branchName: feature.branchName,
@@ -89,7 +97,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
       syncedCount: 0,
       conflictCount: 0,
       errorCount: 0,
-      contextRefreshed: false,
+      contextRefreshed,
     };
   }
 
@@ -159,6 +167,19 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
       contextRefreshed = true;
     } catch {
       // Best-effort regeneration; ignore failures.
+    }
+  }
+
+  if (!contextRefreshed) {
+    try {
+      const freshness = await checkGenerationLock(workspacePath);
+      if (!freshness.fresh) {
+        await refreshWorkspace(workspacePath);
+        contextRefreshed = true;
+      }
+    } catch {
+      // Context reconciliation is best-effort too. A completed rebase must not
+      // be reported as a failed sync just because generation remains stale.
     }
   }
 

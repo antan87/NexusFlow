@@ -8,13 +8,14 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 
 import type { ProjectAnalysis } from '../types.js';
+import { parsePorcelainZ } from '../utils/multi-git.js';
 
 /** Name of the analysis cache file, written at the workspace root. */
 const CACHE_FILE = '.nexusflow-analysis-cache.json';
@@ -28,7 +29,7 @@ let generatorVersion: string | undefined;
  * Read locally rather than via `utils/update-check`, which drags config loading
  * and the network update check into `core/`.
  */
-function getGeneratorVersion(): string {
+export function getGeneratorVersion(): string {
   if (generatorVersion !== undefined) return generatorVersion;
 
   let resolved: string | undefined;
@@ -137,21 +138,13 @@ export async function saveAnalysisCache(
 }
 
 /**
- * Strips the surrounding quotes git adds to porcelain paths containing
- * special characters.
- */
-function unquotePorcelainPath(p: string): string {
-  if (p.startsWith('"') && p.endsWith('"')) {
-    return p.slice(1, -1);
-  }
-  return p;
-}
-
-/**
  * Computes a content fingerprint for a repo: this package's version, the HEAD
- * commit SHA, and a hash of the dirty working-tree files (status line + size +
- * mtime per file) when the tree is not clean. Editing, adding, or deleting an
- * uncommitted file therefore changes the fingerprint too.
+ * commit SHA, and a hash of each dirty path plus its actual bytes (or symlink
+ * target) when the tree is not clean. Editing, adding, or deleting an
+ * uncommitted file therefore changes the fingerprint even when its size and
+ * directory metadata stay unchanged. Platforms without a no-follow file-open
+ * flag fail closed for dirty regular files and return `null`, forcing analysis
+ * instead of reusing a cache based on an unsafe read.
  *
  * The version is part of the key so that upgrading NexusFlow re-runs the
  * analysis the generators read from. Keyed on repo content alone, an upgrade that
@@ -174,32 +167,47 @@ export async function getRepoFingerprint(
     });
     const sha = shaOut.trim();
 
-    const { stdout: statusOut } = await execa('git', ['status', '--porcelain'], {
+    // `-uall` is essential: plain porcelain collapses an untracked directory to
+    // `?? newdir/`, so editing a file inside it leaves the directory metadata
+    // unchanged and used to produce a false cache hit / false "fresh" result.
+    const { stdout: statusOut } = await execa('git', ['status', '--porcelain=v1', '-z', '-uall'], {
       cwd: repoPath,
     });
-    const lines = statusOut.split('\n').filter(Boolean);
-    if (lines.length === 0) {
+    const entries = parsePorcelainZ(statusOut);
+    if (entries.length === 0) {
       return `${prefix}${sha}`;
     }
 
-    let dirtySignature = '';
-    for (const line of lines) {
-      const rel = line.slice(3).trim();
-      // Rename lines look like "R  old -> new"; stat the new path.
-      const target = rel.includes(' -> ') ? rel.split(' -> ').pop()! : rel;
-      const filePath = path.join(repoPath, unquotePorcelainPath(target));
+    const dirty = createHash('sha256');
+    for (const entry of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+      dirty.update(entry.code).update('\0').update(entry.path).update('\0');
+      const filePath = path.join(repoPath, entry.path);
       try {
-        const st = await fs.stat(filePath);
-        dirtySignature += `${line}|${st.size}|${Math.floor(st.mtimeMs)}\n`;
+        // Reading the link itself never follows it. For ordinary files, the
+        // no-follow flag closes the lstat/read race where an untrusted worktree
+        // could swap a checked file for a symlink before its bytes were read.
+        const target = await fs.readlink(filePath);
+        dirty.update('symlink\0').update(target);
       } catch {
-        dirtySignature += `${line}|missing\n`;
+        if (typeof constants.O_NOFOLLOW !== 'number') {
+          // Windows does not expose O_NOFOLLOW. An ordinary read after the
+          // failed readlink probe would reintroduce a symlink-swap race, so
+          // disable cache reuse for this dirty snapshot and reanalyze it.
+          return null;
+        }
+        try {
+          const flags = constants.O_RDONLY | constants.O_NOFOLLOW;
+          dirty.update('file\0').update(await fs.readFile(filePath, { flag: flags }));
+        } catch {
+          // Deletions have no bytes to read; their status and path above are the
+          // complete retained state that must invalidate the snapshot.
+          dirty.update('missing\0');
+        }
       }
+      dirty.update('\0');
     }
 
-    const dirtyHash = createHash('sha1')
-      .update(dirtySignature)
-      .digest('hex')
-      .slice(0, 12);
+    const dirtyHash = dirty.digest('hex').slice(0, 12);
     return `${prefix}${sha}+${dirtyHash}`;
   } catch {
     return null;

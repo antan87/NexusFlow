@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 import {
@@ -33,6 +34,7 @@ describe('analysis-cache', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error('not a link'), { code: 'EINVAL' }));
   });
 
   describe('loadAnalysisCache', () => {
@@ -102,13 +104,17 @@ describe('analysis-cache', () => {
     it('extends the SHA with a dirty-files hash when the tree is dirty', async () => {
       vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
         if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
-        return { stdout: ' M src/file1.ts\n' };
+        return { stdout: ' M src/file1.ts\0' };
       }) as any);
-      vi.mocked(fs.stat).mockResolvedValue({ size: 100, mtimeMs: 1000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('first') as any);
 
       const fp = await getRepoFingerprint('/ws/repo-1');
 
-      expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      } else {
+        expect(fp).toBeNull();
+      }
     });
 
     it('invalidates every cached fingerprint when the version changes', async () => {
@@ -127,17 +133,54 @@ describe('analysis-cache', () => {
     it('changes the fingerprint when a dirty file is edited', async () => {
       vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
         if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
-        return { stdout: ' M src/file1.ts\n' };
+        return { stdout: ' M src/file1.ts\0' };
       }) as any);
 
-      vi.mocked(fs.stat).mockResolvedValue({ size: 100, mtimeMs: 1000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('first') as any);
       const before = await getRepoFingerprint('/ws/repo-1');
 
-      vi.mocked(fs.stat).mockResolvedValue({ size: 150, mtimeMs: 2000 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('second') as any);
       const after = await getRepoFingerprint('/ws/repo-1');
 
-      expect(before).not.toBe(after);
-      expect(before).not.toBe('abc123');
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(before).not.toBe(after);
+        expect(before).not.toBe('abc123');
+      } else {
+        expect(before).toBeNull();
+        expect(after).toBeNull();
+      }
+    });
+
+    it('changes when content inside an untracked directory changes without directory metadata changing', async () => {
+      vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
+        if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
+        return { stdout: '?? newdir/source.ts\0' };
+      }) as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('aaaa') as any);
+      const before = await getRepoFingerprint('/ws/repo-1');
+
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('bbbb') as any);
+      const after = await getRepoFingerprint('/ws/repo-1');
+
+      if (typeof constants.O_NOFOLLOW === 'number') {
+        expect(after).not.toBe(before);
+      } else {
+        expect(before).toBeNull();
+        expect(after).toBeNull();
+      }
+    });
+
+    it('hashes a symlink target without reading through the link', async () => {
+      vi.mocked(execa).mockImplementation((async (_cmd: any, args: any) => {
+        if (args[0] === 'rev-parse') return { stdout: 'abc123\n' };
+        return { stdout: ' M src/link.ts\0' };
+      }) as any);
+      vi.mocked(fs.readlink).mockResolvedValue('../outside/secret' as any);
+
+      const fp = await getRepoFingerprint('/ws/repo-1');
+
+      expect(fp).toMatch(/^nf\S+:abc123\+[0-9a-f]{12}$/);
+      expect(fs.readFile).not.toHaveBeenCalled();
     });
 
     it('returns null when git fails', async () => {

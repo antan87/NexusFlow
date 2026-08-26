@@ -7,6 +7,7 @@ import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js'
 import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from './CodexSdkAdapter.js';
 import { acquireLock, type ReleaseLock } from '../core/locks.js';
+import { checkGenerationLock } from '../core/generation-lock.js';
 
 export interface TeamAgentSpec {
   id: string;
@@ -91,6 +92,14 @@ export class MultiAgentOrchestrator extends EventEmitter {
   async runTeam(specs: TeamAgentSpec[], runOptions?: RunTeamOptions): Promise<TeamworkResult> {
     if (!specs || specs.length < 2) {
       throw new Error('Teamwork orchestration requires at least 2 agents (e.g. Lead Planner + Developer).');
+    }
+
+    const freshness = await checkGenerationLock(this.workspacePath, { markDocuments: true });
+    if (!freshness.fresh) {
+      this.emit('warning', {
+        type: 'stale-context',
+        message: freshness.drift.map((item) => item.message).join(' '),
+      });
     }
 
     // Verify unique agent IDs

@@ -265,6 +265,15 @@ export interface Feature {
 
   /** Custom teamwork coordination instructions for the agent team. */
   teamworkInstructions?: string;
+
+  /** Explicit runtime/intra-repo seams that package dependency analysis cannot infer. */
+  contracts?: Array<{
+    from: string;
+    to: string;
+    kind: string;
+    /** Knowledge heading id, e.g. 2026-08-25-bff-error-encoding. */
+    entry: string;
+  }>;
 }
 
 /** Runtime context for an active workspace — now includes analysis data. */
@@ -277,6 +286,13 @@ export interface WorkspaceContext {
 
   /** Analysis results for each repo (keyed by repo path). */
   analysis?: Map<string, ProjectAnalysis>;
+
+  /** Immutable repo snapshot captured before generated artifacts are rendered. */
+  generation?: {
+    generatedAt: string;
+    toolVersion: string;
+    repos: Record<string, { sha: string; fingerprint: string }>;
+  };
 }
 
 // ─── Phase 2: Project Analysis Types ──────────────────────────────────────

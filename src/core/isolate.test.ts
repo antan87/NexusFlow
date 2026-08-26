@@ -348,4 +348,40 @@ describe('isolateWorkspaceRepo & on-demand worktree isolation', { timeout: 30000
     expect(branchCheck?.status).toBe('pass');
     expect(report.errors).toHaveLength(0);
   });
+
+  it('doctor rejects explicit contract endpoints that do not exist', async () => {
+    const feature: Feature = {
+      id: 'contract-test', mode: 'in-place', branchName: 'contract-test', description: 'Contract test',
+      repos: [repo1Dir], originalRepos: [repo1Dir], assistants: [], workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+      contracts: [{ from: 'src/missing-bff', to: 'src/missing-spa', kind: 'http-envelope', entry: '2026-08-25-bff-errors' }],
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+    await fs.writeFile(path.join(workspaceDir, 'nexusflow-knowledge.md'), '### 2026-08-25 — bff-errors\n**Gotcha:** Decode once.\n');
+
+    const report = await runDoctor(workspaceDir);
+
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'Explicit Contracts', status: 'fail' }),
+    ]));
+  });
+
+  it('doctor accepts explicit contract endpoints backed by real paths and knowledge', async () => {
+    await fs.mkdir(path.join(repo1Dir, 'apps', 'bff'), { recursive: true });
+    await fs.mkdir(path.join(repo1Dir, 'apps', 'spa'), { recursive: true });
+    const feature: Feature = {
+      id: 'contract-test', mode: 'in-place', branchName: 'contract-test', description: 'Contract test',
+      repos: [repo1Dir], originalRepos: [repo1Dir], assistants: [], workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+      contracts: [{ from: 'apps/bff', to: 'apps/spa', kind: 'http-envelope', entry: '2026-08-25-bff-errors' }],
+    };
+    await saveFeatureConfig(workspaceDir, feature);
+    await fs.writeFile(path.join(workspaceDir, 'nexusflow-knowledge.md'), '### 2026-08-25 — bff-errors\n**Gotcha:** Decode once.\n');
+
+    const report = await runDoctor(workspaceDir);
+
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'Explicit Contracts', name: 'http-envelope', status: 'pass' }),
+    ]));
+  });
 });
