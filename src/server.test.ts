@@ -2030,6 +2030,49 @@ describe('Server API Endpoints Unit Tests', () => {
       });
     });
   });
+
+  describe('GET /api/workspaces/status', () => {
+    it('returns workspace statuses including active AI assistants', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([
+        {
+          id: 'ws-1',
+          branchName: 'feature-one',
+          workspacePath: '/workspaces/feature-one',
+          repos: ['repo1'],
+        },
+        {
+          id: 'ws-2',
+          branchName: 'feature-two',
+          workspacePath: '/workspaces/feature-two',
+          repos: ['repo2'],
+        },
+      ] as any);
+
+      const findActive = vi.spyOn(sessionFinder, 'findActiveAssistants').mockImplementation(async (wsPath) => {
+        if (wsPath === '/workspaces/feature-one') {
+          return ['antigravity', 'claude'];
+        }
+        return [];
+      });
+
+      const response = await app.request('/api/workspaces/status');
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body['feature-one']).toMatchObject({
+        id: 'ws-1',
+        branchName: 'feature-one',
+        activeAssistants: ['antigravity', 'claude'],
+      });
+      expect(body['feature-two']).toMatchObject({
+        id: 'ws-2',
+        branchName: 'feature-two',
+        activeAssistants: [],
+      });
+
+      findActive.mockRestore();
+    });
+  });
 });
 
 

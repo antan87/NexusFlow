@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -16,6 +16,8 @@ import {
   isInjectedContextText,
   getSessionTranscript,
   findSessions,
+  findActiveAssistants,
+  clearSessionFinderCache,
 } from './session-finder.js';
 
 describe('getClaudeProjectFolderName', () => {
@@ -308,6 +310,7 @@ describe('JSON error boundaries and malformed lines resilience', () => {
   let prevCodex: string | undefined;
 
   beforeEach(async () => {
+    clearSessionFinderCache();
     prevAg = process.env.ANTIGRAVITY_CLI_HOME;
     prevClaude = process.env.CLAUDE_CONFIG_DIR;
     prevCodex = process.env.CODEX_HOME;
@@ -326,6 +329,7 @@ describe('JSON error boundaries and malformed lines resilience', () => {
   });
 
   afterEach(async () => {
+    clearSessionFinderCache();
     if (prevAg === undefined) delete process.env.ANTIGRAVITY_CLI_HOME;
     else process.env.ANTIGRAVITY_CLI_HOME = prevAg;
     if (prevClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
@@ -381,5 +385,102 @@ describe('JSON error boundaries and malformed lines resilience', () => {
     expect(transcript).toHaveLength(2);
     expect(transcript[0].content).toBe('Build feature X');
     expect(transcript[1].content).toBe('Feature built.');
+  });
+
+  describe('findActiveAssistants', () => {
+    it('returns empty array when no assistants have sessions', async () => {
+      const active = await findActiveAssistants(workspaceDir);
+      expect(active).toEqual([]);
+    });
+
+    it('detects active Antigravity session and ignores unrelated workspaces', async () => {
+      const agHistoryPath = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'history.jsonl');
+      await fs.writeFile(
+        agHistoryPath,
+        [
+          JSON.stringify({ conversationId: 'conv-other', workspace: '/some/other/workspace' }),
+          JSON.stringify({ conversationId: 'conv-target', workspace: workspaceDir }),
+        ].join('\n'),
+      );
+
+      const active = await findActiveAssistants(workspaceDir);
+      expect(active).toContain('antigravity');
+
+      const activeOther = await findActiveAssistants('/completely/unrelated/path');
+      expect(activeOther).not.toContain('antigravity');
+    });
+
+    it('detects active Claude session in projects directory', async () => {
+      const claudeFolder = getClaudeProjectFolderName(workspaceDir);
+      const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', claudeFolder);
+      await fs.mkdir(claudeProjDir, { recursive: true });
+      await fs.writeFile(path.join(claudeProjDir, 'session-123.jsonl'), '{"type":"user"}');
+
+      const active = await findActiveAssistants(workspaceDir);
+      expect(active).toContain('claude');
+    });
+
+    it('detects active Codex session matching workspace cwd', async () => {
+      const codexSessionsDir = path.join(process.env.CODEX_HOME!, 'sessions');
+      await fs.writeFile(
+        path.join(codexSessionsDir, 'rollout-2026.jsonl'),
+        [
+          JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a53', cwd: workspaceDir } }),
+          JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: 'hello' } }),
+        ].join('\n'),
+      );
+
+      const active = await findActiveAssistants(workspaceDir);
+      expect(active).toContain('codex');
+    });
+
+    it('returns deduplicated list of active assistants when multiple harnesses are active', async () => {
+      // 1. Antigravity
+      const agHistoryPath = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'history.jsonl');
+      await fs.writeFile(
+        agHistoryPath,
+        [
+          JSON.stringify({ conversationId: 'conv-1', workspace: workspaceDir }),
+          JSON.stringify({ conversationId: 'conv-2', workspace: workspaceDir }),
+        ].join('\n'),
+      );
+
+      // 2. Claude
+      const claudeFolder = getClaudeProjectFolderName(workspaceDir);
+      const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', claudeFolder);
+      await fs.mkdir(claudeProjDir, { recursive: true });
+      await fs.writeFile(path.join(claudeProjDir, 'session-abc.jsonl'), '{"type":"user"}');
+
+      const active = await findActiveAssistants(workspaceDir);
+      expect(active).toHaveLength(2);
+      expect(active).toContain('antigravity');
+      expect(active).toContain('claude');
+    });
+
+    it('leverages caching and detects updates when new sessions are added', async () => {
+      const agHistoryPath = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'history.jsonl');
+      await fs.writeFile(
+        agHistoryPath,
+        JSON.stringify({ conversationId: 'conv-cache', workspace: workspaceDir }) + '\n',
+      );
+
+      const first = await findActiveAssistants(workspaceDir);
+      expect(first).toContain('antigravity');
+
+      // Second check: cache hit
+      const second = await findActiveAssistants(workspaceDir);
+      expect(second).toContain('antigravity');
+
+      // Add a Claude session: should immediately detect both
+      const claudeFolder = getClaudeProjectFolderName(workspaceDir);
+      const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', claudeFolder);
+      await fs.mkdir(claudeProjDir, { recursive: true });
+      await fs.writeFile(path.join(claudeProjDir, 'session-new.jsonl'), '{"type":"user"}');
+
+      const third = await findActiveAssistants(workspaceDir);
+      expect(third).toHaveLength(2);
+      expect(third).toContain('antigravity');
+      expect(third).toContain('claude');
+    });
   });
 });

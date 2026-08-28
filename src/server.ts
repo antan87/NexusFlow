@@ -46,6 +46,7 @@ import { openInEditor } from './utils/open-editor.js';
 import {
   canOpenCodexSessionInWorkspace,
   canTransferClaudeSessionInWorkspace,
+  findActiveAssistants,
   findSessions,
   getSessionTranscript,
 } from './utils/session-finder.js';
@@ -117,7 +118,7 @@ import {
   withResourceAdministrationLock,
 } from './resources/service.js';
 
-import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState } from './types.js';
+import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 
 // Resolve static files directory
@@ -834,7 +835,7 @@ app.get('/api/workspaces/status', async (c) => {
       workspaces.map(async (ws) => {
         const workspacePath =
           ws.workspacePath || path.join(config.workspacesDir, ws.branchName);
-        const status = {
+        const status: WorkspaceStatus = {
           id: ws.id,
           branchName: ws.branchName,
           changedFiles: 0,
@@ -842,6 +843,7 @@ app.get('/api/workspaces/status', async (c) => {
           runningServices: 0,
           syncStatus: 'unknown' as SyncStatus | 'unknown',
           pendingValidation: false,
+          activeAssistants: [],
         };
 
         try {
@@ -867,6 +869,9 @@ app.get('/api/workspaces/status', async (c) => {
           const repoStates = Object.values(wsState.repos);
           status.syncStatus = worstSyncStatus(repoStates);
           status.pendingValidation = repoStates.some((r) => r.pendingValidation);
+
+          // Active AI assistant sessions
+          status.activeAssistants = await findActiveAssistants(workspacePath, ws.repos);
         } catch {
           // Leave defaults on any per-workspace failure so one bad repo doesn't
           // fail the whole response.

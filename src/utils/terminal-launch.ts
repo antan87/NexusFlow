@@ -88,6 +88,34 @@ export function buildHarnessCliCommand(assistant: string, sessionId?: string): s
 }
 
 /**
+ * Generates and sanitizes a descriptive title for external terminal windows/tabs.
+ */
+export function formatTerminalTitle(
+  workspacePath: string,
+  options: TerminalLaunchOptions = {},
+  platform = process.platform,
+): string {
+  if (options.title && options.title.trim()) {
+    const sanitizedCustom = options.title.replace(/[^a-zA-Z0-9 _\-:()[\]]/g, '').trim();
+    if (sanitizedCustom) return sanitizedCustom;
+  }
+
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const wsName = pathApi.basename(workspacePath) || 'Workspace';
+  const parts: string[] = ['NexusFlow:', wsName];
+
+  if (options.assistant) {
+    parts.push(`[${options.assistant}]`);
+  }
+  if (options.sessionId && isValidSessionUuid(options.sessionId)) {
+    parts.push(`(${options.sessionId.slice(0, 8)})`);
+  }
+
+  const rawTitle = parts.join(' ');
+  return rawTitle.replace(/[^a-zA-Z0-9 _\-:()[\]]/g, '').trim() || 'NexusFlow Terminal';
+}
+
+/**
  * Validates and sanitizes a custom command string for terminal execution.
  */
 export function sanitizeTerminalCommand(cmd: string): string {
@@ -120,16 +148,42 @@ export async function launchWorkspaceTerminal(
     cmdToRun = buildHarnessCliCommand(options.assistant, options.sessionId);
   }
 
+  const terminalTitle = formatTerminalTitle(workspacePath, options, platform);
+
   if (platform === 'win32') {
-    const winTitle = (options.title || 'NexusFlow Terminal').replace(/[^a-zA-Z0-9 _-]/g, '') || 'NexusFlow Terminal';
     const escapedWs = escapePsSingleQuote(workspacePath);
     const shellBin = isBinaryOnPath('pwsh.exe') ? 'pwsh.exe' : 'powershell.exe';
-    const titleScript = `$host.UI.RawUI.WindowTitle = '${escapePsSingleQuote(winTitle)}'; `;
+    const titleScript = `$host.UI.RawUI.WindowTitle = '${escapePsSingleQuote(terminalTitle)}'; `;
     const focusPrefix = '$wshell = New-Object -ComObject Wscript.Shell; try { $wshell.AppActivate($PID) } catch {}; ';
     const psScript = cmdToRun
       ? `${titleScript}${focusPrefix}Set-Location -LiteralPath '${escapedWs}'; ${cmdToRun}`
       : `${titleScript}${focusPrefix}Set-Location -LiteralPath '${escapedWs}'`;
     const encodedCmd = Buffer.from(psScript, 'utf16le').toString('base64');
+
+    // Method 0: Windows Terminal (wt.exe) with tab attachment to current window
+    if (isBinaryOnPath('wt.exe')) {
+      try {
+        const child = execa('wt.exe', [
+          '-w', '0',
+          'nt',
+          '-d', workspacePath,
+          '--title', terminalTitle,
+          shellBin, '-NoExit', '-EncodedCommand', encodedCmd,
+        ], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        if (child && typeof (child as any).catch === 'function') {
+          (child as any).catch(() => {});
+        }
+        if (child && typeof (child as any).unref === 'function') {
+          (child as any).unref();
+        }
+        return { success: true, command: cmdToRun };
+      } catch {
+        // Fall back to standalone PowerShell/CMD if wt fails
+      }
+    }
 
     // Method 1: Start-Process via powershell.exe (guarantees a visible, focused native console window)
     try {
@@ -172,9 +226,11 @@ export async function launchWorkspaceTerminal(
     const posixEscapedPath = escapePosixSingleQuote(workspacePath);
     const appleScriptSafePath = posixEscapedPath.replace(/[\\"]/g, '\\$&');
     const appleScriptSafeCmd = cmdToRun ? cmdToRun.replace(/[\\"]/g, '\\$&') : '';
+    const safeEscapedTitle = terminalTitle.replace(/[\\"]/g, '\\$&');
+    const titleCmd = `printf '\\033]0;%s\\007' '${safeEscapedTitle}'; `;
     const script = cmdToRun
-      ? `tell application "Terminal" to do script "cd '${appleScriptSafePath}' && ${appleScriptSafeCmd}"\ntell application "Terminal" to activate`
-      : `tell application "Terminal" to do script "cd '${appleScriptSafePath}'"\ntell application "Terminal" to activate`;
+      ? `tell application "Terminal" to do script "${titleCmd}cd '${appleScriptSafePath}' && ${appleScriptSafeCmd}"\ntell application "Terminal" to activate`
+      : `tell application "Terminal" to do script "${titleCmd}cd '${appleScriptSafePath}'"\ntell application "Terminal" to activate`;
 
     try {
       const child = execa('/usr/bin/osascript', ['-e', script], {
@@ -195,17 +251,27 @@ export async function launchWorkspaceTerminal(
 
   if (platform === 'linux') {
     const escapedWs = escapePosixSingleQuote(workspacePath);
+    const titleEscape = `printf '\\033]0;%s\\007' '${escapePosixSingleQuote(terminalTitle)}'; `;
     const bashScript = cmdToRun
-      ? `cd '${escapedWs}' && ${cmdToRun}; exec bash`
-      : `cd '${escapedWs}'; exec bash`;
+      ? `${titleEscape}cd '${escapedWs}' && ${cmdToRun}; exec bash`
+      : `${titleEscape}cd '${escapedWs}'; exec bash`;
 
     const linuxTerminals = [
-      { bin: 'gnome-terminal', args: ['--working-directory', workspacePath, '--', 'bash', '-c', `${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
-      { bin: 'konsole', args: ['--workdir', workspacePath, '-e', 'bash', '-c', `${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
-      { bin: 'xfce4-terminal', args: ['--working-directory', workspacePath, '-e', `bash -c "${cmdToRun ? cmdToRun + '; ' : ''}exec bash"`] },
-      { bin: 'alacritty', args: ['--working-directory', workspacePath, '-e', 'bash', '-c', `${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'ptyxis', args: ['--tab', '--working-directory', workspacePath, '-T', terminalTitle, '--', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'gnome-terminal', args: ['--tab', '--working-directory', workspacePath, '--title', terminalTitle, '--', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'kgx', args: ['--working-directory', workspacePath, '-T', terminalTitle, '-e', `bash -c "${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash"`] },
+      { bin: 'konsole', args: ['--new-tab', '--workdir', workspacePath, '-p', `tabtitle=${terminalTitle}`, '-e', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'xfce4-terminal', args: ['--tab', '--working-directory', workspacePath, '--title', terminalTitle, '-e', `bash -c "${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash"`] },
+      { bin: 'tilix', args: ['--new-tab', '--working-directory', workspacePath, '-e', `bash -c "${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash"`] },
+      { bin: 'terminator', args: ['--new-tab', '--working-directory', workspacePath, '-e', `bash -c "${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash"`] },
+      { bin: 'alacritty', args: ['--working-directory', workspacePath, '--title', terminalTitle, '-e', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'kitty', args: ['--directory', workspacePath, '--title', terminalTitle, 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'foot', args: ['-D', workspacePath, '--title', terminalTitle, 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'wezterm', args: ['start', '--cwd', workspacePath, '--', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'ghostty', args: [`--working-directory=${workspacePath}`, '-e', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
+      { bin: 'x-terminal-emulator', args: ['--working-directory', workspacePath, '--', 'bash', '-c', `${titleEscape}${cmdToRun ? cmdToRun + '; ' : ''}exec bash`] },
       { bin: 'x-terminal-emulator', args: ['-e', 'bash', '-c', bashScript] },
-      { bin: 'xterm', args: ['-e', 'bash', '-c', bashScript] },
+      { bin: 'xterm', args: ['-title', terminalTitle, '-e', 'bash', '-c', bashScript] },
     ];
 
     for (const term of linuxTerminals) {
@@ -226,7 +292,7 @@ export async function launchWorkspaceTerminal(
         // Try next candidate
       }
     }
-    throw new Error('No supported Linux terminal emulator found on PATH (tried gnome-terminal, konsole, xfce4-terminal, alacritty, x-terminal-emulator, xterm).');
+    throw new Error('No supported Linux terminal emulator found on PATH (tried ptyxis, gnome-terminal, konsole, xfce4-terminal, alacritty, kitty, foot, wezterm, ghostty, x-terminal-emulator, xterm).');
   }
 
   throw new Error(`Terminal launching is not supported on platform: ${platform}`);
