@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import { loadFeatureConfig } from '../core/workspace.js';
 import { runDoctor, type DoctorCheck, type DoctorCheckStatus } from '../core/doctor.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
+import { BRAND_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 
 /** Category display order + emoji, matching the previous doctor layout. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -46,14 +47,14 @@ function renderCheck(check: DoctorCheck): string {
  * @param workspaceArg - Optional workspace path.
  */
 export async function doctorCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n🩺 NexusFlow — Workspace Doctor\n'));
+  console.log(chalk.bold.cyan(`\n🩺 ${BRAND_NAME} — Workspace Doctor\n`));
 
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace to diagnose:');
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
-    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    console.error(chalk.red(`✖ Failed to load workspace configuration. Ensure ${PRIMARY_MANIFEST_FILE} exists.`));
     return;
   }
 

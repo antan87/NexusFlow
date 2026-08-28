@@ -13,6 +13,8 @@ import * as fs from 'node:fs/promises';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from '../core/constants.js';
+
 /**
  * Resolves a workspace path without any interactive prompts.
  *
@@ -21,16 +23,21 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
  *
  * @param workspaceArg - Optional explicit workspace path.
  * @returns Absolute workspace path, or `null` when none can be determined.
- * @throws If an explicit `workspaceArg` is given but has no `nexusflow.json`.
+ * @throws If an explicit `workspaceArg` is given but has no manifest.
  */
 export async function resolveWorkspaceQuiet(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
     try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+      await fs.access(path.join(absolutePath, PRIMARY_MANIFEST_FILE));
       return absolutePath;
     } catch {
-      throw new Error(`Invalid workspace: No nexusflow.json found at ${absolutePath}`);
+      try {
+        await fs.access(path.join(absolutePath, LEGACY_MANIFEST_FILE));
+        return absolutePath;
+      } catch {
+        throw new Error(`Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`);
+      }
     }
   }
 

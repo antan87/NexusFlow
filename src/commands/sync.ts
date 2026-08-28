@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { syncWorkspace, type RepoSyncReport } from '../core/sync.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 
 /**
  * Executes the sync command.
@@ -18,14 +19,14 @@ import { syncWorkspace, type RepoSyncReport } from '../core/sync.js';
  * @param workspaceArg - Optional workspace path from CLI.
  */
 export async function syncCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n🔄 NexusFlow — Syncing Workspace\n'));
+  console.log(chalk.bold.cyan(`\n🔄 ${BRAND_NAME} — Syncing Workspace\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
-    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    console.error(chalk.red(`✖ Failed to load workspace configuration. Ensure ${PRIMARY_MANIFEST_FILE} exists.`));
     return;
   }
 
@@ -93,7 +94,7 @@ function renderRepoResult(repo: RepoSyncReport, workspacePath: string): void {
       break;
     case 'error':
       console.log(`  ${chalk.red('🔌')} ${repo.message}`);
-      console.log(chalk.dim('    This is an infrastructure failure (network/auth), not a merge conflict — check your connection or credentials and re-run nexusflow sync.'));
+      console.log(chalk.dim(`    This is an infrastructure failure (network/auth), not a merge conflict — check your connection or credentials and re-run ${CLI_NAME} sync.`));
       break;
   }
 }
@@ -104,13 +105,12 @@ function renderRepoResult(repo: RepoSyncReport, workspacePath: string): void {
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No workspace configuration found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

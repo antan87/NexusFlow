@@ -130,9 +130,9 @@ export function AppSidebar({
       <div className="flex h-12 items-center justify-between px-3 border-b border-border/60">
         <Link to="/overview" className="flex items-center gap-2">
           <div className="grid h-6 w-6 place-items-center rounded bg-primary text-[11px] font-bold text-primary-foreground shadow-xs">
-            NF
+            CS
           </div>
-          <span className="text-xs font-bold tracking-tight text-foreground">NexusFlow</span>
+          <span className="text-xs font-bold tracking-tight text-foreground">ContextSpace</span>
         </Link>
         <span className="text-[10px] font-mono text-muted-foreground/70">v{appVersion}</span>
       </div>

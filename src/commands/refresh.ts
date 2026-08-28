@@ -8,6 +8,7 @@ import { listWorkspaces, loadFeatureConfig, saveFeatureConfig } from '../core/wo
 import { refreshWorkspace } from '../core/refresh.js';
 import { getWorkflowTemplates } from '../utils/workflows.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 
 /**
  * Runs the refresh command.
@@ -21,14 +22,14 @@ export async function refreshCommand(
   options: { force?: boolean; strategy?: string; check?: boolean },
   workspaceArg?: string,
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n🔄 NexusFlow — Refresh Workspace Context\n'));
+  console.log(chalk.bold.cyan(`\n🔄 ${BRAND_NAME} — Refresh Workspace Context\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
-    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    console.error(chalk.red(`✖ Failed to load workspace configuration. Ensure ${PRIMARY_MANIFEST_FILE} exists.`));
     return;
   }
 
@@ -54,7 +55,7 @@ export async function refreshCommand(
         feature.teamworkInstructions = template.content;
         console.log(chalk.green(`  ✔ Updated strategy to: ${chalk.bold(template.name)}`));
       } else {
-        console.error(chalk.red(`  ✖ Strategy template "${strategyId}" not found. Use "nexusflow strategy list" to see available templates.`));
+        console.error(chalk.red(`  ✖ Strategy template "${strategyId}" not found. Use "${CLI_NAME} strategy list" to see available templates.`));
         return;
       }
     }
@@ -105,13 +106,12 @@ export async function refreshCommand(
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No workspace configuration found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

@@ -1,9 +1,9 @@
 {
-  "name": "nexusflow-vscode",
-  "displayName": "NexusFlow Multi-Repo Workspace Orchestrator",
+  "name": "contextspace-vscode",
+  "displayName": "ContextSpace Multi-Repo Workspace Orchestrator",
   "description": "Manage multiple repositories as a single feature workspace, orchestrate background services, and align AI coding contexts natively inside VS Code.",
   "version": "2.10.0",
-  "publisher": "nexusflow",
+  "publisher": "contextspace",
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -12,30 +12,32 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:nexusflow.json"
+    "workspaceContains:contextspace.json",
+    "workspaceContains:nexusflow.json",
+    "workspaceContains:workspace.json"
   ],
   "contributes": {
     "mcpServerDefinitionProviders": [
       {
-        "id": "nexusflow-mcp",
-        "label": "NexusFlow MCP Server"
+        "id": "contextspace-mcp",
+        "label": "ContextSpace MCP Server"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "nexusflow-sidebar",
-          "title": "NexusFlow",
+          "id": "contextspace-sidebar",
+          "title": "ContextSpace",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "nexusflow-sidebar": [
+      "contextspace-sidebar": [
         {
           "type": "webview",
-          "id": "nexusflow.dashboardView",
-          "name": "NexusFlow Dashboard"
+          "id": "contextspace.dashboardView",
+          "name": "ContextSpace Dashboard"
         }
       ]
     },

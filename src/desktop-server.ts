@@ -12,11 +12,12 @@
 
 import { startServer } from './server.js';
 
-const port = Number(process.env.NF_PORT ?? process.argv[2] ?? 0) || 0;
+const port = Number(process.env.CS_PORT ?? process.env.NF_PORT ?? process.argv[2] ?? 0) || 0;
 
 startServer(port, { strictPort: false })
   .then(({ port: actualPort }) => {
     // The Electron shell watches stdout for this token to know the server is up.
+    console.log(`CONTEXTSPACE_READY_PORT=${actualPort}`);
     console.log(`NEXUSFLOW_READY_PORT=${actualPort}`);
     console.log(`Dashboard running at: http://localhost:${actualPort}`);
   })

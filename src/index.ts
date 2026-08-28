@@ -54,26 +54,29 @@ import {
 import { adapterListCommand, adapterUseCommand, adapterInfoCommand, adapterInitCommand } from './commands/adapter.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
 
+import { CLI_NAME, BRAND_NAME } from './core/constants.js';
+
 const program = new Command();
 
 program
-  .name('nexusflow')
+  .name(CLI_NAME)
   .description(
-    'Combine multiple repos into a workspace with rich AI assistant context',
+    `${BRAND_NAME} — Combine multiple repos into a workspace with rich AI assistant context`,
   )
   .version(getCurrentVersion())
-  .option('--debug', 'Enable verbose debug logging to stderr (or set NEXUSFLOW_DEBUG=1)');
+  .option('--debug', 'Enable verbose debug logging to stderr (or set CONTEXTSPACE_DEBUG=1)');
 
 // Turn the global --debug flag into the env var the debug logger reads, before
 // any action runs.
 program.hook('preAction', (thisCommand) => {
   if (thisCommand.opts().debug) {
+    process.env.CONTEXTSPACE_DEBUG = '1';
     process.env.NEXUSFLOW_DEBUG = '1';
   }
 });
 
 function isDebugMode(): boolean {
-  return process.argv.includes('--debug') || Boolean(process.env.NEXUSFLOW_DEBUG);
+  return process.argv.includes('--debug') || Boolean(process.env.CONTEXTSPACE_DEBUG || process.env.NEXUSFLOW_DEBUG);
 }
 
 /**
@@ -123,7 +126,7 @@ program
 
 program
   .command('init')
-  .description('Initialize NexusFlow configuration')
+  .description(`Initialize ${BRAND_NAME} configuration`)
   .option('--workspace [path]', 'Initialize or adopt a git-backed workspace artifact repository')
   .action(runAction(async (options: { workspace?: string | boolean }) => initCommand(options)));
 
@@ -172,7 +175,7 @@ program
 
 program
   .command('ui')
-  .description('Start the NexusFlow dashboard server (the backend the desktop app embeds)')
+  .description(`Start the ${BRAND_NAME} dashboard server (the backend the desktop app embeds)`)
   .option('-p, --port <number>', 'Port to run the dashboard server on', '3000')
   .option('-d, --daemon', 'Run the dashboard server in the background (daemon mode)')
   .option('--open', 'Also open the dashboard in your default browser')
@@ -457,7 +460,7 @@ strategyCmd
 
 const desktopCmd = program
   .command('desktop')
-  .description('Launch the NexusFlow desktop application')
+  .description(`Launch the ${BRAND_NAME} desktop application`)
   .action(runAction(desktopCommand));
 
 desktopCmd
@@ -466,7 +469,7 @@ desktopCmd
   .action(runAction(desktopInstallCommand));
 
 // Config command group
-const configCmd = program.command('config').description('View and update NexusFlow configuration');
+const configCmd = program.command('config').description(`View and update ${BRAND_NAME} configuration`);
 
 configCmd
   .command('show')
@@ -486,7 +489,7 @@ configCmd
   .argument('<value>', 'Value to assign')
   .action(runAction(configSetCommand));
 
-// Default action when 'nexusflow config' is run without a subcommand
+// Default action when 'ctxspace config' is run without a subcommand
 configCmd.action(runAction(configShowCommand));
 
 // Adapter command group
@@ -515,13 +518,13 @@ adapterCmd
   .argument('<name>', 'Name for the new adapter')
   .action(runAction(adapterInitCommand));
 
-// Default action when 'nexusflow adapter' is run without a subcommand
+// Default action when 'ctxspace adapter' is run without a subcommand
 adapterCmd.action(runAction(adapterListCommand));
 
 // Schedule command group
 const scheduleCmd = program
   .command('schedule')
-  .description('Manage recurring workspace jobs (sync/refresh) — jobs run while a NexusFlow server is active')
+  .description(`Manage recurring workspace jobs (sync/refresh) — jobs run while a ${BRAND_NAME} server is active`)
   .option('--json', 'Output in JSON format');
 
 scheduleCmd
@@ -545,13 +548,13 @@ scheduleCmd
   .command('remove')
   .alias('rm')
   .description('Remove a scheduled job')
-  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .argument('<id>', `Job id (see "${CLI_NAME} schedule list")`)
   .action(runAction(scheduleRemoveCommand));
 
 scheduleCmd
   .command('enable')
   .description('Enable a scheduled job')
-  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .argument('<id>', `Job id (see "${CLI_NAME} schedule list")`)
   .action(runAction(async (id: string) => {
     await scheduleToggleCommand(id, true);
   }));
@@ -559,7 +562,7 @@ scheduleCmd
 scheduleCmd
   .command('disable')
   .description('Disable a scheduled job without removing it')
-  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .argument('<id>', `Job id (see "${CLI_NAME} schedule list")`)
   .action(runAction(async (id: string) => {
     await scheduleToggleCommand(id, false);
   }));
@@ -567,17 +570,17 @@ scheduleCmd
 scheduleCmd
   .command('run')
   .description('Run a scheduled job immediately')
-  .argument('<id>', 'Job id (see "nexusflow schedule list")')
+  .argument('<id>', `Job id (see "${CLI_NAME} schedule list")`)
   .action(runAction(scheduleRunCommand));
 
-// Default action when 'nexusflow schedule' is run without a subcommand
+// Default action when 'ctxspace schedule' is run without a subcommand
 scheduleCmd.action(runAction(scheduleListCommand));
 
-const mcp = program.command('mcp').description('Manage the NexusFlow MCP Server for AI assistants');
+const mcp = program.command('mcp').description(`Manage the ${BRAND_NAME} MCP Server for AI assistants`);
 
 mcp
   .command('run')
-  .description('Start the NexusFlow MCP Server (typically called automatically by AI assistants)')
+  .description(`Start the ${BRAND_NAME} MCP Server (typically called automatically by AI assistants)`)
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('-r, --role <role>', 'Agent execution role for scoped tool surfaces (e.g. readonly, review, ci, developer, full)')
   .option('--allow <tools...>', 'Explicit list of allowed tool names')
@@ -586,7 +589,7 @@ mcp
 
 mcp
   .command('setup')
-  .description('Automatically configure your AI environments (Claude Desktop, Cursor, VS Code) to use the NexusFlow MCP Server')
+  .description(`Automatically configure your AI environments (Claude Desktop, Cursor, VS Code) to use the ${BRAND_NAME} MCP Server`)
   .action(runAction(mcpSetupCommand));
 
 program.hook('postAction', async (thisCommand, actionCommand) => {

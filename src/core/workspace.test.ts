@@ -6,9 +6,12 @@ import type { Feature } from '../types.js';
 
 vi.mock('node:fs/promises');
 
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from './constants.js';
+
 describe('feature manifest persistence (A1.6)', () => {
   const workspacePath = path.resolve('/mock/workspaces/feat');
-  const manifestPath = path.join(workspacePath, 'nexusflow.json');
+  const manifestPath = path.join(workspacePath, PRIMARY_MANIFEST_FILE);
+  const legacyManifestPath = path.join(workspacePath, LEGACY_MANIFEST_FILE);
 
   const feature: Feature = {
     id: 'feat',
@@ -48,16 +51,25 @@ describe('feature manifest persistence (A1.6)', () => {
     expect(loaded?.id).toBe('feat');
   });
 
+  it('loads legacy nexusflow.json when contextspace.json is absent', async () => {
+    vi.mocked(fs.readFile).mockImplementation(async (p: any) => {
+      if (p === legacyManifestPath) return JSON.stringify(feature);
+      throw new Error('ENOENT');
+    });
+
+    const loaded = await loadWorkspaceManifest(workspacePath);
+    expect(loaded?.id).toBe('feat');
+  });
+
   it('loads an exact workspace manifest without searching parent directories', async () => {
     vi.mocked(fs.readFile).mockImplementation(async (p: any) => {
-      if (p === path.join(path.dirname(workspacePath), 'nexusflow.json')) {
+      if (p === path.join(path.dirname(workspacePath), PRIMARY_MANIFEST_FILE)) {
         return JSON.stringify({ ...feature, workspacePath: path.dirname(workspacePath) });
       }
       throw new Error('ENOENT');
     });
 
     await expect(loadWorkspaceManifest(workspacePath)).resolves.toBeNull();
-    expect(fs.readFile).toHaveBeenCalledTimes(1);
     expect(fs.readFile).toHaveBeenCalledWith(manifestPath, 'utf-8');
   });
 });

@@ -13,13 +13,14 @@ import { execa } from 'execa';
 import type { ServiceConfig, RunningService, RunningState } from '../types.js';
 
 /** Name of the state file that tracks running services. */
-const STATE_FILE = '.nexusflow-running.json';
+const PRIMARY_STATE_FILE = '.contextspace-running.json';
+const LEGACY_STATE_FILE = '.nexusflow-running.json';
 
 /**
  * Returns the path to the running-state file for a workspace.
  */
 function getStatePath(workspacePath: string): string {
-  return path.join(workspacePath, STATE_FILE);
+  return path.join(workspacePath, PRIMARY_STATE_FILE);
 }
 
 /** Stable, collision-free 8-char hash of the absolute workspace path. */
@@ -30,10 +31,10 @@ export function workspaceHash(workspacePath: string): string {
 /** Workspace PM2 prefix embedding the workspace hash to eliminate prefix over-matching. */
 export function pm2Prefix(workspacePath: string): string {
   const base = path.basename(workspacePath).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 24);
-  return `nexusflow-${base}-${workspaceHash(workspacePath)}-`;
+  return `contextspace-${base}-${workspaceHash(workspacePath)}-`;
 }
 
-/** PM2 app name for a workspace service: `nexusflow-<base>-<hash>-<name>`. */
+/** PM2 app name for a workspace service: `contextspace-<base>-<hash>-<name>`. */
 export function pm2AppName(workspacePath: string, serviceName: string): string {
   return `${pm2Prefix(workspacePath)}${serviceName}`;
 }
@@ -123,9 +124,13 @@ export async function getPm2List(): Promise<any[]> {
  */
 export async function readRawRunningState(workspacePath: string): Promise<RunningState | null> {
   try {
-    return JSON.parse(await fs.readFile(getStatePath(workspacePath), 'utf-8')) as RunningState;
+    return JSON.parse(await fs.readFile(path.join(workspacePath, PRIMARY_STATE_FILE), 'utf-8')) as RunningState;
   } catch {
-    return null;
+    try {
+      return JSON.parse(await fs.readFile(path.join(workspacePath, LEGACY_STATE_FILE), 'utf-8')) as RunningState;
+    } catch {
+      return null;
+    }
   }
 }
 

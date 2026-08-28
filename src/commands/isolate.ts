@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { loadFeatureConfig, isolateWorkspaceRepo } from '../core/workspace.js';
 import { isInPlace, isRepoIsolated } from '../utils/feature.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 interface IsolateCommandOptions {
   branch?: string;
@@ -23,7 +24,7 @@ export async function isolateCommand(
   branchArg?: string,
   options: IsolateCommandOptions = {},
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n⚡ NexusFlow — Isolate Repository\n'));
+  console.log(chalk.bold.cyan(`\n⚡ ${BRAND_NAME} — Isolate Repository\n`));
 
   const workspacePath = await resolveWorkspaceInteractive(
     options.workspace,

@@ -449,20 +449,27 @@ Instructions for conducting deep application security audits.
 
 // ─── Categories Management ────────────────────────────────────────────────
 
-export function getNexusFlowHome(): string {
-  if (process.env.NEXUSFLOW_HOME && process.env.NEXUSFLOW_HOME !== 'undefined') {
-    return process.env.NEXUSFLOW_HOME;
+export function getContextSpaceHome(): string {
+  const envDir = process.env.CONTEXTSPACE_HOME || process.env.NEXUSFLOW_HOME;
+  if (envDir && envDir !== 'undefined') {
+    return path.resolve(envDir);
   }
-  return path.join(os.homedir(), '.nexusflow');
+  const primary = path.join(os.homedir(), '.contextspace');
+  const legacy = path.join(os.homedir(), '.nexusflow');
+  if (fse.existsSync(primary)) return primary;
+  if (fse.existsSync(legacy)) return legacy;
+  return primary;
 }
+
+export const getNexusFlowHome = getContextSpaceHome;
 
 
 export function getUserCategoriesPath(): string {
-  return path.join(getNexusFlowHome(), 'categories.json');
+  return path.join(getContextSpaceHome(), 'categories.json');
 }
 
 export function getUserSkillsDir(): string {
-  return path.join(getNexusFlowHome(), 'skills');
+  return path.join(getContextSpaceHome(), 'skills');
 }
 
 const PORTABLE_SKILL_SUPPORT_DIRECTORIES = new Set(['scripts', 'references', 'assets', 'agents']);

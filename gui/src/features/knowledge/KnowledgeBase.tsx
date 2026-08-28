@@ -35,7 +35,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
     <div className="rounded-lg border border-border bg-card p-4 surface-card">
       <header className="flex justify-between items-center mb-4">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
+          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (contextspace-knowledge.md)
         </h4>
         <div className="flex items-center gap-2">
           {!isEditingKnowledge && knowledgeContent && (

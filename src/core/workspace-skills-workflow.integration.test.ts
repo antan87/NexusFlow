@@ -115,8 +115,8 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     // 1. Run the workspace generation pipeline
     await generateContextFiles(ctx, assistants, tempWorkspace);
     const artifactCommit = await execa('git', ['log', '-1', '--format=%s'], { cwd: tempWorkspace });
-    expect(artifactCommit.stdout).toBe('chore(nexusflow): refresh workspace artifacts');
-    const generationLock = JSON.parse(await fs.readFile(path.join(tempWorkspace, 'nexusflow.lock'), 'utf-8'));
+    expect(artifactCommit.stdout).toBe('chore(ctxspace): refresh workspace artifacts');
+    const generationLock = JSON.parse(await fs.readFile(path.join(tempWorkspace, 'contextspace.lock'), 'utf-8'));
     expect(generationLock.outputs).toHaveProperty('AGENTS.md');
     expect(Object.keys(generationLock.outputs)).toContain('.agents/skills/pr-review-toolkit/SKILL.md');
 

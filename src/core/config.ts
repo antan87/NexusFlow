@@ -45,16 +45,20 @@ function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void 
   }
 }
 
+import { PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME } from './constants.js';
+
 /** Name of the config directory under the user's home folder. */
-const CONFIG_DIR_NAME = '.nexusflow';
+const CONFIG_DIR_NAME = PRIMARY_CONFIG_DIR_NAME;
 
 /** Name of the config file. */
 const CONFIG_FILE_NAME = 'config.json';
 
 /**
- * Returns the absolute path to the NexusFlow config directory (~/.nexusflow).
+ * Returns the absolute path to the ContextSpace config directory (~/.contextspace).
  */
 export function getConfigDir(): string {
+  const envDir = process.env.CONTEXTSPACE_HOME || process.env.NEXUSFLOW_HOME;
+  if (envDir) return path.resolve(envDir);
   return path.join(os.homedir(), CONFIG_DIR_NAME);
 }
 
@@ -121,8 +125,14 @@ export async function loadConfig(options: { quiet?: boolean } = {}): Promise<Nex
   try {
     raw = await fs.readFile(configPath, 'utf-8');
   } catch {
-    // File doesn't exist (first run) or is unreadable — defaults are correct.
-    raw = null;
+    // Check legacy ~/.nexusflow/config.json
+    try {
+      const legacyConfigPath = path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, CONFIG_FILE_NAME);
+      raw = await fs.readFile(legacyConfigPath, 'utf-8');
+    } catch {
+      // File doesn't exist (first run) or is unreadable — defaults are correct.
+      raw = null;
+    }
   }
 
   if (raw !== null) {

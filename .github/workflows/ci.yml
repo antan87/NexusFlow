@@ -65,10 +65,10 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
-            packaged_exe: dist/win-unpacked/NexusFlow.exe
+            packaged_exe: dist/win-unpacked/ContextSpace.exe
           - os: ubuntu-latest
             platform: linux
-            packaged_exe: dist/linux-unpacked/nexusflow-desktop
+            packaged_exe: dist/linux-unpacked/contextspace-desktop
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
@@ -118,6 +118,7 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: desktop
         env:
+          CONTEXTSPACE_PACKAGED_EXE: ${{ matrix.packaged_exe }}
           NEXUSFLOW_PACKAGED_EXE: ${{ matrix.packaged_exe }}
         run: npm run test:e2e
 
@@ -125,6 +126,7 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: desktop
         env:
+          CONTEXTSPACE_PACKAGED_EXE: ${{ matrix.packaged_exe }}
           NEXUSFLOW_PACKAGED_EXE: ${{ matrix.packaged_exe }}
         run: xvfb-run --auto-servernum npm run test:e2e
 
@@ -136,14 +138,14 @@ jobs:
           appimage="$APPIMAGE"
           test -x "$appimage" || chmod +x "$appimage"
           set +e
-          timeout --kill-after=10s 180s xvfb-run --auto-servernum env APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" >/tmp/nexusflow-appimage-smoke.log 2>&1
+          timeout --kill-after=10s 180s xvfb-run --auto-servernum env APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" >/tmp/contextspace-appimage-smoke.log 2>&1
           code=$?
           set -e
           # The desktop app is expected to stay open; timeout is the success
           # signal. Require the backend's explicit ready marker as proof that
           # the actual AppImage booted, rather than accepting any long-running
           # process or the separate unpacked-app E2E above.
-          grep -Eq 'NEXUSFLOW_READY_PORT=[0-9]+' /tmp/nexusflow-appimage-smoke.log
+          grep -Eq '(CONTEXTSPACE|NEXUSFLOW)_READY_PORT=[0-9]+' /tmp/contextspace-appimage-smoke.log
           test "$code" -eq 124 -o "$code" -eq 137
 
       - name: Stage Windows desktop artifacts
@@ -151,7 +153,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force desktop/release-assets | Out-Null
-          Copy-Item desktop/dist/NexusFlowSetup.exe desktop/release-assets/NexusFlowSetup.exe
+          if (Test-Path desktop/dist/ContextSpaceSetup.exe) {
+            Copy-Item desktop/dist/ContextSpaceSetup.exe desktop/release-assets/ContextSpaceSetup.exe
+          } else {
+            Copy-Item desktop/dist/NexusFlowSetup.exe desktop/release-assets/NexusFlowSetup.exe
+          }
           Copy-Item desktop/dist/latest.yml desktop/release-assets/latest.yml
           Get-ChildItem desktop/dist -File -Filter '*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName desktop/release-assets }
 
@@ -185,6 +191,6 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nexusflow-desktop-${{ matrix.platform }}
+          name: contextspace-desktop-${{ matrix.platform }}
           path: desktop/release-assets/*
           if-no-files-found: error

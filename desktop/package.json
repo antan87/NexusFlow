@@ -1,5 +1,5 @@
 {
-  "name": "nexusflow-desktop",
+  "name": "contextspace-desktop",
   "version": "2.10.0",
   "type": "module",
   "main": "main.js",
@@ -20,8 +20,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "se.hogia.nexusflow",
-    "productName": "NexusFlow",
+    "appId": "se.hogia.contextspace",
+    "productName": "ContextSpace",
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
@@ -47,7 +47,7 @@
       "target": "nsis"
     },
     "nsis": {
-      "artifactName": "NexusFlowSetup.exe"
+      "artifactName": "ContextSpaceSetup.exe"
     },
     "mac": {
       "target": "dmg"

@@ -18,7 +18,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     <div className="rounded-lg border border-border bg-card p-4 surface-card">
       <header className="flex justify-between items-center mb-4">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <ListOrdered size={16} className="text-primary" /> Inter-Repo Implementation Plan (nexusflow-plan.md)
+          <ListOrdered size={16} className="text-primary" /> Inter-Repo Implementation Plan (contextspace-plan.md)
         </h4>
         {planContent && (
           <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-md border border-border/60">

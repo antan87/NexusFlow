@@ -65,7 +65,7 @@ export async function detectOrchestrationTools(
                 tool: 'aspire',
                 configPath: csprojPath,
                 startCommand: `dotnet run --project "${projectPath}"`,
-                stopCommand: 'Stopped via NexusFlow',
+                stopCommand: 'Stopped via ContextSpace',
                 run: { command: 'dotnet', args: ['run', '--project', csprojPath], cwd: folder },
                 mode: 'pm2',
               });
@@ -100,7 +100,7 @@ export async function detectOrchestrationTools(
         tool: 'procfile',
         configPath: procPath,
         startCommand: prefix ? `honcho start -f ${path.join(prefix, 'Procfile')}` : 'honcho start',
-        stopCommand: 'Stopped via NexusFlow',
+        stopCommand: 'Stopped via ContextSpace',
         run: { command: 'honcho', args: ['start', '-f', procPath], cwd: folder },
         mode: 'pm2',
       });
@@ -117,7 +117,7 @@ export async function detectOrchestrationTools(
           tool: 'makefile',
           configPath: makePath,
           startCommand: makeCmd,
-          stopCommand: 'Stopped via NexusFlow',
+          stopCommand: 'Stopped via ContextSpace',
           run: { command: 'make', args: ['-C', folder, 'dev'], cwd: folder },
           mode: 'pm2',
         });
@@ -303,10 +303,15 @@ export async function detectAllServices(
   // core/workspace.js — to keep this module free of import cycles.
   let feature: Feature | null = null;
   try {
-    const raw = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    const raw = await fs.readFile(path.join(workspacePath, 'contextspace.json'), 'utf-8');
     feature = normalizeFeature(JSON.parse(raw) as Feature);
   } catch {
-    // No/invalid manifest — fall back to scanning subdirectories below.
+    try {
+      const raw = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+      feature = normalizeFeature(JSON.parse(raw) as Feature);
+    } catch {
+      // No/invalid manifest — fall back to scanning subdirectories below.
+    }
   }
 
   if (feature) {

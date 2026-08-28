@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
+import { BRAND_NAME } from '../core/constants.js';
 
 export const GITHUB_RELEASE_API_URL = 'https://api.github.com/repos/antan87/NexusFlow/releases/latest';
 const GITHUB_RELEASE_PAGE_URL = 'https://github.com/antan87/NexusFlow/releases/latest';
@@ -302,11 +303,11 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
  *
  * The Electron `desktop/` project lives inside this repo:
  *
- *   NexusFlow/            ← repo root
+ *   ContextSpace/            ← repo root
  *     dist/commands/desktop.js   ← this file at runtime
  *     desktop/                   ← Electron desktop app (main.js)
  *
- * This file compiles to `NexusFlow/dist/commands/desktop.js`, so the repo
+ * This file compiles to `ContextSpace/dist/commands/desktop.js`, so the repo
  * root is two levels up (and `desktop/` sits beside `dist/`).
  */
 function resolveRepoRoot(): string {
@@ -319,11 +320,11 @@ function getDesktopDir(): string {
 }
 
 /**
- * Launches the NexusFlow Electron desktop app via `npm start` in the desktop
+ * Launches the ContextSpace Electron desktop app via `npm start` in the desktop
  * project. Spawns detached so the CLI returns while the app keeps running.
  */
 export async function desktopCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Desktop App\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Desktop App\n`));
 
   const desktopDir = getDesktopDir();
 

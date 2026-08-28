@@ -1,7 +1,7 @@
 # Workspace Knowledge — sdk_claude_codex
 
 > Accumulated decisions and gotchas for this feature. Append with
-> `nexusflow knowledge add -t decision|gotcha -m "..."`, which creates the
+> `ctxspace knowledge add -t decision|gotcha -m "..."`, which creates the
 > section it needs.
 
 ## Feature Goal
@@ -11,7 +11,7 @@ Improve compatibility with Codex SDK (`@openai/codex-sdk`) and Claude Agent SDK 
 ## Decisions
 
 ### Decision: Lazy Session Upsert on Claude Init Message
-`session_id` in `@anthropic-ai/claude-agent-sdk` is only emitted mid-stream on the first `SystemMessage` (`type === "system" && subtype === "init"`) and on `ResultMessage`s. NexusFlow must create or upsert the DB session record lazily upon receiving this event rather than prior to spawning the query.
+`session_id` in `@anthropic-ai/claude-agent-sdk` is only emitted mid-stream on the first `SystemMessage` (`type === "system" && subtype === "init"`) and on `ResultMessage`s. ContextSpace must create or upsert the DB session record lazily upon receiving this event rather than prior to spawning the query.
 
 ### Decision: CWD-Decoupled SessionStore Keying
 `sessionStore` keys by `projectKey` derived from working directory. For multi-host/ephemeral workspaces, pass `CLAUDE_CODE_PROJECT_DIR_NAME: workspaceId` (and `CLAUDE_CONFIG_DIR`) in the query's `env` (requires Agent SDK >= 0.3.234) and key database records by `(workspaceId, sessionId)`.
@@ -22,8 +22,8 @@ Eliminate local `~/.claude/projects/` JSONL transcript scraping. All session que
 ### Decision: Early Usage Event Schema Normalization
 Capture `turn.completed` usage (`event.usage`) on Codex and ResultMessage usage on Claude during Phase 1 schema design. Capturing and normalizing usage metrics early avoids costly database/schema retrofits when building usage reporting in Phase 3.
 
-### Decision: Scoped Tool Surface for NexusFlow MCP Server
-In Phase 2, NexusFlow's MCP server enforces role-based tool allow/deny lists (`readonly`, `review`, `ci`, `developer`, `interactive`, `full`). `nexusflow mcp run` accepts `-r, --role <role>`, `--allow`, and `--deny` flags so spawned servers strictly filter tool capabilities.
+### Decision: Scoped Tool Surface for ContextSpace MCP Server
+In Phase 2, ContextSpace's MCP server enforces role-based tool allow/deny lists (`readonly`, `review`, `ci`, `developer`, `interactive`, `full`). `ctxspace mcp run` accepts `-r, --role <role>`, `--allow`, and `--deny` flags so spawned servers strictly filter tool capabilities.
 
 ### Decision: Fail-Closed Trust Boundary for Embedded-Chat MCP Tool Approvals
 In embedded-chat SDK sessions under `workspace-write`, only core file tools and read-only MCP coordination tools (`list_*`, `get_*`, `search_*`, `workspace_status`, `run_doctor`, `add_knowledge`, `promote_knowledge`, `refresh_context`) are auto-accepted. Mutating lifecycle tools (`create_workspace`, `commit_workspace`, `finish_workspace`, `isolate_repo`, `sync_workspace`) fail closed and deny with explicit guidance pointing to CLI/dashboard until interactive dashboard approval routing is implemented. Blanket namespace prefix matching is prohibited.

@@ -787,7 +787,7 @@ Workspace Metadata:
 
 Core Instructions:
 1. Read "AGENTS.md" at the workspace root first — it names the repos, how they depend on each other, which to change first, and how to verify each.
-2. Search "nexusflow-knowledge.md" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`nexusflow knowledge add\`. "nexusflow-plan.md" carries the phase order when a change spans repos.
+2. Search "contextspace-knowledge.md" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`ctxspace knowledge add\`. "contextspace-plan.md" carries the phase order when a change spans repos.
 3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" inside sub-repositories.
 `;
     const copied = await safeCopyToClipboard(prompt);

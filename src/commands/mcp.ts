@@ -22,7 +22,7 @@ export async function mcpRunCommand(workspace?: string, options?: McpRunOptions)
 }
 
 export async function mcpSetupCommand() {
-  console.log(chalk.blue.bold('\nSetting up NexusFlow MCP Server for AI Assistants...'));
+  console.log(chalk.blue.bold('\nSetting up ContextSpace MCP Server for AI Assistants...'));
   
   const isWin = os.platform() === 'win32';
   const isMac = os.platform() === 'darwin';
@@ -55,7 +55,7 @@ export async function mcpSetupCommand() {
     command: 'npx',
     // Setup is an explicit grant for the normal workspace-management surface.
     // Ad-hoc `mcp run` remains read-only unless its caller names a role.
-    args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run', '--role', 'interactive']
+    args: ['-y', '@mrpatronz/contextspace', 'mcp', 'run', '--role', 'interactive']
   };
 
   let updatedCount = 0;
@@ -84,7 +84,7 @@ export async function mcpSetupCommand() {
         }
       }
 
-      configData.mcpServers['nexusflow'] = mcpConfig;
+      configData.mcpServers['contextspace'] = mcpConfig;
 
       await fs.writeFile(configPath, JSON.stringify(configData, null, 2), 'utf8');
       console.log(chalk.green(`  ✓ Configured MCP in: ${configPath}`));
@@ -100,7 +100,7 @@ export async function mcpSetupCommand() {
   } else {
     console.log(chalk.yellow('\nCould not find any standard configuration files to update.'));
     console.log('You can manually add this configuration to your mcp.json:');
-    console.log(JSON.stringify({ mcpServers: { nexusflow: mcpConfig } }, null, 2));
+    console.log(JSON.stringify({ mcpServers: { contextspace: mcpConfig } }, null, 2));
   }
 }
 

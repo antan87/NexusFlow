@@ -140,11 +140,19 @@ function parseStatCounts(statOutput: string): [number, number] {
  * @returns Array of repo metadata objects.
  * @throws If `nexusflow.json` cannot be read or parsed.
  */
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from '../core/constants.js';
+
 export async function getWorkspaceRepos(
   workspacePath: string,
 ): Promise<WorkspaceRepo[]> {
-  const manifestPath = path.join(workspacePath, 'nexusflow.json');
-  const raw = await fs.readFile(manifestPath, 'utf-8');
+  let manifestPath = path.join(workspacePath, PRIMARY_MANIFEST_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(manifestPath, 'utf-8');
+  } catch {
+    manifestPath = path.join(workspacePath, LEGACY_MANIFEST_FILE);
+    raw = await fs.readFile(manifestPath, 'utf-8');
+  }
   const feature = normalizeFeature(JSON.parse(raw) as Feature);
 
   return Promise.all(
@@ -579,7 +587,7 @@ export async function commitAndPush(
         .map((f) => f.path);
       if (modifiedTrackedSensitive.length > 0) {
         console.warn(
-          `[NexusFlow] Warning: tracked sensitive file(s) modified and will be committed: ${modifiedTrackedSensitive.join(', ')}`,
+          `[ContextSpace] Warning: tracked sensitive file(s) modified and will be committed: ${modifiedTrackedSensitive.join(', ')}`,
         );
       }
 
@@ -603,7 +611,7 @@ export async function commitAndPush(
 
       if (skippedSensitive.length > 0) {
         console.warn(
-          `[NexusFlow] Excluded ${skippedSensitive.length} untracked sensitive file(s) from commit: ${skippedSensitive.join(', ')}`,
+          `[ContextSpace] Excluded ${skippedSensitive.length} untracked sensitive file(s) from commit: ${skippedSensitive.join(', ')}`,
         );
       }
 

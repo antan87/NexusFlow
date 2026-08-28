@@ -12,6 +12,12 @@ const CORE_ARTIFACTS = [
   'AGENTS.md',
   'CLAUDE.md',
   'WORKSPACE.md',
+  'contextspace.json',
+  'contextspace.lock',
+  'contextspace-knowledge.md',
+  'contextspace-plan.md',
+  '.contextspace/resources.json',
+  '.contextspace/resources.lock.json',
   'nexusflow.json',
   'nexusflow.lock',
   'nexusflow-knowledge.md',
@@ -38,11 +44,11 @@ export async function ensureWorkspaceGitRepository(workspacePath: string): Promi
   }
   const name = await execa('git', ['config', '--local', 'user.name'], { cwd: workspacePath, reject: false });
   if (name.exitCode !== 0 || !name.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.name', 'NexusFlow'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.name', 'ContextSpace'], { cwd: workspacePath });
   }
   const email = await execa('git', ['config', '--local', 'user.email'], { cwd: workspacePath, reject: false });
   if (email.exitCode !== 0 || !email.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.email', 'nexusflow@local'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.email', 'contextspace@local'], { cwd: workspacePath });
   }
 }
 
@@ -63,9 +69,10 @@ export async function commitWorkspaceArtifacts(
   message: string,
   extra: string[] = [],
 ): Promise<{ committed: boolean; sha?: string }> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'workspace-git.lock'), {
+  await fs.mkdir(path.join(workspacePath, '.contextspace'), { recursive: true });
+  const release = await acquireLock(path.join(workspacePath, '.contextspace', 'workspace-git.lock'), {
     staleMs: 60_000, timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating the workspace artifact repository.',
+    timeoutMessage: 'Another ContextSpace operation is updating the workspace artifact repository.',
   });
   try {
     await ensureWorkspaceGitRepository(workspacePath);
@@ -88,9 +95,10 @@ export async function commitExactWorkspaceArtifacts(
   message: string,
   relativePaths: string[],
 ): Promise<{ committed: boolean; sha?: string }> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'workspace-git.lock'), {
+  await fs.mkdir(path.join(workspacePath, '.contextspace'), { recursive: true });
+  const release = await acquireLock(path.join(workspacePath, '.contextspace', 'workspace-git.lock'), {
     staleMs: 60_000, timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating the workspace artifact repository.',
+    timeoutMessage: 'Another ContextSpace operation is updating the workspace artifact repository.',
   });
   try {
     await ensureWorkspaceGitRepository(workspacePath);

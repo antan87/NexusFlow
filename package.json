@@ -9,6 +9,9 @@
   },
   "main": "dist/index.js",
   "bin": {
+    "ctxspace": "dist/index.js",
+    "contextspace": "dist/index.js",
+    "cs": "dist/index.js",
     "nexusflow": "dist/index.js"
   },
   "files": [
