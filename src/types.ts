@@ -538,6 +538,24 @@ export interface RunningState {
  */
 export type SyncStatus = 'up-to-date' | 'rebased' | 'conflict' | 'stash-conflict' | 'error';
 
+/** At-a-glance status for one workspace, from GET /api/workspaces/status. */
+export interface WorkspaceStatus {
+  id: string;
+  branchName: string;
+  /** Total uncommitted files across all repo worktrees. */
+  changedFiles: number;
+  /** Number of repos with uncommitted changes. */
+  dirtyRepos: number;
+  /** Number of currently running orchestrated services. */
+  runningServices: number;
+  /** Worst-case sync classification across repos, or 'unknown' if never synced. */
+  syncStatus: SyncStatus | 'unknown';
+  /** True when any repo pulled in new commits and awaits re-validation. */
+  pendingValidation: boolean;
+  /** AI assistants that have active/recorded sessions in this workspace. */
+  activeAssistants?: AIAssistant[];
+}
+
 /** Persisted sync/validation state for a single repo in a workspace. */
 export interface RepoSyncState {
   /** Directory name of the repo. */

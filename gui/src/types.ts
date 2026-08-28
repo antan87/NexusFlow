@@ -142,6 +142,8 @@ export interface WorkspaceStatus {
   syncStatus: SyncStatus | 'unknown';
   /** True when any repo pulled in new commits and awaits re-validation. */
   pendingValidation: boolean;
+  /** AI assistants that have active/recorded sessions in this workspace. */
+  activeAssistants?: AIAssistant[];
 }
 
 export interface ServiceConfig {

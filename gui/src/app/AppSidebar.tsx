@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
-import { SiClaude, SiGithubcopilot } from 'react-icons/si';
+import { SiClaude, SiGithubcopilot, SiCursor } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
@@ -261,13 +261,49 @@ export function AppSidebar({
                     <span className="truncate font-mono tracking-tight font-medium text-foreground">
                       {w.branchName}
                     </span>
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full shrink-0',
-                        hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Active AI Harness Indicators */}
+                      {st?.activeAssistants && st.activeAssistants.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          {st.activeAssistants.map((ast) => (
+                            <span
+                              key={ast}
+                              className="inline-flex items-center justify-center size-3.5 opacity-75 group-hover:opacity-100 transition-opacity"
+                              title={`Active session: ${
+                                ast === 'antigravity'
+                                  ? 'Antigravity'
+                                  : ast === 'claude'
+                                  ? 'Claude'
+                                  : ast === 'codex'
+                                  ? 'Codex'
+                                  : ast === 'cursor'
+                                  ? 'Cursor'
+                                  : 'Copilot'
+                              }`}
+                            >
+                              {ast === 'antigravity' ? (
+                                <AntigravityIcon className="size-3" />
+                              ) : ast === 'claude' ? (
+                                <SiClaude className="size-2.5 text-[#D97757]" />
+                              ) : ast === 'codex' ? (
+                                <BsOpenai className="size-2.5 text-foreground" />
+                              ) : ast === 'cursor' ? (
+                                <SiCursor className="size-2.5 text-foreground" />
+                              ) : (
+                                <SiGithubcopilot className="size-2.5 text-blue-400" />
+                              )}
+                            </span>
+                          ))}
+                        </div>
                       )}
-                      title={hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
-                    />
+                      <span
+                        className={cn(
+                          'size-1.5 rounded-full shrink-0',
+                          hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                        )}
+                        title={hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
+                      />
+                    </div>
                   </div>
 
                   {/* Metadata Subtitle */}
@@ -287,25 +323,6 @@ export function AppSidebar({
                           {st!.runningServices} svc
                         </span>
                       </>
-                    )}
-
-                    {/* AI Icon indicators */}
-                    {w.assistants && w.assistants.length > 0 && (
-                      <div className="ml-auto flex items-center gap-1">
-                        {w.assistants.map((ast) => (
-                          <span key={ast} className="opacity-70 group-hover:opacity-100 transition-opacity">
-                            {ast === 'antigravity' ? (
-                              <AntigravityIcon className="size-3" />
-                            ) : ast === 'claude' ? (
-                              <SiClaude className="size-2.5 text-[#D97757]" />
-                            ) : ast === 'codex' ? (
-                              <BsOpenai className="size-2.5 text-foreground" />
-                            ) : (
-                              <SiGithubcopilot className="size-2.5 text-blue-400" />
-                            )}
-                          </span>
-                        ))}
-                      </div>
                     )}
                   </div>
                 </Link>

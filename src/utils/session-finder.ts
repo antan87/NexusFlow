@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { AISession, ChatMessage } from '../types.js';
+import type { AIAssistant, AISession, ChatMessage } from '../types.js';
 
 export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -603,6 +603,184 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   // Sort by updatedAt descending
   sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return sessions;
+}
+
+/**
+ * Quickly checks which AI assistants have active/recorded sessions for a given workspace.
+ * Unlike `findSessions`, this function returns as soon as each assistant is found,
+ * without reading full transcripts or parsing unnecessary session content.
+ *
+ * @param workspacePath - Root directory of the active workspace.
+ * @param repoPaths - Directories of sub-repositories included in the workspace.
+ * @returns A promise that resolves to an array of unique {@link AIAssistant} names.
+ */
+// ─── High-Performance mtime-aware Session Caches ────────────────────────────
+let agHistoryCache: { mtime: number; workspaces: string[] } | null = null;
+let copilotSessionsCache: { mtime: number; cwds: string[] } | null = null;
+let codexSessionsCache: { mtime: number; cwds: string[] } | null = null;
+
+/** Clears internal caches used by session detection (primarily for unit tests). */
+export function clearSessionFinderCache(): void {
+  agHistoryCache = null;
+  copilotSessionsCache = null;
+  codexSessionsCache = null;
+}
+
+async function getAntigravityWorkspaces(agDir: string): Promise<string[]> {
+  const agHistoryPath = path.join(agDir, 'history.jsonl');
+  try {
+    const stat = await fs.stat(agHistoryPath);
+    if (agHistoryCache && agHistoryCache.mtime === stat.mtimeMs) {
+      return agHistoryCache.workspaces;
+    }
+    const historyContent = await fs.readFile(agHistoryPath, 'utf-8');
+    const lines = historyContent.split('\n').filter(Boolean);
+    const workspaces: string[] = [];
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.conversationId && typeof entry.workspace === 'string') {
+          workspaces.push(entry.workspace);
+        }
+      } catch {}
+    }
+    agHistoryCache = { mtime: stat.mtimeMs, workspaces };
+    return workspaces;
+  } catch {
+    agHistoryCache = null;
+    return [];
+  }
+}
+
+async function getCopilotCwds(): Promise<string[]> {
+  const dbPath = path.join(os.homedir(), '.copilot', 'session-store.db');
+  try {
+    const stat = await fs.stat(dbPath);
+    if (copilotSessionsCache && copilotSessionsCache.mtime === stat.mtimeMs) {
+      return copilotSessionsCache.cwds;
+    }
+    const copilotDb = await openCopilotDb();
+    if (!copilotDb) return [];
+    try {
+      const rows = copilotDb.prepare('SELECT cwd FROM sessions').all() as any[];
+      const cwds = rows.map((r) => r.cwd).filter((c): c is string => typeof c === 'string');
+      copilotSessionsCache = { mtime: stat.mtimeMs, cwds };
+      return cwds;
+    } finally {
+      try { copilotDb.close(); } catch {}
+    }
+  } catch {
+    copilotSessionsCache = null;
+    return [];
+  }
+}
+
+async function getCodexCwds(codexHome: string): Promise<string[]> {
+  const codexSessionsDir = path.join(codexHome, 'sessions');
+  try {
+    const stat = await fs.stat(codexSessionsDir);
+    if (codexSessionsCache && codexSessionsCache.mtime === stat.mtimeMs) {
+      return codexSessionsCache.cwds;
+    }
+    const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
+    const sortedCodexFiles = [...codexFiles].sort((a, b) => b.localeCompare(a));
+    const MAX_CODEX_SCAN = 100;
+    const filesToScan = sortedCodexFiles.slice(0, MAX_CODEX_SCAN);
+    const cwds: string[] = [];
+    for (const file of filesToScan) {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
+        const lines = content.split('\n').filter(Boolean);
+        for (const line of lines) {
+          try {
+            const record = JSON.parse(line);
+            if (record.type === 'session_meta' && typeof record.payload?.cwd === 'string') {
+              cwds.push(record.payload.cwd);
+              break;
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    codexSessionsCache = { mtime: stat.mtimeMs, cwds };
+    return cwds;
+  } catch {
+    codexSessionsCache = null;
+    return [];
+  }
+}
+
+/**
+ * Quickly checks which AI assistants have active/recorded sessions for a given workspace.
+ * Uses mtime-checked metadata caching and early exit to ensure sub-millisecond execution.
+ *
+ * @param workspacePath - Root directory of the active workspace.
+ * @param repoPaths - Directories of sub-repositories included in the workspace.
+ * @returns A promise that resolves to an array of unique {@link AIAssistant} names.
+ */
+export async function findActiveAssistants(
+  workspacePath: string,
+  repoPaths: string[] = []
+): Promise<AIAssistant[]> {
+  const active = new Set<AIAssistant>();
+  const wsFolderName = path.basename(workspacePath);
+
+  const cleanPath = (p: string) => {
+    const resolved = path.resolve(p).replace(/[/\\]+$/, '');
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  const normWorkspace = cleanPath(workspacePath);
+  const normRepos = repoPaths.map(cleanPath);
+  const sep = path.sep;
+
+  const isPathMatch = (sessPath?: string) => {
+    if (!sessPath) return false;
+    const normSess = cleanPath(sessPath);
+    if (normSess === normWorkspace || normSess.startsWith(normWorkspace + sep)) return true;
+    for (const r of normRepos) {
+      if (normSess === r || normSess.startsWith(r + sep)) return true;
+    }
+    return false;
+  };
+
+  // 1. Antigravity Sessions (cached with mtime check)
+  const agWorkspaces = await getAntigravityWorkspaces(getAntigravityDir());
+  if (agWorkspaces.some(isPathMatch)) {
+    active.add('antigravity');
+  }
+
+  // 2. Claude Code Sessions (direct folder exists & non-empty check)
+  const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const claudeProjectsDir = path.join(claudeConfigDir, 'projects');
+  const candidateFolders = [
+    getClaudeProjectFolderName(workspacePath),
+    ...repoPaths.map((r) => getClaudeProjectFolderName(r)),
+  ];
+  for (const folder of candidateFolders) {
+    const projectPath = path.join(claudeProjectsDir, folder);
+    try {
+      const files = await fs.readdir(projectPath);
+      if (files.some((f) => f.endsWith('.jsonl'))) {
+        active.add('claude');
+        break;
+      }
+    } catch {}
+  }
+
+  // 3. OpenAI Codex Sessions (cached with mtime check)
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  const codexCwds = await getCodexCwds(codexHome);
+  if (codexCwds.some((cwd) => isPathMatch(cwd) || cwd.includes(wsFolderName))) {
+    active.add('codex');
+  }
+
+  // 4. GitHub Copilot Sessions (cached with mtime check)
+  const copilotCwds = await getCopilotCwds();
+  if (copilotCwds.some(isPathMatch)) {
+    active.add('copilot');
+  }
+
+  return Array.from(active);
 }
 
 /**
