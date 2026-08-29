@@ -1,51 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
   <defs>
-    <linearGradient id="cs-bg-grad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1E2638" />
-      <stop offset="100%" stop-color="#0C101A" />
-    </linearGradient>
-    <clipPath id="c-shape-clip">
-      <path d="M42 22 L86 22 L102 38 L102 52 L78 52 L78 40 L50 40 L50 88 L78 88 L78 76 L102 76 L102 90 L86 106 L42 106 L26 90 L26 38 Z" />
+    <clipPath id="cs-fav-clip">
+      <path d="M68 36 L132 36 L154 58 L154 78 L122 78 L122 66 L80 66 L80 134 L122 134 L122 122 L154 122 L154 142 L132 164 L68 164 L46 142 L46 58 Z" />
     </clipPath>
   </defs>
 
   <!-- Dark Slate Background Plate -->
-  <rect width="128" height="128" rx="28" fill="url(#cs-bg-grad)" />
-  <rect x="1" y="1" width="126" height="126" rx="27" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1.5" />
+  <rect width="200" height="200" rx="42" fill="#222A36" />
+  <rect x="1" y="1" width="198" height="198" rx="41" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2" />
 
-  <!-- Chequered Grid Base inside 'C' -->
-  <g clip-path="url(#c-shape-clip)">
-    <rect x="20" y="16" width="90" height="96" fill="#EF4444" />
+  <!-- Checkerboard Field inside 'C' -->
+  <g clip-path="url(#cs-fav-clip)">
+    <rect x="36" y="26" width="128" height="148" fill="#E52E2E" />
+    
+    <!-- Staggered White Checkerboard Squares -->
     <!-- Row 1 -->
-    <rect x="38" y="16" width="16" height="16" fill="#FFFFFF" />
-    <rect x="70" y="16" width="16" height="16" fill="#FFFFFF" />
+    <rect x="64" y="36" width="18" height="18" fill="#FFFFFF" />
+    <rect x="100" y="36" width="18" height="18" fill="#FFFFFF" />
+    <rect x="136" y="36" width="18" height="18" fill="#FFFFFF" />
     <!-- Row 2 -->
-    <rect x="22" y="32" width="16" height="16" fill="#FFFFFF" />
-    <rect x="54" y="32" width="16" height="16" fill="#FFFFFF" />
-    <rect x="86" y="32" width="16" height="16" fill="#FFFFFF" />
+    <rect x="46" y="54" width="18" height="18" fill="#FFFFFF" />
+    <rect x="82" y="54" width="18" height="18" fill="#FFFFFF" />
+    <rect x="118" y="54" width="18" height="18" fill="#FFFFFF" />
     <!-- Row 3 -->
-    <rect x="38" y="48" width="16" height="16" fill="#FFFFFF" />
+    <rect x="64" y="72" width="18" height="18" fill="#FFFFFF" />
+    <rect x="136" y="72" width="18" height="18" fill="#FFFFFF" />
     <!-- Row 4 -->
-    <rect x="22" y="64" width="16" height="16" fill="#FFFFFF" />
+    <rect x="46" y="90" width="18" height="18" fill="#FFFFFF" />
     <!-- Row 5 -->
-    <rect x="38" y="80" width="16" height="16" fill="#FFFFFF" />
-    <rect x="70" y="80" width="16" height="16" fill="#FFFFFF" />
+    <rect x="64" y="108" width="18" height="18" fill="#FFFFFF" />
     <!-- Row 6 -->
-    <rect x="22" y="96" width="16" height="16" fill="#FFFFFF" />
-    <rect x="54" y="96" width="16" height="16" fill="#FFFFFF" />
-    <rect x="86" y="96" width="16" height="16" fill="#FFFFFF" />
+    <rect x="46" y="126" width="18" height="18" fill="#FFFFFF" />
+    <rect x="82" y="126" width="18" height="18" fill="#FFFFFF" />
+    <rect x="118" y="126" width="18" height="18" fill="#FFFFFF" />
+    <!-- Row 7 -->
+    <rect x="64" y="146" width="18" height="18" fill="#FFFFFF" />
+    <rect x="100" y="146" width="18" height="18" fill="#FFFFFF" />
+    <rect x="136" y="146" width="18" height="18" fill="#FFFFFF" />
   </g>
 
-  <!-- Slashes / Speed Cuts Overlay across the C -->
-  <path d="M74 14 L114 54 L110 58 L70 18 Z" fill="#0C101A" />
-  <path d="M98 32 L116 14" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
+  <!-- 4 Dynamic Razor Slashes with External Needle Spikes -->
+  <path d="M112 24 L168 80 L162 86 L106 30 Z" fill="#222A36" />
+  <path d="M112 24 L142 -6" stroke="#E52E2E" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M150 62 L172 40" stroke="#E52E2E" stroke-width="2.5" stroke-linecap="round" />
 
-  <path d="M48 24 L106 82 L100 88 L42 30 Z" fill="#0C101A" />
-  <path d="M92 68 L114 46" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M78 38 L160 120 L154 126 L72 44 Z" fill="#222A36" />
+  <path d="M84 32 L116 0" stroke="#E52E2E" stroke-width="4" stroke-linecap="round" />
+  <path d="M146 106 L178 74" stroke="#E52E2E" stroke-width="3.5" stroke-linecap="round" />
 
-  <path d="M28 46 L86 104 L80 110 L22 52 Z" fill="#0C101A" />
-  <path d="M22 48 L14 56" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M48 76 L130 158 L124 164 L42 82 Z" fill="#222A36" />
+  <path d="M44 80 L22 102" stroke="#E52E2E" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M62 62 L32 92" stroke="#E52E2E" stroke-width="3.5" stroke-linecap="round" />
 
-  <path d="M16 68 L64 116 L58 122 L10 74 Z" fill="#0C101A" />
-  <path d="M16 78 L6 88" stroke="#EF4444" stroke-width="2" stroke-linecap="round" />
+  <path d="M32 118 L94 180 L88 186 L26 124 Z" fill="#222A36" />
+  <path d="M34 116 L12 138" stroke="#E52E2E" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M78 164 L96 182" stroke="#E52E2E" stroke-width="2.5" stroke-linecap="round" />
 </svg>
