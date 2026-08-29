@@ -181,6 +181,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('contextspace.runDoctor', doctorHandler));
     context.subscriptions.push(vscode.commands.registerCommand('nexusflow.runDoctor', doctorHandler));
 
+function escapeShellDoubleQuotes(str: string): string {
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+}
+
     // Register Commit Workspace Command
     const commitHandler = async () => {
         const message = await vscode.window.showInputBox({
@@ -188,7 +192,8 @@ export function activate(context: vscode.ExtensionContext) {
             placeHolder: 'e.g., feat: implement new UI components'
         });
         if (message) {
-            runContextSpaceCommand(context, `commit "${message.replace(/"/g, '\\"')}"`);
+            const escaped = escapeShellDoubleQuotes(message);
+            runContextSpaceCommand(context, `commit "${escaped}"`);
         }
     };
     context.subscriptions.push(vscode.commands.registerCommand('contextspace.commitWorkspace', commitHandler));
