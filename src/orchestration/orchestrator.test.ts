@@ -70,7 +70,7 @@ describe('orchestrator runner', () => {
     // Name/log are keyed on the detection id (not the tool) so same-tool tools
     // in different sub-repos never collide.
     expect(running.pm2Name).toBe(orchestratorPm2Name(WS, detection));
-    expect(running.pm2Name).toMatch(/^contextspace-feature-a-[0-9a-f]{8}-orch-tilt-tiltfile$/);
+    expect(running.pm2Name).toMatch(/^ctxspace-feature-a-[0-9a-f]{8}-orch-tilt-tiltfile$/);
     expect(running.logName).toBe('orch-tilt-tiltfile');
     // pm2 delete (idempotent) then pm2 start with the orch app name.
     const startCall = vi.mocked(execa).mock.calls.find((c) => (c[1] as string[] | undefined)?.includes('start'));

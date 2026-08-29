@@ -13,6 +13,7 @@ import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 
 import { slugify } from './slug.js';
 import { acquireLock, createMutationQueue } from '../core/locks.js';
+import { resolveBrandHomeDir } from '../core/constants.js';
 import {
   formatValidationError,
   resourceIdSchema,
@@ -450,15 +451,7 @@ Instructions for conducting deep application security audits.
 // ─── Categories Management ────────────────────────────────────────────────
 
 export function getContextSpaceHome(): string {
-  const envDir = process.env.CONTEXTSPACE_HOME || process.env.NEXUSFLOW_HOME;
-  if (envDir && envDir !== 'undefined') {
-    return path.resolve(envDir);
-  }
-  const primary = path.join(os.homedir(), '.contextspace');
-  const legacy = path.join(os.homedir(), '.nexusflow');
-  if (fse.existsSync(primary)) return primary;
-  if (fse.existsSync(legacy)) return legacy;
-  return primary;
+  return resolveBrandHomeDir();
 }
 
 export const getNexusFlowHome = getContextSpaceHome;

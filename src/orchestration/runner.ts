@@ -11,10 +11,11 @@ import chalk from 'chalk';
 import { execa } from 'execa';
 
 import type { ServiceConfig, RunningService, RunningState } from '../types.js';
+import { BRAND_CONFIG, getPm2ProcessPrefix } from '../core/constants.js';
 
 /** Name of the state file that tracks running services. */
-const PRIMARY_STATE_FILE = '.contextspace-running.json';
-const LEGACY_STATE_FILE = '.nexusflow-running.json';
+const PRIMARY_STATE_FILE = BRAND_CONFIG.files.runningState.primary;
+const LEGACY_STATE_FILE = BRAND_CONFIG.files.runningState.legacy;
 
 /**
  * Returns the path to the running-state file for a workspace.
@@ -30,11 +31,10 @@ export function workspaceHash(workspacePath: string): string {
 
 /** Workspace PM2 prefix embedding the workspace hash to eliminate prefix over-matching. */
 export function pm2Prefix(workspacePath: string): string {
-  const base = path.basename(workspacePath).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 24);
-  return `contextspace-${base}-${workspaceHash(workspacePath)}-`;
+  return getPm2ProcessPrefix(workspacePath);
 }
 
-/** PM2 app name for a workspace service: `contextspace-<base>-<hash>-<name>`. */
+/** PM2 app name for a workspace service: `${prefix}${name}`. */
 export function pm2AppName(workspacePath: string, serviceName: string): string {
   return `${pm2Prefix(workspacePath)}${serviceName}`;
 }

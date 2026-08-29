@@ -135,7 +135,7 @@ describe('orchestration runner PM2 state handling', () => {
   describe('per-service lifecycle', () => {
     it('pm2AppName and serviceLogFile derive workspace-scoped names', () => {
       const ws = path.join(process.cwd(), 'my-ws');
-      expect(pm2AppName(ws, 'api')).toMatch(/^contextspace-my-ws-[0-9a-f]{8}-api$/);
+      expect(pm2AppName(ws, 'api')).toMatch(/^ctxspace-my-ws-[0-9a-f]{8}-api$/);
       expect(serviceLogFile('/logs', 'api')).toBe(path.join('/logs', 'api.log'));
     });
 

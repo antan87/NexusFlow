@@ -45,7 +45,7 @@ function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void 
   }
 }
 
-import { PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME } from './constants.js';
+import { PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME, resolveBrandHomeDir } from './constants.js';
 
 /** Name of the config directory under the user's home folder. */
 const CONFIG_DIR_NAME = PRIMARY_CONFIG_DIR_NAME;
@@ -57,9 +57,7 @@ const CONFIG_FILE_NAME = 'config.json';
  * Returns the absolute path to the ContextSpace config directory (~/.contextspace).
  */
 export function getConfigDir(): string {
-  const envDir = process.env.CONTEXTSPACE_HOME || process.env.NEXUSFLOW_HOME;
-  if (envDir) return path.resolve(envDir);
-  return path.join(os.homedir(), CONFIG_DIR_NAME);
+  return resolveBrandHomeDir();
 }
 
 /**

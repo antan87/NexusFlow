@@ -9,6 +9,7 @@ import {
   readWorkspaceKnowledge,
   MAX_ENTRY_CHARS,
 } from './knowledge.js';
+import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } from './constants.js';
 import * as storage from './storage.js';
 import * as workspace from './workspace.js';
 import * as generators from '../generators/index.js';
@@ -285,7 +286,7 @@ describe('knowledge I/O', () => {
     });
 
     expect(result.createdFile).toBe(true);
-    const content = ws.get('feat/nexusflow-knowledge.md')!;
+    const content = ws.get(`feat/${PRIMARY_KNOWLEDGE_FILE}`)!;
     expect(content).toContain('## Architecture Decisions');
     expect(content).toContain('**Decision:** store knowledge via the adapter');
   });
@@ -301,7 +302,7 @@ describe('knowledge I/O', () => {
     const retry = await addWorkspaceKnowledge('/wsp', entry);
 
     expect(retry.duplicate).toBe(true);
-    expect(ws.get('feat/nexusflow-knowledge.md')!.match(/### 2026-08-26 — idempotent-remember/g)).toHaveLength(1);
+    expect(ws.get(`feat/${PRIMARY_KNOWLEDGE_FILE}`)!.match(/### 2026-08-26 — idempotent-remember/g)).toHaveLength(1);
   });
 
   it('rejects a same-day title collision with different content', async () => {
@@ -324,7 +325,7 @@ describe('knowledge I/O', () => {
     });
 
     expect(result.commit).toEqual({ status: 'failed', message: 'index locked' });
-    expect(ws.get('feat/nexusflow-knowledge.md')).toContain('Keep the durable adapter write.');
+    expect(ws.get(`feat/${PRIMARY_KNOWLEDGE_FILE}`)).toContain('Keep the durable adapter write.');
   });
 
   it('rejects an empty message', async () => {
@@ -336,7 +337,7 @@ describe('knowledge I/O', () => {
   it('adds to a repo base file, bootstrapping it from the template', async () => {
     const result = await addBaseKnowledge('/wsp', 'api', { type: 'gotcha', title: 'Flaky CI test', message: 'flaky test on CI' });
     expect(result.createdFile).toBe(true);
-    const content = base.get('api/nexusflow-knowledge.md')!;
+    const content = base.get(`api/${PRIMARY_KNOWLEDGE_FILE}`)!;
     expect(content).toContain('## Discovered Gotchas & Watch-outs');
     expect(content).toContain('flaky test on CI');
   });
@@ -355,7 +356,7 @@ describe('knowledge I/O', () => {
 
   it('promotes a gotcha to base knowledge (copy leaves the workspace entry)', async () => {
     ws.set(
-      'feat/nexusflow-knowledge.md',
+      `feat/${PRIMARY_KNOWLEDGE_FILE}`,
       `# Workspace Knowledge — feat\n\n## Known Gotchas\n\n- **2026-07-04:** shared learning\n`,
     );
     const entries = parseKnowledgeEntries((await readWorkspaceKnowledge('/wsp'))!);
@@ -363,23 +364,23 @@ describe('knowledge I/O', () => {
     const result = await promoteKnowledge('/wsp', { repoName: 'api', entries, mode: 'copy' });
 
     expect(result.promotedCount).toBe(1);
-    expect(base.get('api/nexusflow-knowledge.md')).toContain('- **2026-07-04:** shared learning');
+    expect(base.get(`api/${PRIMARY_KNOWLEDGE_FILE}`)).toContain('- **2026-07-04:** shared learning');
     // Copy mode keeps the original.
-    expect(ws.get('feat/nexusflow-knowledge.md')).toContain('- **2026-07-04:** shared learning');
+    expect(ws.get(`feat/${PRIMARY_KNOWLEDGE_FILE}`)).toContain('- **2026-07-04:** shared learning');
   });
 
   it('move mode replaces the promoted workspace entry with a note', async () => {
     ws.set(
-      'feat/nexusflow-knowledge.md',
+      `feat/${PRIMARY_KNOWLEDGE_FILE}`,
       `# Workspace Knowledge — feat\n\n## Known Gotchas\n\n- **2026-07-04:** shared learning\n`,
     );
     const entries = parseKnowledgeEntries((await readWorkspaceKnowledge('/wsp'))!);
 
     await promoteKnowledge('/wsp', { repoName: 'api', entries, mode: 'move' });
 
-    const wsContent = ws.get('feat/nexusflow-knowledge.md')!;
+    const wsContent = ws.get(`feat/${PRIMARY_KNOWLEDGE_FILE}`)!;
     expect(wsContent).not.toContain('shared learning');
     expect(wsContent).toContain('Promoted to api base knowledge');
-    expect(base.get('api/nexusflow-knowledge.md')).toContain('shared learning');
+    expect(base.get(`api/${PRIMARY_KNOWLEDGE_FILE}`)).toContain('shared learning');
   });
 });
