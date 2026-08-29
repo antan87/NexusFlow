@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './workflows.js';
 import { acquireLock } from '../core/locks.js';
+import { resolveBrandHomeDir } from '../core/constants.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:os', () => ({
@@ -26,14 +27,14 @@ describe('Workflows Utility Unit Tests', () => {
 
       const result = await saveWorkflowTemplate('My Temp Name', '# Final Strategy Name\n\nStrategy Content');
 
-      expect(fs.mkdir).toHaveBeenCalledWith(path.join('/mock/home', '.nexusflow', 'workflows'), { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(path.join(resolveBrandHomeDir(), 'workflows'), { recursive: true });
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('final-strategy-name.md.tmp-'),
         '# Final Strategy Name\n\nStrategy Content',
       );
       expect(fs.rename).toHaveBeenCalledWith(
         expect.stringContaining('final-strategy-name.md.tmp-'),
-        path.join('/mock/home', '.nexusflow', 'workflows', 'final-strategy-name.md'),
+        path.join(resolveBrandHomeDir(), 'workflows', 'final-strategy-name.md'),
       );
       expect(result).toEqual({
         id: 'final-strategy-name',
@@ -51,7 +52,11 @@ describe('Workflows Utility Unit Tests', () => {
       const result = await saveWorkflowTemplate('My Temp Name', 'Strategy Content');
 
       expect(fs.writeFile).toHaveBeenCalledWith(
+<<<<<<< HEAD
         expect.stringContaining('my-temp-name.md.tmp-'),
+=======
+        path.join(resolveBrandHomeDir(), 'workflows', 'my-temp-name.md'),
+>>>>>>> eb5965f (refactor(brand): replace hardcoded naming references across workflows, logs, and materializer with typed brand config)
         '# My Temp Name\n\nStrategy Content',
       );
       expect(result.id).toBe('my-temp-name');
@@ -64,7 +69,7 @@ describe('Workflows Utility Unit Tests', () => {
 
       const result = await saveWorkflowTemplate('New Name', '# New Name\n\nContent', 'old-id');
 
-      expect(fs.unlink).toHaveBeenCalledWith(path.join('/mock/home', '.nexusflow', 'workflows', 'old-id.md'));
+      expect(fs.unlink).toHaveBeenCalledWith(path.join(resolveBrandHomeDir(), 'workflows', 'old-id.md'));
       expect(result.id).toBe('new-name');
     });
 
@@ -94,8 +99,8 @@ describe('Workflows Utility Unit Tests', () => {
 
       await deleteWorkflowTemplate('some-id');
 
-      expect(acquireLock).toHaveBeenCalledWith(path.join('/mock/home', '.nexusflow', '.locks', 'resource-catalog.lock'), expect.any(Object));
-      expect(fs.unlink).toHaveBeenCalledWith(path.join('/mock/home', '.nexusflow', 'workflows', 'some-id.md'));
+      expect(acquireLock).toHaveBeenCalledWith(path.join(resolveBrandHomeDir(), '.locks', 'resource-catalog.lock'), expect.any(Object));
+      expect(fs.unlink).toHaveBeenCalledWith(path.join(resolveBrandHomeDir(), 'workflows', 'some-id.md'));
     });
 
     it('should ignore ENOENT error', async () => {
@@ -112,7 +117,7 @@ describe('Workflows Utility Unit Tests', () => {
       vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
       // Mock readdir to return files
       vi.spyOn(fs, 'readdir').mockImplementation(async (dirPath) => {
-        if (dirPath.toString().includes('.nexusflow')) {
+        if (dirPath.toString().includes('.contextspace') || dirPath.toString().includes('.nexusflow')) {
           return ['custom-one.md'] as any;
         }
         return ['solo-developer.md', 'cost-aware-sol-luna.md'] as any;

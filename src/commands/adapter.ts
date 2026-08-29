@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import { listStorageProviders, getStorageProvider } from '../core/adapters/registry.js';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { StorageAdapterMeta, AdapterConfigField } from '../core/ports/storage.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_CONFIG_DIR_NAME } from '../core/constants.js';
 
 /**
  * Lists all registered storage adapters in a formatted table.
@@ -296,9 +297,9 @@ export default plugin;
   await fs.writeFile(path.join(targetDir, 'src', 'index.ts'), indexContent, 'utf8');
 
   // README.md
-  const readme = `# nexusflow-${adapterName}
+  const readme = `# ${BRAND_NAME} ${adapterName} Storage Adapter
 
-A custom storage adapter for [NexusFlow](https://github.com/antan87/NexusFlow).
+A custom storage adapter for [${BRAND_NAME}](https://github.com/antan87/NexusFlow).
 
 ## Development
 
@@ -309,11 +310,11 @@ npm run build
 
 ## Usage
 
-Add to your NexusFlow config (\`~/.nexusflow/config.json\`):
+Add to your ${BRAND_NAME} config (\`~/${PRIMARY_CONFIG_DIR_NAME}/config.json\`):
 
 \`\`\`json
 {
-  "plugins": ["./path/to/nexusflow-${adapterName}/dist/index.js"],
+  "plugins": ["./path/to/${CLI_NAME}-${adapterName}/dist/index.js"],
   "storageProvider": "${adapterName}"
 }
 \`\`\`
@@ -321,7 +322,7 @@ Add to your NexusFlow config (\`~/.nexusflow/config.json\`):
 Or activate via CLI:
 
 \`\`\`bash
-nexusflow adapter use ${adapterName}
+${CLI_NAME} adapter use ${adapterName}
 \`\`\`
 `;
   await fs.writeFile(path.join(targetDir, 'README.md'), readme, 'utf8');

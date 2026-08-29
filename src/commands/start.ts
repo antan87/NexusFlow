@@ -16,6 +16,8 @@ import {
   startOrchestrator,
 } from '../orchestration/index.js';
 
+import { BRAND_NAME, CLI_NAME, PRIMARY_LOGS_DIR } from '../core/constants.js';
+
 /**
  * Start services for a workspace.
  * If run inside a workspace dir, auto-detects it.
@@ -24,7 +26,7 @@ import {
  * @param workspaceArg - Optional workspace path from CLI.
  */
 export async function startCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n▶ NexusFlow — Start Services\n'));
+  console.log(chalk.bold.cyan(`\n▶ ${BRAND_NAME} — Start Services\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
@@ -39,7 +41,7 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
     }
 
     const useExisting = await confirm({
-      message: 'Use detected orchestration tool instead of NexusFlow runner?',
+      message: `Use detected orchestration tool instead of ${BRAND_NAME} runner?`,
       default: false,
     });
 
@@ -51,11 +53,11 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
             choices: tools.map((t) => ({ name: `${t.tool} — ${t.configPath}`, value: t })),
           });
 
-      const logDir = path.join(workspacePath, '.nexusflow-logs');
+      const logDir = path.join(workspacePath, PRIMARY_LOGS_DIR);
       try {
         await startOrchestrator(tool, workspacePath, logDir);
         console.log(chalk.bold.green(`\n✅ ${tool.tool} started.`));
-        console.log(chalk.dim(`  Stop with:  nexusflow stop\n`));
+        console.log(chalk.dim(`  Stop with:  ${CLI_NAME} stop\n`));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(chalk.red(`  ✖ Failed to start ${tool.tool}: ${msg}`));
@@ -92,12 +94,12 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
     return;
   }
 
-  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  const logDir = path.join(workspacePath, PRIMARY_LOGS_DIR);
   await startServices(services, workspacePath, logDir);
 
   console.log(chalk.bold.green('\n✅ Services started!\n'));
-  console.log(chalk.dim('  View logs:  nexusflow logs'));
-  console.log(chalk.dim('  Stop all:   nexusflow stop'));
+  console.log(chalk.dim(`  View logs:  ${CLI_NAME} logs`));
+  console.log(chalk.dim(`  Stop all:   ${CLI_NAME} stop`));
   console.log(chalk.dim(`  Log dir:    ${logDir}\n`));
 }
 

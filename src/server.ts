@@ -18,6 +18,7 @@ import * as os from 'node:os';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
+import { PRIMARY_LOGS_DIR, LEGACY_LOGS_DIR } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
@@ -1639,6 +1640,14 @@ app.get('/api/workspace/:id/services', async (c) => {
   }
 });
 
+function getWorkspaceLogDir(workspacePath: string): string {
+  const primary = path.join(workspacePath, PRIMARY_LOGS_DIR);
+  const legacy = path.join(workspacePath, LEGACY_LOGS_DIR);
+  if (existsSync(primary)) return primary;
+  if (existsSync(legacy)) return legacy;
+  return primary;
+}
+
 // 10. Start services in workspace. Configs are re-detected server-side —
 // the client only says "start", never what to execute.
 app.post('/api/workspace/:id/services/start', async (c) => {
@@ -1646,7 +1655,7 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     const services = await detectAllServices(workspacePath);
     await startServices(services, workspacePath, logDir);
@@ -1679,7 +1688,7 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
     const action = c.req.param('action') as 'start' | 'stop' | 'restart';
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     if (action === 'stop') {
       const stopped = await stopService(workspacePath, serviceName);
@@ -1702,7 +1711,7 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
 
 /** Resolve + contain a service log path; names may contain '/' (repo/sub). */
 function resolveServiceLogFile(workspacePath: string, serviceName: string): string {
-  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  const logDir = getWorkspaceLogDir(workspacePath);
   return assertWithin(logDir, path.join(logDir, `${serviceName}.log`));
 }
 
@@ -1804,7 +1813,7 @@ app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
     }
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     const tools = await detectOrchestrationTools(workspacePath);
     const detection = tools.find((t) => t.id === body.id);
