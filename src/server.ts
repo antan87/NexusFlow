@@ -527,9 +527,17 @@ app.use('*', async (c, next) => {
 // cross-site request forgery and browser form posts from untrusted web pages.
 app.use('/api/*', async (c, next) => {
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(c.req.method)) {
+    const secFetchSite = c.req.header('sec-fetch-site');
+    if (secFetchSite === 'cross-site') {
+      return c.json({ error: 'Forbidden cross-site request.' }, 403);
+    }
     const origin = c.req.header('origin');
     if (origin && !hasTrustedLocalOrigin(origin)) {
       return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+    }
+    const referer = c.req.header('referer');
+    if (referer && !hasTrustedLocalOrigin(referer)) {
+      return c.json({ error: 'Forbidden cross-origin referer.' }, 403);
     }
   }
   await next();
