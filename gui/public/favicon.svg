@@ -1,43 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
   <defs>
-    <linearGradient id="cs-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#111625" />
-      <stop offset="100%" stop-color="#07090E" />
+    <linearGradient id="cs-bg-grad" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E2638" />
+      <stop offset="100%" stop-color="#0C101A" />
     </linearGradient>
-    <linearGradient id="cs-rim" x1="20" y1="10" x2="108" y2="118" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#EF4444" stop-opacity="0.6" />
-      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.15" />
-      <stop offset="100%" stop-color="#EF4444" stop-opacity="0.3" />
-    </linearGradient>
-    <linearGradient id="cs-crimson" x1="45" y1="20" x2="85" y2="108" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FF5A6E" />
-      <stop offset="100%" stop-color="#DC2626" />
-    </linearGradient>
-    <linearGradient id="cs-white" x1="30" y1="20" x2="98" y2="108" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" />
-      <stop offset="100%" stop-color="#E2E8F0" />
-    </linearGradient>
+    <clipPath id="c-shape-clip">
+      <path d="M42 22 L86 22 L102 38 L102 52 L78 52 L78 40 L50 40 L50 88 L78 88 L78 76 L102 76 L102 90 L86 106 L42 106 L26 90 L26 38 Z" />
+    </clipPath>
   </defs>
 
-  <!-- Squircle Base Plate -->
-  <rect width="128" height="128" rx="28" fill="url(#cs-bg)" />
-  <rect x="1" y="1" width="126" height="126" rx="27" stroke="url(#cs-rim)" stroke-width="1.5" />
+  <!-- Dark Slate Background Plate -->
+  <rect width="128" height="128" rx="28" fill="url(#cs-bg-grad)" />
+  <rect x="1" y="1" width="126" height="126" rx="27" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1.5" />
 
-  <!-- 3-Stripes Hexagonal Speed Slashes -->
-  <!-- Left Hexagon Contour Bracket (Forms 'C' Enclosure) -->
-  <path d="M42 32 L26 42 L26 86 L42 96 L48 92 L34 83 L34 45 L48 36 Z" fill="url(#cs-white)" />
+  <!-- Chequered Grid Base inside 'C' -->
+  <g clip-path="url(#c-shape-clip)">
+    <rect x="20" y="16" width="90" height="96" fill="#EF4444" />
+    <!-- Row 1 -->
+    <rect x="38" y="16" width="16" height="16" fill="#FFFFFF" />
+    <rect x="70" y="16" width="16" height="16" fill="#FFFFFF" />
+    <!-- Row 2 -->
+    <rect x="22" y="32" width="16" height="16" fill="#FFFFFF" />
+    <rect x="54" y="32" width="16" height="16" fill="#FFFFFF" />
+    <rect x="86" y="32" width="16" height="16" fill="#FFFFFF" />
+    <!-- Row 3 -->
+    <rect x="38" y="48" width="16" height="16" fill="#FFFFFF" />
+    <!-- Row 4 -->
+    <rect x="22" y="64" width="16" height="16" fill="#FFFFFF" />
+    <!-- Row 5 -->
+    <rect x="38" y="80" width="16" height="16" fill="#FFFFFF" />
+    <rect x="70" y="80" width="16" height="16" fill="#FFFFFF" />
+    <!-- Row 6 -->
+    <rect x="22" y="96" width="16" height="16" fill="#FFFFFF" />
+    <rect x="54" y="96" width="16" height="16" fill="#FFFFFF" />
+    <rect x="86" y="96" width="16" height="16" fill="#FFFFFF" />
+  </g>
 
-  <!-- Right Hexagon Contour Bracket Corner -->
-  <path d="M86 32 L102 42 L102 48 L94 43 L80 34 Z" fill="url(#cs-white)" />
-  <path d="M86 96 L102 86 L102 80 L94 85 L80 94 Z" fill="url(#cs-white)" />
+  <!-- Slashes / Speed Cuts Overlay across the C -->
+  <path d="M74 14 L114 54 L110 58 L70 18 Z" fill="#0C101A" />
+  <path d="M98 32 L116 14" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
 
-  <!-- 3 Dynamic Speed Slashes (Adidas Diagonal Slashes) -->
-  <!-- Stripe 1: White Left Slasher -->
-  <path d="M52 26 L42 42 L62 82 L72 66 Z" fill="url(#cs-white)" />
+  <path d="M48 24 L106 82 L100 88 L42 30 Z" fill="#0C101A" />
+  <path d="M92 68 L114 46" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
 
-  <!-- Stripe 2: Primary Crimson Power Slash (Center) -->
-  <path d="M68 22 L56 42 L80 94 L92 74 Z" fill="url(#cs-crimson)" />
+  <path d="M28 46 L86 104 L80 110 L22 52 Z" fill="#0C101A" />
+  <path d="M22 48 L14 56" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" />
 
-  <!-- Stripe 3: White Right Slasher -->
-  <path d="M84 38 L76 50 L94 88 L102 76 Z" fill="url(#cs-white)" />
+  <path d="M16 68 L64 116 L58 122 L10 74 Z" fill="#0C101A" />
+  <path d="M16 78 L6 88" stroke="#EF4444" stroke-width="2" stroke-linecap="round" />
 </svg>
