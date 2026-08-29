@@ -32,10 +32,10 @@ export function OnboardingScreen({
               Onboarding Guide
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
-              Welcome to NexusFlow
+              Welcome to ContextSpace
             </h1>
             <p className="text-sm text-muted-foreground mb-8 max-w-xl leading-relaxed">
-              NexusFlow orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
+              ContextSpace orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
             </p>
 
             {/* Onboarding Steps */}

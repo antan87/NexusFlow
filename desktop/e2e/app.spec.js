@@ -34,7 +34,11 @@ test.describe('desktop app', () => {
   let window;
 
   test.beforeAll(async () => {
-    const launchEnv = { ...process.env, NEXUSFLOW_DESKTOP_LOG: logPath };
+    const launchEnv = {
+      ...process.env,
+      CONTEXTSPACE_DESKTOP_LOG: logPath,
+      NEXUSFLOW_DESKTOP_LOG: logPath,
+    };
     app = packagedExe
       ? await electron.launch({ executablePath: packagedExe, env: launchEnv })
       : await electron.launch({ args: ['.'], cwd: desktopDir, env: launchEnv });
@@ -78,10 +82,10 @@ test.describe('desktop app', () => {
   // Electron-on-Windows cold-start timing makes nav clicks flaky.
   test('boots the backend and loads the dashboard shell', async () => {
     // The dashboard sidebar renders the brand; an error/blank page would not.
-    await expect(window.getByText('NexusFlow', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(window.getByText('ContextSpace', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
     // The preload bridge reports the backend port the window actually loaded.
-    const port = await window.evaluate(() => window.nexusBridge.getServerPort());
+    const port = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.getServerPort());
     expect(port).toBeGreaterThan(0);
   });
 

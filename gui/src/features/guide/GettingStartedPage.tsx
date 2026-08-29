@@ -20,17 +20,17 @@ export function GettingStartedPage({
           Getting Started Guide
         </div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
-          Welcome to NexusFlow
+          Welcome to ContextSpace
         </h1>
         <p className="text-sm text-muted-foreground">
-          NexusFlow orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
+          ContextSpace orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
         </p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
         {/* Left: Interactive Stepper */}
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-6">
-          <h2 className="text-lg font-semibold text-foreground mb-4">NexusFlow Workflows</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-4">ContextSpace Workflows</h2>
           
           <div className="flex gap-4">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 border border-primary/20 text-primary font-bold text-sm">
