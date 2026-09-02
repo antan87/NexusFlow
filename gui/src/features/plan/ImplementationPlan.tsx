@@ -15,7 +15,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 surface-card">
+    <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
       <header className="flex justify-between items-center mb-4">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
           <ListOrdered size={16} className="text-primary" /> Inter-Repo Implementation Plan (contextspace-plan.md)
@@ -51,11 +51,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           No implementation plan generated yet.
         </div>
       ) : viewMode === 'preview' ? (
-        <div className="max-h-[500px] overflow-auto rounded-md border border-border/70 bg-muted/20 p-4">
+        <div className="max-h-[550px] overflow-auto rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4">
           <ChatMarkdown content={planContent} />
         </div>
       ) : (
-        <div className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+        <div className="max-h-[550px] overflow-auto whitespace-pre-wrap rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {planContent}
         </div>
       )}
