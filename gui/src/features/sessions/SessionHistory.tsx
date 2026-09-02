@@ -119,9 +119,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const aiDetect = useAiDetect();
 
   const isAgyDetected = aiDetect.data?.find((a) => a.name === 'antigravity')?.detected ?? true;
-  const isClaudeDetected = aiDetect.data?.find((a) => a.name === 'claude')?.detected ?? false;
-  const isCodexDetected = aiDetect.data?.find((a) => a.name === 'codex')?.detected ?? false;
-  const isCopilotDetected = aiDetect.data?.find((a) => a.name === 'copilot')?.detected ?? false;
+  const isClaudeDetected = Boolean(aiDetect.data?.find((a) => a.name === 'claude')?.detected);
+  const isCodexDetected = Boolean(aiDetect.data?.find((a) => a.name === 'codex')?.detected);
+  const isCopilotDetected = Boolean(aiDetect.data?.find((a) => a.name === 'copilot')?.command);
 
   const hasAgyIde = Boolean(launchTargets.data?.some((t) => t.id === 'antigravity' && t.available));
   const hasCodexDesktop = Boolean(launchTargets.data?.some((t) => t.id === 'codex-desktop' && t.available));
@@ -359,7 +359,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     },
   ];
 
-  const installedHarnesses = allHarnesses;
+  const installedHarnesses = useMemo(() => {
+    return allHarnesses.filter((h) => h.isDetected || h.sessions.length > 0);
+  }, [allHarnesses]);
 
   const sortLabelMap: Record<SessionSortOption, string> = {
     'created-desc': 'Newest',
@@ -408,21 +410,21 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             >
               All ({sessions.length})
             </button>
-            {['antigravity', 'claude', 'codex', 'copilot'].map((ast) => {
-              const count = sessions.filter((s) => s.assistant === ast).length;
+            {installedHarnesses.map((harness) => {
+              const count = harness.sessions.length;
               return (
                 <button
                   type="button"
-                  key={ast}
-                  onClick={() => setSelectedAssistantFilter(selectedAssistantFilter === ast ? 'all' : ast)}
+                  key={harness.id}
+                  onClick={() => setSelectedAssistantFilter(selectedAssistantFilter === harness.id ? 'all' : harness.id)}
                   className={cn(
                     'px-2 py-0.5 text-[11px] rounded font-medium capitalize transition-colors cursor-pointer',
-                    selectedAssistantFilter === ast
+                    selectedAssistantFilter === harness.id
                       ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
                       : 'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted'
                   )}
                 >
-                  {ast} ({count})
+                  {harness.name.replace('Google ', '').replace('OpenAI ', '').replace('GitHub ', '')} ({count})
                 </button>
               );
             })}

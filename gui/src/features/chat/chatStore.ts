@@ -13,18 +13,22 @@ export interface ChatMessage {
   kind?: 'error' | 'note';
   /** Authorization used for this user turn. */
   executionProfile?: ChatExecutionProfile;
+  /** Attached images (file paths or data URLs) for this turn. */
+  images?: string[];
 }
 
 export interface ChatStore {
   v: 4;
   /** Resumable session identity scoped to each CLI provider. */
-  sessions: Record<string, { id: string; started: boolean; model?: string }>;
+  sessions: Record<string, { id: string; started: boolean; model?: string; effort?: string }>;
   /** Last used provider id. */
   providerId: string | null;
   /** Last explicitly selected profile, scoped to each profile-aware provider. */
   profilesByProvider: Record<string, ChatExecutionProfile>;
   /** Last explicitly selected model, scoped to each provider. */
   modelsByProvider?: Record<string, string>;
+  /** Last explicitly selected reasoning effort, scoped to each provider. */
+  effortsByProvider?: Record<string, string>;
   messages: ChatMessage[];
 }
 
@@ -36,6 +40,7 @@ const emptyStore = (): ChatStore => ({
   providerId: null,
   profilesByProvider: { 'claude-cli': 'review', 'codex-cli': 'review' },
   modelsByProvider: {},
+  effortsByProvider: {},
   messages: [],
 });
 
@@ -67,12 +72,19 @@ export function loadChatStore(branchName: string): ChatStore {
               .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
           )
         : {};
+      const effortsByProvider = typeof parsed.effortsByProvider === 'object' && parsed.effortsByProvider !== null
+        ? Object.fromEntries(
+            Object.entries(parsed.effortsByProvider)
+              .filter((entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'),
+          )
+        : {};
       return {
         ...emptyStore(),
         sessions: parsed.sessions,
         providerId: typeof parsed.providerId === 'string' ? parsed.providerId : null,
         profilesByProvider: { ...emptyStore().profilesByProvider, ...profilesByProvider },
         modelsByProvider,
+        effortsByProvider,
         messages: parsed.messages,
       };
     }

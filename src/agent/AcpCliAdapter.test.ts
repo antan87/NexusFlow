@@ -11,7 +11,7 @@ import {
   type AcpConnection,
   type AcpTransportFactory,
 } from './AcpCliAdapter.js';
-import { buildCopilotAcpArgs } from './CopilotAcpAdapter.js';
+import { buildCopilotAcpArgs, CopilotAcpAdapter } from './CopilotAcpAdapter.js';
 
 const SESSION_ID = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -211,6 +211,35 @@ describe('AcpCliAdapter', () => {
     expect(errors[0]).toMatch(/invalid session id/i);
   });
 
+  it('handles agent_thought_chunk as active turn activity and streams thought tokens', async () => {
+    let client: acp.Client;
+    const connection = makeConnection({
+      prompt: vi.fn(async (): Promise<acp.PromptResponse> => {
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'Thinking about the solution...' },
+          },
+        });
+        return { stopReason: 'end_turn' };
+      }),
+    });
+    const fixture = makeHarness(connection);
+    const output: string[] = [];
+    const errors: string[] = [];
+    fixture.harness.on('data', (text) => output.push(text));
+    fixture.harness.on('error', (error: Error) => errors.push(error.message));
+
+    const start = fixture.harness.start('C:\\workspace');
+    client = fixture.getClient();
+    await start;
+    await fixture.harness.send('Think about this');
+
+    expect(output).toEqual(['Thinking about the solution...']);
+    expect(errors).toEqual([]);
+  });
+
   it('reports a successful turn with no recognizable message', async () => {
     const { harness } = makeHarness(makeConnection());
     const errors: string[] = [];
@@ -276,5 +305,17 @@ describe('isSafeAcpSessionId', () => {
     expect(isSafeAcpSessionId('ses_abc-123')).toBe(true);
     expect(isSafeAcpSessionId('ses_abc\n123')).toBe(false);
     expect(isSafeAcpSessionId('x'.repeat(201))).toBe(false);
+  });
+});
+
+describe('CopilotAcpAdapter session id validation', () => {
+  it('accepts UUID and safe opaque ACP session IDs, rejecting unsafe IDs', () => {
+    const adapter = new CopilotAcpAdapter();
+    const validate = (adapter as any).options.validateSessionId;
+    expect(validate('123e4567-e89b-12d3-a456-426614174000')).toBe(true);
+    expect(validate('ses_abc-123')).toBe(true);
+    expect(validate('session-xyz_999')).toBe(true);
+    expect(validate('invalid\nsession')).toBe(false);
+    expect(validate('')).toBe(false);
   });
 });

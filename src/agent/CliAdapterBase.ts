@@ -94,13 +94,18 @@ export abstract class CliAdapterBase extends EventEmitter {
     this.runTurn(args, data);
   }
 
+  /** Subclasses can customize environment variables for the CLI subprocess. */
+  protected buildEnv(): NodeJS.ProcessEnv {
+    return { ...process.env, FORCE_COLOR: '0' }; // Strip colors for easier parsing
+  }
+
   /** Kept as a seam so lifecycle tests can exercise process failures without a real CLI. */
   protected spawnProcess(args: string[]): ChildProcess {
     return spawn(this.binary, args, {
       cwd: this.cwd,
       shell: this.useShell,
       detached: process.platform !== 'win32',
-      env: { ...process.env, FORCE_COLOR: '0' } // Strip colors for easier parsing
+      env: this.buildEnv(),
     });
   }
 

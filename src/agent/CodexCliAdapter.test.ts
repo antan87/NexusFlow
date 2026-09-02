@@ -53,7 +53,7 @@ class TestCodexCliAdapter extends CodexCliAdapter {
 describe('buildCodexTurnArgs', () => {
   it('starts a JSONL exec turn in a read-only sandbox by default', () => {
     expect(buildCodexTurnArgs(undefined, 'review')).toEqual([
-      'exec', '--json', '--color', 'never',
+      'exec', '--json', '--color', 'never', '--skip-git-repo-check',
       '-c', 'sandbox_mode="read-only"',
       '-c', 'approval_policy="never"',
       '-',
@@ -62,7 +62,7 @@ describe('buildCodexTurnArgs', () => {
 
   it('resumes the exact Codex thread id', () => {
     expect(buildCodexTurnArgs(ID, 'review')).toEqual([
-      'exec', 'resume', '--json',
+      'exec', 'resume', '--json', '--skip-git-repo-check',
       '-c', 'sandbox_mode="read-only"',
       '-c', 'approval_policy="never"',
       ID, '-',
@@ -71,14 +71,14 @@ describe('buildCodexTurnArgs', () => {
 
   it('uses workspace-write with network and approval escalation disabled', () => {
     expect(buildCodexTurnArgs(undefined, 'workspace-write')).toEqual([
-      'exec', '--json', '--color', 'never',
+      'exec', '--json', '--color', 'never', '--skip-git-repo-check',
       '-c', 'sandbox_mode="workspace-write"',
       '-c', 'approval_policy="never"',
       '-c', 'sandbox_workspace_write.network_access=false',
       '-',
     ]);
     expect(buildCodexTurnArgs(ID, 'workspace-write')).toEqual([
-      'exec', 'resume', '--json',
+      'exec', 'resume', '--json', '--skip-git-repo-check',
       '-c', 'sandbox_mode="workspace-write"',
       '-c', 'approval_policy="never"',
       '-c', 'sandbox_workspace_write.network_access=false',
@@ -88,13 +88,13 @@ describe('buildCodexTurnArgs', () => {
 
   it('passes the selected model on new and resumed Codex turns', () => {
     expect(buildCodexTurnArgs(undefined, 'review', 'gpt-5.6-terra')).toEqual([
-      'exec', '--json', '--color', 'never', '--model', 'gpt-5.6-terra',
+      'exec', '--json', '--color', 'never', '--skip-git-repo-check', '--model', 'gpt-5.6-terra',
       '-c', 'sandbox_mode="read-only"',
       '-c', 'approval_policy="never"',
       '-',
     ]);
     expect(buildCodexTurnArgs(ID, 'review', 'gpt-5.6-terra')).toEqual([
-      'exec', 'resume', '--json', '--model', 'gpt-5.6-terra',
+      'exec', 'resume', '--json', '--skip-git-repo-check', '--model', 'gpt-5.6-terra',
       '-c', 'sandbox_mode="read-only"',
       '-c', 'approval_policy="never"',
       ID, '-',
@@ -207,13 +207,13 @@ describe('Codex acknowledged thread lifecycle', () => {
     expect(adapter.processes[0].child.stdout.setEncoding).toHaveBeenCalledWith('utf8');
     expect(adapter.processes.map(process => process.args)).toEqual([
       [
-        'exec', '--json', '--color', 'never',
+        'exec', '--json', '--color', 'never', '--skip-git-repo-check',
         '-c', 'sandbox_mode="read-only"',
         '-c', 'approval_policy="never"',
         '-',
       ],
       [
-        'exec', 'resume', '--json',
+        'exec', 'resume', '--json', '--skip-git-repo-check',
         '-c', 'sandbox_mode="workspace-write"',
         '-c', 'approval_policy="never"',
         '-c', 'sandbox_workspace_write.network_access=false',

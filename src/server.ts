@@ -214,7 +214,81 @@ app.get('/ws', async (c, next) => {
   return upgradeWebSocket((c) => {
     let agent: AgentHarness | null = null;
     let activeProvider: ProviderAdapter | null = null;
+    let lastCwd: string | null = null;
+    let lastCommand: string | null = null;
+    let lastSession: AgentSession | undefined;
+    let startPromise: Promise<{ agent: AgentHarness; provider: ProviderAdapter } | null> | null = null;
     const turnGate = new AgentTurnGate();
+
+    const startAgentInstance = async (
+      targetWs: { send: (data: string) => void },
+      command: string,
+      cwd: string,
+      session?: AgentSession,
+    ) => {
+      turnGate.settle();
+      if (agent) {
+        const previousAgent = agent;
+        agent = null;
+        activeProvider = null;
+        previousAgent.stop();
+      }
+      const provider = ProviderRegistry.getProvider(command);
+      if (!provider) {
+        targetWs.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}. Please create a dedicated adapter.` }));
+        return null;
+      }
+
+      const config = await loadConfig();
+      const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
+      if (!safeCwd) {
+        targetWs.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
+        return null;
+      }
+
+      const startedAgent = provider.createInstance();
+      agent = startedAgent;
+      activeProvider = provider;
+      lastCwd = safeCwd;
+      lastCommand = command;
+      lastSession = session;
+      const isCurrentAgent = () => agent === startedAgent;
+      startedAgent.on('data', (text: string) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({ type: 'stream', text }));
+      });
+      startedAgent.on('system', (message: string) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({ type: 'system', message }));
+      });
+      startedAgent.on('session', (id: string) => {
+        if (!isCurrentAgent()) return;
+        if (isValidSessionUuid(id)) {
+          lastSession = { ...(lastSession ?? { resume: true }), id };
+          targetWs.send(JSON.stringify({ type: 'session', id }));
+        }
+      });
+      startedAgent.on('idle', () => {
+        if (!isCurrentAgent()) return;
+        turnGate.settle();
+        targetWs.send(JSON.stringify({ type: 'status', state: 'idle' }));
+      });
+      startedAgent.on('close', (code: number) => {
+        if (!isCurrentAgent()) return;
+        turnGate.settle();
+        targetWs.send(JSON.stringify({ type: 'close', code }));
+      });
+      startedAgent.on('usage', (usage: any) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({ type: 'usage', usage }));
+      });
+      startedAgent.on('error', (error: Error) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
+      });
+      await startedAgent.start(safeCwd, session);
+      return { agent: startedAgent, provider };
+    };
 
     return {
       async onMessage(event, ws) {
@@ -229,35 +303,16 @@ app.get('/ws', async (c, next) => {
             if (payload.type === 'ping') {
               ws.send(JSON.stringify({ type: 'pong' }));
             } else if (payload.type === 'start') {
-              turnGate.settle();
-              if (agent) {
-                const previousAgent = agent;
-                agent = null;
-                activeProvider = null;
-                previousAgent.stop();
-              }
-              const provider = ProviderRegistry.getProvider(payload.command);
-              if (!provider) {
-                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
-                return;
-              }
-
-              const config = await loadConfig();
-              if (typeof payload.cwd !== 'string' || !payload.cwd.trim()) {
+              const command = payload.command;
+              const cwd = payload.cwd;
+              if (typeof cwd !== 'string' || !cwd.trim()) {
                 ws.send(JSON.stringify({ type: 'error', message: 'Workspace directory cwd is required.' }));
                 return;
               }
-              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, payload.cwd);
-              if (!safeCwd) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
+              const provider = ProviderRegistry.getProvider(command);
+              if (!provider) {
+                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}. Please create a dedicated adapter.` }));
                 return;
-              }
-              const freshness = await checkGenerationLock(safeCwd, { markDocuments: true });
-              if (!freshness.fresh) {
-                ws.send(JSON.stringify({
-                  type: 'system',
-                  message: `⚠ NexusFlow generated context is stale or drifted. ${freshness.drift.map((item) => item.message).join(' ')}`,
-                }));
               }
 
               let session: AgentSession | undefined;
@@ -269,56 +324,46 @@ app.get('/ws', async (c, next) => {
                 }));
                 return;
               }
+              const effort = typeof payload.effort === 'string' && payload.effort.trim() ? payload.effort.trim() : undefined;
               if (payload.sessionId !== undefined && payload.sessionId !== null) {
                 if (!isValidSessionUuid(payload.sessionId)) {
                   ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
                   return;
                 }
-                session = { id: payload.sessionId, resume: Boolean(payload.resume), model };
-              } else if (model) {
-                session = { id: crypto.randomUUID(), resume: false, model };
+                session = { id: payload.sessionId, resume: Boolean(payload.resume), model, effort };
+              } else if (model || effort) {
+                session = { id: crypto.randomUUID(), resume: false, model, effort };
               }
 
-              const startedAgent = provider.createInstance();
-              agent = startedAgent;
-              activeProvider = provider;
-              const isCurrentAgent = () => agent === startedAgent;
-              startedAgent.on('data', (text: string) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'stream', text }));
-              });
-              startedAgent.on('system', (message: string) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'system', message }));
-              });
-              startedAgent.on('session', (id: string) => {
-                if (!isCurrentAgent()) return;
-                // Provider output is still boundary input. Only inert UUIDs
-                // may be persisted by the renderer and sent back in argv.
-                if (isValidSessionUuid(id)) {
-                  ws.send(JSON.stringify({ type: 'session', id }));
-                }
-              });
-              startedAgent.on('idle', () => {
-                if (!isCurrentAgent()) return;
-                turnGate.settle();
-                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
-              });
-              startedAgent.on('close', (code: number) => {
-                if (!isCurrentAgent()) return;
-                turnGate.settle();
-                ws.send(JSON.stringify({ type: 'close', code }));
-              });
-              startedAgent.on('usage', (usage: any) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'usage', usage }));
-              });
-              startedAgent.on('error', (error: Error) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
-              });
-              startedAgent.start(safeCwd, session);
+              try {
+                startPromise = startAgentInstance(ws, command, cwd, session);
+                await startPromise;
+              } finally {
+                startPromise = null;
+              }
             } else if (payload.type === 'input') {
+              if (startPromise) {
+                try {
+                  await startPromise;
+                } catch {
+                  // Handled by client/emitter; proceed to active instance check
+                }
+              }
+
+              if (!agent || !activeProvider) {
+                const command = typeof payload.command === 'string' ? payload.command : (lastCommand ?? 'antigravity-cli');
+                const cwd = typeof payload.cwd === 'string' ? payload.cwd : lastCwd;
+                if (cwd) {
+                  try {
+                    startPromise = startAgentInstance(ws, command, cwd, lastSession);
+                    const instance = await startPromise;
+                    if (!instance) return;
+                  } finally {
+                    startPromise = null;
+                  }
+                }
+              }
+
               if (agent && activeProvider) {
                 if (!turnGate.tryBegin()) {
                   const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
@@ -336,9 +381,6 @@ app.get('/ws', async (c, next) => {
                   ws.send(JSON.stringify({ type: 'error', message: error }));
                   return;
                 }
-                // Some harness validation failures emit error + idle
-                // synchronously from send(); do not overwrite that settled
-                // state with a late busy frame.
                 if (turnGate.isActive()) {
                   const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
                   ws.send(JSON.stringify({
@@ -347,6 +389,13 @@ app.get('/ws', async (c, next) => {
                   }));
                   ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
                 }
+              } else {
+                const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: 'No active agent session. Please start or reconnect the agent.',
+                  ...(turnId ? { turnId } : {}),
+                }));
               }
             } else if (payload.type === 'stop') {
               turnGate.settle();
@@ -358,7 +407,7 @@ app.get('/ws', async (c, next) => {
               }
             }
           } catch (err) {
-            console.error('[WS] Failed to parse message', err);
+            console.error('Error handling WebSocket message:', err);
           }
         }
       },
@@ -652,6 +701,60 @@ app.post('/api/adapters/status/refresh', async (c) => {
     return c.json({ error: 'Only Claude Code and Codex status can be refreshed.' }, 400);
   }
   return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: providerId }));
+});
+
+app.post('/api/chat/upload-attachment', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  try {
+    const body = await c.req.json().catch(() => null) as {
+      dataUrl?: unknown;
+      filename?: unknown;
+      workspacePath?: unknown;
+    } | null;
+
+    if (!body || typeof body.dataUrl !== 'string' || !body.dataUrl.startsWith('data:image/')) {
+      return c.json({ error: 'A valid image dataUrl is required.' }, 400);
+    }
+
+    const matches = body.dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (!matches) {
+      return c.json({ error: 'Malformed image dataUrl format.' }, 400);
+    }
+
+    const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((20 * 1024 * 1024 * 4) / 3);
+    if (matches[2].length > MAX_ATTACHMENT_BASE64_CHARS) {
+      return c.json({ error: 'Image attachment exceeds maximum allowed size of 20MB.' }, 413);
+    }
+
+    const rawExt = matches[1].toLowerCase();
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+    const buffer = Buffer.from(matches[2], 'base64');
+    const imageId = crypto.randomUUID();
+    const config = await loadConfig();
+    const workspaceDir = typeof body.workspacePath === 'string'
+      ? await resolveExactLaunchWorkspace(config.workspacesDir, body.workspacePath)
+      : null;
+
+    const targetDir = workspaceDir
+      ? path.join(workspaceDir, '.nexusflow', 'attachments')
+      : path.join(getConfigDir(), 'attachments');
+
+    await fs.mkdir(targetDir, { recursive: true });
+    const targetFile = path.join(targetDir, `${imageId}.${ext}`);
+    await fs.writeFile(targetFile, buffer);
+
+    return c.json({
+      id: imageId,
+      filename: typeof body.filename === 'string' ? body.filename : `image-${imageId}.${ext}`,
+      path: targetFile,
+      size: buffer.length,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
 });
 
 // 1. Get current configuration

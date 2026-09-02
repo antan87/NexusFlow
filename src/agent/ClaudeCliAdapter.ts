@@ -5,7 +5,7 @@ import type { AgentExecutionProfile } from './ProviderRegistry.js';
 export type ClaudeOutputEvent =
   | { type: 'session'; id: string }
   | { type: 'message'; text: string }
-  | { type: 'complete'; text: string }
+  | { type: 'complete'; text: string; usage?: Record<string, unknown>; totalCostUsd?: number }
   | { type: 'system'; message: string }
   | { type: 'error'; message: string; source: 'protocol' | 'provider' };
 
@@ -82,15 +82,22 @@ export function decodeClaudeLine(line: string): ClaudeOutputEvent[] {
       events.push({ type: 'session', id: value.session_id });
     }
     if (value.subtype === 'success' && value.is_error !== true) {
-      if (typeof value.result !== 'string') {
-        events.push({
-          type: 'error',
-          message: 'Claude completed without a recognized text result.',
-          source: 'protocol',
-        });
-      } else {
-        events.push({ type: 'complete', text: value.result });
-      }
+      const text = typeof value.result === 'string' ? value.result : '';
+      const usage = isRecord(value.usage) ? value.usage : undefined;
+      const totalCostUsd =
+        typeof value.total_cost_usd === 'number'
+          ? value.total_cost_usd
+          : typeof (value as any).totalCostUsd === 'number'
+            ? (value as any).totalCostUsd
+            : undefined;
+
+      const completeEvent: ClaudeOutputEvent = {
+        type: 'complete',
+        text,
+        ...(usage ? { usage } : {}),
+        ...(totalCostUsd !== undefined ? { totalCostUsd } : {}),
+      };
+      events.push(completeEvent);
     } else {
       events.push({ type: 'error', message: claudeFailureMessage(value), source: 'provider' });
     }
@@ -162,6 +169,14 @@ export class ClaudeCliAdapter extends CliAdapterBase {
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = false;
     this.turnFinished = false;
+  }
+
+  protected override buildEnv(): NodeJS.ProcessEnv {
+    const env = super.buildEnv();
+    if (this.session?.effort) {
+      env.CLAUDE_CODE_EFFORT_LEVEL = this.session.effort;
+    }
+    return env;
   }
 
   protected buildArgs(
@@ -236,6 +251,25 @@ export class ClaudeCliAdapter extends CliAdapterBase {
           ), true);
         } else if (!this.sawTextDelta && event.text) {
           this.emit('data', event.text);
+        } else if (!this.sawTextDelta && !event.text) {
+          this.failCurrentTurn(new Error(
+            `Claude completed without a recognized text result. ${this.acknowledgedThisTurn
+              ? 'The acknowledged session remains resumable.'
+              : 'The turn was not marked resumable.'}`,
+          ), true);
+        }
+
+        if (event.usage || event.totalCostUsd !== undefined) {
+          const u: any = event.usage;
+          const normalizedUsage = {
+            inputTokens: typeof u?.input_tokens === 'number' ? u.input_tokens : 0,
+            outputTokens: typeof u?.output_tokens === 'number' ? u.output_tokens : 0,
+            cachedInputTokens:
+              (typeof u?.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0) +
+              (typeof u?.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0),
+            costUsdEstimate: event.totalCostUsd,
+          };
+          this.emit('usage', normalizedUsage);
         }
       } else {
         this.turnFinished = true;

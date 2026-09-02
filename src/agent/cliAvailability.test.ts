@@ -149,6 +149,11 @@ describe('detectAntigravityCliStatus', () => {
 
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/agy/);
+    expect(status).toMatchObject({
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'agy',
+      recoveryLabel: 'Copy CLI command',
+    });
   });
 });
 
@@ -206,6 +211,11 @@ describe('detectCopilotCliStatus', () => {
     const status = detectCopilotCliStatus({ hasBinary: false, env: {} });
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/not found on PATH/i);
+    expect(status).toMatchObject({
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'copilot login',
+      recoveryLabel: 'Copy sign-in command',
+    });
   });
 
   it('accepts an installation whose help advertises ACP', () => {
@@ -224,6 +234,11 @@ describe('detectCopilotCliStatus', () => {
     });
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/does not expose ACP/i);
+    expect(status).toMatchObject({
+      setupIssue: 'probe-failed',
+      recoveryCommand: 'copilot login',
+      recoveryLabel: 'Copy sign-in command',
+    });
   });
 
   it('reports a failed or timed-out capability probe', () => {
@@ -234,6 +249,11 @@ describe('detectCopilotCliStatus', () => {
     });
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/timed out/);
+    expect(status).toMatchObject({
+      setupIssue: 'probe-failed',
+      recoveryCommand: 'copilot help',
+      recoveryLabel: 'Copy status command',
+    });
   });
 
   it('rejects an overriding classic PAT that Copilot cannot use', () => {
@@ -244,5 +264,10 @@ describe('detectCopilotCliStatus', () => {
     });
     expect(status.usable).toBe(false);
     expect(status.message).toMatch(/classic/i);
+    expect(status).toMatchObject({
+      setupIssue: 'signed-out',
+      recoveryCommand: 'copilot login',
+      recoveryLabel: 'Copy sign-in command',
+    });
   });
 });

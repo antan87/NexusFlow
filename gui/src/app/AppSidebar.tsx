@@ -14,6 +14,7 @@ import {
   Check,
   Activity,
   Users,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
@@ -23,6 +24,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { useTheme } from './ThemeProvider.js';
+import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 
 export type WorkspaceSortOption =
@@ -66,6 +68,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { pathname } = useLocation();
   const { theme, setTheme } = useTheme();
+  const { open: openFloatingChat } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
 
@@ -171,39 +174,52 @@ export function AppSidebar({
             </span>
           </div>
 
-          {/* Declarative Base UI Order By Menu */}
-          <Menu>
-            <MenuTrigger className="flex items-center gap-1 text-[11px] normal-case font-medium text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors">
-              <ArrowUpDown size={11} className="opacity-70" />
-              <span>{sortLabelMap[sortBy]}</span>
-              <ChevronDown size={10} className="opacity-60" />
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-48">
-              <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Order Workspaces By
-              </div>
-              <MenuItem onClick={() => setSortBy('created-desc')} className="flex items-center justify-between text-xs">
-                <span>Newest created</span>
-                {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
-              </MenuItem>
-              <MenuItem onClick={() => setSortBy('created-asc')} className="flex items-center justify-between text-xs">
-                <span>Oldest created</span>
-                {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
-              </MenuItem>
-              <MenuItem onClick={() => setSortBy('changes-desc')} className="flex items-center justify-between text-xs">
-                <span>Most changes</span>
-                {sortBy === 'changes-desc' && <Check size={12} className="text-primary" />}
-              </MenuItem>
-              <MenuItem onClick={() => setSortBy('name-asc')} className="flex items-center justify-between text-xs">
-                <span>Name (A–Z)</span>
-                {sortBy === 'name-asc' && <Check size={12} className="text-primary" />}
-              </MenuItem>
-              <MenuItem onClick={() => setSortBy('repos-desc')} className="flex items-center justify-between text-xs">
-                <span>Most repos</span>
-                {sortBy === 'repos-desc' && <Check size={12} className="text-primary" />}
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => openFloatingChat()}
+              className="flex items-center gap-1 text-[11px] normal-case font-medium text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors"
+              title="Open floating chat window with workspace tabs"
+              aria-label="Open floating chat window"
+            >
+              <Bot size={12} className="text-primary" />
+              <span>Chat</span>
+            </button>
+
+            {/* Declarative Base UI Order By Menu */}
+            <Menu>
+              <MenuTrigger className="flex items-center gap-1 text-[11px] normal-case font-medium text-muted-foreground hover:text-foreground cursor-pointer px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors">
+                <ArrowUpDown size={11} className="opacity-70" />
+                <span>{sortLabelMap[sortBy]}</span>
+                <ChevronDown size={10} className="opacity-60" />
+              </MenuTrigger>
+              <MenuPopup align="end" className="w-48">
+                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Order Workspaces By
+                </div>
+                <MenuItem onClick={() => setSortBy('created-desc')} className="flex items-center justify-between text-xs">
+                  <span>Newest created</span>
+                  {sortBy === 'created-desc' && <Check size={12} className="text-primary" />}
+                </MenuItem>
+                <MenuItem onClick={() => setSortBy('created-asc')} className="flex items-center justify-between text-xs">
+                  <span>Oldest created</span>
+                  {sortBy === 'created-asc' && <Check size={12} className="text-primary" />}
+                </MenuItem>
+                <MenuItem onClick={() => setSortBy('changes-desc')} className="flex items-center justify-between text-xs">
+                  <span>Most changes</span>
+                  {sortBy === 'changes-desc' && <Check size={12} className="text-primary" />}
+                </MenuItem>
+                <MenuItem onClick={() => setSortBy('name-asc')} className="flex items-center justify-between text-xs">
+                  <span>Name (A–Z)</span>
+                  {sortBy === 'name-asc' && <Check size={12} className="text-primary" />}
+                </MenuItem>
+                <MenuItem onClick={() => setSortBy('repos-desc')} className="flex items-center justify-between text-xs">
+                  <span>Most repos</span>
+                  {sortBy === 'repos-desc' && <Check size={12} className="text-primary" />}
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </div>
         </div>
 
         {/* Quick Search */}
@@ -298,6 +314,19 @@ export function AppSidebar({
                           ))}
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openFloatingChat(w.branchName);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-background/80 hover:text-primary transition-all text-muted-foreground cursor-pointer"
+                        title={`Open ${w.branchName} in floating chat`}
+                        aria-label={`Open ${w.branchName} in floating chat`}
+                      >
+                        <Bot size={12} />
+                      </button>
                       <span
                         className={cn(
                           'size-1.5 rounded-full shrink-0',

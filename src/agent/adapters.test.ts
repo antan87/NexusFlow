@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-
+import { ProviderRegistry } from './ProviderRegistry.js';
 import { cachedStatus } from './adapters.js';
 
 describe('cachedStatus', () => {
@@ -84,5 +84,12 @@ describe('cachedStatus', () => {
     read();
 
     expect(detect).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers claude-sdk with provider-assigned sessionIdentity capability', () => {
+    const claudeSdk = ProviderRegistry.getProvider('claude-sdk');
+    expect(claudeSdk).toBeDefined();
+    expect(claudeSdk?.capabilities.sessionIdentity).toBe('provider-assigned');
+    expect(claudeSdk?.capabilities.transport).toBe('sdk');
   });
 });

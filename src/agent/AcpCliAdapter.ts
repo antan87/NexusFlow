@@ -259,7 +259,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     const update = params.update;
     if (
       this.acceptAgentMessages
-      && update.sessionUpdate === 'agent_message_chunk'
+      && (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk')
       && update.content.type === 'text'
       && update.content.text
     ) {

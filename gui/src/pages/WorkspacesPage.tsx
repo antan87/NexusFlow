@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Sparkles,
   Puzzle,
+  Bot,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
@@ -53,7 +54,7 @@ import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
-import { AgentChat } from '../features/chat/AgentChat.js';
+import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
@@ -119,6 +120,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
   const selectedMode = selected?.mode ?? 'worktree';
+  const { open: openFloatingChat } = useFloatingChat();
 
   // Detected services for the overview topology panel
   const detectedServices = useWorkspaceServices(selected?.branchName ?? null).data?.services ?? [];
@@ -333,23 +335,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 </TabsTab>
               ))}
             </TabsList>
-            <section
-              aria-labelledby="embedded-harness-heading"
-              aria-hidden={subTab !== 'sessions'}
-              className={cn('space-y-2 pt-3', subTab !== 'sessions' && 'hidden')}
-            >
-              <div>
-                <h2 id="embedded-harness-heading" className="text-sm font-semibold text-foreground">
-                  Embedded harness
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Start a first-party SDK or local CLI session in this workspace and choose its execution profile and model.
-                </p>
-              </div>
-              <div className="h-[36rem] min-h-[28rem] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                <AgentChat key={selected.branchName} ws={selected} />
-              </div>
-            </section>
             <TabsPanel value={subTab} className="animate-fade-in pt-3">
               {subTab === 'overview' && (
                 <div className="flex flex-col gap-3">
@@ -539,14 +524,26 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 </div>
               )}
               {subTab === 'sessions' && (
-                <section aria-labelledby="session-history-heading" className="space-y-2">
-                  <div>
-                    <h2 id="session-history-heading" className="text-sm font-semibold text-foreground">
-                      Session history
-                    </h2>
-                    <p className="text-xs text-muted-foreground">
-                      Inspect or resume sessions recorded by the installed harnesses.
-                    </p>
+                <section aria-labelledby="session-history-heading" className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-border bg-card shadow-xs">
+                    <div>
+                      <h2 id="session-history-heading" className="text-sm font-semibold text-foreground">
+                        AI Sessions & History
+                      </h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Inspect recorded session logs, turns, and token usage, or open active conversations in the floating chat.
+                      </p>
+                    </div>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => openFloatingChat(selected.branchName)}
+                      className="text-xs h-8 gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
+                      title="Open floating multi-workspace chat"
+                    >
+                      <Bot className="size-3.5" />
+                      <span>Open Floating Chat</span>
+                    </Button>
                   </div>
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
