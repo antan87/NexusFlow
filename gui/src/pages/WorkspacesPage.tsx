@@ -12,12 +12,10 @@ import {
   Puzzle,
   LayoutDashboard,
   GitCompare,
-  Cpu,
   Bot,
   Brain,
   ListTodo,
   GitBranch,
-  ExternalLink,
   Zap,
   ArrowRight,
   type LucideIcon,
@@ -56,7 +54,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js
 import { Spinner } from '../components/ui/spinner.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
-import { useWorkspaceServices, useWorkspaceLaunchTargets, useWorkspaceSkills, useSkills } from '../lib/api/queries.js';
+import { useWorkspaceLaunchTargets, useWorkspaceSkills, useSkills } from '../lib/api/queries.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
@@ -64,7 +62,6 @@ import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
 import { AgentChat } from '../features/chat/AgentChat.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
-import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
@@ -73,7 +70,7 @@ import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
-type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan' | 'skills';
+type SubTab = 'overview' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills';
 
 interface TabDef {
   value: SubTab;
@@ -84,7 +81,6 @@ interface TabDef {
 const TABS: TabDef[] = [
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
   { value: 'changes', label: 'Changes', icon: GitCompare },
-  { value: 'services', label: 'Services', icon: Cpu },
   { value: 'sessions', label: 'AI & Sessions', icon: Bot },
   { value: 'knowledge', label: 'Knowledge', icon: Brain },
   { value: 'plan', label: 'Plan', icon: ListTodo },
@@ -137,9 +133,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openFloatingChat } = useFloatingChat();
 
-  // Detected services for the overview topology panel
-  const detectedServices = useWorkspaceServices(selected?.branchName ?? null).data?.services ?? [];
-
   // Active skills in this workspace
   const workspaceSkillsConfig = useWorkspaceSkills(selected?.branchName ?? null).data;
   const { data: allSkills = [], isLoading: skillsLoading } = useSkills(selected?.branchName);
@@ -150,9 +143,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         const name = repoName(rp);
         const change = changesProps.gitChanges?.find((c: { repoName: string; files?: unknown[] }) => c.repoName === name);
         const changedCount: number | null = change ? change.files?.length ?? 0 : null;
-        const svcs = detectedServices.filter((s) => (s.cwd ?? '').split(/[\/]/).includes(name));
-        const ports = Array.from(new Set(svcs.map((s) => s.port).filter((p): p is number => typeof p === 'number')));
-        return { name, path: rp, changedCount, ports, serviceCount: svcs.length };
+        return { name, path: rp, changedCount };
       })
     : [];
 
@@ -187,7 +178,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     const st = workspaceStatuses[selected.branchName];
     const sync = selectedMode === 'in-place' ? null : (st ? syncMeta(st.syncStatus) : null);
     const totalChangedFiles = st?.changedFiles ?? 0;
-    const runningServicesCount = st?.runningServices ?? 0;
 
     return (
       <div className="flex flex-col min-w-0 pb-12">
@@ -242,18 +232,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </span>
                 )}
                 <span>•</span>
-                {runningServicesCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab(selected.branchName, 'services')}
-                    className="flex items-center gap-1.5 text-emerald-400 font-semibold hover:underline cursor-pointer"
-                  >
-                    <span className="size-2 rounded-full bg-emerald-400 animate-ping" />
-                    {runningServicesCount} active {runningServicesCount === 1 ? 'service' : 'services'}
-                  </button>
-                ) : (
-                  <span className="text-muted-foreground/80">0 running services</span>
-                )}
+                <span className="text-muted-foreground/80">Created {new Date(selected.createdAt).toLocaleDateString()}</span>
                 {sync && (
                   <>
                     <span>•</span>
@@ -377,12 +356,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       {totalChangedFiles}
                     </span>
                   );
-                } else if (tab.value === 'services' && runningServicesCount > 0) {
-                  badge = (
-                    <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-emerald-400">
-                      {runningServicesCount}
-                    </span>
-                  );
                 } else if (tab.value === 'skills' && activeSkills.length > 0) {
                   badge = (
                     <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
@@ -463,35 +436,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       </div>
                     </div>
 
-                    {/* Tile 2: Live Services */}
-                    <div
-                      onClick={() => onSelectTab(selected.branchName, 'services')}
-                      className="group p-4 rounded-xl border border-border/80 bg-card/70 hover:bg-card hover:border-primary/40 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="grid size-8 place-items-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <Cpu size={15} />
-                          </span>
-                          <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Runtime Services</span>
-                        </div>
-                        <ArrowRight size={13} className="text-muted-foreground group-hover:text-primary transition-transform group-hover:translate-x-1" />
-                      </div>
-                      <div>
-                        <div className="text-2xl font-black font-mono text-foreground">
-                          {runningServicesCount > 0 ? (
-                            <span className="text-emerald-400">{runningServicesCount} Running</span>
-                          ) : (
-                            <span>{detectedServices.length} Detected</span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground mt-1 truncate">
-                          {detectedServices.length > 0 ? `${detectedServices.map(s => s.name).join(', ')}` : 'No background services'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Tile 3: AI Context Engine */}
+                    {/* Tile 2: AI Assistant Engine */}
                     <div
                       onClick={() => onSelectTab(selected.branchName, 'sessions')}
                       className="group p-4 rounded-xl border border-border/80 bg-card/70 hover:bg-card hover:border-primary/40 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
@@ -510,7 +455,31 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           {selected.assistants[0] || 'Antigravity'}
                         </div>
                         <div className="text-[11px] text-muted-foreground mt-1">
-                          {activeSkills.length} active skills attached
+                          Context rules & templates ready
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tile 3: Attached Skills */}
+                    <div
+                      onClick={() => onSelectTab(selected.branchName, 'skills')}
+                      className="group p-4 rounded-xl border border-border/80 bg-card/70 hover:bg-card hover:border-primary/40 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                            <Puzzle size={15} />
+                          </span>
+                          <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Skills & Toolkits</span>
+                        </div>
+                        <ArrowRight size={13} className="text-muted-foreground group-hover:text-primary transition-transform group-hover:translate-x-1" />
+                      </div>
+                      <div>
+                        <div className="text-2xl font-black font-mono text-foreground">
+                          {activeSkills.length} <span className="text-sm font-semibold text-muted-foreground">Active</span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-1">
+                          {activeSkills.length === 0 ? 'Click to attach capabilities' : 'Reviewers, linters & test suites'}
                         </div>
                       </div>
                     </div>
@@ -576,19 +545,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           </div>
 
                           <div className="flex items-center gap-3 shrink-0">
-                            {r.ports.map((p) => (
-                              <a
-                                key={p}
-                                href={`http://localhost:${p}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                                title={`Open http://localhost:${p}`}
-                              >
-                                <span>:{p}</span>
-                                <ExternalLink size={10} />
-                              </a>
-                            ))}
                             <span className={cn(
                               'font-mono text-[11px] font-semibold px-2 py-0.5 rounded-md border',
                               r.changedCount === null
@@ -716,7 +672,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
-              {subTab === 'services' && <ServiceConsole ws={selected} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'plan' && <ImplementationPlan {...planProps} />}
@@ -740,7 +695,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 </EmptyMedia>
                 <EmptyTitle>No workspace selected</EmptyTitle>
                 <EmptyDescription>
-                  Select a workspace from the sidebar to inspect git changes, services, context, or launch AI assistants.
+                  Select a workspace from the sidebar to inspect git changes, context, or launch AI assistants.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

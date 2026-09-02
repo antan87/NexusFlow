@@ -1,11 +1,22 @@
 import React, { useState } from 'react';
-import { FolderGit2, RefreshCw, Check, Save, ChevronDown, ChevronRight, Copy } from 'lucide-react';
+import {
+  FolderGit2,
+  RefreshCw,
+  Check,
+  Save,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  ChevronsDownUp,
+  ChevronsUpDown,
+} from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
+import { cn } from '../../lib/utils.js';
 
 interface ChangesViewerProps {
   ws: Feature;
@@ -44,11 +55,42 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   handleSyncAll,
   handleCommitAll,
 }) => {
+  // Collapsed repositories state: default to TRUE (collapsed) so user isn't overwhelmed
+  const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
   const [diffCache, setDiffCache] = useState<Record<string, string>>({});
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   const [copiedKey, setCopiedKey] = useState<string>('');
+
+  const isRepoCollapsed = (repoName: string): boolean => {
+    // Default to collapsed (true) if never explicitly toggled
+    return collapsedRepos[repoName] ?? true;
+  };
+
+  const toggleRepoCollapse = (repoName: string) => {
+    setCollapsedRepos((prev) => ({
+      ...prev,
+      [repoName]: !isRepoCollapsed(repoName),
+    }));
+  };
+
+  const expandAllRepos = () => {
+    const next: Record<string, boolean> = {};
+    gitChanges.forEach((repo) => {
+      next[repo.repoName] = false;
+    });
+    setCollapsedRepos(next);
+  };
+
+  const collapseAllRepos = () => {
+    const next: Record<string, boolean> = {};
+    gitChanges.forEach((repo) => {
+      next[repo.repoName] = true;
+    });
+    setCollapsedRepos(next);
+    setExpandedFiles({});
+  };
 
   const toggleFileExpansion = async (repoName: string, fileName: string) => {
     const cacheKey = `${repoName}/${fileName}`;
@@ -113,12 +155,42 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     );
   };
 
+  const reposWithChanges = gitChanges.filter((repo) => repo.files && repo.files.length > 0);
+  const totalFilesAcrossRepos = reposWithChanges.reduce((sum, r) => sum + r.files.length, 0);
+
   return (
     <div className="animate-fade-in">
       <header className="flex justify-between items-center mb-6 flex-wrap gap-3">
-        <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <FolderGit2 size={16} className="text-primary" /> Active Workspace Git Diffs
-        </h4>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
+            <FolderGit2 size={16} className="text-primary" /> Active Workspace Git Diffs
+          </h4>
+          {reposWithChanges.length > 0 && (
+            <div className="flex items-center gap-1.5 pl-2 border-l border-border/80">
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={collapseAllRepos}
+                title="Collapse all repositories and file diffs"
+                className="text-xs text-muted-foreground hover:text-foreground h-7 px-2 gap-1 font-semibold"
+              >
+                <ChevronsDownUp size={12} />
+                <span>Collapse All</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={expandAllRepos}
+                title="Expand all repositories"
+                className="text-xs text-muted-foreground hover:text-foreground h-7 px-2 gap-1 font-semibold"
+              >
+                <ChevronsUpDown size={12} />
+                <span>Expand All</span>
+              </Button>
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -141,7 +213,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           <Button
             size="sm"
             onClick={() => setShowCommitModal(true)}
-            disabled={gitChanges.every((repo) => repo.files.length === 0) || commitLoading}
+            disabled={totalFilesAcrossRepos === 0 || commitLoading}
           >
             Commit & Push All
           </Button>
@@ -251,9 +323,9 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           <Spinner className="size-6 text-primary" />
         </div>
       ) : (
-        <div className="space-y-6">
-          {gitChanges.every((repo) => repo.files.length === 0) ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card py-16 text-center">
+        <div className="space-y-4">
+          {reposWithChanges.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card py-16 text-center shadow-xs">
               <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-success/25 bg-success/10 text-success-foreground shadow-sm">
                 <Check size={20} />
               </div>
@@ -263,129 +335,162 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
               </p>
             </div>
           ) : (
-            gitChanges.map((repo) => {
-              if (repo.files.length === 0) return null;
+            reposWithChanges.map((repo) => {
               const totalFilesChanged = repo.files.length;
               const repoAdditions = repo.files.reduce((acc: number, f: any) => acc + (f.additions || 0), 0);
               const repoDeletions = repo.files.reduce((acc: number, f: any) => acc + (f.deletions || 0), 0);
+              const collapsed = isRepoCollapsed(repo.repoName);
 
               return (
                 <div
                   key={repo.repoName}
-                  className="relative rounded-xl border border-border bg-card p-6 transition-colors"
+                  className="relative rounded-xl border border-border/80 bg-card/80 backdrop-blur-md transition-all shadow-xs overflow-hidden"
                 >
-                  <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <h5 className="font-mono text-sm font-bold text-foreground">{repo.repoName}</h5>
+                  {/* Collapsible Repository Header Banner */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleRepoCollapse(repo.repoName)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleRepoCollapse(repo.repoName);
+                      }
+                    }}
+                    className={cn(
+                      'flex justify-between items-center px-5 py-4 cursor-pointer select-none transition-colors',
+                      collapsed
+                        ? 'hover:bg-accent/40'
+                        : 'bg-muted/20 border-b border-border/60 hover:bg-muted/30'
+                    )}
+                  >
+                    <div className="flex items-center gap-3 flex-wrap min-w-0">
+                      <span className="grid size-6 place-items-center rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0">
+                        {collapsed ? (
+                          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown size={14} className="shrink-0 text-primary" />
+                        )}
+                      </span>
+                      <h5 className="font-mono text-sm font-bold text-foreground truncate">{repo.repoName}</h5>
                       <StatusBadge tone="warning" dot={false}>
                         {totalFilesChanged} file{totalFilesChanged === 1 ? '' : 's'} changed
                       </StatusBadge>
                       {(repoAdditions > 0 || repoDeletions > 0) && (
-                        <span className="rounded border border-border bg-muted/40 px-2 py-0.5 font-mono text-[10px] font-bold">
+                        <span className="rounded-md border border-border bg-muted/60 px-2 py-0.5 font-mono text-[10px] font-bold">
                           <span className="font-bold text-success-foreground">+{repoAdditions}</span>{' '}
                           <span className="font-bold text-destructive-foreground">-{repoDeletions}</span>
                         </span>
                       )}
                     </div>
-                    <span
-                      className="max-w-[280px] truncate font-mono text-[10px] text-muted-foreground"
-                      title={repo.repoPath}
-                    >
-                      {repo.repoPath}
-                    </span>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className="max-w-[280px] truncate font-mono text-[10px] text-muted-foreground hidden md:inline"
+                        title={repo.repoPath}
+                      >
+                        {repo.repoPath}
+                      </span>
+                      <span className="text-[11px] font-bold text-primary hover:underline">
+                        {collapsed ? 'Expand Files' : 'Collapse'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex flex-col gap-3">
-                    {repo.files.map((fileInfo: any) => {
-                      const cacheKey = `${repo.repoName}/${fileInfo.file}`;
-                      const isExpanded = !!expandedFiles[cacheKey];
-                      const isLoading = !!diffLoading[cacheKey];
-                      const fileDiff = diffCache[cacheKey] || '';
-                      const error = diffErrors[cacheKey] || '';
+                  {/* Collapsible File List Body */}
+                  {!collapsed && (
+                    <div className="p-5 flex flex-col gap-3 bg-card/40">
+                      {repo.files.map((fileInfo: any) => {
+                        const cacheKey = `${repo.repoName}/${fileInfo.file}`;
+                        const isExpanded = !!expandedFiles[cacheKey];
+                        const isLoading = !!diffLoading[cacheKey];
+                        const fileDiff = diffCache[cacheKey] || '';
+                        const error = diffErrors[cacheKey] || '';
 
-                      return (
-                        <div
-                          key={fileInfo.file}
-                          className="overflow-hidden rounded-xl border border-border bg-muted/20 transition-colors hover:border-foreground/15"
-                        >
-                          {/* File Header Row */}
+                        return (
                           <div
-                            className="flex cursor-pointer select-none items-center justify-between px-4 py-3 transition-colors hover:bg-accent/50"
-                            onClick={() => toggleFileExpansion(repo.repoName, fileInfo.file)}
+                            key={fileInfo.file}
+                            className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 transition-colors hover:border-primary/30 shadow-2xs"
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {isExpanded ? (
-                                <ChevronDown size={14} className="shrink-0 text-primary" />
-                              ) : (
-                                <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-                              )}
-                              <span
-                                className="max-w-[240px] truncate font-mono text-[11px] text-foreground sm:max-w-[480px]"
-                                title={fileInfo.file}
-                              >
-                                {fileInfo.file}
-                              </span>
-                              {(fileInfo.additions > 0 || fileInfo.deletions > 0) && (
-                                <span className="ml-1 shrink-0 font-mono text-[9px] font-bold text-muted-foreground">
-                                  <span className="text-success-foreground">+{fileInfo.additions}</span> /{' '}
-                                  <span className="text-destructive-foreground">-{fileInfo.deletions}</span>
+                            {/* File Header Row */}
+                            <div
+                              className="flex cursor-pointer select-none items-center justify-between px-4 py-3 transition-colors hover:bg-accent/50"
+                              onClick={() => toggleFileExpansion(repo.repoName, fileInfo.file)}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {isExpanded ? (
+                                  <ChevronDown size={14} className="shrink-0 text-primary" />
+                                ) : (
+                                  <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+                                )}
+                                <span
+                                  className="max-w-[240px] truncate font-mono text-[11px] text-foreground sm:max-w-[480px] font-semibold"
+                                  title={fileInfo.file}
+                                >
+                                  {fileInfo.file}
                                 </span>
-                              )}
+                                {(fileInfo.additions > 0 || fileInfo.deletions > 0) && (
+                                  <span className="ml-1 shrink-0 font-mono text-[9px] font-bold text-muted-foreground">
+                                    <span className="text-success-foreground">+{fileInfo.additions}</span> /{' '}
+                                    <span className="text-destructive-foreground">-{fileInfo.deletions}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                <span
+                                  className={`rounded border px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
+                                    fileInfo.type === 'added'
+                                      ? 'border-success/25 bg-success/10 text-success-foreground'
+                                      : fileInfo.type === 'deleted'
+                                        ? 'border-destructive/25 bg-destructive/10 text-destructive-foreground'
+                                        : 'border-warning/25 bg-warning/10 text-warning-foreground'
+                                  }`}
+                                >
+                                  {fileInfo.type}
+                                </span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2.5 shrink-0">
-                              <span
-                                className={`rounded border px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
-                                  fileInfo.type === 'added'
-                                    ? 'border-success/25 bg-success/10 text-success-foreground'
-                                    : fileInfo.type === 'deleted'
-                                      ? 'border-destructive/25 bg-destructive/10 text-destructive-foreground'
-                                      : 'border-warning/25 bg-warning/10 text-warning-foreground'
-                                }`}
-                              >
-                                {fileInfo.type}
-                              </span>
-                            </div>
-                          </div>
 
-                          {/* Diff Details Section */}
-                          {isExpanded && (
-                            <div className="border-t border-border bg-background p-3">
-                              {isLoading ? (
-                                <div className="flex items-center gap-2 p-2 font-mono text-[10px] text-primary">
-                                  <Spinner className="size-3" /> Loading diff...
-                                </div>
-                              ) : error ? (
-                                <div className="p-2 font-mono text-[10px] text-destructive-foreground">Error: {error}</div>
-                              ) : (
-                                <div className="relative">
-                                  {/* Copy Button */}
-                                  <div className="absolute top-2 right-2 z-10">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        navigator.clipboard.writeText(fileDiff);
-                                        setCopiedKey(cacheKey);
-                                        setTimeout(() => setCopiedKey(''), 2000);
-                                      }}
-                                      className="cursor-pointer rounded-lg border border-border bg-card p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
-                                      title="Copy Diff"
-                                    >
-                                      {copiedKey === cacheKey ? (
-                                        <Check size={12} className="text-success-foreground" />
-                                      ) : (
-                                        <Copy size={12} />
-                                      )}
-                                    </button>
+                            {/* Diff Details Section */}
+                            {isExpanded && (
+                              <div className="border-t border-border bg-background p-3">
+                                {isLoading ? (
+                                  <div className="flex items-center gap-2 p-2 font-mono text-[10px] text-primary">
+                                    <Spinner className="size-3" /> Loading diff...
                                   </div>
-                                  {renderDiffContent(fileDiff)}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                                ) : error ? (
+                                  <div className="p-2 font-mono text-[10px] text-destructive-foreground">Error: {error}</div>
+                                ) : (
+                                  <div className="relative">
+                                    {/* Copy Button */}
+                                    <div className="absolute top-2 right-2 z-10">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          navigator.clipboard.writeText(fileDiff);
+                                          setCopiedKey(cacheKey);
+                                          setTimeout(() => setCopiedKey(''), 2000);
+                                        }}
+                                        className="cursor-pointer rounded-lg border border-border bg-card p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+                                        title="Copy Diff"
+                                      >
+                                        {copiedKey === cacheKey ? (
+                                          <Check size={12} className="text-success-foreground" />
+                                        ) : (
+                                          <Copy size={12} />
+                                        )}
+                                      </button>
+                                    </div>
+                                    {renderDiffContent(fileDiff)}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })
