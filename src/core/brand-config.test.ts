@@ -43,6 +43,15 @@ describe('Brand Configuration System', () => {
     expect(BRAND_CONFIG.files.knowledge.legacy).toBe('nexusflow-knowledge.md');
   });
 
+  it('defines the canonical Tropical Sunset Hex-CW theme palette', () => {
+    expect(BRAND_CONFIG.theme.primary).toBe('#F97316');
+    expect(BRAND_CONFIG.theme.sunset.gold).toBe('#FDE047');
+    expect(BRAND_CONFIG.theme.sunset.coral).toBe('#FB923C');
+    expect(BRAND_CONFIG.theme.sunset.hibiscus).toBe('#F43F5E');
+    expect(BRAND_CONFIG.theme.sunset.indigo).toBe('#6366F1');
+    expect(BRAND_CONFIG.theme.dark.background).toBe('#0A0812');
+  });
+
   it('resolves first defined environment variable in priority order', () => {
     delete process.env.CONTEXTSPACE_HOME;
     delete process.env.NEXUSFLOW_HOME;

@@ -77,6 +77,29 @@ export interface BrandConfigSchema {
     readonly freshnessStart: readonly string[];
     readonly freshnessEnd: readonly string[];
   };
+  readonly theme: {
+    readonly primary: string;
+    readonly sunset: {
+      readonly gold: string;
+      readonly coral: string;
+      readonly hibiscus: string;
+      readonly indigo: string;
+    };
+    readonly dark: {
+      readonly background: string;
+      readonly foreground: string;
+      readonly card: string;
+      readonly popover: string;
+      readonly border: string;
+    };
+    readonly light: {
+      readonly background: string;
+      readonly foreground: string;
+      readonly card: string;
+      readonly popover: string;
+      readonly border: string;
+    };
+  };
 }
 
 export const BRAND_CONFIG: BrandConfigSchema = {
@@ -171,6 +194,29 @@ export const BRAND_CONFIG: BrandConfigSchema = {
   sentinels: {
     freshnessStart: ['CONTEXTSPACE:FRESHNESS:START', 'NEXUSFLOW:FRESHNESS:START'],
     freshnessEnd: ['CONTEXTSPACE:FRESHNESS:END', 'NEXUSFLOW:FRESHNESS:END'],
+  },
+  theme: {
+    primary: '#F97316',
+    sunset: {
+      gold: '#FDE047',
+      coral: '#FB923C',
+      hibiscus: '#F43F5E',
+      indigo: '#6366F1',
+    },
+    dark: {
+      background: '#0A0812',
+      foreground: '#F8FAFC',
+      card: '#140F22',
+      popover: '#181228',
+      border: 'rgba(251, 146, 60, 0.14)',
+    },
+    light: {
+      background: '#FAF8F6',
+      foreground: '#0F172A',
+      card: '#FFFFFF',
+      popover: '#FFFFFF',
+      border: 'rgba(234, 88, 12, 0.10)',
+    },
   },
 } as const;
 

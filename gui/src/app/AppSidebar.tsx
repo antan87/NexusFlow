@@ -20,6 +20,7 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot, SiCursor } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
@@ -128,11 +129,9 @@ export function AppSidebar({
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
       {/* Header */}
       <div className="flex h-12 items-center justify-between px-3 border-b border-border/60">
-        <Link to="/overview" className="flex items-center gap-2">
-          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-[11px] font-bold text-primary-foreground shadow-xs">
-            CS
-          </div>
-          <span className="text-xs font-bold tracking-tight text-foreground">ContextSpace</span>
+        <Link to="/overview" className="flex items-center gap-2.5 group">
+          <ContextSpaceIcon size={24} className="rounded-md shadow-xs transition-transform duration-200 group-hover:scale-105" />
+          <span className="text-xs font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">ContextSpace</span>
         </Link>
         <span className="text-[10px] font-mono text-muted-foreground/70">v{appVersion}</span>
       </div>
