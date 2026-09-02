@@ -77,16 +77,16 @@ export function StrategiesPage(props: StrategiesPageProps) {
 
   return (
     <div className="mx-auto max-w-6xl animate-fade-in">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold text-foreground">Team Collaboration Strategies</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Predefine and review custom teamwork guidelines injected into workspaces' AGENTS.md files.
+      <header className="mb-6 border-b border-border/70 pb-4">
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Team Collaboration Strategies</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Predefine and review custom teamwork orchestration templates injected into workspaces' AGENTS.md files.
         </p>
       </header>
 
       <div className="grid grid-cols-1 gap-6 text-left lg:grid-cols-12">
         <div className="flex flex-col gap-4 lg:col-span-4">
-          <Card className="rounded-xl p-5 shadow-sm">
+          <Card className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Strategies</h3>
               <Button

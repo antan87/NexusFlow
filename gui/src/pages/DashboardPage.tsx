@@ -2,7 +2,6 @@ import { useState, useMemo, type ReactNode } from 'react';
 import {
   FolderGit2,
   GitBranch,
-  Play,
   Plus,
   ArrowRight,
   Terminal,
@@ -206,8 +205,6 @@ export function DashboardPage({
   const statuses = Object.values(workspaceStatuses);
   const totalChangedFiles = statuses.reduce((sum, s) => sum + (s.changedFiles || 0), 0);
   const workspacesWithChanges = statuses.filter((s) => s.changedFiles > 0).length;
-  const runningServicesCount = statuses.reduce((sum, s) => sum + (s.runningServices || 0), 0);
-  const workspacesWithServices = statuses.filter((s) => s.runningServices > 0).length;
   const worktreeCount = workspaces.filter((w) => (w.mode ?? 'worktree') === 'worktree').length;
   const inPlaceCount = workspaces.filter((w) => w.mode === 'in-place').length;
 
@@ -319,7 +316,7 @@ export function DashboardPage({
             </StatusBadge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Multi-repo health, background services, and AI coding activity across your workspaces.
+            Multi-repo health, synchronized worktrees, and AI coding harnesses across your workspaces.
           </p>
         </div>
 
@@ -376,24 +373,22 @@ export function DashboardPage({
           </div>
         </Card>
 
-        {/* Metric 3: Running Services */}
+        {/* Metric 3: Monitored Repositories */}
         <Card className="p-4 surface-card flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Live Services
+              Repositories
             </span>
-            <span className={cn('grid size-7 place-items-center rounded', runningServicesCount > 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-muted/60 text-muted-foreground')}>
-              <Play size={15} />
+            <span className="grid size-7 place-items-center rounded bg-primary/10 text-primary">
+              <Boxes size={15} />
             </span>
           </div>
           <div className="mt-2">
-            <div className={cn('font-mono text-2xl font-bold', runningServicesCount > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>
-              {runningServicesCount} <span className="text-xs font-normal text-muted-foreground">active</span>
+            <div className="font-mono text-2xl font-bold text-foreground">
+              {repoStats.length} <span className="text-xs font-normal text-muted-foreground">repos</span>
             </div>
             <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-              {workspacesWithServices > 0
-                ? `In ${workspacesWithServices} workspace${workspacesWithServices === 1 ? '' : 's'}`
-                : 'No services running'}
+              {workspaces.length} active workspace{workspaces.length === 1 ? '' : 's'}
             </div>
           </div>
         </Card>
