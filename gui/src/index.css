@@ -145,7 +145,38 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    min-height: 100vh;
+    background-color: var(--background);
+    background-image:
+      /* Soft Hawaiian Sunset Top-Center Horizon Glow (Solar Gold & Coral) */
+      radial-gradient(ellipse 80% 50% at 50% -12%, rgba(251, 146, 60, 0.09) 0%, transparent 65%),
+      /* Mid-Right Hibiscus Rose Aurora Glow */
+      radial-gradient(circle 600px at 100% 35%, rgba(244, 63, 94, 0.05) 0%, transparent 60%),
+      /* Deep Pacific Twilight Indigo undertone */
+      radial-gradient(circle 700px at 10% 90%, rgba(99, 102, 241, 0.06) 0%, transparent 65%),
+      /* Subtle Architectural coordinate lattice inspired by Hex-CW chassis */
+      radial-gradient(rgba(251, 146, 60, 0.06) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+    background-attachment: fixed;
   }
+
+  .dark body,
+  :is(.dark, .dark *) body,
+  :root[class~="dark"] body {
+    background-color: #0a0812;
+    background-image:
+      /* Solar Gold & Coral Top Horizon Sweep */
+      radial-gradient(ellipse 75% 45% at 50% -15%, rgba(253, 224, 71, 0.05) 0%, rgba(251, 146, 60, 0.10) 35%, transparent 70%),
+      /* Hibiscus Rose Ambient Wing */
+      radial-gradient(circle 650px at 98% 30%, rgba(244, 63, 94, 0.06) 0%, transparent 60%),
+      /* Pacific Indigo Twilight Floor */
+      radial-gradient(circle 750px at 5% 95%, rgba(99, 102, 241, 0.07) 0%, transparent 65%),
+      /* Architectural Hex / Dot coordinate matrix */
+      radial-gradient(rgba(251, 146, 60, 0.08) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+    background-attachment: fixed;
+  }
+
   code,
   pre,
   kbd,

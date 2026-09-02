@@ -961,7 +961,7 @@ Core Instructions:
   const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-transparent text-foreground">
       <AppSidebar
         appVersion={appVersion}
         workspaces={workspaces}
