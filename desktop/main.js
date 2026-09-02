@@ -242,9 +242,11 @@ function showBackendError(detail) {
 }
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,

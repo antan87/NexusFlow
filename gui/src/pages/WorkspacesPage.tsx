@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from 'react';
+import { useState, useEffect, type ComponentProps } from 'react';
 import {
   RefreshCw,
   MoreVertical,
@@ -9,6 +9,7 @@ import {
   Code2,
   ChevronDown,
   Sparkles,
+  ArrowUpCircle,
   Puzzle,
   LayoutDashboard,
   GitCompare,
@@ -23,6 +24,7 @@ import {
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
+import { API_BASE } from '../lib/apiBase.js';
 
 const renderEditorIcon = (id: string, name: string) => {
   const lower = `${id} ${name}`.toLowerCase();
@@ -132,6 +134,46 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openFloatingChat } = useFloatingChat();
+
+  const [isLegacy, setIsLegacy] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+
+  useEffect(() => {
+    if (!selected?.branchName) {
+      setIsLegacy(false);
+      return;
+    }
+    let active = true;
+    fetch(`${API_BASE}/api/workspace/${encodeURIComponent(selected.branchName)}/migration-status`)
+      .then((res) => (res.ok ? res.json() : { isLegacy: false }))
+      .then((data) => {
+        if (active) setIsLegacy(Boolean(data?.isLegacy));
+      })
+      .catch(() => {
+        if (active) setIsLegacy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selected?.branchName]);
+
+  const handleMigrateWorkspace = async () => {
+    if (!selected?.branchName || migrating) return;
+    setMigrating(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/workspace/${encodeURIComponent(selected.branchName)}/migrate`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error('Migration failed');
+      showToast?.('Workspace successfully upgraded to native ContextSpace!', 'success');
+      setIsLegacy(false);
+      props.fetchWorkspaces?.();
+    } catch (e: any) {
+      showToast?.(e.message || 'Failed to migrate workspace', 'error');
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   // Active skills in this workspace
   const workspaceSkillsConfig = useWorkspaceSkills(selected?.branchName ?? null).data;
@@ -338,6 +380,27 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
         {/* Tab Navigation & Content Container */}
         <div className="px-6 pt-5">
+          {/* Legacy Migration Alert Banner */}
+          {isLegacy && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent p-3 backdrop-blur-md shadow-xs">
+              <div className="flex items-center gap-2.5 text-xs text-amber-200">
+                <Sparkles size={16} className="text-amber-400 shrink-0 animate-pulse" />
+                <span>
+                  <strong className="font-semibold text-amber-300">Legacy NexusFlow Workspace:</strong> Upgrade to native ContextSpace manifest and synchronized artifacts.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleMigrateWorkspace}
+                disabled={migrating}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                <ArrowUpCircle size={14} className={migrating ? 'animate-spin' : ''} />
+                {migrating ? 'Upgrading...' : 'Migrate to ContextSpace'}
+              </button>
+            </div>
+          )}
+
           <Tabs
             value={subTab}
             onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}

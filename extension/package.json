@@ -4,6 +4,7 @@
   "description": "Manage multiple repositories as a single feature workspace, orchestrate background services, and align AI coding contexts natively inside VS Code.",
   "version": "2.10.0",
   "publisher": "contextspace",
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.125.0"
   },

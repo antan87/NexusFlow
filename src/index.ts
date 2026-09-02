@@ -294,6 +294,19 @@ program
   }));
 
 program
+  .command('migrate')
+  .description('Migrate legacy NexusFlow workspaces and global config to ContextSpace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-a, --all', 'Scan and migrate all workspaces found in workspacesDir')
+  .option('-g, --global', 'Migrate global configuration (~/.nexusflow -> ~/.contextspace)')
+  .option('--dry-run', 'Preview changes without modifying disk')
+  .option('--no-refresh', 'Skip regenerating context files after migration')
+  .action(runAction(async (workspace: string | undefined, options: { all?: boolean; global?: boolean; dryRun?: boolean; refresh?: boolean }) => {
+    const { migrateCommand } = await import('./commands/migrate.js');
+    await migrateCommand(workspace, options);
+  }));
+
+program
   .command('finish')
   .description('Finish a feature — commit & push everything, open PRs, promote learnings, optionally remove the workspace')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')

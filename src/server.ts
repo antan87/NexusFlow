@@ -2230,7 +2230,14 @@ app.put('/api/workspace/:id/knowledge', async (c) => {
 
     const feature = await loadFeatureConfig(workspacePath);
     const featureId = feature?.id ?? path.basename(workspacePath);
-    await writeWorkspaceFile(workspacePath, featureId, 'nexusflow-knowledge.md', content);
+    const { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } = await import('./core/constants.js');
+    const { workspaceFileExists } = await import('./core/storage.js');
+    const filename = (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE))
+      ? PRIMARY_KNOWLEDGE_FILE
+      : (await workspaceFileExists(workspacePath, featureId, LEGACY_KNOWLEDGE_FILE))
+        ? LEGACY_KNOWLEDGE_FILE
+        : PRIMARY_KNOWLEDGE_FILE;
+    await writeWorkspaceFile(workspacePath, featureId, filename, content);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
@@ -2280,22 +2287,51 @@ app.post('/api/workspace/:id/knowledge/entry', async (c) => {
   }
 });
 
-// 13c. Get workspace plan (nexusflow-plan.md)
+// 13c. Get workspace plan (contextspace-plan.md / nexusflow-plan.md)
 app.get('/api/workspace/:id/plan', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const planFile = path.join(workspacePath, 'nexusflow-plan.md');
+    const { resolveWorkspaceFilePath } = await import('./core/brand-config.js');
+    const resolved = await resolveWorkspaceFilePath(workspacePath, 'plan');
 
     let content = '';
     try {
-      content = await fs.readFile(planFile, 'utf-8');
+      content = await fs.readFile(resolved.path, 'utf-8');
     } catch {
       content = '# Workspace Plan\n\nNo implementation plan file yet.';
     }
 
     return c.json({ content });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2. Check workspace migration status (legacy NexusFlow files detected)
+app.get('/api/workspace/:id/migration-status', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { isLegacyWorkspace } = await import('./core/migrate.js');
+    const isLegacy = await isLegacyWorkspace(workspacePath);
+    return c.json({ isLegacy });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-3. Migrate legacy workspace to native ContextSpace
+app.post('/api/workspace/:id/migrate', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { migrateWorkspace } = await import('./core/migrate.js');
+    const report = await migrateWorkspace(workspacePath, { dryRun: false, refresh: true });
+    return c.json(report);
   } catch (error) {
     return errorResponse(c, error);
   }

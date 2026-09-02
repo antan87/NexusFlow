@@ -22,6 +22,9 @@
   "build": {
     "appId": "se.hogia.contextspace",
     "productName": "ContextSpace",
+    "directories": {
+      "buildResources": "assets"
+    },
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
