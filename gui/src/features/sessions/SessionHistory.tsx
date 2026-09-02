@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -46,7 +46,7 @@ interface SessionHistoryProps {
   showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
 }
 
-export const getResumeCliCommand = (assistant: string, sessionId: string): string => {
+const getResumeCliCommand = (assistant: string, sessionId: string): string => {
   switch (assistant) {
     case 'antigravity':
       return `agy --conversation ${sessionId}`;
@@ -206,7 +206,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         timestamp: new Date(),
       });
       showToast?.(`Resumed ${assistant} session in terminal`, 'success');
-    } catch (err: unknown) {
+    } catch {
       const fallbackCmd = getResumeCliCommand(assistant, sessionId);
       await safeCopyToClipboard(fallbackCmd);
       showToast?.(`Copied resume command to clipboard: ${fallbackCmd}`, 'info');
@@ -290,9 +290,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     [sessions, sortBy]
   );
 
-  const isAssistantConfigured = (id: string) => ws.assistants?.includes(id) ?? false;
+  const isAssistantConfigured = useCallback((id: string) => ws.assistants?.includes(id) ?? false, [ws.assistants]);
 
-  const allHarnesses = [
+  const allHarnesses = useMemo(() => [
     {
       id: 'antigravity',
       name: 'Google Antigravity',
@@ -357,7 +357,11 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         </span>
       ),
     },
-  ];
+  ], [
+    isAgyDetected, isClaudeDetected, isCodexDetected, isCopilotDetected,
+    hasAgyIde, hasCodexDesktop, isAssistantConfigured,
+    agySessions, claudeSessions, codexSessions, copilotSessions,
+  ]);
 
   const installedHarnesses = useMemo(() => {
     return allHarnesses.filter((h) => h.isDetected || h.sessions.length > 0);

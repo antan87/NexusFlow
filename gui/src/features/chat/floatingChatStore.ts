@@ -54,7 +54,9 @@ const listeners = new Set<() => void>();
 function notify() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState));
-  } catch {}
+  } catch {
+    // Non-fatal if localStorage is unavailable
+  }
   for (const listener of listeners) {
     listener();
   }
@@ -74,7 +76,7 @@ export const floatingChatStore = {
 
   open: (branchName?: string) => {
     updateState((prev) => {
-      let openTabs = [...prev.openTabs];
+      const openTabs = [...prev.openTabs];
       let activeTab = prev.activeTab;
 
       if (branchName) {

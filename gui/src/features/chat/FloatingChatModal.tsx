@@ -36,7 +36,9 @@ function getWorkspaceChatIcon(ws?: Feature) {
     if (provider.startsWith('codex')) return <BsOpenai className="size-3 text-foreground shrink-0" />;
     if (provider.startsWith('copilot')) return <SiGithubcopilot className="size-3 text-blue-400 shrink-0" />;
     if (provider.startsWith('antigravity')) return <AntigravityIcon className="size-3.5 shrink-0" />;
-  } catch {}
+  } catch {
+    // Non-fatal if workspace chat store could not be read
+  }
   return <FolderGit2 className="size-3 text-muted-foreground shrink-0" />;
 }
 
@@ -123,7 +125,9 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     dragRef.current = null;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      // Non-fatal if pointer capture was already released
+    }
   }, []);
 
   // Handle Resizing (Bottom-Right corner)
@@ -158,7 +162,9 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     resizeRef.current = null;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch {
+      // Non-fatal if pointer capture was already released
+    }
   }, []);
 
   // Compute default placement if position is null

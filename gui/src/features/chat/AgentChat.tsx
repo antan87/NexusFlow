@@ -10,7 +10,7 @@ import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
-import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
+import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
@@ -434,6 +434,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [effortsByProvider, setEffortsByProvider] = useState<Record<string, string>>(initialStore.effortsByProvider ?? {});
   const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [sessions, setSessions] = useState(initialStore.sessions);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [sessionSwitching, setSessionSwitching] = useState(false);
   const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
@@ -446,11 +447,25 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
+    setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
+  }, []);
+
   const handleImageFiles = useCallback((files: FileList | File[]) => {
-    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const allFiles = Array.from(files);
+    const nonImages = allFiles.filter(f => !f.type.startsWith('image/'));
+    if (nonImages.length > 0) {
+      appendSystemNote(`${nonImages.length} non-image file(s) ignored. Only image attachments are supported.`, 'note');
+    }
+
+    const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
 
     for (const file of imageFiles) {
+      if (file.size > 20 * 1024 * 1024) {
+        appendSystemNote(`Image "${file.name}" exceeds the 20MB limit and was not attached.`, 'error');
+        continue;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
@@ -463,6 +478,15 @@ export function AgentChat({ ws }: AgentChatProps) {
       };
       reader.readAsDataURL(file);
     }
+  }, [appendSystemNote]);
+
+  const updateSessions = useCallback((updater: (prev: ChatStore['sessions']) => ChatStore['sessions']) => {
+    setSessions((prev) => {
+      const next = updater(prev);
+      sessionsRef.current = next;
+      return next;
+    });
+    setSessionRevision(c => c + 1);
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -647,10 +671,6 @@ export function AgentChat({ ws }: AgentChatProps) {
     setTurnOpen(false);
   }, []);
 
-  const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
-    setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
-  }, []);
-
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
   const sendTurn = useCallback(async (
     socket: WebSocket,
@@ -679,8 +699,11 @@ export function AgentChat({ ws }: AgentChatProps) {
             const data = await res.json();
             return { dataUrl: img.dataUrl, path: data.path as string };
           }
+          const errData = await res.json().catch(() => ({ error: 'Upload failed' }));
+          appendSystemNote(`Image "${img.name}" could not be uploaded: ${errData.error || res.statusText}`, 'error');
         } catch (err) {
           console.error('Failed to upload image attachment', err);
+          appendSystemNote(`Image "${img.name}" failed to upload.`, 'error');
         }
         return { dataUrl: img.dataUrl, path: null };
       }));
@@ -713,17 +736,19 @@ export function AgentChat({ ws }: AgentChatProps) {
         cwd: ws.workspacePath,
         ...(effort ? { effort } : {}),
       }));
-    } catch (error) {
+    } catch {
       pendingAdmissionsRef.current = pendingAdmissionsRef.current
         .filter(admission => admission.turnId !== turnId);
-      throw error;
+      setMessages(prev => prev.filter(m => m !== message));
+      setInput(current => current ? `${turnPrompt}\n\n${current}` : turnPrompt);
+      appendSystemNote('Failed to send message to the agent.', 'error');
     }
     setMessages(prev => [...prev, message]);
     setInput('');
     setAttachedImages([]);
     setBusy(true);
     closeTurn();
-  }, [agentName, attachedImages, closeTurn, effortsByProvider, ws.workspacePath]);
+  }, [agentName, appendSystemNote, attachedImages, closeTurn, effortsByProvider, ws.workspacePath]);
 
   const noteSessionEnded = useCallback(() => {
     if (endedNoteRef.current) return;
@@ -905,7 +930,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       // Only commit session/chat replacement after both frames have been
       // accepted by an open transport. A failed kickoff therefore cannot
       // erase the user's prior local conversation.
-      sessionsRef.current = nextSessions;
+      updateSessions(() => nextSessions);
       dispatched = true;
       setConnecting(false);
       setConnected(true);
@@ -947,11 +972,10 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'session' && typeof payload.id === 'string') {
           const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id);
           if (validId) {
-            sessionsRef.current = {
-              ...sessionsRef.current,
+            updateSessions(prev => ({
+              ...prev,
               [providerId]: { id: payload.id, started: true },
-            };
-            setSessionRevision(current => current + 1);
+            }));
           }
         } else if (payload.type === 'accepted' && typeof payload.turnId === 'string') {
           pendingAdmissionsRef.current = pendingAdmissionsRef.current
@@ -980,8 +1004,11 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'error') {
           pendingAdmissionsRef.current = [];
           if (typeof payload.message === 'string' && payload.message.toLowerCase().includes('session')) {
-            delete sessionsRef.current[providerId];
-            setSessionRevision(current => current + 1);
+            updateSessions(prev => {
+              const next = { ...prev };
+              delete next[providerId];
+              return next;
+            });
           }
           appendSystemNote(payload.message, 'error');
           setBusy(false);
@@ -1037,7 +1064,7 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, effortsByProvider, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, updateSessions, ws.workspacePath]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
@@ -1046,7 +1073,11 @@ export function AgentChat({ ws }: AgentChatProps) {
     const providerId = connectionProviderRef.current || agentName;
     if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
       if (socket) {
-        try { socket.close(); } catch {}
+        try {
+          socket.close();
+        } catch {
+          // Ignore socket closure error
+        }
         wsRef.current = null;
       }
       startAgent(providerId, { firstMessage: text });
@@ -1161,10 +1192,10 @@ export function AgentChat({ ws }: AgentChatProps) {
         return started;
       }
 
-      sessionsRef.current = {
-        ...sessionsRef.current,
+      updateSessions(prev => ({
+        ...prev,
         [providerId]: { id: session.id, started: true },
-      };
+      }));
       commitTranscript();
       return true;
     } catch (error) {
@@ -1174,7 +1205,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       finishSessionSwitch(requestId);
       return false;
     }
-  }, [appendSystemNote, finishSessionSwitch, providers, startAgent, stopAgent]);
+  }, [appendSystemNote, finishSessionSwitch, providers, startAgent, stopAgent, updateSessions]);
 
   const pickSession = useCallback((session: PickableSession) => {
     void loadSession(session);
@@ -1343,9 +1374,11 @@ export function AgentChat({ ws }: AgentChatProps) {
       if (wsRef.current) stopAgent();
       // Forget only the selected provider's session; switching providers later
       // can still resume its own independently-scoped conversation.
-      const remainingSessions = { ...sessionsRef.current };
-      delete remainingSessions[agentName];
-      sessionsRef.current = remainingSessions;
+      updateSessions(prev => {
+        const remaining = { ...prev };
+        delete remaining[agentName];
+        return remaining;
+      });
       endedNoteRef.current = false;
       setMessages([]);
       clearChatStore(ws.branchName);
@@ -1376,7 +1409,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   };
 
   const [copiedSessionId, setCopiedSessionId] = useState(false);
-  const activeSessionId = sessionsRef.current[agentName]?.id;
+  const activeSessionId = sessions[agentName]?.id;
 
   const copySessionId = (id: string) => {
     safeCopyToClipboard(id).then(() => {
