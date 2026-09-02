@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon } from 'lucide-react';
+import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon, Sparkles, Shield, ChevronDown } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
@@ -34,8 +34,8 @@ const REASONING_EFFORT_OPTIONS = [
 ] as const;
 
 function reasoningEffortLabelForId(id: string): string {
-  const match = REASONING_EFFORT_OPTIONS.find(e => e.id === id);
-  return match?.label ?? 'Auto Effort';
+  if (!id) return 'Auto';
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 interface AgentChatProps {
@@ -267,10 +267,23 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
   };
 }
 
+function formatShortProviderName(name?: string): string {
+  if (!name) return 'Select Agent';
+  return name.replace(/\s*\((Local CLI|First-Party SDK)\)$/, '');
+}
+
+function formatShortProfileLabel(label?: string): string {
+  if (!label) return 'Review';
+  if (label.toLowerCase().includes('review')) return 'Review';
+  if (label.toLowerCase().includes('edit') || label.toLowerCase().includes('write')) return 'Edit';
+  return label;
+}
+
 function modelLabelForId(provider: ChatProvider, modelId: string): string {
+  if (!modelId) return 'Auto';
   const found = provider.models?.find(model => model.id === modelId);
   if (found) return found.label;
-  return modelId || 'Automatic';
+  return modelId;
 }
 
 function reconcileModelSelections(
@@ -1504,85 +1517,48 @@ export function AgentChat({ ws }: AgentChatProps) {
           </div>
         )}
         <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center gap-2 border-b border-border/50 p-2">
-            <Menu>
-              <MenuTrigger
-                aria-label="Select Provider"
-                disabled={busy || connecting || sessionSwitching}
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50 text-foreground',
-                )}
-              >
-                {currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-primary" /> : <Cpu size={14} className="text-primary" />}
-                {currentProvider?.name || 'Select Agent'}
-              </MenuTrigger>
-              <MenuPopup align="start" side="top">
-                {providers.filter(p => p.isConfigured || p.setupIssue !== 'missing-cli').map((p) => (
-                  <MenuItem
-                    key={p.id}
-                    onClick={() => switchProvider(p.id)}
-                    className={cn(
-                      'flex items-center gap-2 text-xs cursor-pointer',
-                      p.id === displayedProviderId && 'font-semibold text-primary',
-                    )}
-                  >
-                    {p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />}
-                    <span className="flex-1">{p.name}</span>
-                    {p.id === displayedProviderId && <Check size={12} className="text-primary ml-auto" />}
-                  </MenuItem>
-                ))}
-              </MenuPopup>
-            </Menu>
-            <div className="h-4 w-px bg-border"></div>
-            {currentProvider?.executionProfiles?.length && currentExecutionProfile ? (
-              <>
-                <Menu>
-                  <MenuTrigger
-                    aria-label="Select execution profile"
-                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
-                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {currentExecutionProfile.label}
-                  </MenuTrigger>
-                  <MenuPopup align="start" side="top" className="max-w-80">
-                    {currentProvider.executionProfiles.map((profile) => (
-                      <MenuItem
-                        key={profile.id}
-                        onClick={() => setProfilesByProvider(current => ({
-                          ...current,
-                          [currentProvider.id]: profile.id,
-                        }))}
-                      >
-                        <span className="flex flex-col">
-                          <span className="font-medium">{profile.label}</span>
-                          <span className="text-xs text-muted-foreground">{profile.description}</span>
-                        </span>
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </Menu>
-                <span
-                  className="min-w-0 truncate text-xs text-muted-foreground"
-                  title={currentExecutionProfile.description}
+          <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-border/50 bg-muted/20 px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Harness Selector */}
+              <Menu>
+                <MenuTrigger
+                  aria-label="Select Provider"
+                  disabled={busy || connecting || sessionSwitching}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                 >
-                  {currentExecutionProfile.description}
-                </span>
-              </>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {currentProvider?.accessLabel ?? 'Harness-managed access'}
-              </span>
-            )}
-            {currentProvider?.models?.length && (
-              <>
-                <div className="h-4 w-px bg-border"></div>
+                  {currentProvider?.icon === 'Bot' ? <Bot size={13} className="text-primary" /> : <Cpu size={13} className="text-primary" />}
+                  <span>{formatShortProviderName(currentProvider?.name)}</span>
+                  <ChevronDown size={11} className="opacity-50 ml-0.5" />
+                </MenuTrigger>
+                <MenuPopup align="start" side="top">
+                  {providers.filter(p => p.isConfigured || p.setupIssue !== 'missing-cli').map((p) => (
+                    <MenuItem
+                      key={p.id}
+                      onClick={() => switchProvider(p.id)}
+                      className={cn(
+                        'flex items-center gap-2 text-xs cursor-pointer',
+                        p.id === displayedProviderId && 'font-semibold text-primary',
+                      )}
+                    >
+                      {p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />}
+                      <span className="flex-1">{p.name}</span>
+                      {p.id === displayedProviderId && <Check size={12} className="text-primary ml-auto" />}
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+
+              {/* Model Selector */}
+              {currentProvider?.models?.length && (
                 <Menu>
                   <MenuTrigger
                     aria-label="Select model"
                     disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
-                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                   >
-                    {modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}
+                    <Sparkles size={12} className="text-amber-500 shrink-0" />
+                    <span className="max-w-44 truncate">{modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
                   <MenuPopup align="start" side="top" className="max-w-80">
                     {currentProvider.models.map((m) => (
@@ -1594,26 +1570,64 @@ export function AgentChat({ ws }: AgentChatProps) {
                         }))}
                       >
                         <span className="flex flex-col">
-                          <span className="font-medium">{m.label}</span>
+                          <span className="font-medium flex items-center gap-1.5">
+                            <Sparkles size={11} className="text-amber-500" />
+                            {m.label}
+                          </span>
                           <span className="text-xs text-muted-foreground">{m.description}</span>
                         </span>
                       </MenuItem>
                     ))}
                   </MenuPopup>
                 </Menu>
-              </>
-            )}
-            {currentProvider && (
-              <>
-                <div className="h-4 w-px bg-border"></div>
+              )}
+
+              {/* Execution Profile Selector */}
+              {currentProvider?.executionProfiles?.length && currentExecutionProfile && (
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Select execution profile"
+                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                    title={currentExecutionProfile.description}
+                  >
+                    <Shield size={12} className={currentExecutionProfile.id === 'workspace-write' ? "text-amber-500 shrink-0" : "text-emerald-500 shrink-0"} />
+                    <span>{formatShortProfileLabel(currentExecutionProfile.label)}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="top" className="max-w-80">
+                    {currentProvider.executionProfiles.map((profile) => (
+                      <MenuItem
+                        key={profile.id}
+                        onClick={() => setProfilesByProvider(current => ({
+                          ...current,
+                          [currentProvider.id]: profile.id,
+                        }))}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium flex items-center gap-1.5">
+                            <Shield size={12} className={profile.id === 'workspace-write' ? "text-amber-500" : "text-emerald-500"} />
+                            {profile.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{profile.description}</span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              )}
+
+              {/* Reasoning Effort Selector */}
+              {currentProvider && (
                 <Menu>
                   <MenuTrigger
                     aria-label="Select reasoning effort"
                     disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
-                    className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Zap size={12} className={effortsByProvider[currentProvider.id] ? "text-amber-500 fill-amber-500/20" : "text-muted-foreground"} />
-                    {reasoningEffortLabelForId(effortsByProvider[currentProvider.id] ?? '')}
+                    <Zap size={12} className={effortsByProvider[currentProvider.id] ? "text-amber-500 fill-amber-500/20 shrink-0" : "text-muted-foreground shrink-0"} />
+                    <span>{reasoningEffortLabelForId(effortsByProvider[currentProvider.id] ?? '')}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
                   <MenuPopup align="start" side="top" className="max-w-72">
                     {REASONING_EFFORT_OPTIONS.map((e) => (
@@ -1635,30 +1649,32 @@ export function AgentChat({ ws }: AgentChatProps) {
                     ))}
                   </MenuPopup>
                 </Menu>
-              </>
-            )}
-            <div className="h-4 w-px bg-border"></div>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.length) handleImageFiles(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={busy || sessionSwitching}
-              className="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-              title="Attach image (or paste / drop into chat)"
-            >
-              <ImageIcon size={13} />
-              <span>Image</span>
-            </button>
+              )}
+            </div>
+
+            {/* Right Side: Tools & Actions */}
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) handleImageFiles(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || sessionSwitching}
+                className="flex cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background/90 p-1.5 text-muted-foreground shadow-2xs transition-colors hover:bg-accent hover:text-foreground hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                title="Attach image (or paste / drop into chat)"
+              >
+                <ImageIcon size={14} className="text-primary" />
+              </button>
+            </div>
           </div>
           {attachedImages.length > 0 && (
             <div className="flex flex-wrap gap-2 border-b border-border/40 px-3 py-2 bg-muted/20">
