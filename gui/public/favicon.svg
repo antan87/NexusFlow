@@ -1,57 +1,42 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
   <defs>
     <linearGradient id="cs-fav-bg" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#182030" />
-      <stop offset="100%" stop-color="#080C14" />
+      <stop offset="0%" stop-color="#1A1426" />
+      <stop offset="50%" stop-color="#0F0C18" />
+      <stop offset="100%" stop-color="#06040A" />
     </linearGradient>
-    <linearGradient id="cs-fav-rim" x1="30" y1="20" x2="170" y2="180" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#EF4444" stop-opacity="0.6" />
-      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.15" />
-      <stop offset="100%" stop-color="#EF4444" stop-opacity="0.3" />
+    <linearGradient id="cs-fav-sunset" x1="40" y1="20" x2="160" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE047" />
+      <stop offset="30%" stop-color="#FB923C" />
+      <stop offset="65%" stop-color="#F43F5E" />
+      <stop offset="100%" stop-color="#6366F1" />
     </linearGradient>
-    <linearGradient id="cs-fav-white" x1="46" y1="36" x2="90" y2="164" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" />
-      <stop offset="100%" stop-color="#CBD5E1" />
+    <linearGradient id="cs-fav-rim" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE047" stop-opacity="0.6" />
+      <stop offset="50%" stop-color="#F43F5E" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.2" />
     </linearGradient>
-    <linearGradient id="cs-fav-red" x1="90" y1="36" x2="154" y2="164" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FF5A6E" />
-      <stop offset="50%" stop-color="#EF4444" />
-      <stop offset="100%" stop-color="#B91C1C" />
-    </linearGradient>
-    <clipPath id="cs-fav-c-clip">
-      <path d="M68 36 L132 36 L154 58 L154 78 L122 78 L122 66 L80 66 L80 134 L122 134 L122 122 L154 122 L154 142 L132 164 L68 164 L46 142 L46 58 Z" />
-    </clipPath>
   </defs>
 
-  <!-- Dark Slate Background Plate -->
+  <!-- Plate -->
   <rect width="200" height="200" rx="44" fill="url(#cs-fav-bg)" />
   <rect x="1" y="1" width="198" height="198" rx="43" stroke="url(#cs-fav-rim)" stroke-width="1.5" />
 
-  <!-- Dual-Tone Body with Chamfered Internal Seams -->
-  <g clip-path="url(#cs-fav-c-clip)">
-    <!-- Left Spine: Alpine White Gradient -->
-    <path d="M46 36 L90 36 L90 164 L46 164 Z" fill="url(#cs-fav-white)" />
-    <!-- Right Power Wing: Crimson Gradient -->
-    <path d="M90 36 L154 36 L154 164 L90 164 Z" fill="url(#cs-fav-red)" />
-    <!-- Internal Bevel Highlight Line -->
-    <line x1="90" y1="36" x2="90" y2="164" stroke="#080C14" stroke-width="2" />
-    <line x1="88" y1="36" x2="88" y2="164" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1" />
-  </g>
+  <!-- Outer Hexagonal 'C' Chassis (Uniform 18px width) -->
+  <path d="M100 28 L154 59 L136 70 L100 49 L58 73 L58 127 L100 151 L136 130 L154 141 L100 172 L40 137 L40 63 Z" fill="url(#cs-fav-sunset)" />
 
-  <!-- 3 Precision Razor Slashes with Depth Shadow -->
-  <!-- Slash 1: Upper -->
-  <path d="M88 28 L168 108 L158 118 L78 38 Z" fill="#080C14" />
-  <path d="M88 28 L168 108" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="1" />
-  <!-- Slash 2: Center Core -->
-  <path d="M58 58 L138 138 L128 148 L48 68 Z" fill="#080C14" />
-  <path d="M58 58 L138 138" stroke="#FF5A6E" stroke-opacity="0.3" stroke-width="1" />
-  <!-- Slash 3: Lower -->
-  <path d="M28 88 L108 168 L98 178 L18 98 Z" fill="#080C14" />
+  <!-- Inner Angular 'W' (Workspace) in Pure Alpine White -->
+  <path d="M74 72 L90 72 L103 118 L116 84 L128 84 L141 118 L154 72 L170 72 L152 134 L136 134 L122 98 L108 134 L92 134 Z" fill="#FFFFFF" />
 
-  <!-- Tapered Speed Needle Trails -->
-  <path d="M94 22 L128 -12" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" />
-  <path d="M154 94 L190 58" stroke="#EF4444" stroke-width="4" stroke-linecap="round" />
-  <path d="M44 72 L10 106" stroke="#EF4444" stroke-width="4" stroke-linecap="round" />
-  <path d="M124 124 L160 88" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" />
-  <path d="M24 102 L-10 136" stroke="#EF4444" stroke-width="3.5" stroke-linecap="round" />
+  <!-- 3 Clean Diagonal Speed Cuts -->
+  <path d="M106 20 L188 102 L180 110 L98 28 Z" fill="#06040A" />
+  <path d="M68 52 L150 134 L142 142 L60 60 Z" fill="#06040A" />
+  <path d="M38 92 L120 174 L112 182 L30 100 Z" fill="#06040A" />
+
+  <!-- Precision Needle Speed Trails -->
+  <path d="M106 20 L138 -12" stroke="#FDE047" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M174 88 L206 56" stroke="#FB923C" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M54 66 L22 98" stroke="#F43F5E" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M134 118 L168 84" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+  <path d="M32 106 L0 138" stroke="#6366F1" stroke-width="3" stroke-linecap="round" />
 </svg>
