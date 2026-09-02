@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { listWorkspaces, loadFeatureConfig, addRepoToWorkspace } from '../core/workspace.js';
+import { BRAND_NAME } from '../core/constants.js';
 import type { Feature, RepoInfo } from '../types.js';
 
 /**
@@ -24,10 +25,10 @@ export function filterAvailableRepos<T extends Pick<RepoInfo, 'path'>>(
   scanned: T[],
   feature: Pick<Feature, 'originalRepos'>,
 ): T[] {
-  const originalRepoPaths = new Set(
+  const existingSourcePaths = new Set(
     (feature.originalRepos ?? []).map((p) => path.resolve(p)),
   );
-  return scanned.filter((r) => !originalRepoPaths.has(path.resolve(r.path)));
+  return scanned.filter((r) => !existingSourcePaths.has(path.resolve(r.path)));
 }
 
 /**
@@ -40,7 +41,7 @@ export async function addRepoCommand(
   repoPathArg?: string,
   workspaceArg?: string,
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n➕ NexusFlow — Adding Repository to Workspace\n'));
+  console.log(chalk.bold.cyan(`\n➕ ${BRAND_NAME} — Adding Repository to Workspace\n`));
 
   const config = await loadConfig();
 

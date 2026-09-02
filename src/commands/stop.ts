@@ -14,6 +14,7 @@ import {
   stopOrchestrator,
   stopServices,
 } from '../orchestration/index.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
  * Stop all services — and any started orchestration tools — for a workspace.
@@ -21,7 +22,7 @@ import {
  * @param workspaceArg - Optional workspace path from CLI.
  */
 export async function stopCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n⏹ NexusFlow — Stop Services\n'));
+  console.log(chalk.bold.cyan(`\n⏹ ${BRAND_NAME} — Stop Services\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;

@@ -64,7 +64,23 @@ program
     `${BRAND_NAME} — Combine multiple repos into a workspace with rich AI assistant context`,
   )
   .version(getCurrentVersion())
-  .option('--debug', 'Enable verbose debug logging to stderr (or set CONTEXTSPACE_DEBUG=1)');
+  .option('--debug', 'Enable verbose debug logging to stderr (or set CONTEXTSPACE_DEBUG=1)')
+  .addHelpText('beforeAll', () => {
+    const c1 = chalk.hex('#FDE047');
+    const c2 = chalk.hex('#FB923C');
+    const c3 = chalk.hex('#F43F5E');
+    const c4 = chalk.hex('#6366F1');
+
+    return `
+${c1('   ___           __           __   ____')}
+${c2('  / __\\___  _ __/ /____ __ __/ /_ / __/___  ___ ________')}
+${c3(' / /  / _ \\/ _  / __/ // /\\ \\ / __/ \\_ \\/ _ \\/ _ `/ __/ -_)')}
+${c4(' \\___/\\___/_//_/\\__/\\_,_//_\\_\\\\__/ /___/ .__/\\_,_/\\__/\\__/')}
+${c4('                                      /_/')}
+  ${chalk.bold('ContextSpace')} ${chalk.dim(`v${getCurrentVersion()}`)} — ${chalk.hex('#FB923C')('Multi-Repo AI Workspace Orchestrator')}
+  Aliases: ${chalk.dim('ctxspace, contextspace, cs, nexusflow')}
+`;
+  });
 
 // Turn the global --debug flag into the env var the debug logger reads, before
 // any action runs.
@@ -266,12 +282,9 @@ program
   }));
 
 program
-  .command('handoff')
-  .description('Generate a compact handoff bundle (nexusflow-handoff.md) for session resumption')
-  .argument('[workspace]', 'Path to the workspace')
-  .action(runAction(async (workspace) => {
-    await handoffCommand(workspace);
-  }));
+  .command('handoff [workspace]')
+  .description('Generate a compact handoff bundle (contextspace-handoff.md) for session resumption')
+  .action(runAction(handoffCommand));
 
 
 program

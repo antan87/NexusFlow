@@ -10,6 +10,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
  * Runs the handoff command.
@@ -18,14 +19,14 @@ import { buildDependencyGraph } from '../generators/plan-generator.js';
  * @param workspaceArg - Optional workspace path from CLI.
  */
 export async function handoffCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n🤝 NexusFlow — Handoff Bundle\n'));
+  console.log(chalk.bold.cyan(`\n🤝 ${BRAND_NAME} — Handoff Bundle\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
-    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    console.error(chalk.red(`✖ Failed to load workspace configuration. Ensure contextspace.json exists.`));
     return;
   }
 

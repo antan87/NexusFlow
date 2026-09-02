@@ -25,6 +25,7 @@ import {
   setScheduleEnabled,
   type ScheduleTask,
 } from '../core/scheduler.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 import { findActiveServerPort } from './ui.js';
 
 /**
@@ -37,7 +38,7 @@ export async function scheduleAddCommand(
   workspaceArg: string | undefined,
   options: { task?: string; every?: string },
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Schedule a Recurring Job\n'));
+  console.log(chalk.bold.cyan(`\n🕐 ${BRAND_NAME} — Schedule a Recurring Job\n`));
 
   const task = (options.task || 'sync') as ScheduleTask;
   if (task !== 'sync' && task !== 'refresh') {
@@ -58,7 +59,7 @@ export async function scheduleAddCommand(
 
   console.log(chalk.green(`✅ Scheduled ${chalk.bold(task)} every ${chalk.bold(formatInterval(intervalMinutes))} for ${chalk.bold(path.basename(workspacePath))}`));
   console.log(chalk.dim(`  Job id: ${job.id}`));
-  console.log(chalk.dim('  Jobs run while a NexusFlow server is active — start one with "nexusflow ui" (e.g. --daemon --server-only).'));
+  console.log(chalk.dim(`  Jobs run while a ${BRAND_NAME} server is active — start one with "${CLI_NAME} ui" (e.g. --daemon --server-only).`));
   console.log(chalk.dim('  Scheduled runs are token-efficient: only repos whose content changed are re-analyzed.\n'));
 }
 
@@ -74,18 +75,18 @@ export async function scheduleListCommand(options?: { json?: boolean }): Promise
     return;
   }
 
-  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Scheduled Jobs\n'));
+  console.log(chalk.bold.cyan(`\n🕐 ${BRAND_NAME} — Scheduled Jobs\n`));
 
   if (!activePort) {
-    console.log(chalk.yellow('⚠️  Notice: The NexusFlow background server is not currently active.'));
-    console.log(chalk.dim('   Jobs are dormant until started with: nexusflow ui --daemon\n'));
+    console.log(chalk.yellow(`⚠️  Notice: The ${BRAND_NAME} background server is not currently active.`));
+    console.log(chalk.dim(`   Jobs are dormant until started with: ${CLI_NAME} ui --daemon\n`));
   } else {
-    console.log(chalk.green(`✔ NexusFlow background server is active (port ${activePort}).\n`));
+    console.log(chalk.green(`✔ ${BRAND_NAME} background server is active (port ${activePort}).\n`));
   }
 
   if (store.jobs.length === 0) {
     console.log(chalk.yellow('No scheduled jobs. Add one with:'));
-    console.log(chalk.dim('  nexusflow schedule add [workspace] --task sync --every 2h\n'));
+    console.log(chalk.dim(`  ${CLI_NAME} schedule add [workspace] --task sync --every 2h\n`));
     return;
   }
 

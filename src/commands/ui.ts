@@ -12,6 +12,7 @@ import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 export interface DaemonState {
   pid: number;
@@ -115,7 +116,7 @@ export async function findAvailablePort(startPort: number, attempts = 100): Prom
 export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }): Promise<void> {
   const requestedPort = options.port ? parseInt(options.port, 10) : 3000;
 
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Web Dashboard\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Web Dashboard\n`));
 
   let targetPort = requestedPort;
   const isRequestedPortActive = await isPortActive(requestedPort);

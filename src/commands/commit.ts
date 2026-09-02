@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 interface CommitOptions {
   /**
@@ -46,7 +47,7 @@ export async function commitCommand(
   workspaceArg?: string,
   options?: CommitOptions,
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n💾 NexusFlow — Committing Workspace Changes\n'));
+  console.log(chalk.bold.cyan(`\n💾 ${BRAND_NAME} — Committing Workspace Changes\n`));
 
   const noPush = options?.push === false;
 
