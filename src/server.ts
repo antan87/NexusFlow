@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
@@ -120,6 +121,17 @@ import {
 
 import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
+import {
+  WorkroomAuthorizationError,
+  WorkroomRevisionError,
+  WorkroomValidationError,
+  documentNameSchema,
+  workflowStepSchema,
+} from './workrooms/contracts.js';
+import { listWorkroomNetworkInterfaces } from './workrooms/host.js';
+import { workroomManager } from './workrooms/manager.js';
+import { buildPortableWorkroomPreview, digestPortableWorkroomContext } from './workrooms/portable.js';
+import { randomToken, tokenDigest } from './workrooms/crypto.js';
 
 // Resolve static files directory
 const __filename = fileURLToPath(import.meta.url);
@@ -486,6 +498,19 @@ function errorResponse(c: any, error: unknown) {
       missingAgents: error.missingAgents,
     }, 400);
   }
+  if (error instanceof WorkroomAuthorizationError) {
+    return c.json({ error: error.message }, 401);
+  }
+  if (error instanceof WorkroomRevisionError) {
+    return c.json({
+      error: error.message,
+      expectedRevision: error.expected,
+      actualRevision: error.actual,
+    }, 409);
+  }
+  if (error instanceof WorkroomValidationError) {
+    return c.json({ error: error.message }, 400);
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return c.json({ error: msg }, 500);
 }
@@ -548,9 +573,13 @@ export function isAllowedUpdateUrl(candidate: string): boolean {
 app.use(
   '/api/*',
   cors({
-    origin: (origin) => {
+    credentials: true,
+    origin: (origin, c) => {
       // No Origin header → same-origin or a non-browser client (CLI/desktop).
       if (!origin) return origin;
+      if (c.req.path.startsWith('/api/workrooms/')) {
+        return hasExactDashboardOrigin(origin, c.req.url) ? origin : null;
+      }
       try {
         const { hostname } = new URL(origin);
         const isLocal =
@@ -2713,6 +2742,494 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
 });
 
 
+// ─── Workrooms: opt-in LAN/VPN collaboration ─────────────────────────────
+
+const WORKROOM_HUMAN_SESSION_COOKIE = 'nexusflow_workroom_human';
+const WORKROOM_BOOTSTRAP_COOKIE = 'nexusflow_workroom_bootstrap';
+const WORKROOM_BOOTSTRAP_HEADER = 'x-nexusflow-workroom-bootstrap';
+const WORKROOM_BOOTSTRAP_TOKEN = randomToken();
+
+function establishWorkroomBootstrap(c: Parameters<typeof setCookie>[0]): void {
+  setCookie(c, WORKROOM_BOOTSTRAP_COOKIE, WORKROOM_BOOTSTRAP_TOKEN, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    path: '/api/workrooms',
+  });
+}
+
+function hasValidWorkroomBootstrap(c: Parameters<typeof getCookie>[0]): boolean {
+  const cookieToken = getCookie(c, WORKROOM_BOOTSTRAP_COOKIE);
+  const headerToken = c.req.header(WORKROOM_BOOTSTRAP_HEADER);
+  return Boolean(cookieToken && headerToken
+    && tokenDigest(cookieToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN)
+    && tokenDigest(headerToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN));
+}
+
+function establishWorkroomHumanSession(c: Parameters<typeof setCookie>[0], token = workroomManager.beginHumanSession()): void {
+  setCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    path: '/api/workrooms',
+  });
+}
+
+function hasExactDashboardOrigin(origin: string | undefined, requestUrl: string): boolean {
+  if (!origin) return false;
+  try {
+    const normalizedOrigin = new URL(origin).origin;
+    const requestOrigin = new URL(requestUrl).origin;
+    const configuredDevelopmentOrigin = process.env.NEXUSFLOW_DASHBOARD_ORIGIN
+      ? new URL(process.env.NEXUSFLOW_DASHBOARD_ORIGIN).origin
+      : undefined;
+    return normalizedOrigin === requestOrigin || normalizedOrigin === configuredDevelopmentOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function hasExactWorkroomBrowserBoundary(c: Parameters<typeof getCookie>[0]): boolean {
+  const origin = c.req.header('origin');
+  if (origin) return hasExactDashboardOrigin(origin, c.req.url);
+  const referer = c.req.header('referer');
+  if (referer) return hasExactDashboardOrigin(referer, c.req.url);
+  return c.req.header('sec-fetch-site') === 'same-origin';
+}
+
+app.use('/api/workrooms/*', async (c, next) => {
+  const pathname = new URL(c.req.url).pathname;
+  c.header('Cache-Control', 'no-store');
+  if (!hasExactWorkroomBrowserBoundary(c)) {
+    return c.json({ error: 'Workroom access requires the local browser dashboard.' }, 403);
+  }
+  if (pathname === '/api/workrooms/bootstrap') return next();
+  if (!hasValidWorkroomBootstrap(c)) {
+    return c.json({ error: 'Workroom access requires a same-origin dashboard bootstrap.' }, 403);
+  }
+  if (pathname === '/api/workrooms/session' || pathname === '/api/workrooms/session/reclaim'
+    || pathname === '/api/workrooms/session/abandon') return next();
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method);
+  const needsHumanReadSession = c.req.method === 'GET' && (
+    pathname === '/api/workrooms/snapshot'
+    || pathname === '/api/workrooms/local-resources'
+    || (pathname === '/api/workrooms/status' && workroomManager.hasActiveRoom())
+  );
+  if (!isMutation && !needsHumanReadSession) return next();
+  const doesNotRequireExistingHumanSession = pathname === '/api/workrooms/start'
+    || pathname === '/api/workrooms/join'
+    || pathname === '/api/workrooms/import'
+    || /^\/api\/workrooms\/quarantined\/room-[a-f0-9]{32}\/discard$/.test(pathname)
+    || /^\/api\/workrooms\/room-[a-f0-9]{32}\/resume$/.test(pathname);
+  if (needsHumanReadSession || (isMutation && !doesNotRequireExistingHumanSession)) {
+    try {
+      const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+      if (pathname === '/api/workrooms/stop') return next();
+      await workroomManager.runWithHumanAuthority(authority, () => next());
+      return;
+    } catch (error) {
+      return errorResponse(c, error);
+    }
+  }
+  await next();
+});
+
+app.post('/api/workrooms/bootstrap', (c) => {
+  establishWorkroomBootstrap(c);
+  return c.json({ token: WORKROOM_BOOTSTRAP_TOKEN });
+});
+
+app.get('/api/workrooms/session', (c) => {
+  const active = workroomManager.hasActiveRoom();
+  if (!active) return c.json({ active: false, locked: false });
+  const roomType = workroomManager.activeRoomType();
+  if (!roomType) return c.json({ active: false, locked: false });
+  try {
+    workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    return c.json({ active: true, locked: false, roomType });
+  } catch {
+    return c.json({ active: true, locked: true, roomType });
+  }
+});
+
+app.post('/api/workrooms/session/reclaim', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!workroomManager.hasActiveRoom()) return c.json({ error: 'No active Workroom can be reconnected.' }, 409);
+    const token = await workroomManager.reclaimHostHumanSession(String(body.password ?? ''));
+    establishWorkroomHumanSession(c, token);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/session/abandon', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (body.confirm !== true) return c.json({ error: 'Confirm leaving this locked guest connection.' }, 400);
+    await workroomManager.abandonLockedGuest();
+    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/interfaces', (c) => {
+  return c.json({ interfaces: listWorkroomNetworkInterfaces() });
+});
+
+app.get('/api/workrooms/status', async (c) => {
+  try {
+    const status = await workroomManager.status();
+    if (status.mode !== 'idle') {
+      workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    }
+    return c.json({ status });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/paused', async (c) => {
+  try {
+    return c.json({ rooms: await workroomManager.listPaused() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/quarantined', async (c) => {
+  try {
+    return c.json({ rooms: await workroomManager.listQuarantined() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/quarantined/:roomId/discard', async (c) => {
+  try {
+    const roomId = c.req.param('roomId');
+    const body = await c.req.json();
+    if (body.confirmRoomId !== roomId) {
+      return c.json({ error: 'Confirm the exact quarantined Workroom ID before discarding it.' }, 400);
+    }
+    await workroomManager.discardQuarantined(roomId);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/:roomId/resume', async (c) => {
+  try {
+    const body = await c.req.json();
+    const status = await workroomManager.resumeHost(c.req.param('roomId'), String(body.password ?? ''));
+    establishWorkroomHumanSession(c);
+    return c.json({ status });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/preview/:workspaceId', async (c) => {
+  try {
+    const workspaceId = decodeURIComponent(c.req.param('workspaceId'));
+    const config = await loadConfig();
+    const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, workspaceId);
+    if (!workspacePath) return c.json({ error: 'Workspace not found.' }, 404);
+    return c.json({ preview: await buildPortableWorkroomPreview(workspacePath) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/start', async (c) => {
+  try {
+    const body = await c.req.json();
+    const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+    const config = await loadConfig();
+    const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, workspaceId);
+    if (!workspacePath) return c.json({ error: 'Workspace not found.' }, 404);
+    const preview = await buildPortableWorkroomPreview(workspacePath);
+    if (body.contextConfirmed !== true) {
+      return c.json({ error: 'Review the exact shared context and confirm it before starting the Workroom.' }, 400);
+    }
+    const documentOverrides = typeof body.documents === 'object' && body.documents !== null
+      ? body.documents as Record<string, unknown>
+      : {};
+    const documents = { plan: '', decisions: '', handoff: '' };
+    for (const name of ['plan', 'decisions', 'handoff'] as const) {
+      if (typeof documentOverrides[name] === 'string') documents[name] = documentOverrides[name];
+    }
+    if (body.contextDigest !== digestPortableWorkroomContext(preview.bundle, documents)) {
+      return c.json({ error: 'The exact selected context changed after review. Refresh the sharing preview and confirm it again.' }, 409);
+    }
+    const status = await workroomManager.startHost({
+      ...preview,
+      documents,
+      name: String(body.name ?? '').trim() || `${preview.bundle.feature.id} workroom`,
+      address: String(body.address ?? ''),
+      port: Number(body.port ?? 4242),
+      password: String(body.password ?? ''),
+      hostDisplayName: String(body.hostDisplayName ?? '').trim() || os.userInfo().username || 'Host',
+    });
+    establishWorkroomHumanSession(c);
+    return c.json({ status }, 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/stop', async (c) => {
+  try {
+    const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    await workroomManager.stopOrLeave(authority);
+    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/invites', async (c) => {
+  try {
+    return c.json(await workroomManager.createInvite(), 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/join', async (c) => {
+  try {
+    const body = await c.req.json();
+    let localWorkspaceId: string | undefined;
+    if (typeof body.workspaceId === 'string' && body.workspaceId) {
+      const config = await loadConfig();
+      const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, body.workspaceId);
+      if (!workspacePath) return c.json({ error: 'Select an existing local workspace for the Workroom mapping.' }, 404);
+      localWorkspaceId = body.workspaceId;
+    }
+    const status = await workroomManager.join(
+      String(body.invite ?? ''),
+      String(body.password ?? ''),
+      String(body.displayName ?? '').trim() || os.userInfo().username || 'Developer',
+      localWorkspaceId,
+    );
+    establishWorkroomHumanSession(c);
+    return c.json({ status }, 202);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/join/poll', async (c) => {
+  try {
+    return c.json({ status: await workroomManager.pollJoin() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/snapshot', async (c) => {
+  try {
+    return c.json({ snapshot: await workroomManager.snapshot() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.put('/api/workrooms/documents/:name', async (c) => {
+  try {
+    const name = documentNameSchema.parse(c.req.param('name'));
+    const body = await c.req.json();
+    if (typeof body.content !== 'string' || !Number.isInteger(body.expectedRevision)) {
+      return c.json({ error: 'content and an integer expectedRevision are required.' }, 400);
+    }
+    return c.json({ document: await workroomManager.updateDocument(name, body.content, body.expectedRevision) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/handoff', async (c) => {
+  try {
+    const body = await c.req.json();
+    const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+    const config = await loadConfig();
+    const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, workspaceId);
+    if (!workspacePath) return c.json({ error: 'Select a local workspace before publishing a handoff.' }, 404);
+    return c.json({ document: await workroomManager.publishHandoff(workspacePath) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/members/:requestId/decision', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (typeof body.accept !== 'boolean') return c.json({ error: 'accept must be a boolean.' }, 400);
+    await workroomManager.decideJoin(c.req.param('requestId'), body.accept);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.put('/api/workrooms/members/:memberId/role', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (body.role !== 'publisher' && body.role !== 'member') return c.json({ error: 'role must be publisher or member.' }, 400);
+    await workroomManager.setRole(c.req.param('memberId'), body.role);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.delete('/api/workrooms/members/:memberId', async (c) => {
+  try {
+    await workroomManager.revokeMember(c.req.param('memberId'));
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/password/rotate', async (c) => {
+  try {
+    const body = await c.req.json();
+    await workroomManager.rotatePassword(String(body.password ?? ''), body.revokeDevices !== false);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/workrooms/local-resources', async (c) => {
+  try {
+    return c.json({ resources: await workroomManager.listLocalResources() });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/resources/publish', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!['skill', 'agent', 'workflow'].includes(body.kind) || typeof body.id !== 'string' || typeof body.version !== 'string') {
+      return c.json({ error: 'kind, id, and semantic version are required.' }, 400);
+    }
+    return c.json({ package: await workroomManager.publishLocalResource(body.kind, body.id, body.version) }, 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/resources/:digest/download', async (c) => {
+  try {
+    return c.json(await workroomManager.downloadResource(c.req.param('digest')));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/resources/:digest/apply', async (c) => {
+  try {
+    const body = await c.req.json();
+    return c.json({ applied: await workroomManager.applyResource(
+      c.req.param('digest'),
+      String(body.approvedDigest ?? ''),
+      String(body.approvedLocalDigest ?? ''),
+    ) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/resources/:digest/quarantine', async (c) => {
+  try {
+    await workroomManager.quarantineResource(c.req.param('digest'));
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/resources/:digest/purge', async (c) => {
+  try {
+    const body = await c.req.json();
+    if (body.confirmDigest !== c.req.param('digest')) {
+      return c.json({ error: 'Confirm the exact quarantined resource digest before purging it.' }, 400);
+    }
+    await workroomManager.purgeResource(c.req.param('digest'));
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/workflow/select', async (c) => {
+  try {
+    const body = await c.req.json();
+    const steps = Array.isArray(body.steps)
+      ? body.steps.map((step: unknown) => workflowStepSchema.parse(step))
+      : undefined;
+    if (typeof body.workflowId !== 'string' || typeof body.version !== 'string' || !steps
+      || !Number.isInteger(body.expectedRevision) || body.expectedRevision < 0) {
+      return c.json({ error: 'workflowId, version, steps, and a nonnegative integer expectedRevision are required.' }, 400);
+    }
+    await workroomManager.selectLocalWorkflow(body.workflowId, body.version, steps, body.expectedRevision);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/workflow/steps/:stepId/transition', async (c) => {
+  try {
+    const body = await c.req.json();
+    const allowed = ['pending', 'in_progress', 'completion_proposed', 'completed', 'skipped'];
+    if (!allowed.includes(body.status) || !Number.isInteger(body.expectedRevision)) {
+      return c.json({ error: 'A valid status and integer expectedRevision are required.' }, 400);
+    }
+    return c.json({ step: await workroomManager.transitionWorkflowStep(
+      c.req.param('stepId'),
+      body.status,
+      body.expectedRevision,
+      typeof body.evidence === 'string' ? body.evidence : undefined,
+    ) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/export', async (c) => {
+  try {
+    const body = await c.req.json();
+    return c.json({ export: await workroomManager.exportRoom(String(body.passphrase ?? '')) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/workrooms/import', async (c) => {
+  try {
+    const body = await c.req.json();
+    const status = await workroomManager.importRoom(body.export, String(body.exportPassphrase ?? ''), {
+      name: typeof body.name === 'string' ? body.name : undefined,
+      address: String(body.address ?? ''),
+      port: Number(body.port ?? 4242),
+      password: String(body.password ?? ''),
+      hostDisplayName: String(body.hostDisplayName ?? '').trim() || os.userInfo().username || 'Host',
+    });
+    establishWorkroomHumanSession(c);
+    return c.json({ status }, 201);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+
 // ─── Schedules: recurring workspace jobs (sync/refresh) ─────────────────
 
 
@@ -2829,6 +3346,12 @@ export function startServer(
     }) as import('node:http').Server;
 
     injectWebSocket(server);
+
+    server.on('close', () => {
+      void workroomManager.stopOrLeave().catch((error) => {
+        console.error('[workroom] failed to stop with the dashboard:', error instanceof Error ? error.message : String(error));
+      });
+    });
 
     server.on('error', (e: any) => {
       if (e.code === 'EADDRINUSE') {

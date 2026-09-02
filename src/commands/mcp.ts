@@ -3,10 +3,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import chalk from 'chalk';
 import { startMcpServer, type McpServerOptions } from '../mcp/server.js';
-import type { AgentRole } from '../mcp/tools.js';
 
 export interface McpRunOptions {
-  role?: AgentRole;
+  role?: string;
   allow?: string[];
   deny?: string[];
 }
@@ -54,7 +53,9 @@ export async function mcpSetupCommand() {
 
   const mcpConfig = {
     command: 'npx',
-    args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run']
+    // Setup is an explicit grant for the normal workspace-management surface.
+    // Ad-hoc `mcp run` remains read-only unless its caller names a role.
+    args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run', '--role', 'interactive']
   };
 
   let updatedCount = 0;

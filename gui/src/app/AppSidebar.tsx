@@ -13,6 +13,7 @@ import {
   ArrowUpDown,
   Check,
   Activity,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
@@ -40,6 +41,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Projects', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
+  { label: 'Workrooms', to: '/workrooms', icon: Users, match: (p) => p.startsWith('/workrooms') },
   { label: 'Resource Library', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') || p.startsWith('/agents') },
   { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
   { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },

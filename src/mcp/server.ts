@@ -4,17 +4,24 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';
 import type { NexusFlowConfig } from '../types.js';
-import { enabledTools, findTool, type AgentRole, type ToolContext } from './tools.js';
+import { enabledTools, findTool, isAgentRole, type AgentRole, type ToolContext } from './tools.js';
 
 export interface McpServerOptions {
   workspacePath?: string;
-  role?: AgentRole;
+  role?: string;
   allowList?: string[];
   denyList?: string[];
+}
+
+export function resolveMcpExecutionRole(role: string | undefined): AgentRole {
+  if (role === undefined) return 'readonly';
+  if (!isAgentRole(role)) throw new Error(`Invalid MCP execution role: ${role}`);
+  return role;
 }
 
 /**
@@ -25,11 +32,11 @@ export interface McpServerOptions {
  * `workspaceId` that resolves outside `workspacesDir` (via `..` or an absolute
  * path) is rejected — the HTTP server has this guard; the MCP server did not.
  */
-function resolveWorkspacePath(
+export async function resolveMcpWorkspacePath(
   explicit: string | undefined,
   config: NexusFlowConfig,
   args: Record<string, unknown> | undefined,
-): string {
+): Promise<string> {
   if (explicit) return explicit;
 
   if (args && typeof args.workspaceId === 'string' && args.workspaceId.length > 0) {
@@ -39,7 +46,15 @@ function resolveWorkspacePath(
     if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
       throw new Error(`Invalid workspaceId "${args.workspaceId}": resolves outside the workspaces directory.`);
     }
-    return resolved;
+    const [canonicalBase, canonicalWorkspace] = await Promise.all([
+      fs.realpath(base),
+      fs.realpath(resolved),
+    ]);
+    const canonicalRel = path.relative(canonicalBase, canonicalWorkspace);
+    if (canonicalRel === '' || canonicalRel.startsWith('..') || path.isAbsolute(canonicalRel)) {
+      throw new Error(`Invalid workspaceId "${args.workspaceId}": resolves outside the workspaces directory through a linked path.`);
+    }
+    return canonicalWorkspace;
   }
 
   return process.cwd();
@@ -50,7 +65,8 @@ export async function startMcpServer(optionsOrWorkspacePath?: string | McpServer
     ? { workspacePath: optionsOrWorkspacePath }
     : optionsOrWorkspacePath ?? {};
 
-  const { workspacePath, role, allowList, denyList } = options;
+  const { workspacePath, allowList, denyList } = options;
+  const role = resolveMcpExecutionRole(options.role);
 
   const server = new Server(
     {
@@ -94,7 +110,7 @@ export async function startMcpServer(optionsOrWorkspacePath?: string | McpServer
 
     let resolvedWorkspacePath: string;
     try {
-      resolvedWorkspacePath = resolveWorkspacePath(workspacePath, config, args as Record<string, unknown> | undefined);
+      resolvedWorkspacePath = await resolveMcpWorkspacePath(workspacePath, config, args as Record<string, unknown> | undefined);
     } catch (error: any) {
       return {
         content: [{ type: 'text', text: error.message }],

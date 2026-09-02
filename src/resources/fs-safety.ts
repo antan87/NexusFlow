@@ -62,10 +62,15 @@ export async function assertPathIsNotLink(targetPath: string): Promise<void> {
   }
 }
 
-export async function atomicWriteFile(filePath: string, data: string | Uint8Array): Promise<void> {
+export async function atomicWriteFile(
+  filePath: string,
+  data: string | Uint8Array,
+  beforeCommit?: () => Promise<void>,
+): Promise<void> {
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
     await fs.writeFile(tempPath, data);
+    await beforeCommit?.();
     await fs.rename(tempPath, filePath);
   } catch (error) {
     await fs.unlink(tempPath).catch(() => {});

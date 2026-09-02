@@ -247,3 +247,104 @@ export interface WorkspaceSkillsConfig {
   enabledCategories?: string[];
 }
 
+// ─── Workrooms ────────────────────────────────────────────────────────────
+
+export type WorkroomRole = 'host' | 'publisher' | 'member';
+export type WorkroomDocumentName = 'plan' | 'decisions' | 'handoff';
+
+export interface WorkroomParticipant {
+  id: string;
+  displayName: string;
+  role: WorkroomRole;
+  joinedAt: string;
+  lastSeenAt: string;
+  revokedAt?: string;
+}
+
+export interface WorkroomDocument {
+  name: WorkroomDocumentName;
+  revision: number;
+  content: string;
+  updatedAt: string;
+  updatedBy: string;
+  history: Array<{ revision: number; content: string; updatedAt: string; updatedBy: string }>;
+}
+
+export interface WorkroomResourceManifest {
+  schemaVersion: 1;
+  kind: 'skill' | 'agent' | 'workflow';
+  id: string;
+  version: string;
+  digest: string;
+  ownerMemberId: string;
+  maintainerMemberIds: string[];
+  createdAt: string;
+  dependencies: Array<{ kind: 'skill' | 'agent' | 'workflow'; id: string; version: string; digest: string }>;
+  compatibility?: {
+    platforms?: Array<'win32' | 'linux' | 'darwin'>;
+    nexusflow?: string;
+  };
+  quarantinedAt?: string;
+}
+
+export interface WorkflowStepProgress {
+  stepId: string;
+  status: 'pending' | 'in_progress' | 'completion_proposed' | 'completed' | 'skipped';
+  revision: number;
+  evidence?: string;
+  proposedBy?: string;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface WorkroomSnapshot {
+  schemaVersion: 1;
+  roomId: string;
+  name: string;
+  address: string;
+  port: number;
+  certificateFingerprint: string;
+  revision: number;
+  createdAt: string;
+  bundle: {
+    schemaVersion: 1;
+    project: { id: string; name: string };
+    feature: { id: string; goal: string; description: string };
+    repos: Array<{
+      id: string;
+      name: string;
+      remoteUrl: string;
+      defaultBranch: string;
+      handoff?: { branch: string; commit: string; ahead: number; behind: number; dirty: boolean; publishedAt: string; publishedBy: string };
+    }>;
+    pinnedResources: WorkroomResourceManifest[];
+    createdAt: string;
+  };
+  documents: Record<WorkroomDocumentName, WorkroomDocument>;
+  participants: WorkroomParticipant[];
+  pendingJoins: Array<{ id: string; displayName: string; requestedAt: string }>;
+  resources: WorkroomResourceManifest[];
+  workflowProgress?: {
+    workflow: { kind: 'workflow'; id: string; version: string; digest: string };
+    package: {
+      schemaVersion: 1;
+      id: string;
+      version: string;
+      name: string;
+      description: string;
+      markdown: string;
+      steps: Array<{ id: string; title: string; requiresEvidence: boolean }>;
+      dependencies: Array<{ kind: 'skill' | 'agent' | 'workflow'; id: string; version: string; digest: string }>;
+    };
+    revision: number;
+    steps: WorkflowStepProgress[];
+  };
+  activity: Array<{ sequence: number; type: string; actorId: string; createdAt: string; summary: string }>;
+}
+
+export type WorkroomStatus =
+  | { mode: 'idle' }
+  | { mode: 'locked'; roomType: 'host' | 'guest' }
+  | { mode: 'host'; roomId: string; name: string; url: string; localWorkspaceId: string; certificateFingerprint: string; snapshot: WorkroomSnapshot }
+  | { mode: 'guest'; roomId: string; name?: string; url: string; status: 'pending' | 'accepted' | 'rejected'; connection?: 'connected' | 'disconnected' | 'revoked'; memberId?: string; localWorkspaceId?: string; snapshot?: WorkroomSnapshot };
+
