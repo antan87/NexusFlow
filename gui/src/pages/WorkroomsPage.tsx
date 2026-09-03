@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  ArrowLeft,
   Check,
   Clipboard,
   Download,
@@ -30,11 +31,13 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../
 import { Spinner } from '../components/ui/spinner.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { Textarea } from '../components/ui/textarea.js';
+import { HandoffStream, type WorkroomTool } from '../features/workrooms/HandoffStream.js';
 import { apiFetch, ApiError } from '../lib/api/client.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import type {
   Feature,
   WorkflowStepProgress,
+  WorkroomDocument,
   WorkroomDocumentName,
   WorkroomSnapshot,
   WorkroomStatus,
@@ -100,6 +103,16 @@ const documentLabels: Record<WorkroomDocumentName, string> = {
   handoff: 'Handoff',
 };
 
+const toolLabels: Record<WorkroomTool, string> = {
+  overview: 'Project & privacy',
+  context: 'Shared context',
+  resources: 'Resources',
+  workflow: 'Workflow',
+  members: 'People',
+  activity: 'Full activity log',
+  security: 'Security & encrypted export',
+};
+
 function randomPassphrase(): string {
   const bytes = new Uint8Array(18);
   crypto.getRandomValues(bytes);
@@ -108,6 +121,44 @@ function randomPassphrase(): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function statusSnapshot(status: WorkroomStatus): WorkroomSnapshot | undefined {
+  return status.mode === 'host' ? status.snapshot : status.mode === 'guest' ? status.snapshot : undefined;
+}
+
+function withSnapshot(status: WorkroomStatus, snapshot: WorkroomSnapshot): WorkroomStatus {
+  if (status.mode === 'host' || status.mode === 'guest') return { ...status, snapshot };
+  return status;
+}
+
+function reconcileStatus(current: WorkroomStatus, incoming: WorkroomStatus): WorkroomStatus {
+  const currentSnapshot = statusSnapshot(current);
+  const incomingSnapshot = statusSnapshot(incoming);
+  if (!currentSnapshot || !incomingSnapshot || currentSnapshot.roomId !== incomingSnapshot.roomId) return incoming;
+
+  const newerSnapshot = incomingSnapshot.revision >= currentSnapshot.revision ? incomingSnapshot : currentSnapshot;
+  const documents = {
+    plan: incomingSnapshot.documents.plan.revision >= currentSnapshot.documents.plan.revision
+      ? incomingSnapshot.documents.plan
+      : currentSnapshot.documents.plan,
+    decisions: incomingSnapshot.documents.decisions.revision >= currentSnapshot.documents.decisions.revision
+      ? incomingSnapshot.documents.decisions
+      : currentSnapshot.documents.decisions,
+    handoff: incomingSnapshot.documents.handoff.revision >= currentSnapshot.documents.handoff.revision
+      ? incomingSnapshot.documents.handoff
+      : currentSnapshot.documents.handoff,
+  };
+  return withSnapshot(incoming, { ...newerSnapshot, documents });
+}
+
+function reconcileHandoffDocument(current: WorkroomStatus, roomId: string, document: WorkroomDocument): WorkroomStatus {
+  const currentSnapshot = statusSnapshot(current);
+  if (!currentSnapshot || currentSnapshot.roomId !== roomId || document.revision < currentSnapshot.documents.handoff.revision) return current;
+  return withSnapshot(current, {
+    ...currentSnapshot,
+    documents: { ...currentSnapshot.documents, handoff: document },
+  });
 }
 
 async function digestContext(bundle: WorkroomSnapshot['bundle'], documents: Record<WorkroomDocumentName, string>): Promise<string> {
@@ -152,9 +203,14 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
   const [rotationPassword, setRotationPassword] = useState(() => randomPassphrase());
   const [exportPassphrase, setExportPassphrase] = useState(() => randomPassphrase());
   const [importEnvelope, setImportEnvelope] = useState<Record<string, unknown> | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState<'stream' | WorkroomTool>('stream');
+  const [handoffMessage, setHandoffMessage] = useState('');
   const [pausedRooms, setPausedRooms] = useState<PausedWorkroom[]>([]);
   const [quarantinedRooms, setQuarantinedRooms] = useState<QuarantinedWorkroom[]>([]);
+  const busyRef = useRef<string | null>(null);
+  const streamHeadingRef = useRef<HTMLHeadingElement>(null);
+  const toolBackButtonRef = useRef<HTMLButtonElement>(null);
+  const activeRoomRenderedRef = useRef(false);
 
   const snapshot = status.mode === 'host' ? status.snapshot : status.mode === 'guest' ? status.snapshot : undefined;
   const isHost = status.mode === 'host';
@@ -170,7 +226,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
   const refreshStatus = useCallback(async (notify = false) => {
     try {
       const result = await apiFetch<{ status: WorkroomStatus }>('/api/workrooms/status');
-      setStatus(result.status);
+      setStatus((current) => reconcileStatus(current, result.status));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         try {
@@ -254,16 +310,44 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
       .catch(() => {});
   }, [hasSnapshot]);
 
-  const perform = async (key: string, action: () => Promise<void>, success?: string) => {
+  useEffect(() => {
+    if (status.mode === 'idle') {
+      setHandoffMessage('');
+      setActiveTab('stream');
+    }
+  }, [status.mode]);
+
+  useEffect(() => {
+    if (!hasSnapshot) {
+      activeRoomRenderedRef.current = false;
+      return;
+    }
+    if (!activeRoomRenderedRef.current) {
+      activeRoomRenderedRef.current = true;
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (activeTab === 'stream') streamHeadingRef.current?.focus();
+      else toolBackButtonRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, hasSnapshot]);
+
+  const perform = async (key: string, action: () => Promise<void>, success?: string): Promise<boolean> => {
+    if (busyRef.current !== null) return false;
+    busyRef.current = key;
     setBusy(key);
     try {
       await action();
       await refreshStatus();
       await refreshStoredRooms().catch(() => {});
       if (success) showToast(success, 'success');
+      return true;
     } catch (error) {
       showToast(errorMessage(error), 'error', 8_000);
+      return false;
     } finally {
+      busyRef.current = null;
       setBusy(null);
     }
   };
@@ -326,6 +410,8 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
   const stopOrLeave = () => perform('stop', async () => {
     await apiFetch('/api/workrooms/stop', { method: 'POST' });
     setStatus({ mode: 'idle' });
+    setActiveTab('stream');
+    setHandoffMessage('');
     setInvite('');
   }, isHost ? 'Workroom stopped.' : 'Left the Workroom.');
 
@@ -419,6 +505,31 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
       body: JSON.stringify({ status: nextStatus, expectedRevision: step.revision, ...(nextStatus === 'completed' && evidence ? { evidence } : {}) }),
     });
   });
+
+  const postHandoffUpdate = async (message: string) => {
+    const submittedMessage = message.trim();
+    const posted = await perform('stream-post', async () => {
+      if (!snapshot) throw new Error('The Workroom snapshot is not available.');
+      if (dirtyDocs.handoff) throw new Error('Resolve the unsaved Handoff draft in Shared context before posting another update.');
+      const currentContent = snapshot.documents.handoff.content.trimEnd();
+      const content = currentContent ? `${currentContent}\n\n${submittedMessage}\n` : `${submittedMessage}\n`;
+      try {
+        const result = await apiFetch<{ document: WorkroomDocument }>('/api/workrooms/documents/handoff', {
+          method: 'PUT',
+          body: JSON.stringify({ content, expectedRevision: snapshot.documents.handoff.revision }),
+        });
+        setStatus((current) => reconcileHandoffDocument(current, snapshot.roomId, result.document));
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          await refreshStatus();
+          throw new Error('Someone updated the handoff first. Your update is preserved; review the latest shared context and post again.', { cause: error });
+        }
+        throw error;
+      }
+    }, 'Handoff update shared.');
+    if (posted) setHandoffMessage((current) => current.trim() === submittedMessage ? '' : current);
+    return posted;
+  };
 
   const exportRoom = () => perform('export', async () => {
     const result = await apiFetch<{ export: Record<string, unknown> }>('/api/workrooms/export', {
@@ -598,18 +709,16 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl animate-fade-in space-y-5">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2"><span className="size-2 rounded-full bg-emerald-500" /><h1 className="text-xl font-semibold">{snapshot.name}</h1><Badge variant={isHost ? 'info' : 'secondary'}>{isHost ? 'Hosting' : 'Connected'}</Badge></div>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">{status.url} · revision {snapshot.revision}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {isHost && <Button onClick={createInvite} disabled={busy !== null}>{busy === 'invite' ? <Spinner /> : <Link2 />} New invitation</Button>}
-          <Button variant="outline" onClick={() => refreshStatus(true)}><RefreshCw /> Refresh</Button>
-          <Button variant="destructive-outline" onClick={stopOrLeave} disabled={busy !== null}><Square /> {isHost ? 'Stop room' : 'Leave room'}</Button>
-        </div>
-      </header>
+    <div className="mx-auto max-w-[1500px] animate-fade-in space-y-4">
+      {activeTab !== 'stream' && (
+        <header className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center">
+          <Button ref={toolBackButtonRef} variant="ghost" onClick={() => setActiveTab('stream')}><ArrowLeft /> Back to Handoff Stream</Button>
+          <div className="min-w-0 sm:border-l sm:border-border sm:pl-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{snapshot.name}</p>
+            <h1 className="truncate text-lg font-semibold">{toolLabels[activeTab]}</h1>
+          </div>
+        </header>
+      )}
 
       {invite && (
         <Alert variant="success">
@@ -620,10 +729,30 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
         </Alert>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="max-w-full overflow-x-auto">
-          {['overview', 'context', 'resources', 'workflow', 'members', 'activity', 'security'].map((tab) => <TabsTab key={tab} value={tab} className="capitalize">{tab}</TabsTab>)}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'stream' | WorkroomTool)}>
+        <TabsList className="hidden">
+          <TabsTab value="stream">Handoff Stream</TabsTab>
+          {(Object.keys(toolLabels) as WorkroomTool[]).map((tool) => <TabsTab key={tool} value={tool}>{toolLabels[tool]}</TabsTab>)}
         </TabsList>
+
+        <TabsPanel value="stream" className="mt-0">
+          <HandoffStream
+            snapshot={snapshot}
+            roomUrl={status.url}
+            isHost={isHost}
+            me={me}
+            busy={busy}
+            message={handoffMessage}
+            hasUnsavedHandoffDraft={dirtyDocs.handoff}
+            headingRef={streamHeadingRef}
+            onCreateInvite={createInvite}
+            onRefresh={() => refreshStatus(true)}
+            onStopOrLeave={stopOrLeave}
+            onOpenTool={setActiveTab}
+            onMessageChange={setHandoffMessage}
+            onPostUpdate={postHandoffUpdate}
+          />
+        </TabsPanel>
 
         <TabsPanel value="overview" className="space-y-5">
           <div className="grid gap-4 md:grid-cols-3">
@@ -636,7 +765,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
         </TabsPanel>
 
         <TabsPanel value="context" className="space-y-4">
-          {(Object.keys(documentLabels) as WorkroomDocumentName[]).map((name) => <Card key={name}><CardHeader><div className="flex items-center justify-between"><div><CardTitle>{documentLabels[name]}</CardTitle><CardDescription>Revision {snapshot.documents[name].revision} · updated {new Date(snapshot.documents[name].updatedAt).toLocaleString()}</CardDescription></div>{dirtyDocs[name] && <Badge variant="warning">Local draft</Badge>}</div></CardHeader><CardContent className="space-y-3"><Textarea className="min-h-64 font-mono text-xs" value={drafts[name]} onChange={(event) => { setDrafts((current) => ({ ...current, [name]: event.target.value })); setDirtyDocs((current) => ({ ...current, [name]: true })); }} /><div className="flex flex-wrap justify-end gap-2">{name === 'handoff' && <Button variant="outline" onClick={() => perform('handoff', () => apiFetch('/api/workrooms/handoff', { method: 'POST', body: JSON.stringify({ workspaceId: status.localWorkspaceId }) }).then(() => undefined), 'Git metadata handoff published.')} disabled={!status.localWorkspaceId || busy !== null}><RefreshCw /> Publish Git snapshot</Button>}<Button onClick={() => saveDocument(name)} disabled={!dirtyDocs[name] || busy !== null}>{busy === `doc-${name}` ? <Spinner /> : <Upload />} Share revision</Button></div></CardContent></Card>)}
+          {(Object.keys(documentLabels) as WorkroomDocumentName[]).map((name) => <Card key={name}><CardHeader><div className="flex items-center justify-between"><div><CardTitle>{documentLabels[name]}</CardTitle><CardDescription>Revision {snapshot.documents[name].revision} · updated {new Date(snapshot.documents[name].updatedAt).toLocaleString()}</CardDescription></div>{dirtyDocs[name] && <Badge variant="warning">Local draft</Badge>}</div></CardHeader><CardContent className="space-y-3"><Textarea className="min-h-64 font-mono text-xs" value={drafts[name]} disabled={busy !== null} onChange={(event) => { setDrafts((current) => ({ ...current, [name]: event.target.value })); setDirtyDocs((current) => ({ ...current, [name]: true })); }} /><div className="flex flex-wrap justify-end gap-2">{name === 'handoff' && <Button variant="outline" onClick={() => perform('handoff', () => apiFetch('/api/workrooms/handoff', { method: 'POST', body: JSON.stringify({ workspaceId: status.localWorkspaceId }) }).then(() => undefined), 'Git metadata handoff published.')} disabled={!status.localWorkspaceId || busy !== null}><RefreshCw /> Publish Git snapshot</Button>}<Button onClick={() => saveDocument(name)} disabled={!dirtyDocs[name] || busy !== null}>{busy === `doc-${name}` ? <Spinner /> : <Upload />} Share revision</Button></div></CardContent></Card>)}
         </TabsPanel>
 
         <TabsPanel value="resources" className="space-y-4">
@@ -655,6 +784,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
 
         <TabsPanel value="workflow" className="space-y-4">
           {isHost && !snapshot.workflowProgress && <Card><CardHeader><CardTitle>Start shared workflow tracking</CardTitle><CardDescription>Convert a local strategy into explicit ordered steps. Agents may propose completion; a developer confirms it.</CardDescription></CardHeader><CardContent className="space-y-3"><div className="grid gap-3 sm:grid-cols-[1fr_130px]"><div className="space-y-1.5"><Label>Workflow</Label><Select value={workflowResource} onValueChange={(value) => typeof value === 'string' && setWorkflowResource(value)}><SelectTrigger><SelectValue>{localResources.find((item) => item.id === workflowResource && item.kind === 'workflow')?.name || 'Select workflow'}</SelectValue></SelectTrigger><SelectPopup>{localResources.filter((item) => item.kind === 'workflow').map((resource) => <SelectItem key={resource.id} value={resource.id}>{resource.name}</SelectItem>)}</SelectPopup></Select></div><div className="space-y-1.5"><Label>Version</Label><Input value={workflowVersion} onChange={(event) => setWorkflowVersion(event.target.value)} /></div></div><div className="space-y-1.5"><Label>Ordered steps, one per line</Label><Textarea className="min-h-32" value={workflowSteps} onChange={(event) => setWorkflowSteps(event.target.value)} /></div><Button onClick={selectWorkflow} disabled={!workflowResource || busy !== null}><Play /> Start workflow</Button></CardContent></Card>}
+          {!isHost && !snapshot.workflowProgress && <Card><CardHeader><CardTitle>No shared workflow yet</CardTitle><CardDescription>The host can select a reviewed workflow for this room. You can continue sharing context and handoff updates while you wait.</CardDescription></CardHeader></Card>}
           {snapshot.workflowProgress && (
             <Card>
               <CardHeader><CardTitle>{snapshot.workflowProgress.package.name}@{snapshot.workflowProgress.workflow.version}</CardTitle><CardDescription>Exact strategy retained at digest {snapshot.workflowProgress.workflow.digest.slice(0, 12)}… · shared progress revision {snapshot.workflowProgress.revision}</CardDescription></CardHeader>
