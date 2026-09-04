@@ -7,6 +7,7 @@ import {
   recordApproval,
   resolveApproval,
   getPendingApprovals,
+  FallbackDatabase,
   type StoredChatThread,
 } from './db.js';
 
@@ -117,5 +118,56 @@ describe('storage/db SQLite persistence', () => {
     resolveApproval('app-1', 'allow', db);
     pending = getPendingApprovals('ws-test-4', db);
     expect(pending).toHaveLength(0);
+  });
+
+  describe('FallbackDatabase (Node 20 runtime compatibility)', () => {
+    let fallbackDb: FallbackDatabase;
+
+    beforeEach(() => {
+      fallbackDb = new FallbackDatabase(':memory:');
+    });
+
+    it('saves, loads, updates, and clears threads with fallback store', () => {
+      saveChatThread({
+        workspaceId: 'fallback-ws-1',
+        providerId: 'codex-cli',
+        sessions: { 'codex-cli': { id: 's-1', started: true } },
+        profilesByProvider: { 'codex-cli': 'review' },
+        modelsByProvider: { 'codex-cli': 'gpt-5.6' },
+        effortsByProvider: { 'codex-cli': 'low' },
+        messages: [
+          { role: 'user', content: 'Fallback test' },
+          { role: 'assistant', content: 'Fallback reply', filesChanged: ['file.txt'] },
+        ],
+      }, fallbackDb);
+
+      const loaded = loadChatThread('fallback-ws-1', fallbackDb);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.workspaceId).toBe('fallback-ws-1');
+      expect(loaded?.providerId).toBe('codex-cli');
+      expect(loaded?.messages).toHaveLength(2);
+      expect(loaded?.messages[1].filesChanged).toEqual(['file.txt']);
+
+      clearChatThread('fallback-ws-1', fallbackDb);
+      expect(loadChatThread('fallback-ws-1', fallbackDb)).toBeNull();
+    });
+
+    it('records and resolves approvals with fallback store', () => {
+      recordApproval({
+        id: 'fb-app-1',
+        workspaceId: 'fallback-ws-2',
+        tool: 'Write',
+        input: { file: 'a.txt' },
+        description: 'Create a.txt',
+      }, fallbackDb);
+
+      let pending = getPendingApprovals('fallback-ws-2', fallbackDb);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].id).toBe('fb-app-1');
+
+      resolveApproval('fb-app-1', 'allow', fallbackDb);
+      pending = getPendingApprovals('fallback-ws-2', fallbackDb);
+      expect(pending).toHaveLength(0);
+    });
   });
 });

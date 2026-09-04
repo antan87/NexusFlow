@@ -1,14 +1,26 @@
 /**
  * @module storage/db
  * Server-side SQLite persistence using Node's built-in `node:sqlite` DatabaseSync.
+ * Gracefully falls back to a durable in-process store when running on Node < 22.5.
  * Stores chat threads, turns, and approval records durably in ~/.nexusflow/nexusflow.db.
  */
 
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { getConfigDir } from '../core/config.js';
+
+export interface IDatabaseSync {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...args: any[]): any;
+    get(...args: any[]): any;
+    all(...args: any[]): any[];
+  };
+  close(): void;
+}
 
 export interface StoredChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -42,7 +54,286 @@ export interface StoredApproval {
   resolvedAt?: number;
 }
 
-let activeDb: DatabaseSync | null = null;
+let NodeDatabaseSyncClass: typeof DatabaseSync | null = null;
+try {
+  const req = createRequire(import.meta.url);
+  const sqlite = req('node:sqlite');
+  if (sqlite && typeof sqlite.DatabaseSync === 'function') {
+    NodeDatabaseSyncClass = sqlite.DatabaseSync;
+  }
+} catch {
+  NodeDatabaseSyncClass = null;
+}
+
+/**
+ * Lightweight in-memory/JSON database fallback used when node:sqlite is not
+ * present in the runtime (e.g. Node 20 or earlier).
+ */
+export class FallbackDatabase implements IDatabaseSync {
+  private targetPath: string;
+  private threads = new Map<string, any>();
+  private turns = new Map<string, any[]>();
+  private approvals = new Map<string, any>();
+
+  constructor(targetPath: string) {
+    this.targetPath = targetPath;
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk(): void {
+    if (this.targetPath === ':memory:') return;
+    try {
+      const jsonPath = this.targetPath.endsWith('.db')
+        ? this.targetPath.replace(/\.db$/, '.json')
+        : this.targetPath + '.json';
+      if (fs.existsSync(jsonPath)) {
+        const raw = fs.readFileSync(jsonPath, 'utf8');
+        const data = JSON.parse(raw);
+        if (data.threads) {
+          for (const [k, v] of Object.entries(data.threads)) {
+            this.threads.set(k, v);
+          }
+        }
+        if (data.turns) {
+          for (const [k, v] of Object.entries(data.turns)) {
+            this.turns.set(k, v as any[]);
+          }
+        }
+        if (data.approvals) {
+          for (const [k, v] of Object.entries(data.approvals)) {
+            this.approvals.set(k, v);
+          }
+        }
+      }
+    } catch {
+      // Ignore disk load errors
+    }
+  }
+
+  private saveToDisk(): void {
+    if (this.targetPath === ':memory:') return;
+    try {
+      const jsonPath = this.targetPath.endsWith('.db')
+        ? this.targetPath.replace(/\.db$/, '.json')
+        : this.targetPath + '.json';
+      const dir = path.dirname(jsonPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = {
+        threads: Object.fromEntries(this.threads),
+        turns: Object.fromEntries(this.turns),
+        approvals: Object.fromEntries(this.approvals),
+      };
+      fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf8');
+    } catch {
+      // Ignore disk save errors
+    }
+  }
+
+  exec(_sql: string): void {
+    // Pragmas, schema definitions, transactions are no-ops in memory store
+  }
+
+  prepare(sql: string) {
+    const normalized = sql.trim().replace(/\s+/g, ' ');
+    const self = this;
+
+    if (normalized.startsWith('INSERT INTO chat_threads')) {
+      return {
+        run(
+          workspace_id: string,
+          provider_id: string | null,
+          sessions_json: string,
+          profiles_json: string,
+          models_json: string,
+          efforts_json: string,
+          updated_at: number,
+        ) {
+          self.threads.set(workspace_id, {
+            workspace_id,
+            provider_id,
+            sessions_json,
+            profiles_json,
+            models_json,
+            efforts_json,
+            updated_at,
+          });
+          self.saveToDisk();
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('DELETE FROM chat_turns WHERE workspace_id = ?')) {
+      return {
+        run(workspace_id: string) {
+          self.turns.delete(workspace_id);
+          self.saveToDisk();
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('INSERT INTO chat_turns')) {
+      return {
+        run(
+          id: string,
+          workspace_id: string,
+          turn_index: number,
+          role: string,
+          content: string,
+          kind: string | null,
+          execution_profile: string | null,
+          images_json: string | null,
+          files_changed_json: string | null,
+          created_at: number,
+        ) {
+          let list = self.turns.get(workspace_id);
+          if (!list) {
+            list = [];
+            self.turns.set(workspace_id, list);
+          }
+          list.push({
+            id,
+            workspace_id,
+            turn_index,
+            role,
+            content,
+            kind,
+            execution_profile,
+            images_json,
+            files_changed_json,
+            created_at,
+          });
+          self.saveToDisk();
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('SELECT * FROM chat_threads WHERE workspace_id = ?')) {
+      return {
+        run() { return {}; },
+        get(workspace_id: string) {
+          return self.threads.get(workspace_id);
+        },
+        all(workspace_id: string) {
+          const item = self.threads.get(workspace_id);
+          return item ? [item] : [];
+        },
+      };
+    }
+
+    if (normalized.startsWith('SELECT * FROM chat_turns WHERE workspace_id = ?')) {
+      return {
+        run() { return {}; },
+        get(workspace_id: string) {
+          const list = self.turns.get(workspace_id) || [];
+          return list[0];
+        },
+        all(workspace_id: string) {
+          const list = self.turns.get(workspace_id) || [];
+          return [...list].sort((a, b) => a.turn_index - b.turn_index);
+        },
+      };
+    }
+
+    if (normalized.startsWith('DELETE FROM chat_threads WHERE workspace_id = ?')) {
+      return {
+        run(workspace_id: string) {
+          self.threads.delete(workspace_id);
+          self.turns.delete(workspace_id);
+          self.saveToDisk();
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('INSERT INTO tool_approvals')) {
+      return {
+        run(
+          id: string,
+          workspace_id: string,
+          tool: string,
+          input_json: string,
+          description: string | null,
+          created_at: number,
+        ) {
+          const existing = self.approvals.get(id);
+          self.approvals.set(id, {
+            id,
+            workspace_id,
+            tool,
+            input_json,
+            description,
+            decision: existing ? existing.decision : 'pending',
+            created_at,
+            resolved_at: existing?.resolved_at ?? null,
+          });
+          self.saveToDisk();
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('UPDATE tool_approvals SET decision = ?, resolved_at = ? WHERE id = ?')) {
+      return {
+        run(decision: string, resolved_at: number, id: string) {
+          const existing = self.approvals.get(id);
+          if (existing) {
+            existing.decision = decision;
+            existing.resolved_at = resolved_at;
+            self.saveToDisk();
+          }
+          return { changes: 1 };
+        },
+        get() { return undefined; },
+        all() { return []; },
+      };
+    }
+
+    if (normalized.startsWith('SELECT * FROM tool_approvals WHERE workspace_id = ?')) {
+      return {
+        run() { return {}; },
+        get(workspace_id: string) {
+          const list = Array.from(self.approvals.values()).filter(
+            (a) => a.workspace_id === workspace_id && a.decision === 'pending',
+          );
+          return list[0];
+        },
+        all(workspace_id: string) {
+          const list = Array.from(self.approvals.values()).filter(
+            (a) => a.workspace_id === workspace_id && a.decision === 'pending',
+          );
+          return list.sort((a, b) => a.created_at - b.created_at);
+        },
+      };
+    }
+
+    return {
+      run() { return { changes: 0 }; },
+      get() { return undefined; },
+      all() { return []; },
+    };
+  }
+
+  close(): void {
+    this.saveToDisk();
+  }
+}
+
+let activeDb: IDatabaseSync | null = null;
 let activeDbPath: string | null = null;
 
 export function getDefaultDbPath(): string {
@@ -57,7 +348,7 @@ export function getDefaultDbPath(): string {
   return path.join(os.homedir(), '.nexusflow', 'nexusflow.db');
 }
 
-export function initDatabase(dbPath?: string): DatabaseSync {
+export function initDatabase(dbPath?: string): IDatabaseSync {
   if (!dbPath && activeDb) {
     return activeDb;
   }
@@ -75,82 +366,91 @@ export function initDatabase(dbPath?: string): DatabaseSync {
     }
   }
 
-  if (targetPath !== ':memory:') {
-    try {
-      const dir = path.dirname(targetPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+  // If native node:sqlite is available (Node 22.5+), use it
+  if (NodeDatabaseSyncClass) {
+    if (targetPath !== ':memory:') {
+      try {
+        const dir = path.dirname(targetPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      } catch {
+        targetPath = ':memory:';
       }
+    }
+
+    let db: IDatabaseSync;
+    try {
+      db = new NodeDatabaseSyncClass(targetPath);
     } catch {
       targetPath = ':memory:';
+      db = new NodeDatabaseSyncClass(targetPath);
     }
+
+    activeDb = db;
+    activeDbPath = targetPath;
+
+    // Optimize SQLite performance & concurrency with WAL mode
+    if (dbPath !== ':memory:') {
+      try { db.exec('PRAGMA journal_mode = WAL;'); } catch { /* ignore */ }
+    }
+    db.exec('PRAGMA foreign_keys = ON;');
+
+    // Schema creation
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_threads (
+        workspace_id TEXT PRIMARY KEY,
+        provider_id TEXT,
+        sessions_json TEXT NOT NULL DEFAULT '{}',
+        profiles_json TEXT NOT NULL DEFAULT '{}',
+        models_json TEXT NOT NULL DEFAULT '{}',
+        efforts_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_turns (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        turn_index INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        kind TEXT,
+        execution_profile TEXT,
+        images_json TEXT,
+        files_changed_json TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES chat_threads(workspace_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chat_turns_workspace ON chat_turns(workspace_id, turn_index);
+
+      CREATE TABLE IF NOT EXISTS tool_approvals (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        description TEXT,
+        decision TEXT NOT NULL DEFAULT 'pending',
+        created_at INTEGER NOT NULL,
+        resolved_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_tool_approvals_pending ON tool_approvals(workspace_id, decision);
+    `);
+
+    try {
+      db.exec('ALTER TABLE chat_turns ADD COLUMN files_changed_json TEXT;');
+    } catch {
+      // Column already exists
+    }
+
+    return db;
   }
 
-  let db: DatabaseSync;
-  try {
-    db = new DatabaseSync(targetPath);
-  } catch {
-    targetPath = ':memory:';
-    db = new DatabaseSync(targetPath);
-  }
-
+  // Graceful fallback when node:sqlite is not available (Node < 22.5)
+  const db = new FallbackDatabase(targetPath);
   activeDb = db;
   activeDbPath = targetPath;
-
-  // Optimize SQLite performance & concurrency with WAL mode
-  if (dbPath !== ':memory:') {
-    try { db.exec('PRAGMA journal_mode = WAL;'); } catch { /* ignore */ }
-  }
-  db.exec('PRAGMA foreign_keys = ON;');
-
-  // Schema creation
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS chat_threads (
-      workspace_id TEXT PRIMARY KEY,
-      provider_id TEXT,
-      sessions_json TEXT NOT NULL DEFAULT '{}',
-      profiles_json TEXT NOT NULL DEFAULT '{}',
-      models_json TEXT NOT NULL DEFAULT '{}',
-      efforts_json TEXT NOT NULL DEFAULT '{}',
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS chat_turns (
-      id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      turn_index INTEGER NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      kind TEXT,
-      execution_profile TEXT,
-      images_json TEXT,
-      files_changed_json TEXT,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (workspace_id) REFERENCES chat_threads(workspace_id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_chat_turns_workspace ON chat_turns(workspace_id, turn_index);
-
-    CREATE TABLE IF NOT EXISTS tool_approvals (
-      id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      tool TEXT NOT NULL,
-      input_json TEXT NOT NULL,
-      description TEXT,
-      decision TEXT NOT NULL DEFAULT 'pending',
-      created_at INTEGER NOT NULL,
-      resolved_at INTEGER
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tool_approvals_pending ON tool_approvals(workspace_id, decision);
-  `);
-
-  try {
-    db.exec('ALTER TABLE chat_turns ADD COLUMN files_changed_json TEXT;');
-  } catch {
-    // Column already exists
-  }
-
   return db;
 }
 
