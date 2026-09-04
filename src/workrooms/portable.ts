@@ -61,6 +61,13 @@ async function gitOutput(repoPath: string, args: string[], fallback: string): Pr
   }
 }
 
+export function escapeMarkdownTableCell(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/[\r\n]+/g, ' ');
+}
+
 async function readOptionalText(filePath: string): Promise<string> {
   try {
     const value = await fs.readFile(filePath, 'utf8');
@@ -209,7 +216,7 @@ export async function buildPublishedHandoff(
       defaultBranch: repo.defaultBranch || 'main',
       handoff: { branch, commit, ahead, behind, dirty, publishedAt, publishedBy: actorId },
     });
-    rows.push(`| ${repo.name.replace(/\|/g, '\\|')} | ${branch.replace(/\|/g, '\\|')} | ${commit.slice(0, 12)} | ${ahead} | ${behind} | ${dirty ? 'Dirty' : 'Clean'} |`);
+    rows.push(`| ${escapeMarkdownTableCell(repo.name)} | ${escapeMarkdownTableCell(branch)} | ${commit.slice(0, 12)} | ${ahead} | ${behind} | ${dirty ? 'Dirty' : 'Clean'} |`);
   }
   const markdown = [
     `# Workroom handoff — ${feature.branchName}`,

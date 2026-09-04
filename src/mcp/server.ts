@@ -9,7 +9,7 @@ import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';
 import type { NexusFlowConfig } from '../types.js';
-import { enabledTools, findTool, isAgentRole, type AgentRole, type ToolContext } from './tools.js';
+import { enabledTools, isAgentRole, type AgentRole, type ToolContext } from './tools.js';
 
 export interface McpServerOptions {
   workspacePath?: string;

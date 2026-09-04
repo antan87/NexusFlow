@@ -3,11 +3,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { saveAgent, getAllAgents } from '../resources/agents-catalog.js';
-import { atomicWriteJson } from '../resources/fs-safety.js';
-import { getAllSkills, getNexusFlowHome, saveSkill } from '../utils/skills-catalog.js';
+import { assertFileHandleMatchesPath, assertNoLinkedPathComponents, assertPathWithin, atomicWriteJson, readFileHandleAtMost } from '../resources/fs-safety.js';
+import { getAllSkills, getNexusFlowHome, getUserSkillsDir, saveSkill } from '../utils/skills-catalog.js';
 import { getCurrentVersion } from '../utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
 import {
+  WORKROOM_MAX_FILE_BYTES,
   WORKROOM_SCHEMA_VERSION,
   WorkroomValidationError,
   type ImmutableResourceRefV1,
@@ -140,18 +141,44 @@ async function hydrateSkillSupportingFiles(
     let content = file.content;
     let mode: number | undefined;
     if (skill.sourcePath) {
+      const skillsRoot = path.resolve(getUserSkillsDir());
       const sourceRoot = path.resolve(skill.sourcePath);
       const sourcePath = path.resolve(sourceRoot, directory, file.name);
       if (!sourcePath.startsWith(`${sourceRoot}${path.sep}`)) throw new WorkroomValidationError('Skill supporting file escaped its source package.');
-      const stats = await fs.lstat(sourcePath);
-      if (!stats.isFile() || stats.isSymbolicLink()) throw new WorkroomValidationError(`Linked or non-file skill support entry is not shareable: ${file.name}`);
-      const bytes = await fs.readFile(sourcePath);
+      const handle = await fs.open(sourcePath, 'r');
       try {
-        content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      } catch {
-        throw new WorkroomValidationError(`Skill supporting files must be UTF-8 text: ${file.name}`);
+        let stats;
+        try {
+          await assertNoLinkedPathComponents(skillsRoot, sourcePath);
+          const [matchingStats, skillsRootStats, canonicalRoot, canonicalSource] = await Promise.all([
+            assertFileHandleMatchesPath(handle, sourcePath),
+            fs.lstat(skillsRoot, { bigint: true }),
+            fs.realpath(skillsRoot),
+            fs.realpath(sourcePath),
+          ]);
+          assertPathWithin(canonicalRoot, canonicalSource);
+          if (!skillsRootStats.isDirectory() || skillsRootStats.isSymbolicLink()) throw new Error('The skills root is linked or not a directory.');
+          stats = matchingStats;
+        } catch (error) {
+          if (error instanceof WorkroomValidationError) throw error;
+          throw new WorkroomValidationError(`Linked, replaced, or non-file skill support entry is not shareable: ${file.name}`);
+        }
+        if (stats.size > BigInt(WORKROOM_MAX_FILE_BYTES)) {
+          throw new WorkroomValidationError(`Skill supporting file exceeds the ${WORKROOM_MAX_FILE_BYTES}-byte limit: ${file.name}`);
+        }
+        const bytes = await readFileHandleAtMost(handle, WORKROOM_MAX_FILE_BYTES + 1);
+        if (bytes.length > WORKROOM_MAX_FILE_BYTES) {
+          throw new WorkroomValidationError(`Skill supporting file exceeds the ${WORKROOM_MAX_FILE_BYTES}-byte limit: ${file.name}`);
+        }
+        try {
+          content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch {
+          throw new WorkroomValidationError(`Skill supporting files must be UTF-8 text: ${file.name}`);
+        }
+        mode = Number(stats.mode & 0o777n);
+      } finally {
+        await handle.close().catch(() => {});
       }
-      mode = stats.mode & 0o777;
     }
     if (content === undefined) throw new WorkroomValidationError(`Skill supporting file content is unavailable: ${file.name}`);
     const relativePath = `${directory}/${file.name}`;

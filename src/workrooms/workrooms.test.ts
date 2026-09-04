@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   WORKROOM_SCHEMA_VERSION,
   WORKROOM_MAX_EXPORT_PLAINTEXT_BYTES,
+  WORKROOM_MAX_FILE_BYTES,
   WORKROOM_MAX_RESOURCE_CATALOG_JSON_BYTES,
   WorkroomAuthorizationError,
   WorkroomRevisionError,
@@ -21,7 +22,7 @@ import { digestResourcePackage, makeResourceFile, validateResourcePackage } from
 import { applyCachedResource, assertLocalResourceCompatibility, cacheResourcePackage, digestLocalResourceDefinition, getLocalResourceDefinition, packageLocalResource } from './local-resources.js';
 import { assertResourceCatalogStorageSize, createInitialWorkroomState, WorkroomService } from './service.js';
 import { WorkroomSqliteStore } from './sqlite-store.js';
-import { digestPortableWorkroomContext, normalizeGitRemote, scanPortableContextWarnings } from './portable.js';
+import { digestPortableWorkroomContext, escapeMarkdownTableCell, normalizeGitRemote, scanPortableContextWarnings } from './portable.js';
 import { validateWorkroomExportPayload, WorkroomManager } from './manager.js';
 import { assertExportPlaintextSize, decryptExport, encryptedExportSchema, encryptExport } from './crypto.js';
 import { saveSkill } from '../utils/skills-catalog.js';
@@ -134,6 +135,13 @@ describe('Workroom portable contracts', () => {
     expect(warnings.join(' ')).toMatch(/diff/i);
     expect(warnings.join(' ')).toMatch(/path/i);
     expect(warnings.join(' ')).toMatch(/transcript/i);
+  });
+
+  it('escapes Markdown table delimiters, backslashes, and line breaks', () => {
+    expect(escapeMarkdownTableCell(String.raw`a\b`)).toBe(String.raw`a\\b`);
+    expect(escapeMarkdownTableCell('|')).toBe(String.raw`\|`);
+    expect(escapeMarkdownTableCell(String.raw`\|`)).toBe(String.raw`\\\|`);
+    expect(escapeMarkdownTableCell('a\r\nb\nc')).toBe('a b c');
   });
 
   it('rejects package traversal, case collisions, and digest tampering', () => {
@@ -770,6 +778,54 @@ describe('resource review and apply', () => {
     }
   });
 
+  it('rejects a skill supporting file that exceeds the package byte limit', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workroom-skill-limit-'));
+    cleanupPaths.push(root);
+    const previous = process.env.NEXUSFLOW_HOME;
+    process.env.NEXUSFLOW_HOME = root;
+    try {
+      const skill = await saveSkill({
+        id: 'large-support-skill',
+        name: 'large-support-skill',
+        description: 'Skill with an oversized supporting file.',
+        content: '# Large support skill',
+        references: [{ name: 'guide.md', relativePath: 'references/guide.md', content: '# Guide' }],
+      });
+      await fs.writeFile(path.join(skill.sourcePath!, 'references', 'guide.md'), Buffer.alloc(WORKROOM_MAX_FILE_BYTES + 1, 0x61));
+      await expect(packageLocalResource('skill', 'large-support-skill', '0.1.0')).rejects.toThrow(/exceeds.*byte limit/i);
+    } finally {
+      if (previous === undefined) delete process.env.NEXUSFLOW_HOME;
+      else process.env.NEXUSFLOW_HOME = previous;
+    }
+  });
+
+  it('rejects a skill package whose supporting directory is a symlink or junction', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workroom-skill-link-'));
+    cleanupPaths.push(root);
+    const previous = process.env.NEXUSFLOW_HOME;
+    process.env.NEXUSFLOW_HOME = root;
+    try {
+      const skill = await saveSkill({
+        id: 'linked-support-skill',
+        name: 'linked-support-skill',
+        description: 'Skill with a linked supporting directory.',
+        content: '# Linked support skill',
+        references: [{ name: 'guide.md', relativePath: 'references/guide.md', content: '# Safe guide' }],
+      });
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workroom-outside-'));
+      cleanupPaths.push(outside);
+      await fs.writeFile(path.join(outside, 'guide.md'), '# Outside guide', 'utf8');
+      const references = path.join(skill.sourcePath!, 'references');
+      await fs.rm(references, { recursive: true, force: true });
+      await fs.symlink(outside, references, process.platform === 'win32' ? 'junction' : 'dir');
+
+      await expect(packageLocalResource('skill', 'linked-support-skill', '0.1.0')).rejects.toThrow(/linked|not found/i);
+    } finally {
+      if (previous === undefined) delete process.env.NEXUSFLOW_HOME;
+      else process.env.NEXUSFLOW_HOME = previous;
+    }
+  });
+
   it('refuses to overwrite a local resource changed after package review', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workroom-local-revision-'));
     cleanupPaths.push(root);
@@ -1210,7 +1266,8 @@ describe('pinned HTTPS host/client', () => {
     });
     hosted.push(host);
     const request = https.request(`${host.url}/v1/events`, {
-      rejectUnauthorized: false,
+      ca: await fs.readFile(path.join(host.roomDir, 'certificate.pem'), 'utf8'),
+      rejectUnauthorized: true,
       headers: { Authorization: `Bearer ${host.hostAgentToken}` },
     });
     await new Promise<void>((resolve, reject) => {

@@ -12,6 +12,8 @@ import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { generate } from 'selfsigned';
 
+import { assertFileHandleMatchesPath, readFileHandleAtMost } from '../resources/fs-safety.js';
+
 import {
   WorkroomAuthorizationError,
   WORKROOM_MAX_RESOURCE_UPLOAD_BYTES,
@@ -20,7 +22,7 @@ import {
   type PortableFeatureBundleV1,
   type WorkroomDocumentName,
 } from './contracts.js';
-import { decryptExport, encryptExport, normalizeFingerprint, randomToken, tokenDigest, verifyPassword, type EncryptedExportV1 } from './crypto.js';
+import { decryptExport, encryptExport, normalizeFingerprint, tokenDigest, verifyPassword, type EncryptedExportV1 } from './crypto.js';
 import { createInitialWorkroomState, WorkroomService } from './service.js';
 import { WorkroomSqliteStore } from './sqlite-store.js';
 
@@ -657,13 +659,19 @@ export interface QuarantinedWorkroom {
 }
 
 async function readSmallImportMarker(markerPath: string): Promise<Record<string, unknown>> {
-  const stat = await fs.stat(markerPath);
-  if (stat.size > 16 * 1024) return {};
+  const maximumBytes = 16 * 1024;
+  const handle = await fs.open(markerPath, 'r');
   try {
-    const parsed = JSON.parse(await fs.readFile(markerPath, 'utf8')) as unknown;
+    const stat = await assertFileHandleMatchesPath(handle, markerPath);
+    if (stat.size > BigInt(maximumBytes)) return {};
+    const bytes = await readFileHandleAtMost(handle, maximumBytes + 1);
+    if (bytes.length > maximumBytes) return {};
+    const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
     return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
+  } finally {
+    await handle.close().catch(() => {});
   }
 }
 

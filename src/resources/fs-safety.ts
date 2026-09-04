@@ -1,5 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import type { BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 
 export function assertPathWithin(rootDir: string, targetPath: string): string {
   const root = path.resolve(rootDir);
@@ -14,6 +16,35 @@ function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String((error as NodeJS.ErrnoException).code)
     : undefined;
+}
+
+/** Reads no more than maximumBytes from an already-open descriptor. */
+export async function readFileHandleAtMost(handle: FileHandle, maximumBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('A positive safe byte limit is required.');
+  const output = Buffer.alloc(maximumBytes);
+  let offset = 0;
+  while (offset < output.length) {
+    const { bytesRead } = await handle.read(output, offset, output.length - offset, null);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return output.subarray(0, offset);
+}
+
+/** Confirms an open descriptor still names the same regular, non-linked path. */
+export async function assertFileHandleMatchesPath(handle: FileHandle, filePath: string): Promise<BigIntStats> {
+  const [handleStats, pathStats] = await Promise.all([
+    handle.stat({ bigint: true }),
+    fs.lstat(filePath, { bigint: true }),
+  ]);
+  if (!handleStats.isFile()
+    || !pathStats.isFile()
+    || pathStats.isSymbolicLink()
+    || handleStats.dev !== pathStats.dev
+    || handleStats.ino !== pathStats.ino) {
+    throw new Error(`Open file no longer matches its regular path: ${filePath}`);
+  }
+  return handleStats;
 }
 
 /**
