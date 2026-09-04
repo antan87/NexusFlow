@@ -223,7 +223,8 @@ describe('storage/db SQLite persistence', () => {
           messages: [{ role: 'user', content: 'Version 1' }],
         }, diskDb);
 
-        expect(fsMod.existsSync(jsonPath)).toBe(true);
+        const initialJson = fsMod.readFileSync(jsonPath, 'utf8');
+        expect(initialJson).toContain('Version 1');
 
         // Update to generate .bak copy
         saveChatThread({
@@ -236,7 +237,6 @@ describe('storage/db SQLite persistence', () => {
           messages: [{ role: 'user', content: 'Version 2' }],
         }, diskDb);
 
-        expect(fsMod.existsSync(bakPath)).toBe(true);
         const bakContent = JSON.parse(fsMod.readFileSync(bakPath, 'utf8'));
         expect(bakContent.turns['disk-ws-1'][0].content).toBe('Version 1');
 

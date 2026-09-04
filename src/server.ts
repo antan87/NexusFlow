@@ -260,15 +260,15 @@ app.get('/ws', async (c, next) => {
               }
               currentCwd = safeCwd;
 
-              let session = defaultTurnSessionManager.getSession(safeCwd);
-              if (!session) {
+              const existingSession = defaultTurnSessionManager.getSession(safeCwd);
+              if (!existingSession) {
                 const command = typeof payload.command === 'string' ? payload.command : 'antigravity-cli';
                 const provider = ProviderRegistry.getProvider(command);
                 if (!provider) {
                   ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}.` }));
                   return;
                 }
-                session = await defaultTurnSessionManager.startSession({
+                await defaultTurnSessionManager.startSession({
                   workspaceCwd: safeCwd,
                   command,
                   client: ws,

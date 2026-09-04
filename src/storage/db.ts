@@ -117,22 +117,24 @@ export class FallbackDatabase implements IDatabaseSync {
 
     let parsedData: any = null;
 
-    if (fs.existsSync(jsonPath)) {
-      try {
-        const raw = fs.readFileSync(jsonPath, 'utf8');
-        parsedData = JSON.parse(raw);
-      } catch (err) {
+    try {
+      const raw = fs.readFileSync(jsonPath, 'utf8');
+      parsedData = JSON.parse(raw);
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
         console.warn(`[FallbackDatabase] Failed to read or parse ${jsonPath}, attempting backup recovery:`, err);
-        parsedData = null;
       }
+      parsedData = null;
     }
 
-    if (!parsedData && fs.existsSync(bakPath)) {
+    if (!parsedData) {
       try {
         const raw = fs.readFileSync(bakPath, 'utf8');
         parsedData = JSON.parse(raw);
-      } catch (bakErr) {
-        console.warn(`[FallbackDatabase] Failed to read or parse backup ${bakPath}:`, bakErr);
+      } catch (bakErr: any) {
+        if (bakErr?.code !== 'ENOENT') {
+          console.warn(`[FallbackDatabase] Failed to read or parse backup ${bakPath}:`, bakErr);
+        }
         parsedData = null;
       }
     }
@@ -160,8 +162,10 @@ export class FallbackDatabase implements IDatabaseSync {
     if (this.targetPath === ':memory:') return;
     const { jsonPath, bakPath } = this.getJsonPaths();
     const dir = path.dirname(jsonPath);
-    if (!fs.existsSync(dir)) {
+    try {
       fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      // ignore
     }
 
     const data = {
@@ -174,19 +178,15 @@ export class FallbackDatabase implements IDatabaseSync {
 
     try {
       fs.writeFileSync(tempPath, content, 'utf8');
-      if (fs.existsSync(jsonPath)) {
-        try {
-          fs.copyFileSync(jsonPath, bakPath);
-        } catch {
-          // Ignore backup copy failure, proceed with atomic rename
-        }
+      try {
+        fs.copyFileSync(jsonPath, bakPath);
+      } catch {
+        // Ignore backup copy failure, proceed with atomic rename
       }
       fs.renameSync(tempPath, jsonPath);
     } catch (err) {
       try {
-        if (fs.existsSync(tempPath)) {
-          fs.unlinkSync(tempPath);
-        }
+        fs.unlinkSync(tempPath);
       } catch {
         // ignore unlink error
       }
