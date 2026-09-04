@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon, Sparkles, Shield, ChevronDown } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
+import { Badge } from '../../components/ui/badge.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { Textarea } from '../../components/ui/textarea.js';
@@ -23,6 +24,13 @@ interface AttachedImage {
   name: string;
   dataUrl: string;
   file?: File;
+}
+
+interface PendingApproval {
+  requestId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  description?: string;
 }
 
 const REASONING_EFFORT_OPTIONS = [
@@ -510,6 +518,19 @@ export function AgentChat({ ws }: AgentChatProps) {
   const sessionSwitchingRef = useRef(false);
   const sessionLoadRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
   const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+
+  const handleApprovalDecision = useCallback((requestId: string, decision: 'allow' | 'deny') => {
+    const socket = wsRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'approval_response',
+        requestId,
+        decision,
+      }));
+    }
+    setPendingApprovals(prev => prev.filter(a => a.requestId !== requestId));
+  }, []);
 
   useEffect(() => {
     latestRef.current = { messages, agentName, profilesByProvider, modelsByProvider, effortsByProvider };
@@ -977,12 +998,25 @@ export function AgentChat({ ws }: AgentChatProps) {
               [providerId]: { id: payload.id, started: true },
             }));
           }
+        } else if (payload.type === 'approval_request' && typeof payload.requestId === 'string') {
+          setPendingApprovals(prev => [
+            ...prev.filter(a => a.requestId !== payload.requestId),
+            {
+              requestId: payload.requestId,
+              tool: typeof payload.tool === 'string' ? payload.tool : 'Tool',
+              input: (payload.input && typeof payload.input === 'object') ? payload.input : {},
+              description: typeof payload.description === 'string' ? payload.description : undefined,
+            },
+          ]);
         } else if (payload.type === 'accepted' && typeof payload.turnId === 'string') {
           pendingAdmissionsRef.current = pendingAdmissionsRef.current
             .filter(admission => admission.turnId !== payload.turnId);
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
-          if (payload.state !== 'busy') closeTurn();
+          if (payload.state !== 'busy') {
+            closeTurn();
+            setPendingApprovals([]);
+          }
         } else if (payload.type === 'system') {
           appendSystemNote(payload.message, 'note');
         } else if (payload.type === 'rejected' && payload.reason === 'busy') {
@@ -1003,6 +1037,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           );
         } else if (payload.type === 'error') {
           pendingAdmissionsRef.current = [];
+          setPendingApprovals([]);
           if (typeof payload.message === 'string' && payload.message.toLowerCase().includes('session')) {
             updateSessions(prev => {
               const next = { ...prev };
@@ -1016,6 +1051,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           closeTurn();
         } else if (payload.type === 'close') {
           pendingAdmissionsRef.current = [];
+          setPendingApprovals([]);
           setConnected(false);
           setConnecting(false);
           setBusy(false);
@@ -1549,6 +1585,58 @@ export function AgentChat({ ws }: AgentChatProps) {
             )}
           </div>
         )}
+        {pendingApprovals.map((req) => (
+          <div
+            key={req.requestId}
+            role="alert"
+            aria-live="polite"
+            className="flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs shadow-xs animate-fade-in"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 font-semibold text-amber-500">
+                <Shield size={14} className="animate-pulse shrink-0" />
+                <span>Tool Approval Required</span>
+                <Badge variant="outline" className="text-[10px] uppercase font-mono border-amber-500/40 text-amber-600 dark:text-amber-400">
+                  {req.tool}
+                </Badge>
+                {req.description && (
+                  <span className="text-[11px] font-normal text-muted-foreground italic">
+                    ({req.description})
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => handleApprovalDecision(req.requestId, 'allow')}
+                  className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 cursor-pointer"
+                >
+                  <Check size={12} />
+                  <span>Approve</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleApprovalDecision(req.requestId, 'deny')}
+                  className="h-7 text-xs text-destructive hover:bg-destructive/10 border-border/80 gap-1 cursor-pointer"
+                >
+                  <X size={12} />
+                  <span>Deny</span>
+                </Button>
+              </div>
+            </div>
+            {req.input && (
+              <div className="rounded-md bg-background/80 p-2 font-mono text-[11px] text-foreground overflow-x-auto max-h-24 select-text">
+                {typeof req.input.command === 'string'
+                  ? `Command: ${req.input.command}`
+                  : typeof req.input.path === 'string'
+                  ? `File: ${req.input.path}`
+                  : JSON.stringify(req.input, null, 2)}
+              </div>
+            )}
+          </div>
+        ))}
         <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-border/50 bg-muted/20 px-3 py-2 text-xs">
             <div className="flex flex-wrap items-center gap-1.5">

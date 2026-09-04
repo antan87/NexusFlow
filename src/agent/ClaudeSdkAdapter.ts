@@ -151,14 +151,20 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'approval_required': {
-              if (this.currentExecutionProfile === 'workspace-write') {
-                // Tool-class gating: auto-accept in-workspace file edits and read-only MCP coordination tools.
-                // Mutating lifecycle tools and arbitrary shell execution require approval (fail-closed).
-                const toolName = event.tool.replace(/^(mcp__nexusflow__|nexusflow__)/, '');
+              const toolName = event.tool.replace(/^(mcp__nexusflow__|nexusflow__)/, '');
 
-                if (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName)) {
-                  handle.respondToApproval(event.requestId, { behavior: 'allow' });
-                } else if (MUTATING_LIFECYCLE_TOOLS.has(toolName)) {
+              if (this.currentExecutionProfile === 'workspace-write' && (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName))) {
+                handle.respondToApproval(event.requestId, { behavior: 'allow' });
+              } else if (this.listenerCount('approval_request') > 0) {
+                // Interactive human-in-the-loop approval: forward to UI client
+                this.emit('approval_request', {
+                  requestId: event.requestId,
+                  tool: event.tool,
+                  input: (event as any).input ?? {},
+                  description: (event as any).description,
+                });
+              } else if (this.currentExecutionProfile === 'workspace-write') {
+                if (MUTATING_LIFECYCLE_TOOLS.has(toolName)) {
                   handle.respondToApproval(event.requestId, {
                     behavior: 'deny',
                     message: `Workspace lifecycle tool '${toolName}' requires approval and is unavailable in embedded chat. Run in CLI, full terminal, or dashboard.`,
@@ -202,5 +208,19 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
         }
       }
     })();
+  }
+
+  respondToApproval(requestId: string, decision: 'allow' | 'deny', message?: string): void {
+    if (!this.handle) return;
+    if (decision === 'allow') {
+      this.handle.respondToApproval(requestId, { behavior: 'allow' });
+      this.emit('system', `Approved tool execution.`);
+    } else {
+      this.handle.respondToApproval(requestId, {
+        behavior: 'deny',
+        message: message || 'Action denied by user in chat.',
+      });
+      this.emit('system', `Denied tool execution.`);
+    }
   }
 }

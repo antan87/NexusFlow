@@ -298,6 +298,34 @@ describe('AcpCliAdapter', () => {
     expect(errors).toEqual(['GitHub Copilot CLI failed: transport broke']);
     expect(idle).toHaveLength(1);
   });
+
+  it('emits approval_request and resolves via respondToApproval when listener is attached', async () => {
+    const connection = makeConnection();
+    const { harness, getClient } = makeHarness(connection);
+    await harness.start('C:\\workspace');
+
+    const client = getClient();
+    const requests: any[] = [];
+    harness.on('approval_request', (req) => {
+      requests.push(req);
+      harness.respondToApproval(req.requestId, 'allow');
+    });
+
+    const permissionPromise = client.requestPermission({
+      options: [
+        { kind: 'allow_once', optionId: 'opt-allow' },
+        { kind: 'reject_once', optionId: 'opt-deny' },
+      ],
+      toolCall: { title: 'Terminal Command', kind: 'execute' } as any,
+    } as any);
+
+    const response = await permissionPromise;
+    expect(requests).toHaveLength(1);
+    expect(requests[0].tool).toBe('Terminal Command');
+    expect(response).toEqual({
+      outcome: { outcome: 'selected', optionId: 'opt-allow' },
+    });
+  });
 });
 
 describe('isSafeAcpSessionId', () => {

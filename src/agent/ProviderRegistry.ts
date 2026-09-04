@@ -40,12 +40,20 @@ export interface ProviderCapabilities {
   sessionIdFormat?: 'uuid' | 'opaque';
 }
 
-export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session' | 'usage';
+export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session' | 'usage' | 'approval_request';
+
+export interface ToolApprovalRequest {
+  requestId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  description?: string;
+}
 
 export interface AgentHarness {
   start(cwd: string, session?: AgentSession): Promise<void>;
   send(data: string, executionProfile?: AgentExecutionProfile): Promise<void>;
   stop(): void;
+  respondToApproval?(requestId: string, decision: 'allow' | 'deny', message?: string): void;
   on(event: AgentEvent, listener: (...args: any[]) => void): this;
   /**
    * Detaches a listener, so a caller that attaches per operation on a long-lived

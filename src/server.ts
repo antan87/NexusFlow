@@ -282,6 +282,16 @@ app.get('/ws', async (c, next) => {
         if (!isCurrentAgent()) return;
         targetWs.send(JSON.stringify({ type: 'usage', usage }));
       });
+      startedAgent.on('approval_request', (approval: any) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({
+          type: 'approval_request',
+          requestId: approval.requestId,
+          tool: approval.tool,
+          input: approval.input,
+          description: approval.description,
+        }));
+      });
       startedAgent.on('error', (error: Error) => {
         if (!isCurrentAgent()) return;
         targetWs.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
@@ -396,6 +406,13 @@ app.get('/ws', async (c, next) => {
                   message: 'No active agent session. Please start or reconnect the agent.',
                   ...(turnId ? { turnId } : {}),
                 }));
+              }
+            } else if (payload.type === 'approval_response') {
+              const requestId = typeof payload.requestId === 'string' ? payload.requestId : '';
+              const decision = payload.decision === 'allow' ? 'allow' : 'deny';
+              const message = typeof payload.message === 'string' ? payload.message : undefined;
+              if (agent && typeof agent.respondToApproval === 'function' && requestId) {
+                agent.respondToApproval(requestId, decision, message);
               }
             } else if (payload.type === 'stop') {
               turnGate.settle();
