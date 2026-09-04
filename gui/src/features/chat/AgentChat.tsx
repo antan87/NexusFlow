@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon, Sparkles, Shield, ChevronDown } from 'lucide-react';
+import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon, Sparkles, Shield, ChevronDown, FileCode, Undo2 } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
@@ -346,11 +346,15 @@ const MessageBubble = memo(function MessageBubble({
   idx,
   copied,
   onCopy,
+  onRevertTurn,
+  isReverting,
 }: {
   msg: ChatMessage;
   idx: number;
   copied: boolean;
   onCopy: (idx: number, content: string) => void;
+  onRevertTurn?: (files: string[]) => void;
+  isReverting?: boolean;
 }) {
   if (msg.role === 'system') {
     return (
@@ -398,6 +402,36 @@ const MessageBubble = memo(function MessageBubble({
               </div>
             ) : (
               <ChatMarkdown content={msg.content} />
+            )}
+            {msg.filesChanged && msg.filesChanged.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1.5 rounded-md border border-border/70 bg-muted/30 p-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                    <FileCode size={13} className="text-primary" />
+                    <span>{msg.filesChanged.length} file{msg.filesChanged.length > 1 ? 's' : ''} modified</span>
+                  </div>
+                  {onRevertTurn && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isReverting}
+                      onClick={() => onRevertTurn(msg.filesChanged!)}
+                      className="h-6 text-[11px] text-destructive hover:bg-destructive/10 border-border/80 gap-1 cursor-pointer disabled:opacity-50"
+                      title="Undo and revert changes made to these files"
+                    >
+                      {isReverting ? <RefreshCw size={11} className="animate-spin" /> : <Undo2 size={11} />}
+                      <span>{isReverting ? 'Reverting...' : 'Revert Turn'}</span>
+                    </Button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {msg.filesChanged.map((f, i) => (
+                    <span key={i} className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground border border-border/50">
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
             )}
             <button
               onClick={() => onCopy(idx, msg.content)}
@@ -519,6 +553,37 @@ export function AgentChat({ ws }: AgentChatProps) {
   const sessionLoadRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
   const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [revertingFiles, setRevertingFiles] = useState<string[] | null>(null);
+  const turnFilesRef = useRef<Set<string>>(new Set());
+
+  const handleRevertTurn = useCallback(async (files: string[]) => {
+    setRevertingFiles(files);
+    try {
+      const res = await fetch(`${API_BASE}/api/workspace/${encodeURIComponent(ws.branchName)}/changes/revert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        appendSystemNote(`Failed to revert turn changes: ${data.error || res.statusText}`, 'error');
+        return;
+      }
+      appendSystemNote(`Reverted changes to: ${files.join(', ')}`, 'note');
+      setMessages((prev) => prev.map((m) => {
+        if (m.filesChanged === files) {
+          const rest = { ...m };
+          delete rest.filesChanged;
+          return rest;
+        }
+        return m;
+      }));
+    } catch (err: any) {
+      appendSystemNote(`Failed to revert turn changes: ${err?.message || String(err)}`, 'error');
+    } finally {
+      setRevertingFiles(null);
+    }
+  }, [ws.branchName, appendSystemNote]);
 
   const handleApprovalDecision = useCallback((requestId: string, decision: 'allow' | 'deny') => {
     const socket = wsRef.current;
@@ -1028,9 +1093,33 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'accepted' && typeof payload.turnId === 'string') {
           pendingAdmissionsRef.current = pendingAdmissionsRef.current
             .filter(admission => admission.turnId !== payload.turnId);
+        } else if (payload.type === 'file_changed') {
+          if (Array.isArray(payload.paths)) {
+            for (const p of payload.paths) {
+              if (typeof p === 'string' && p.trim()) {
+                turnFilesRef.current.add(p.trim());
+              }
+            }
+          }
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
           if (payload.state !== 'busy') {
+            const filesModified = Array.from(turnFilesRef.current);
+            turnFilesRef.current.clear();
+            if (filesModified.length > 0) {
+              setMessages((prev) => {
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'assistant') {
+                    const updated = [...prev];
+                    const existing = updated[i].filesChanged || [];
+                    const merged = Array.from(new Set([...existing, ...filesModified]));
+                    updated[i] = { ...updated[i], filesChanged: merged };
+                    return updated;
+                  }
+                }
+                return prev;
+              });
+            }
             closeTurn();
             setPendingApprovals([]);
           }
@@ -1055,6 +1144,7 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'error') {
           pendingAdmissionsRef.current = [];
           setPendingApprovals([]);
+          turnFilesRef.current.clear();
           if (typeof payload.message === 'string' && payload.message.toLowerCase().includes('session')) {
             updateSessions(prev => {
               const next = { ...prev };
@@ -1069,6 +1159,7 @@ export function AgentChat({ ws }: AgentChatProps) {
         } else if (payload.type === 'close') {
           pendingAdmissionsRef.current = [];
           setPendingApprovals([]);
+          turnFilesRef.current.clear();
           setConnected(false);
           setConnecting(false);
           setBusy(false);
@@ -1542,7 +1633,15 @@ export function AgentChat({ ws }: AgentChatProps) {
           </div>
         )}
         {messages.map((msg, idx) => (
-          <MessageBubble key={idx} msg={msg} idx={idx} copied={copiedIdx === idx} onCopy={copyMessage} />
+          <MessageBubble
+            key={idx}
+            msg={msg}
+            idx={idx}
+            copied={copiedIdx === idx}
+            onCopy={copyMessage}
+            onRevertTurn={handleRevertTurn}
+            isReverting={revertingFiles === msg.filesChanged}
+          />
         ))}
         {showThinking && (
           <div className="flex justify-start">

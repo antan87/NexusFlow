@@ -29,7 +29,7 @@ describe('storage/db SQLite persistence', () => {
       effortsByProvider: { 'claude-cli': 'high' },
       messages: [
         { role: 'user', content: 'Hello', ts: 1000 },
-        { role: 'assistant', content: 'Hi there!', ts: 2000 },
+        { role: 'assistant', content: 'Hi there!', ts: 2000, filesChanged: ['src/a.ts', 'src/b.ts'] },
         { role: 'system', content: 'File edited', kind: 'note', ts: 3000 },
       ],
     };
@@ -46,7 +46,7 @@ describe('storage/db SQLite persistence', () => {
     expect(loaded?.effortsByProvider['claude-cli']).toBe('high');
     expect(loaded?.messages).toHaveLength(3);
     expect(loaded?.messages[0]).toEqual({ role: 'user', content: 'Hello', ts: 1000 });
-    expect(loaded?.messages[1]).toEqual({ role: 'assistant', content: 'Hi there!', ts: 2000 });
+    expect(loaded?.messages[1]).toEqual({ role: 'assistant', content: 'Hi there!', ts: 2000, filesChanged: ['src/a.ts', 'src/b.ts'] });
     expect(loaded?.messages[2]).toEqual({ role: 'system', content: 'File edited', kind: 'note', ts: 3000 });
   });
 

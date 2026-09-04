@@ -17,6 +17,7 @@ export interface StoredChatMessage {
   kind?: 'error' | 'note';
   executionProfile?: string;
   images?: string[];
+  filesChanged?: string[];
 }
 
 export interface StoredChatThread {
@@ -123,6 +124,7 @@ export function initDatabase(dbPath?: string): DatabaseSync {
       kind TEXT,
       execution_profile TEXT,
       images_json TEXT,
+      files_changed_json TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (workspace_id) REFERENCES chat_threads(workspace_id) ON DELETE CASCADE
     );
@@ -142,6 +144,12 @@ export function initDatabase(dbPath?: string): DatabaseSync {
 
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_pending ON tool_approvals(workspace_id, decision);
   `);
+
+  try {
+    db.exec('ALTER TABLE chat_turns ADD COLUMN files_changed_json TEXT;');
+  } catch {
+    // Column already exists
+  }
 
   return db;
 }
@@ -192,8 +200,8 @@ export function saveChatThread(
     deleteTurnsStmt.run(thread.workspaceId);
 
     const insertTurnStmt = db.prepare(`
-      INSERT INTO chat_turns (id, workspace_id, turn_index, role, content, kind, execution_profile, images_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO chat_turns (id, workspace_id, turn_index, role, content, kind, execution_profile, images_json, files_changed_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (let i = 0; i < thread.messages.length; i++) {
@@ -208,6 +216,7 @@ export function saveChatThread(
         msg.kind ?? null,
         msg.executionProfile ?? null,
         msg.images && msg.images.length > 0 ? JSON.stringify(msg.images) : null,
+        msg.filesChanged && msg.filesChanged.length > 0 ? JSON.stringify(msg.filesChanged) : null,
         msg.ts ?? Date.now(),
       );
     }
@@ -238,6 +247,14 @@ export function loadChatThread(
         // Ignore
       }
     }
+    let filesChanged: string[] | undefined;
+    if (row.files_changed_json) {
+      try {
+        filesChanged = JSON.parse(row.files_changed_json);
+      } catch {
+        // Ignore
+      }
+    }
     return {
       role: row.role as 'user' | 'assistant' | 'system',
       content: row.content,
@@ -245,6 +262,7 @@ export function loadChatThread(
       kind: row.kind ? (row.kind as 'error' | 'note') : undefined,
       executionProfile: row.execution_profile || undefined,
       images,
+      filesChanged,
     };
   });
 

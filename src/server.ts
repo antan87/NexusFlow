@@ -293,6 +293,14 @@ app.get('/ws', async (c, next) => {
           description: approval.description,
         }));
       });
+      startedAgent.on('file_changed', (info: any) => {
+        if (!isCurrentAgent()) return;
+        targetWs.send(JSON.stringify({
+          type: 'file_changed',
+          kind: info?.kind,
+          paths: info?.paths,
+        }));
+      });
       startedAgent.on('error', (error: Error) => {
         if (!isCurrentAgent()) return;
         targetWs.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
@@ -2108,6 +2116,64 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     return c.json({ diff });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13b. Revert changes to specific files in workspace sub-repositories
+app.post('/api/workspace/:id/changes/revert', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => null) as { repo?: string; files?: string[] } | null;
+    const files = Array.isArray(body?.files) ? body.files.filter((f): f is string => typeof f === 'string' && f.trim().length > 0) : [];
+    if (files.length === 0) {
+      return c.json({ error: 'Missing files array in request body.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+
+    const repoName = typeof body?.repo === 'string' && body.repo ? body.repo : (feature?.repos[0] ? path.basename(feature.repos[0]) : null);
+
+    let worktreePath: string;
+    if (feature && isInPlace(feature)) {
+      const matches = repoName ? feature.repos.filter((r) => path.basename(r) === repoName) : feature.repos;
+      if (matches.length === 0) {
+        return c.json({ error: `Unknown repo in this workspace.` }, 404);
+      }
+      worktreePath = matches[0]!;
+    } else {
+      worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
+    }
+
+    const reverted: string[] = [];
+    for (const file of files) {
+      const resolvedFile = assertWithin(worktreePath, path.join(worktreePath, file));
+      const relFile = path.relative(worktreePath, resolvedFile);
+
+      try {
+        const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', relFile], { cwd: worktreePath });
+        const statusLine = statusOut.trim();
+        if (statusLine.startsWith('??')) {
+          await fs.unlink(resolvedFile).catch(() => {});
+          reverted.push(relFile);
+        } else if (statusLine) {
+          await execa('git', ['checkout', 'HEAD', '--', relFile], { cwd: worktreePath });
+          reverted.push(relFile);
+        }
+      } catch {
+        await execa('git', ['checkout', 'HEAD', '--', relFile], { cwd: worktreePath }).catch(() => {});
+        reverted.push(relFile);
+      }
+    }
+
+    return c.json({ success: true, reverted });
   } catch (error) {
     return errorResponse(c, error);
   }

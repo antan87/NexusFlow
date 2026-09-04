@@ -147,6 +147,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'file_changed':
+              this.emit('file_changed', { kind: event.kind, paths: event.paths });
               this.emit('system', `File ${event.kind}: ${event.paths.join(', ')}`);
               break;
 

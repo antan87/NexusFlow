@@ -40,7 +40,7 @@ export interface ProviderCapabilities {
   sessionIdFormat?: 'uuid' | 'opaque';
 }
 
-export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session' | 'usage' | 'approval_request';
+export type AgentEvent = 'data' | 'close' | 'error' | 'system' | 'idle' | 'session' | 'usage' | 'approval_request' | 'file_changed';
 
 export interface ToolApprovalRequest {
   requestId: string;

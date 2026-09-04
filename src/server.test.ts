@@ -2192,6 +2192,35 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('POST /api/workspace/:id/changes/revert', () => {
+    it('rejects non-local origins', async () => {
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://evil.com', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['src/index.ts'] }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it('rejects empty files array', async () => {
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: [] }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects path traversal in file paths', async () => {
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['../../etc/passwd'] }),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('/api/chat/thread endpoints (SQLite persistence)', () => {
     it('saves, retrieves, and clears chat thread in SQLite', async () => {
       const threadData = {

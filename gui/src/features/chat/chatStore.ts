@@ -16,6 +16,8 @@ export interface ChatMessage {
   executionProfile?: ChatExecutionProfile;
   /** Attached images (file paths or data URLs) for this turn. */
   images?: string[];
+  /** Files modified during this assistant turn. */
+  filesChanged?: string[];
 }
 
 export interface ChatStore {
