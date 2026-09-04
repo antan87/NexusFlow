@@ -275,11 +275,6 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
   };
 }
 
-function formatShortProviderName(name?: string): string {
-  if (!name) return 'Select Agent';
-  return name.replace(/\s*\((Local CLI|First-Party SDK)\)$/, '');
-}
-
 function formatShortProfileLabel(label?: string): string {
   if (!label) return 'Review';
   if (label.toLowerCase().includes('review')) return 'Review';
@@ -1798,7 +1793,7 @@ export function AgentChat({ ws }: AgentChatProps) {
                   className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                 >
                   {currentProvider?.icon === 'Bot' ? <Bot size={13} className="text-primary" /> : <Cpu size={13} className="text-primary" />}
-                  <span>{formatShortProviderName(currentProvider?.name)}</span>
+                  <span>{currentProvider?.name ?? 'Select Agent'}</span>
                   <ChevronDown size={11} className="opacity-50 ml-0.5" />
                 </MenuTrigger>
                 <MenuPopup align="start" side="top">
