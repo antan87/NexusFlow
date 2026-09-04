@@ -2013,7 +2013,7 @@ export function AgentChat({ ws }: AgentChatProps) {
                   el.style.height = 'auto';
                 }
               }}
-              placeholder={connected ? 'Message the agent... (Shift+Enter for new line, Ctrl+V to paste images)' : 'Start the agent or press Enter (Ctrl+V to paste images)...'}
+              placeholder={connected ? 'Message the agent... (Shift+Enter for new line)' : 'Start the agent or press Enter...'}
               unstyled
               className="flex-1 [&_[data-slot=textarea]]:max-h-[200px] [&_[data-slot=textarea]]:min-h-11 [&_[data-slot=textarea]]:resize-none [&_[data-slot=textarea]]:text-sm"
               rows={1}
