@@ -96,7 +96,10 @@ export async function getAllAgents(): Promise<CodexAgentItem[]> {
   return agents.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export async function saveAgent(input: unknown): Promise<CodexAgentItem> {
+export async function saveAgent(
+  input: unknown,
+  options: { readonly beforeCommit?: () => Promise<void> } = {},
+): Promise<CodexAgentItem> {
   const agent = validateCodexAgentInput(input);
   const id = agent.id ?? agent.name;
 
@@ -110,10 +113,12 @@ export async function saveAgent(input: unknown): Promise<CodexAgentItem> {
     const staging = await fs.mkdtemp(path.join(root, `.staging-${id}-`));
     const backup = path.join(root, `.backup-${id}-${randomUUID()}`);
     let movedExisting = false;
+    let installedStaging = false;
     try {
       await fs.writeFile(path.join(staging, 'agent.toml'), serializeCodexAgentToml(agent), 'utf-8');
       const metadata: AgentMetadataFile = { schemaVersion: 1, category: agent.category };
       await atomicWriteJson(path.join(staging, 'resource.json'), metadata);
+      await options.beforeCommit?.();
 
       if (await fse.pathExists(target)) {
         await assertNoLinkedPathComponents(root, target);
@@ -121,16 +126,18 @@ export async function saveAgent(input: unknown): Promise<CodexAgentItem> {
         movedExisting = true;
       }
       await fs.rename(staging, target);
+      installedStaging = true;
+      const loaded = await loadAgentFromDir(target);
       if (movedExisting) await fse.remove(backup).catch(() => {});
+      return loaded;
     } catch (error) {
       await fse.remove(staging).catch(() => {});
-      if (movedExisting && !(await fse.pathExists(target)) && (await fse.pathExists(backup))) {
+      if (installedStaging) await fse.remove(target).catch(() => {});
+      if (movedExisting && (await fse.pathExists(backup))) {
         await fs.rename(backup, target).catch(() => {});
       }
       throw error;
     }
-
-    return loadAgentFromDir(target);
   });
 }
 

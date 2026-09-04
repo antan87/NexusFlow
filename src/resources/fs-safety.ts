@@ -1,5 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import type { BigIntStats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 
 export function assertPathWithin(rootDir: string, targetPath: string): string {
   const root = path.resolve(rootDir);
@@ -14,6 +16,46 @@ function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String((error as NodeJS.ErrnoException).code)
     : undefined;
+}
+
+/** Reads no more than maximumBytes from an already-open descriptor. */
+export async function readFileHandleAtMost(handle: FileHandle, maximumBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('A positive safe byte limit is required.');
+  const output = Buffer.alloc(maximumBytes);
+  let offset = 0;
+  while (offset < output.length) {
+    const { bytesRead } = await handle.read(output, offset, output.length - offset, null);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return output.subarray(0, offset);
+}
+
+/** Confirms an open descriptor still names the same regular, non-linked path. */
+export async function assertFileHandleMatchesPath(handle: FileHandle, filePath: string): Promise<BigIntStats> {
+  const parentHandle = await fs.open(path.dirname(filePath), 'r');
+  try {
+    const [handleStats, pathStats, parentStats] = await Promise.all([
+      handle.stat({ bigint: true }),
+      fs.lstat(filePath, { bigint: true }),
+      parentHandle.stat({ bigint: true }),
+    ]);
+    // Node 22 can report lstat().dev as zero on Windows. The open parent has the
+    // real volume identity, while the bigint inode still binds the path entry.
+    const pathDeviceMatches = pathStats.dev === 0n || handleStats.dev === pathStats.dev;
+    if (!handleStats.isFile()
+      || !pathStats.isFile()
+      || pathStats.isSymbolicLink()
+      || !parentStats.isDirectory()
+      || handleStats.dev !== parentStats.dev
+      || !pathDeviceMatches
+      || handleStats.ino !== pathStats.ino) {
+      throw new Error(`Open file no longer matches its regular path: ${filePath}`);
+    }
+    return handleStats;
+  } finally {
+    await parentHandle.close().catch(() => {});
+  }
 }
 
 /**
@@ -62,10 +104,15 @@ export async function assertPathIsNotLink(targetPath: string): Promise<void> {
   }
 }
 
-export async function atomicWriteFile(filePath: string, data: string | Uint8Array): Promise<void> {
+export async function atomicWriteFile(
+  filePath: string,
+  data: string | Uint8Array,
+  beforeCommit?: () => Promise<void>,
+): Promise<void> {
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
     await fs.writeFile(tempPath, data);
+    await beforeCommit?.();
     await fs.rename(tempPath, filePath);
   } catch (error) {
     await fs.unlink(tempPath).catch(() => {});

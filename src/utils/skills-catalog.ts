@@ -768,7 +768,13 @@ export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]
 /**
  * Saves or updates a portable skill package.
  */
-export async function saveSkill(skill: Partial<SkillItem> & { name: string; content: string }): Promise<SkillItem> {
+export async function saveSkill(
+  skill: Partial<SkillItem> & { name: string; content: string },
+  options: {
+    readonly beforeCommit?: () => Promise<void>;
+    readonly supportFileModes?: Readonly<Record<string, number>>;
+  } = {},
+): Promise<SkillItem> {
   const rawId = skill.id || skill.name;
   const idResult = resourceIdSchema.safeParse(rawId);
   if (!idResult.success) {
@@ -797,6 +803,7 @@ export async function saveSkill(skill: Partial<SkillItem> & { name: string; cont
     const stagingDir = await fs.mkdtemp(path.join(userSkillsDir, `.staging-${id}-`));
     const backupDir = path.join(userSkillsDir, `.backup-${id}-${randomUUID()}`);
     let movedExisting = false;
+    let installedStaging = false;
     try {
       let existingFrontmatter: ReturnType<typeof skillFrontmatterSchema.parse> | undefined;
       if (await fse.pathExists(targetDir)) {
@@ -862,9 +869,21 @@ export async function saveSkill(skill: Partial<SkillItem> & { name: string; cont
           if (!file.name || path.basename(file.name) !== file.name || file.content === undefined) {
             throw new Error(`Invalid ${directory} file name: ${file.name || '(empty)'}`);
           }
-          await fs.writeFile(path.join(supportDir, file.name), file.content, 'utf-8');
+          const supportPath = path.join(supportDir, file.name);
+          await fs.writeFile(supportPath, file.content, 'utf-8');
+          const relativePath = `${directory}/${file.name}`;
+          const mode = options.supportFileModes?.[relativePath];
+          if (mode !== undefined) {
+            try {
+              await fs.chmod(supportPath, mode);
+            } catch (error) {
+              if (process.platform !== 'win32') throw error;
+            }
+          }
         }
       }
+
+      await options.beforeCommit?.();
 
       if (await fse.pathExists(targetDir)) {
         await assertNoLinkedPathComponents(userSkillsDir, targetDir);
@@ -872,18 +891,19 @@ export async function saveSkill(skill: Partial<SkillItem> & { name: string; cont
         movedExisting = true;
       }
       await fs.rename(stagingDir, targetDir);
+      installedStaging = true;
+      const loaded = await loadSkillFromDir(targetDir, true, userSkillsDir);
+      if (!loaded) throw new Error('Saved skill could not be loaded.');
       if (movedExisting) await fse.remove(backupDir).catch(() => {});
+      return loaded;
     } catch (error) {
       await fse.remove(stagingDir).catch(() => {});
-      if (movedExisting && !(await fse.pathExists(targetDir)) && (await fse.pathExists(backupDir))) {
+      if (installedStaging) await fse.remove(targetDir).catch(() => {});
+      if (movedExisting && (await fse.pathExists(backupDir))) {
         await fs.rename(backupDir, targetDir).catch(() => {});
       }
       throw error;
     }
-
-    const loaded = await loadSkillFromDir(targetDir, true, userSkillsDir);
-    if (!loaded) throw new Error('Saved skill could not be loaded.');
-    return loaded;
   });
 }
 

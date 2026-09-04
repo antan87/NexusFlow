@@ -227,6 +227,8 @@ NexusFlow is built around a single loop:
 
 `nexusflow mcp setup` registers NexusFlow's MCP server with Claude Desktop, Cursor, and VS Code so your assistant can drive the whole loop without leaving the session. The server exposes:
 
+An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` tool surface. The explicit `nexusflow mcp setup` command installs `--role interactive` for the full workspace-management experience; use `--role readonly` or `--role review` for untrusted or inspection-only agents.
+
 | Tool | What it does |
 |:---|:---|
 | `search_workspace` | `git grep` across every repo in the workspace |
@@ -362,6 +364,7 @@ You can select a strategy workflow when creating a workspace (or define custom o
 - **Plan-Implement-Review** — A structured, multi-agent flow where an Orchestrator coordinates planning, implementation, review, and documentation.
 - **Research-Verify** — A fast iteration strategy centered on research, drafting code, and immediately running verification test suites.
 - **Solo Developer** — A simplified, lightweight direct-action workflow for minor tweaks and linear tasks.
+- **Cost-Aware Sol Control + Luna Worker** — Optional advisory instructions for using Sol at read-only planning/review gates and one Luna/max writer, with explicit rate-limit checkpoints and no silent model upgrades.
 
 ### Custom Strategies & AI Inspection
 
@@ -372,6 +375,18 @@ The dashboard integrates an **AI Strategy Analysis** inspector:
 1. Select an AI assistant harness installed on your machine (e.g. *Claude Code*, *Antigravity*).
 2. (Optional) Provide a comment or specific evaluation focus (e.g. *"Ensure subagent roles are distinct"*).
 3. Click **Inspect Strategy** to have the AI analyze the strategy rules, identify ambiguities/contradictions, rate its orchestration effectiveness, and generate an optimized rewritten guideline.
+
+## 🌐 Workrooms (Experimental)
+
+Workrooms let two or more developers share explicitly reviewed feature context, handoffs, workflow progress, skills, agents, and workflows over a private LAN or an existing VPN. Each developer keeps their own Git checkout, credentials, terminal, editor, and AI sessions. NexusFlow never collects source files, diffs, local paths, or AI transcripts automatically, but user-authored context can contain sensitive text and must be reviewed before inclusion.
+
+Open **Workrooms** in the dashboard to start or join one. A host selects one network address, sets a room password, and creates a 30-minute one-use invitation. The guest verifies the invitation's pinned TLS fingerprint and waits for explicit host approval. The privileged NexusFlow dashboard always remains on localhost; Workrooms use a separate, narrowly scoped HTTPS server that runs only while hosted.
+
+Shared resources are immutable, digest-verified, and bounded by per-package and room-wide storage quotas. NexusFlow downloads them to a local review cache, shows the exact applied definition and complete file contents, identifies local create/update conflicts, and requires approval bound to both the package digest and the reviewed local resource revision before updating the local catalog. Optional compatibility metadata is enforced again at both download and apply: `platforms` lists `win32`, `linux`, and/or `darwin`, while `nexusflow` accepts an exact `major.minor.patch` version or space-separated comparisons such as `>=2.8.0 <3.0.0`. Hosts can quarantine a bad version, which removes it from downloads and future exports, then explicitly purge its digest to release the package bytes and room quota; both actions are audited. Quarantine and purge do not remotely erase review-cache copies that another developer already downloaded; those remain local until that developer removes them. Agent credentials can read context and propose workflow completion only; MCP Workroom reads are explicitly labeled as untrusted collaborator data and are available only to read-only/review tool roles. Human host authority is encrypted at rest and unlocked into a generation-bound HttpOnly local-dashboard session for confirmation and every other mutation. If that browser cookie is lost, a host must enter the room password to recover control; a guest must leave the locked local connection and join again. A paused host must also re-enter the room password to resume. Hosts can create encrypted portable backups; imports are fully validated before a listener starts, are quarantined if any later creation step fails, always receive new credentials and a new TLS identity, and can be inspected and discarded from the dashboard before retrying the original export.
+
+The optional **Cost-Aware Sol Control + Luna Worker** strategy can be selected locally or shared as an immutable Workroom workflow. It is advisory: NexusFlow does not currently launch those roles, enforce their models or reasoning effort, create fresh review contexts, or wait for provider rate-limit resets. The developer or selected agent harness must perform those controls and must stop for a human choice when it cannot honor them.
+
+Workrooms do not provide a public relay, NAT traversal, remote commands, shared terminals, raw diff sharing, browser-only guest access, or automatic resource updates. For home working, connect both machines to the same organization VPN and choose the VPN interface when hosting.
 
 ## 🖥️ Dashboard (Desktop App & Browser)
 
@@ -389,6 +404,8 @@ The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm s
 The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
 
 The dashboard runs a local [Hono](https://hono.dev) server on port 3000 and serves a [React](https://react.dev) + [Vite](https://vite.dev) frontend.
+
+When running the Vite development server separately on `http://localhost:5173`, start the backend with `NEXUSFLOW_DASHBOARD_ORIGIN` set to that exact origin. Workroom browser requests intentionally fail closed when this development origin is absent or differs by host, scheme, or port.
 
 ## ⚙️ Configuration
 

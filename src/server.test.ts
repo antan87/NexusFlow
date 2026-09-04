@@ -25,6 +25,7 @@ import * as orchestration from './orchestration/index.js';
 import * as sessionFinder from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
+import { workroomManager } from './workrooms/manager.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -1690,6 +1691,123 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(response.headers.get('access-control-allow-origin')).toBe(
           'http://localhost:5173',
         );
+      });
+    });
+
+    describe('Workroom human authority', () => {
+      it('rejects originless non-browser mutation clients', async () => {
+        const response = await app.request('/api/workrooms/stop', { method: 'POST' });
+        expect(response.status).toBe(403);
+      });
+
+      it('rejects a hostile page on another loopback port', async () => {
+        const response = await app.request('/api/workrooms/bootstrap', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost:5173' },
+        });
+        expect(response.status).toBe(403);
+        expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      });
+
+      it.each([
+        '/api/workrooms/interfaces',
+        '/api/workrooms/status',
+        '/api/workrooms/paused',
+        '/api/workrooms/quarantined',
+        '/api/workrooms/preview/feature-one',
+        '/api/workrooms/snapshot',
+        '/api/workrooms/local-resources',
+      ])('rejects hostile loopback reads and grants them no Workroom CORS access: %s', async (pathname) => {
+        const response = await app.request(pathname, {
+          headers: { Origin: 'http://localhost:5173' },
+        });
+        expect(response.status).toBe(403);
+        expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      });
+
+      it('requires the dashboard bootstrap even for idle Workroom reads', async () => {
+        const denied = await app.request('/api/workrooms/status', {
+          headers: { Origin: 'http://localhost' },
+        });
+        expect(denied.status).toBe(403);
+
+        const bootstrapResponse = await app.request('/api/workrooms/bootstrap', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost' },
+        });
+        const bootstrap = await bootstrapResponse.json() as { token: string };
+        const cookie = bootstrapResponse.headers.get('set-cookie')?.split(';', 1)[0];
+        const allowed = await app.request('/api/workrooms/status', {
+          headers: {
+            Origin: 'http://localhost',
+            Cookie: cookie!,
+            'X-NexusFlow-Workroom-Bootstrap': bootstrap.token,
+          },
+        });
+        expect(allowed.status).toBe(200);
+        expect(allowed.headers.get('cache-control')).toBe('no-store');
+        await expect(allowed.json()).resolves.toMatchObject({ status: { mode: 'idle' } });
+      });
+
+      it('reports and explicitly reclaims a lost local human session', async () => {
+        const manager = workroomManager as any;
+        manager.host = { service: { verifyHostRecoveryPassword: async (password: string) => password === 'correct horse battery staple' } };
+        manager.activeRoomChanged();
+        try {
+          const bootstrapResponse = await app.request('/api/workrooms/bootstrap', {
+            method: 'POST', headers: { Origin: 'http://localhost' },
+          });
+          const bootstrap = await bootstrapResponse.json() as { token: string };
+          const bootstrapCookie = bootstrapResponse.headers.get('set-cookie')?.split(';', 1)[0];
+          const headers = {
+            Origin: 'http://localhost',
+            Cookie: bootstrapCookie!,
+            'X-NexusFlow-Workroom-Bootstrap': bootstrap.token,
+          };
+          const locked = await app.request('/api/workrooms/session', { headers });
+          await expect(locked.json()).resolves.toEqual({ active: true, locked: true, roomType: 'host' });
+
+          const rejected = await app.request('/api/workrooms/session/reclaim', {
+            method: 'POST', headers, body: JSON.stringify({ password: 'wrong password value' }),
+          });
+          expect(rejected.status).toBe(401);
+
+          const reclaimed = await app.request('/api/workrooms/session/reclaim', {
+            method: 'POST', headers, body: JSON.stringify({ password: 'correct horse battery staple' }),
+          });
+          expect(reclaimed.status).toBe(200);
+          const humanCookie = reclaimed.headers.get('set-cookie')?.split(';', 1)[0];
+          expect(humanCookie).toContain('nexusflow_workroom_human=');
+          const unlocked = await app.request('/api/workrooms/session', {
+            headers: { ...headers, Cookie: `${bootstrapCookie}; ${humanCookie}` },
+          });
+          await expect(unlocked.json()).resolves.toEqual({ active: true, locked: false, roomType: 'host' });
+        } finally {
+          manager.host = undefined;
+          manager.activeRoomChanged();
+        }
+      });
+
+      it('requires an exact-origin bootstrap and then a human session', async () => {
+        const bootstrapResponse = await app.request('/api/workrooms/bootstrap', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost' },
+        });
+        expect(bootstrapResponse.status).toBe(200);
+        const bootstrap = await bootstrapResponse.json() as { token: string };
+        const cookie = bootstrapResponse.headers.get('set-cookie')?.split(';', 1)[0];
+        expect(cookie).toContain('nexusflow_workroom_bootstrap=');
+
+        const response = await app.request('/api/workrooms/stop', {
+          method: 'POST',
+          headers: {
+            Origin: 'http://localhost',
+            Cookie: cookie!,
+            'X-NexusFlow-Workroom-Bootstrap': bootstrap.token,
+          },
+        });
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toMatchObject({ error: expect.stringMatching(/human session/i) });
       });
     });
 

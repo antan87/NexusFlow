@@ -5,9 +5,27 @@ import { fileURLToPath } from 'node:url';
 
 import { resolveResourcePath } from './resources.js';
 import { slugify } from './slug.js';
+import { acquireLock, createMutationQueue } from '../core/locks.js';
+import { atomicWriteFile } from '../resources/fs-safety.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const runCatalogMutation = createMutationQueue();
+
+async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
+  return runCatalogMutation(async () => {
+    const release = await acquireLock(path.join(os.homedir(), '.nexusflow', '.locks', 'resource-catalog.lock'), {
+      staleMs: 60_000,
+      timeoutMs: 10_000,
+      timeoutMessage: 'Timed out waiting for the resource catalog lock.',
+    });
+    try {
+      return await operation();
+    } finally {
+      await release();
+    }
+  });
+}
 
 export interface WorkflowTemplate {
   id: string;
@@ -122,7 +140,12 @@ export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   return Array.from(templateMap.values());
 }
 
-export async function saveWorkflowTemplate(name: string, content: string, originalId?: string): Promise<WorkflowTemplate> {
+export async function saveWorkflowTemplate(
+  name: string,
+  content: string,
+  originalId?: string,
+  options: { readonly beforeCommit?: () => Promise<void>; readonly expectedId?: string } = {},
+): Promise<WorkflowTemplate> {
   const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
   await fs.mkdir(userDir, { recursive: true });
 
@@ -141,6 +164,9 @@ export async function saveWorkflowTemplate(name: string, content: string, origin
   if (!id) {
     throw new Error('Invalid template name');
   }
+  if (options.expectedId !== undefined && id !== options.expectedId) {
+    throw new Error('Workflow Markdown heading does not match the reviewed resource ID.');
+  }
 
   // Ensure content starts with "# <Name>" header so it parses correctly next time
   let fileContent = content.trim();
@@ -148,16 +174,18 @@ export async function saveWorkflowTemplate(name: string, content: string, origin
     fileContent = `# ${parsedName}\n\n${fileContent}`;
   }
 
-  const filePath = path.join(userDir, `${id}.md`);
-  await fs.writeFile(filePath, fileContent, 'utf-8');
+  await withCatalogLock(async () => {
+    const filePath = path.join(userDir, `${id}.md`);
+    await atomicWriteFile(filePath, fileContent, options.beforeCommit);
 
-  // If we are editing an existing custom template and the ID changed, delete the old file
-  if (originalId && originalId !== id) {
-    const oldPath = path.join(userDir, `${originalId}.md`);
-    try {
-      await fs.unlink(oldPath);
-    } catch {}
-  }
+    // If we are editing an existing custom template and the ID changed, delete the old file
+    if (originalId && originalId !== id) {
+      const oldPath = path.join(userDir, `${originalId}.md`);
+      try {
+        await fs.unlink(oldPath);
+      } catch {}
+    }
+  });
 
   const parsed = parseMarkdownTemplate(id, fileContent);
   return {
@@ -168,14 +196,17 @@ export async function saveWorkflowTemplate(name: string, content: string, origin
 }
 
 export async function deleteWorkflowTemplate(id: string): Promise<void> {
+  if (!id || slugify(id) !== id || path.basename(id) !== id) throw new Error('Invalid workflow template ID.');
   const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
   const filePath = path.join(userDir, `${id}.md`);
-  
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    if ((error as any).code !== 'ENOENT') {
-      throw error;
+
+  await withCatalogLock(async () => {
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      if ((error as any).code !== 'ENOENT') {
+        throw error;
+      }
     }
-  }
+  });
 }
