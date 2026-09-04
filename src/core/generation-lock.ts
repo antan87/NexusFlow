@@ -84,13 +84,11 @@ function assertRelativeOutput(relativePath: string): string {
 export function normalizeGeneratedContent(content: string): string {
   let start = content.indexOf(BANNER_START);
   let end = content.indexOf(BANNER_END);
-  let startTag = BANNER_START;
   let endTag = BANNER_END;
 
   if (start < 0 || end < start) {
     start = content.indexOf(LEGACY_BANNER_START);
     end = content.indexOf(LEGACY_BANNER_END);
-    startTag = LEGACY_BANNER_START;
     endTag = LEGACY_BANNER_END;
   }
 

@@ -45,10 +45,7 @@ function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void 
   }
 }
 
-import { PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME, resolveBrandHomeDir } from './constants.js';
-
-/** Name of the config directory under the user's home folder. */
-const CONFIG_DIR_NAME = PRIMARY_CONFIG_DIR_NAME;
+import { LEGACY_CONFIG_DIR_NAME, resolveBrandHomeDir } from './constants.js';
 
 /** Name of the config file. */
 const CONFIG_FILE_NAME = 'config.json';

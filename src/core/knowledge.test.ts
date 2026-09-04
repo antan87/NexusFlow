@@ -9,7 +9,7 @@ import {
   readWorkspaceKnowledge,
   MAX_ENTRY_CHARS,
 } from './knowledge.js';
-import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } from './constants.js';
+import { PRIMARY_KNOWLEDGE_FILE } from './constants.js';
 import * as storage from './storage.js';
 import * as workspace from './workspace.js';
 import * as generators from '../generators/index.js';

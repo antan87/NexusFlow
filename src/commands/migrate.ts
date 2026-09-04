@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import path from 'node:path';
-import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
+import { BRAND_NAME } from '../core/constants.js';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, findWorkspaceRoot } from '../core/workspace.js';
 import { migrateWorkspace, migrateGlobalConfig, isLegacyWorkspace } from '../core/migrate.js';

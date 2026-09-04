@@ -68,11 +68,12 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
+import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
-type SubTab = 'overview' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills';
+type SubTab = 'overview' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills' | 'services';
 
 interface TabDef {
   value: SubTab;
@@ -739,6 +740,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'plan' && <ImplementationPlan {...planProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
+              {subTab === 'services' && <ServiceConsole ws={selected} />}
             </TabsPanel>
           </Tabs>
         </div>

@@ -8,8 +8,7 @@ import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { BRAND_CONFIG } from './brand-config.js';
-import { loadFeatureConfig, findWorkspaceRoot } from './workspace.js';
-import { loadConfig } from './config.js';
+import { loadFeatureConfig } from './workspace.js';
 import { refreshWorkspace } from './refresh.js';
 
 export interface FileMigrationResult {
@@ -185,10 +184,14 @@ export async function migrateWorkspace(
 
   for (const rel of markdownFiles) {
     const filePath = path.join(resolvedPath, rel);
-    if (!existsSync(filePath)) continue;
-
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
+      let content: string;
+      try {
+        content = await fs.readFile(filePath, 'utf-8');
+      } catch (err: any) {
+        if (err.code === 'ENOENT') continue;
+        throw err;
+      }
       let updated = content;
 
       // Update freshness sentinel tags
@@ -213,26 +216,28 @@ export async function migrateWorkspace(
 
   // 4. Update .gitignore
   const gitignorePath = path.join(resolvedPath, '.gitignore');
-  if (existsSync(gitignorePath)) {
-    try {
-      const gitignore = await fs.readFile(gitignorePath, 'utf-8');
-      const lines = gitignore.split('\n');
-      const needed = [
-        'contextspace.json',
-        'contextspace.lock',
-        'contextspace-*.md',
-        '.contextspace',
-        '.contextspace*',
-      ];
-      const missing = needed.filter((n) => !lines.includes(n));
-      if (missing.length > 0) {
-        if (!dryRun) {
-          const appended = gitignore.trimEnd() + '\n\n# ContextSpace\n' + missing.join('\n') + '\n';
-          await fs.writeFile(gitignorePath, appended, 'utf-8');
-        }
-        report.updatedSentinels.push('.gitignore');
+  try {
+    const gitignore = await fs.readFile(gitignorePath, 'utf-8');
+    const lines = gitignore.split('\n');
+    const needed = [
+      'contextspace.json',
+      'contextspace.lock',
+      'contextspace-*.md',
+      '.contextspace',
+      '.contextspace*',
+    ];
+    const missing = needed.filter((n) => !lines.includes(n));
+    if (missing.length > 0) {
+      if (!dryRun) {
+        const appended = gitignore.trimEnd() + '\n\n# ContextSpace\n' + missing.join('\n') + '\n';
+        await fs.writeFile(gitignorePath, appended, 'utf-8');
       }
-    } catch {}
+      report.updatedSentinels.push('.gitignore');
+    }
+  } catch (err: any) {
+    if (err.code !== 'ENOENT') {
+      report.warnings.push(`Failed to update .gitignore: ${err.message}`);
+    }
   }
 
   // 5. Trigger refresh to ensure all context files match

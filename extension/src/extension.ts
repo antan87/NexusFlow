@@ -229,8 +229,6 @@ function runContextSpaceCommand(context: vscode.ExtensionContext, command: strin
     terminal.sendText(`${invocation} ${command}`);
 }
 
-const runNexusFlowCommand = runContextSpaceCommand;
-
 export function deactivate() {
     if (serverProcess) {
         console.log('Stopping Hono server...');

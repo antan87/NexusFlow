@@ -2,8 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { isLegacyWorkspace, migrateWorkspace, migrateGlobalConfig } from './migrate.js';
-import { BRAND_CONFIG } from './brand-config.js';
+import { isLegacyWorkspace, migrateWorkspace } from './migrate.js';
 
 describe('core/migrate', () => {
   let tempDir: string;

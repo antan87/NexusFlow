@@ -37,9 +37,6 @@ import { getActiveStorageProvider } from './adapters/registry.js';
 import { acquireLock } from './locks.js';
 import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } from './constants.js';
 
-/** The primary knowledge filename used for both the workspace and base layers. */
-const KNOWLEDGE_FILE = PRIMARY_KNOWLEDGE_FILE;
-
 async function getWorkspaceKnowledgeFilename(workspacePath: string, featureId: string): Promise<string> {
   if (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE)) {
     return PRIMARY_KNOWLEDGE_FILE;
