@@ -2191,6 +2191,52 @@ describe('Server API Endpoints Unit Tests', () => {
       findActive.mockRestore();
     });
   });
+
+  describe('/api/chat/thread endpoints (SQLite persistence)', () => {
+    it('saves, retrieves, and clears chat thread in SQLite', async () => {
+      const threadData = {
+        providerId: 'claude-cli',
+        sessions: { 'claude-cli': { id: 'test-sess', started: true } },
+        profilesByProvider: { 'claude-cli': 'workspace-write' },
+        modelsByProvider: { 'claude-cli': 'claude-3-7-sonnet' },
+        effortsByProvider: {},
+        messages: [
+          { role: 'user', content: 'Hello SQLite' },
+          { role: 'assistant', content: 'Hi there!' },
+        ],
+      };
+
+      const postRes = await app.request('/api/chat/thread/test-branch', {
+        method: 'POST',
+        headers: {
+          'Origin': 'http://localhost:3000',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(threadData),
+      });
+      const postBody = await postRes.text();
+      expect(postBody).toBe('{"success":true}');
+      expect(postRes.status).toBe(200);
+
+      const getRes = await app.request('/api/chat/thread/test-branch');
+      expect(getRes.status).toBe(200);
+      const getBody = await getRes.json();
+      expect(getBody.thread).not.toBeNull();
+      expect(getBody.thread.workspaceId).toBe('test-branch');
+      expect(getBody.thread.providerId).toBe('claude-cli');
+      expect(getBody.thread.messages).toHaveLength(2);
+
+      const delRes = await app.request('/api/chat/thread/test-branch', {
+        method: 'DELETE',
+        headers: { 'Origin': 'http://localhost:3000' },
+      });
+      expect(delRes.status).toBe(200);
+
+      const getAfterDel = await app.request('/api/chat/thread/test-branch');
+      const emptyBody = await getAfterDel.json();
+      expect(emptyBody.thread).toBeNull();
+    });
+  });
 });
 
 

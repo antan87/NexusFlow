@@ -11,7 +11,7 @@ import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
-import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
+import { loadChatStore, saveChatStore, clearChatStore, fetchRemoteChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
@@ -576,6 +576,23 @@ export function AgentChat({ ws }: AgentChatProps) {
       flushPersist();
     };
   }, [flushPersist]);
+
+  useEffect(() => {
+    let active = true;
+    fetchRemoteChatStore(ws.branchName).then((remote) => {
+      if (!active || !remote) return;
+      setMessages((current) => {
+        if (current.length === 0 && remote.messages.length > 0) {
+          return remote.messages;
+        }
+        return current;
+      });
+      if (remote.sessions && Object.keys(remote.sessions).length > 0) {
+        updateSessions((currentSessions) => ({ ...remote.sessions, ...currentSessions }));
+      }
+    });
+    return () => { active = false; };
+  }, [ws.branchName, updateSessions]);
 
   useEffect(() => {
     const requestId = ++providerRequestRef.current;

@@ -22,6 +22,7 @@ import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
@@ -769,6 +770,63 @@ app.post('/api/chat/upload-attachment', async (c) => {
       path: targetFile,
       size: buffer.length,
     });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/chat/thread/:workspaceId', async (c) => {
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    const thread = loadChatThread(workspaceId);
+    return c.json({ thread });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/chat/thread/:workspaceId', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    const body = await c.req.json().catch(() => null) as any;
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: 'Valid chat thread payload is required.' }, 400);
+    }
+    saveChatThread({
+      workspaceId,
+      providerId: typeof body.providerId === 'string' ? body.providerId : null,
+      sessions: typeof body.sessions === 'object' && body.sessions !== null ? body.sessions : {},
+      profilesByProvider: typeof body.profilesByProvider === 'object' && body.profilesByProvider !== null ? body.profilesByProvider : {},
+      modelsByProvider: typeof body.modelsByProvider === 'object' && body.modelsByProvider !== null ? body.modelsByProvider : {},
+      effortsByProvider: typeof body.effortsByProvider === 'object' && body.effortsByProvider !== null ? body.effortsByProvider : {},
+      messages: Array.isArray(body.messages) ? body.messages : [],
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.delete('/api/chat/thread/:workspaceId', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    clearChatThread(workspaceId);
+    return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
   }

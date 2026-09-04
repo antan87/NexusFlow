@@ -3,6 +3,7 @@
  */
 
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
+import { API_BASE } from '../../lib/apiBase.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -121,12 +122,62 @@ export function loadChatStore(branchName: string): ChatStore {
  *  transcript is unaffected, only what survives a reload is trimmed. */
 const MAX_PERSISTED_MESSAGES = 500;
 
+export async function fetchRemoteChatStore(branchName: string): Promise<ChatStore | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat/thread/${encodeURIComponent(branchName)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && data.thread) {
+      const thread = data.thread;
+      return {
+        v: 4,
+        sessions: thread.sessions || {},
+        providerId: thread.providerId || null,
+        profilesByProvider: { ...emptyStore().profilesByProvider, ...(thread.profilesByProvider || {}) },
+        modelsByProvider: thread.modelsByProvider || {},
+        effortsByProvider: thread.effortsByProvider || {},
+        messages: Array.isArray(thread.messages) ? thread.messages : [],
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncRemoteChatStore(branchName: string, store: ChatStore): Promise<void> {
+  try {
+    const trimmed = store.messages.length > MAX_PERSISTED_MESSAGES
+      ? { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
+      : store;
+
+    await fetch(`${API_BASE}/api/chat/thread/${encodeURIComponent(branchName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(trimmed),
+    });
+  } catch {
+    // Non-fatal if server is unreachable
+  }
+}
+
+export async function clearRemoteChatStore(branchName: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/chat/thread/${encodeURIComponent(branchName)}`, {
+      method: 'DELETE',
+    });
+  } catch {
+    // Non-fatal
+  }
+}
+
 export function saveChatStore(branchName: string, store: ChatStore): void {
   try {
     const trimmed = store.messages.length > MAX_PERSISTED_MESSAGES
       ? { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
       : store;
     localStorage.setItem(chatStorageKey(branchName), JSON.stringify(trimmed));
+    void syncRemoteChatStore(branchName, trimmed);
   } catch (e) {
     console.error('Failed to save chat to localStorage', e);
   }
@@ -135,6 +186,7 @@ export function saveChatStore(branchName: string, store: ChatStore): void {
 export function clearChatStore(branchName: string): void {
   try {
     localStorage.removeItem(chatStorageKey(branchName));
+    void clearRemoteChatStore(branchName);
   } catch {
     // ignore
   }
