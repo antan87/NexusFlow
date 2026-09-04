@@ -33,18 +33,29 @@ export async function readFileHandleAtMost(handle: FileHandle, maximumBytes: num
 
 /** Confirms an open descriptor still names the same regular, non-linked path. */
 export async function assertFileHandleMatchesPath(handle: FileHandle, filePath: string): Promise<BigIntStats> {
-  const [handleStats, pathStats] = await Promise.all([
-    handle.stat({ bigint: true }),
-    fs.lstat(filePath, { bigint: true }),
-  ]);
-  if (!handleStats.isFile()
-    || !pathStats.isFile()
-    || pathStats.isSymbolicLink()
-    || handleStats.dev !== pathStats.dev
-    || handleStats.ino !== pathStats.ino) {
-    throw new Error(`Open file no longer matches its regular path: ${filePath}`);
+  const parentHandle = await fs.open(path.dirname(filePath), 'r');
+  try {
+    const [handleStats, pathStats, parentStats] = await Promise.all([
+      handle.stat({ bigint: true }),
+      fs.lstat(filePath, { bigint: true }),
+      parentHandle.stat({ bigint: true }),
+    ]);
+    // Node 22 can report lstat().dev as zero on Windows. The open parent has the
+    // real volume identity, while the bigint inode still binds the path entry.
+    const pathDeviceMatches = pathStats.dev === 0n || handleStats.dev === pathStats.dev;
+    if (!handleStats.isFile()
+      || !pathStats.isFile()
+      || pathStats.isSymbolicLink()
+      || !parentStats.isDirectory()
+      || handleStats.dev !== parentStats.dev
+      || !pathDeviceMatches
+      || handleStats.ino !== pathStats.ino) {
+      throw new Error(`Open file no longer matches its regular path: ${filePath}`);
+    }
+    return handleStats;
+  } finally {
+    await parentHandle.close().catch(() => {});
   }
-  return handleStats;
 }
 
 /**

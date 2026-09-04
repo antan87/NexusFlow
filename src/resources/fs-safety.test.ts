@@ -18,6 +18,19 @@ afterEach(async () => {
 });
 
 describe('filesystem safety', () => {
+  it('matches a normal file descriptor to its path', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-matching-file-'));
+    cleanupPaths.push(root);
+    const filePath = path.join(root, 'resource.txt');
+    await fs.writeFile(filePath, 'resource', 'utf8');
+    const handle = await fs.open(filePath, 'r');
+    try {
+      await expect(assertFileHandleMatchesPath(handle, filePath)).resolves.toMatchObject({ size: 8n });
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('never reads beyond its byte limit when an open file grows', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-bounded-read-'));
     cleanupPaths.push(root);
