@@ -1,10 +1,5 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-
 import { z } from 'zod';
 
-import { createMutationQueue } from '../core/locks.js';
-import { atomicWriteJson } from '../resources/fs-safety.js';
 import type { PasswordDigest } from './crypto.js';
 import type {
   PortableFeatureBundleV1,
@@ -17,17 +12,20 @@ import type {
 } from './contracts.js';
 import {
   WORKROOM_AUDIT_LIMIT,
-  WORKROOM_MAX_EXPORT_PLAINTEXT_BYTES,
+  WORKROOM_MAX_PARTICIPANTS,
+  WORKROOM_MAX_RETAINED_INVITES,
+  WORKROOM_MAX_RETAINED_JOIN_REQUESTS,
   WORKROOM_MAX_RESOURCES,
   WORKROOM_SCHEMA_VERSION,
   documentNameSchema,
+  participantRoleSchema,
   portableFeatureBundleSchema,
   workflowProgressSchema,
   workroomDocumentSchema,
   workroomEventSchema,
+  workroomParticipantSchema,
   workroomResourceManifestSchema,
   workroomResourcePackageSchema,
-  WorkroomValidationError,
 } from './contracts.js';
 
 export interface StoredInviteV1 {
@@ -116,134 +114,78 @@ export const workroomExportPayloadSchema = z.object({
   exportedAt: z.string().datetime({ offset: true }),
 });
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
+const storedIdentifierSchema = z.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._-]*$/);
+const storedDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const storedDateSchema = z.string().datetime({ offset: true });
+
+export const storedWorkroomSchema = z.object({
+  schemaVersion: z.literal(WORKROOM_SCHEMA_VERSION),
+  roomId: storedIdentifierSchema,
+  name: z.string().trim().min(1).max(160),
+  workspaceId: z.string().min(1).max(255),
+  address: z.string().min(1).max(255),
+  port: z.number().int().min(1).max(65_535),
+  certificateFingerprint: z.string().min(32).max(128),
+  createdAt: storedDateSchema,
+  revision: z.number().int().positive(),
+  password: z.object({ salt: z.string().min(1).max(256), hash: z.string().min(1).max(256) }),
+  hostMemberId: storedIdentifierSchema,
+  bundle: portableFeatureBundleSchema,
+  documents: z.record(documentNameSchema, workroomDocumentSchema),
+  participants: z.array(workroomParticipantSchema.extend({
+    role: participantRoleSchema,
+    deviceTokenHash: storedDigestSchema,
+    agentTokenHash: storedDigestSchema,
+  })).max(WORKROOM_MAX_PARTICIPANTS),
+  invites: z.array(z.object({
+    id: storedIdentifierSchema,
+    tokenHash: storedDigestSchema,
+    createdAt: storedDateSchema,
+    expiresAt: storedDateSchema,
+    createdBy: storedIdentifierSchema,
+    usedAt: storedDateSchema.optional(),
+  })).max(WORKROOM_MAX_RETAINED_INVITES),
+  joinRequests: z.array(z.object({
+    id: storedIdentifierSchema,
+    displayName: z.string().trim().min(1).max(80),
+    deviceTokenHash: storedDigestSchema,
+    agentTokenHash: storedDigestSchema,
+    requestedAt: storedDateSchema,
+    sourceKey: z.string().min(1).max(512),
+    status: z.enum(['pending', 'accepted', 'rejected']),
+    memberId: storedIdentifierSchema.optional(),
+    decidedAt: storedDateSchema.optional(),
+    decidedBy: storedIdentifierSchema.optional(),
+  })).max(WORKROOM_MAX_RETAINED_JOIN_REQUESTS),
+  attemptWindows: z.array(z.object({
+    key: z.string().min(1).max(512),
+    failures: z.array(storedDateSchema).max(1_000),
+    lockedUntil: storedDateSchema.optional(),
+  })).max(1_000),
+  resources: z.array(workroomResourceManifestSchema).max(WORKROOM_MAX_RESOURCES),
+  workflowProgress: workflowProgressSchema.optional(),
+  activity: z.array(workroomEventSchema).max(WORKROOM_AUDIT_LIMIT),
+}).strict();
+
+export function parseStoredWorkroom(value: unknown): StoredWorkroomV1 {
+  return storedWorkroomSchema.parse(value) as StoredWorkroomV1;
 }
 
-export class WorkroomFileStore {
-  private readonly runMutation = createMutationQueue();
-  private readonly statePath: string;
-  private readonly blobsDir: string;
+export interface WorkroomMutation<T> {
+  readonly state: StoredWorkroomV1;
+  readonly result: T;
+  readonly afterCommit?: () => Promise<void>;
+}
 
-  constructor(public readonly roomDir: string) {
-    this.statePath = path.join(roomDir, 'room.json');
-    this.blobsDir = path.join(roomDir, 'blobs');
-  }
-
-  public async initialize(state: StoredWorkroomV1): Promise<void> {
-    await fs.mkdir(this.blobsDir, { recursive: true });
-    try {
-      await fs.access(this.statePath);
-      throw new Error(`Workroom already exists at ${this.roomDir}.`);
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-        await atomicWriteJson(this.statePath, state);
-        return;
-      }
-      throw error;
-    }
-  }
-
-  public async read(): Promise<StoredWorkroomV1> {
-    return JSON.parse(await fs.readFile(this.statePath, 'utf8')) as StoredWorkroomV1;
-  }
-
-  public async mutate<T>(
-    operation: (current: StoredWorkroomV1) => {
-      readonly state: StoredWorkroomV1;
-      readonly result: T;
-      readonly afterCommit?: () => Promise<void>;
-    } | Promise<{
-      readonly state: StoredWorkroomV1;
-      readonly result: T;
-      readonly afterCommit?: () => Promise<void>;
-    }>,
-  ): Promise<T> {
-    return this.runMutation(async () => {
-      const current = await this.read();
-      const outcome = await operation(clone(current));
-      await atomicWriteJson(this.statePath, outcome.state);
-      await outcome.afterCommit?.();
-      return outcome.result;
-    });
-  }
-
-  public async writePackage(pkg: WorkroomResourcePackageV1): Promise<void> {
-    await fs.mkdir(this.blobsDir, { recursive: true });
-    const destination = path.join(this.blobsDir, `${pkg.manifest.digest}.json`);
-    try {
-      await fs.access(destination);
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-        await atomicWriteJson(destination, pkg);
-        return;
-      }
-      throw error;
-    }
-  }
-
-  public async removePackage(digest: string): Promise<void> {
-    if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid Workroom package digest.');
-    await fs.unlink(path.join(this.blobsDir, `${digest}.json`)).catch((error: unknown) => {
-      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error;
-    });
-  }
-
-  /**
-   * Reconciles package bytes against the durable catalog. The room state is
-   * the source of truth, so a transient Windows unlink failure after a purge
-   * can be retried safely without retaining a separate tombstone.
-   */
-  public async pruneUnreferencedPackages(): Promise<void> {
-    await this.runMutation(async () => {
-      const state = await this.read();
-      const referenced = new Set(state.resources.map((resource) => `${resource.digest}.json`));
-      const entries = await fs.readdir(this.blobsDir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (entry.isFile() && /^[a-f0-9]{64}\.json$/.test(entry.name) && !referenced.has(entry.name)) {
-          await fs.unlink(path.join(this.blobsDir, entry.name)).catch(() => {});
-        }
-      }
-    });
-  }
-
-  public async readPackage(digest: string): Promise<WorkroomResourcePackageV1> {
-    if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid package digest.');
-    return JSON.parse(await fs.readFile(path.join(this.blobsDir, `${digest}.json`), 'utf8')) as WorkroomResourcePackageV1;
-  }
-
-  public async packageStorageBytes(digests: readonly string[]): Promise<number> {
-    const sizes = await Promise.all(digests.map(async (digest) => {
-      if (!/^[a-f0-9]{64}$/.test(digest)) throw new WorkroomValidationError('Invalid package digest.');
-      return (await fs.stat(path.join(this.blobsDir, `${digest}.json`))).size;
-    }));
-    return sizes.reduce((total, size) => total + size, 0);
-  }
-
-  public async createExportPayload(): Promise<WorkroomExportPayloadV1> {
-    const state = await this.read();
-    const packages = await Promise.all(
-      state.resources
-        .filter((resource) => !resource.quarantinedAt)
-        .map((resource) => this.readPackage(resource.digest)),
-    );
-    const payload: WorkroomExportPayloadV1 = {
-      schemaVersion: 1,
-      room: {
-        name: state.name,
-        workspaceId: state.workspaceId,
-        bundle: state.bundle,
-        documents: state.documents,
-        resources: state.resources.filter((resource) => !resource.quarantinedAt),
-        workflowProgress: state.workflowProgress,
-        activity: state.activity,
-      },
-      packages,
-      exportedAt: new Date().toISOString(),
-    };
-    if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > WORKROOM_MAX_EXPORT_PLAINTEXT_BYTES) {
-      throw new WorkroomValidationError('This Workroom exceeds the 96 MiB encrypted export limit. Quarantine large resource versions before exporting.');
-    }
-    return payload;
-  }
+export interface WorkroomStore {
+  readonly roomDir: string;
+  initialize(state: StoredWorkroomV1): Promise<void>;
+  read(): Promise<StoredWorkroomV1>;
+  mutate<T>(operation: (current: StoredWorkroomV1) => WorkroomMutation<T> | Promise<WorkroomMutation<T>>): Promise<T>;
+  writePackage(pkg: WorkroomResourcePackageV1): Promise<void>;
+  removePackage(digest: string): Promise<void>;
+  pruneUnreferencedPackages(): Promise<void>;
+  readPackage(digest: string): Promise<WorkroomResourcePackageV1>;
+  packageStorageBytes(digests: readonly string[]): Promise<number>;
+  createExportPayload(): Promise<WorkroomExportPayloadV1>;
 }

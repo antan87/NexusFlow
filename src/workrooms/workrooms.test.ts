@@ -20,7 +20,7 @@ import { PinnedWorkroomClient, formatWorkroomInvite, parseWorkroomInvite } from 
 import { digestResourcePackage, makeResourceFile, validateResourcePackage } from './resource-package.js';
 import { applyCachedResource, assertLocalResourceCompatibility, cacheResourcePackage, digestLocalResourceDefinition, getLocalResourceDefinition, packageLocalResource } from './local-resources.js';
 import { assertResourceCatalogStorageSize, createInitialWorkroomState, WorkroomService } from './service.js';
-import { WorkroomFileStore } from './store.js';
+import { WorkroomSqliteStore } from './sqlite-store.js';
 import { digestPortableWorkroomContext, normalizeGitRemote, scanPortableContextWarnings } from './portable.js';
 import { validateWorkroomExportPayload, WorkroomManager } from './manager.js';
 import { assertExportPlaintextSize, decryptExport, encryptedExportSchema, encryptExport } from './crypto.js';
@@ -65,7 +65,7 @@ async function serviceFixture() {
     bundle: bundle(),
     documents: { plan: '# Plan' },
   });
-  const store = new WorkroomFileStore(roomDir);
+  const store = new WorkroomSqliteStore(roomDir);
   await store.initialize(created.state);
   return { service: new WorkroomService(store), hostToken: created.hostToken, hostAgentToken: created.hostAgentToken };
 }
@@ -1101,6 +1101,36 @@ describe('pinned HTTPS host/client', () => {
     expect(resumed.certificateFingerprint).toBe(originalFingerprint);
     expect(await fs.readFile(path.join(first.roomDir, 'host-credential.pending.json'), 'utf8').catch(() => undefined)).toBeUndefined();
     expect((await new PinnedWorkroomClient(resumed.url, originalFingerprint).health()).roomId).toBe(originalRoomId);
+  }, 30_000);
+
+  it('migrates legacy JSON only after the host password is verified', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-workroom-legacy-resume-'));
+    cleanupPaths.push(root);
+    const room = await startHostedWorkroom({
+      homeDir: root,
+      name: 'Legacy resumable room',
+      workspaceId: 'feature-one',
+      address: '127.0.0.1',
+      port: await freePort(),
+      password: 'correct horse battery staple',
+      hostDisplayName: 'Host',
+      bundle: bundle(),
+      documents: { plan: '# Legacy plan' },
+    });
+    const state = await room.service.store.read();
+    await room.stop();
+    await fs.writeFile(path.join(room.roomDir, 'room.json'), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await fs.unlink(path.join(room.roomDir, 'workroom.sqlite'));
+
+    await expect(resumeHostedWorkroom(root, room.roomId, 'incorrect password')).rejects.toThrow(/password/i);
+    await expect(fs.access(path.join(room.roomDir, 'room.json'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(room.roomDir, 'workroom.sqlite'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const resumed = await resumeHostedWorkroom(root, room.roomId, 'correct horse battery staple');
+    hosted.push(resumed);
+    await expect(fs.access(path.join(room.roomDir, 'workroom.sqlite'))).resolves.toBeUndefined();
+    await expect(fs.readFile(path.join(room.roomDir, 'room.v1.json.backup'), 'utf8')).resolves.toContain('# Legacy plan');
+    expect((await resumed.service.snapshot(resumed.hostToken)).documents.plan.content).toBe('# Legacy plan');
   }, 30_000);
 
   it('recovers an interrupted two-phase password credential promotion', async () => {

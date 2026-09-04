@@ -22,7 +22,7 @@ import {
 } from './contracts.js';
 import { decryptExport, encryptExport, normalizeFingerprint, randomToken, tokenDigest, verifyPassword, type EncryptedExportV1 } from './crypto.js';
 import { createInitialWorkroomState, WorkroomService } from './service.js';
-import { WorkroomFileStore } from './store.js';
+import { WorkroomSqliteStore } from './sqlite-store.js';
 
 export interface WorkroomNetworkInterface {
   readonly name: string;
@@ -631,7 +631,7 @@ export async function startHostedWorkroom(input: StartHostedWorkroomInput): Prom
     bundle: input.bundle,
     documents: input.documents,
   });
-  const store = new WorkroomFileStore(roomDir);
+  const store = new WorkroomSqliteStore(roomDir);
   await store.initialize(state);
   await writeHostedWorkroomCredential(roomDir, hostToken, hostAgentToken, input.password);
   const service = new WorkroomService(store);
@@ -733,7 +733,7 @@ export async function listPausedWorkrooms(homeDir: string): Promise<PausedWorkro
         } catch {}
       }
       if (quarantined) continue;
-      const state = await new WorkroomFileStore(path.join(root, entry.name)).read();
+      const state = await new WorkroomSqliteStore(path.join(root, entry.name)).read();
       await Promise.all([
         fs.access(path.join(root, entry.name, 'certificate.pem')),
         fs.access(path.join(root, entry.name, 'private-key.pem')),
@@ -764,11 +764,12 @@ export async function resumeHostedWorkroom(homeDir: string, roomId: string, pass
       if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error;
     }
   }
-  const store = new WorkroomFileStore(roomDir);
+  const store = new WorkroomSqliteStore(roomDir);
   const state = await store.read();
   if (!(await verifyPassword(password, state.password))) {
     throw new WorkroomAuthorizationError('The Workroom password is incorrect or its host credential is invalid.');
   }
+  await store.migrateLegacy();
   await store.pruneUnreferencedPackages();
   assertLocalInterface(state.address);
   const [cert, key, credentialRaw, pendingCredentialRaw] = await Promise.all([

@@ -38,12 +38,12 @@ import {
 import { hashPassword, randomToken, tokenDigest, verifyPassword } from './crypto.js';
 import { digestResourcePackage, validateResourcePackage } from './resource-package.js';
 import {
-  WorkroomFileStore,
   type StoredAttemptWindowV1,
   type StoredInviteV1,
   type StoredJoinRequestV1,
   type StoredParticipantV1,
   type StoredWorkroomV1,
+  type WorkroomStore,
 } from './store.js';
 
 const FAILED_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
@@ -237,7 +237,7 @@ export class WorkroomService {
   private readonly passwordVerificationsInProgress = new Set<string>();
 
   constructor(
-    public readonly store: WorkroomFileStore,
+    public readonly store: WorkroomStore,
     private readonly verifyRoomPassword: typeof verifyPassword = verifyPassword,
   ) {}
 
@@ -701,7 +701,7 @@ export class WorkroomService {
       return { state: next, result: pkg };
       });
     } catch (error) {
-      // The package blob is written before room.json so readers can never see
+      // The package blob is written before the SQLite state commit so readers can never see
       // a catalog entry without its content. If the atomic state commit fails,
       // remove that now-unreferenced blob before surfacing the failure.
       if (writtenDigest) await this.store.removePackage(writtenDigest).catch(() => {});
