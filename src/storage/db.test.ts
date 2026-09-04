@@ -169,5 +169,88 @@ describe('storage/db SQLite persistence', () => {
       pending = getPendingApprovals('fallback-ws-2', fallbackDb);
       expect(pending).toHaveLength(0);
     });
+
+    it('supports transaction rollback and discards uncommitted staging mutations', () => {
+      saveChatThread({
+        workspaceId: 'tx-ws-1',
+        providerId: 'claude-cli',
+        sessions: {},
+        profilesByProvider: {},
+        modelsByProvider: {},
+        effortsByProvider: {},
+        messages: [{ role: 'user', content: 'Initial msg' }],
+      }, fallbackDb);
+
+      expect(loadChatThread('tx-ws-1', fallbackDb)?.messages).toHaveLength(1);
+
+      // Begin transaction, perform mutation, and rollback
+      fallbackDb.exec('BEGIN TRANSACTION;');
+      fallbackDb.prepare('DELETE FROM chat_turns WHERE workspace_id = ?').run('tx-ws-1');
+      fallbackDb.prepare('INSERT INTO chat_turns (id, workspace_id, turn_index, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('turn-stage', 'tx-ws-1', 0, 'user', 'Staged msg', Date.now());
+
+      // While in transaction, staging holds the new value
+      expect(loadChatThread('tx-ws-1', fallbackDb)?.messages[0].content).toBe('Staged msg');
+
+      // Rollback
+      fallbackDb.exec('ROLLBACK;');
+
+      // Active state remains restored
+      const afterRollback = loadChatThread('tx-ws-1', fallbackDb);
+      expect(afterRollback?.messages).toHaveLength(1);
+      expect(afterRollback?.messages[0].content).toBe('Initial msg');
+    });
+
+    it('persists atomically with .bak copy and recovers when primary JSON is corrupted', async () => {
+      const fsMod = await import('node:fs');
+      const osMod = await import('node:os');
+      const pathMod = await import('node:path');
+
+      const tempDir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'nf-db-test-'));
+      const dbPath = pathMod.join(tempDir, 'test.db');
+      const jsonPath = pathMod.join(tempDir, 'test.json');
+      const bakPath = pathMod.join(tempDir, 'test.json.bak');
+
+      try {
+        const diskDb = new FallbackDatabase(dbPath);
+        saveChatThread({
+          workspaceId: 'disk-ws-1',
+          providerId: 'claude-cli',
+          sessions: {},
+          profilesByProvider: {},
+          modelsByProvider: {},
+          effortsByProvider: {},
+          messages: [{ role: 'user', content: 'Version 1' }],
+        }, diskDb);
+
+        expect(fsMod.existsSync(jsonPath)).toBe(true);
+
+        // Update to generate .bak copy
+        saveChatThread({
+          workspaceId: 'disk-ws-1',
+          providerId: 'claude-cli',
+          sessions: {},
+          profilesByProvider: {},
+          modelsByProvider: {},
+          effortsByProvider: {},
+          messages: [{ role: 'user', content: 'Version 2' }],
+        }, diskDb);
+
+        expect(fsMod.existsSync(bakPath)).toBe(true);
+        const bakContent = JSON.parse(fsMod.readFileSync(bakPath, 'utf8'));
+        expect(bakContent.turns['disk-ws-1'][0].content).toBe('Version 1');
+
+        // Intentionally corrupt primary JSON
+        fsMod.writeFileSync(jsonPath, '{ corrupt json string... !!', 'utf8');
+
+        // New FallbackDatabase should recover seamlessly from .bak
+        const recoveredDb = new FallbackDatabase(dbPath);
+        const recoveredThread = loadChatThread('disk-ws-1', recoveredDb);
+        expect(recoveredThread).not.toBeNull();
+        expect(recoveredThread?.messages[0].content).toBe('Version 1');
+      } finally {
+        fsMod.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

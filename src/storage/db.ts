@@ -75,67 +75,171 @@ export class FallbackDatabase implements IDatabaseSync {
   private turns = new Map<string, any[]>();
   private approvals = new Map<string, any>();
 
+  private inTransaction = false;
+  private stagingThreads = new Map<string, any>();
+  private stagingTurns = new Map<string, any[]>();
+  private stagingApprovals = new Map<string, any>();
+
   constructor(targetPath: string) {
     this.targetPath = targetPath;
     this.loadFromDisk();
   }
 
+  private getJsonPaths(): { jsonPath: string; bakPath: string } {
+    const jsonPath = this.targetPath.endsWith('.db')
+      ? this.targetPath.replace(/\.db$/, '.json')
+      : this.targetPath + '.json';
+    const bakPath = `${jsonPath}.bak`;
+    return { jsonPath, bakPath };
+  }
+
+  private getActiveThreads(): Map<string, any> {
+    return this.inTransaction ? this.stagingThreads : this.threads;
+  }
+
+  private getActiveTurns(): Map<string, any[]> {
+    return this.inTransaction ? this.stagingTurns : this.turns;
+  }
+
+  private getActiveApprovals(): Map<string, any> {
+    return this.inTransaction ? this.stagingApprovals : this.approvals;
+  }
+
+  private onMutation(): void {
+    if (!this.inTransaction) {
+      this.saveToDisk();
+    }
+  }
+
   private loadFromDisk(): void {
     if (this.targetPath === ':memory:') return;
-    try {
-      const jsonPath = this.targetPath.endsWith('.db')
-        ? this.targetPath.replace(/\.db$/, '.json')
-        : this.targetPath + '.json';
-      if (fs.existsSync(jsonPath)) {
+    const { jsonPath, bakPath } = this.getJsonPaths();
+
+    let parsedData: any = null;
+
+    if (fs.existsSync(jsonPath)) {
+      try {
         const raw = fs.readFileSync(jsonPath, 'utf8');
-        const data = JSON.parse(raw);
-        if (data.threads) {
-          for (const [k, v] of Object.entries(data.threads)) {
-            this.threads.set(k, v);
-          }
-        }
-        if (data.turns) {
-          for (const [k, v] of Object.entries(data.turns)) {
-            this.turns.set(k, v as any[]);
-          }
-        }
-        if (data.approvals) {
-          for (const [k, v] of Object.entries(data.approvals)) {
-            this.approvals.set(k, v);
-          }
+        parsedData = JSON.parse(raw);
+      } catch (err) {
+        console.warn(`[FallbackDatabase] Failed to read or parse ${jsonPath}, attempting backup recovery:`, err);
+        parsedData = null;
+      }
+    }
+
+    if (!parsedData && fs.existsSync(bakPath)) {
+      try {
+        const raw = fs.readFileSync(bakPath, 'utf8');
+        parsedData = JSON.parse(raw);
+      } catch (bakErr) {
+        console.warn(`[FallbackDatabase] Failed to read or parse backup ${bakPath}:`, bakErr);
+        parsedData = null;
+      }
+    }
+
+    if (parsedData) {
+      if (parsedData.threads) {
+        for (const [k, v] of Object.entries(parsedData.threads)) {
+          this.threads.set(k, v);
         }
       }
-    } catch {
-      // Ignore disk load errors
+      if (parsedData.turns) {
+        for (const [k, v] of Object.entries(parsedData.turns)) {
+          this.turns.set(k, v as any[]);
+        }
+      }
+      if (parsedData.approvals) {
+        for (const [k, v] of Object.entries(parsedData.approvals)) {
+          this.approvals.set(k, v);
+        }
+      }
     }
   }
 
   private saveToDisk(): void {
     if (this.targetPath === ':memory:') return;
+    const { jsonPath, bakPath } = this.getJsonPaths();
+    const dir = path.dirname(jsonPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const data = {
+      threads: Object.fromEntries(this.threads),
+      turns: Object.fromEntries(this.turns),
+      approvals: Object.fromEntries(this.approvals),
+    };
+    const content = JSON.stringify(data, null, 2);
+    const tempPath = `${jsonPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+
     try {
-      const jsonPath = this.targetPath.endsWith('.db')
-        ? this.targetPath.replace(/\.db$/, '.json')
-        : this.targetPath + '.json';
-      const dir = path.dirname(jsonPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(tempPath, content, 'utf8');
+      if (fs.existsSync(jsonPath)) {
+        try {
+          fs.copyFileSync(jsonPath, bakPath);
+        } catch {
+          // Ignore backup copy failure, proceed with atomic rename
+        }
       }
-      const data = {
-        threads: Object.fromEntries(this.threads),
-        turns: Object.fromEntries(this.turns),
-        approvals: Object.fromEntries(this.approvals),
-      };
-      fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf8');
-    } catch {
-      // Ignore disk save errors
+      fs.renameSync(tempPath, jsonPath);
+    } catch (err) {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch {
+        // ignore unlink error
+      }
+      throw err;
     }
   }
 
-  exec(_sql: string): void {
-    // Pragmas, schema definitions, transactions are no-ops in memory store
+  exec(sql: string): void {
+    const trimmed = sql.trim().toUpperCase();
+    if (trimmed.startsWith('BEGIN')) {
+      this.inTransaction = true;
+      this.stagingThreads = new Map(
+        Array.from(this.threads.entries()).map(([k, v]) => [k, { ...v }]),
+      );
+      this.stagingTurns = new Map(
+        Array.from(this.turns.entries()).map(([k, v]) => [k, v.map((item) => ({ ...item }))]),
+      );
+      this.stagingApprovals = new Map(
+        Array.from(this.approvals.entries()).map(([k, v]) => [k, { ...v }]),
+      );
+      return;
+    }
+
+    if (trimmed.startsWith('COMMIT')) {
+      if (this.inTransaction) {
+        this.threads = this.stagingThreads;
+        this.turns = this.stagingTurns;
+        this.approvals = this.stagingApprovals;
+        this.inTransaction = false;
+        this.stagingThreads = new Map();
+        this.stagingTurns = new Map();
+        this.stagingApprovals = new Map();
+        this.saveToDisk();
+      }
+      return;
+    }
+
+    if (trimmed.startsWith('ROLLBACK')) {
+      if (this.inTransaction) {
+        this.inTransaction = false;
+        this.stagingThreads = new Map();
+        this.stagingTurns = new Map();
+        this.stagingApprovals = new Map();
+      }
+      return;
+    }
   }
 
-  prepare(sql: string) {
+  prepare(sql: string): {
+    run(...args: any[]): any;
+    get(...args: any[]): any;
+    all(...args: any[]): any[];
+  } {
     const normalized = sql.trim().replace(/\s+/g, ' ');
     const self = this;
 
@@ -150,7 +254,7 @@ export class FallbackDatabase implements IDatabaseSync {
           efforts_json: string,
           updated_at: number,
         ) {
-          self.threads.set(workspace_id, {
+          self.getActiveThreads().set(workspace_id, {
             workspace_id,
             provider_id,
             sessions_json,
@@ -159,7 +263,7 @@ export class FallbackDatabase implements IDatabaseSync {
             efforts_json,
             updated_at,
           });
-          self.saveToDisk();
+          self.onMutation();
           return { changes: 1 };
         },
         get() { return undefined; },
@@ -170,8 +274,8 @@ export class FallbackDatabase implements IDatabaseSync {
     if (normalized.startsWith('DELETE FROM chat_turns WHERE workspace_id = ?')) {
       return {
         run(workspace_id: string) {
-          self.turns.delete(workspace_id);
-          self.saveToDisk();
+          self.getActiveTurns().delete(workspace_id);
+          self.onMutation();
           return { changes: 1 };
         },
         get() { return undefined; },
@@ -193,10 +297,11 @@ export class FallbackDatabase implements IDatabaseSync {
           files_changed_json: string | null,
           created_at: number,
         ) {
-          let list = self.turns.get(workspace_id);
+          const map = self.getActiveTurns();
+          let list = map.get(workspace_id);
           if (!list) {
             list = [];
-            self.turns.set(workspace_id, list);
+            map.set(workspace_id, list);
           }
           list.push({
             id,
@@ -210,7 +315,7 @@ export class FallbackDatabase implements IDatabaseSync {
             files_changed_json,
             created_at,
           });
-          self.saveToDisk();
+          self.onMutation();
           return { changes: 1 };
         },
         get() { return undefined; },
@@ -222,10 +327,10 @@ export class FallbackDatabase implements IDatabaseSync {
       return {
         run() { return {}; },
         get(workspace_id: string) {
-          return self.threads.get(workspace_id);
+          return self.getActiveThreads().get(workspace_id);
         },
         all(workspace_id: string) {
-          const item = self.threads.get(workspace_id);
+          const item = self.getActiveThreads().get(workspace_id);
           return item ? [item] : [];
         },
       };
@@ -235,11 +340,11 @@ export class FallbackDatabase implements IDatabaseSync {
       return {
         run() { return {}; },
         get(workspace_id: string) {
-          const list = self.turns.get(workspace_id) || [];
+          const list = self.getActiveTurns().get(workspace_id) || [];
           return list[0];
         },
         all(workspace_id: string) {
-          const list = self.turns.get(workspace_id) || [];
+          const list = self.getActiveTurns().get(workspace_id) || [];
           return [...list].sort((a, b) => a.turn_index - b.turn_index);
         },
       };
@@ -248,9 +353,9 @@ export class FallbackDatabase implements IDatabaseSync {
     if (normalized.startsWith('DELETE FROM chat_threads WHERE workspace_id = ?')) {
       return {
         run(workspace_id: string) {
-          self.threads.delete(workspace_id);
-          self.turns.delete(workspace_id);
-          self.saveToDisk();
+          self.getActiveThreads().delete(workspace_id);
+          self.getActiveTurns().delete(workspace_id);
+          self.onMutation();
           return { changes: 1 };
         },
         get() { return undefined; },
@@ -268,8 +373,9 @@ export class FallbackDatabase implements IDatabaseSync {
           description: string | null,
           created_at: number,
         ) {
-          const existing = self.approvals.get(id);
-          self.approvals.set(id, {
+          const map = self.getActiveApprovals();
+          const existing = map.get(id);
+          map.set(id, {
             id,
             workspace_id,
             tool,
@@ -279,7 +385,7 @@ export class FallbackDatabase implements IDatabaseSync {
             created_at,
             resolved_at: existing?.resolved_at ?? null,
           });
-          self.saveToDisk();
+          self.onMutation();
           return { changes: 1 };
         },
         get() { return undefined; },
@@ -290,11 +396,12 @@ export class FallbackDatabase implements IDatabaseSync {
     if (normalized.startsWith('UPDATE tool_approvals SET decision = ?, resolved_at = ? WHERE id = ?')) {
       return {
         run(decision: string, resolved_at: number, id: string) {
-          const existing = self.approvals.get(id);
+          const map = self.getActiveApprovals();
+          const existing = map.get(id);
           if (existing) {
             existing.decision = decision;
             existing.resolved_at = resolved_at;
-            self.saveToDisk();
+            self.onMutation();
           }
           return { changes: 1 };
         },
@@ -307,13 +414,13 @@ export class FallbackDatabase implements IDatabaseSync {
       return {
         run() { return {}; },
         get(workspace_id: string) {
-          const list = Array.from(self.approvals.values()).filter(
+          const list = Array.from(self.getActiveApprovals().values()).filter(
             (a) => a.workspace_id === workspace_id && a.decision === 'pending',
           );
           return list[0];
         },
         all(workspace_id: string) {
-          const list = Array.from(self.approvals.values()).filter(
+          const list = Array.from(self.getActiveApprovals().values()).filter(
             (a) => a.workspace_id === workspace_id && a.decision === 'pending',
           );
           return list.sort((a, b) => a.created_at - b.created_at);

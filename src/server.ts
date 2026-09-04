@@ -2020,32 +2020,95 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       if (matches.length === 0) {
         return c.json({ error: `Unknown repo in this workspace.` }, 404);
       }
+      if (matches.length > 1) {
+        return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
+      }
       worktreePath = matches[0]!;
     } else {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
     }
 
-    const reverted: string[] = [];
+    // Preflight: inspect all paths, statuses, and take snapshots for rollback
+    interface PreflightItem {
+      resolvedFile: string;
+      relFile: string;
+      isUntracked: boolean;
+      exists: boolean;
+      originalContent?: Buffer;
+    }
+
+    const preflightItems: PreflightItem[] = [];
     for (const file of files) {
       const resolvedFile = assertWithin(worktreePath, path.join(worktreePath, file));
       const relFile = path.relative(worktreePath, resolvedFile);
 
-      try {
-        const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', relFile], { cwd: worktreePath });
-        const statusLine = statusOut.trim();
-        if (statusLine.startsWith('??')) {
-          await fs.unlink(resolvedFile).catch(() => {});
-          reverted.push(relFile);
-        } else if (statusLine) {
-          await execa('git', ['checkout', 'HEAD', '--', relFile], { cwd: worktreePath });
-          reverted.push(relFile);
-        }
-      } catch {
-        await execa('git', ['checkout', 'HEAD', '--', relFile], { cwd: worktreePath }).catch(() => {});
-        reverted.push(relFile);
+      const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', relFile], { cwd: worktreePath });
+      const statusLine = statusOut.trim();
+      if (!statusLine) {
+        continue;
       }
+
+      const isUntracked = statusLine.startsWith('??');
+      let exists = false;
+      let originalContent: Buffer | undefined;
+
+      try {
+        originalContent = await fs.readFile(resolvedFile);
+        exists = true;
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err;
+        }
+        exists = false;
+      }
+
+      preflightItems.push({
+        resolvedFile,
+        relFile,
+        isUntracked,
+        exists,
+        originalContent,
+      });
     }
 
+    // Execution with rollback protection: if any operation fails, restore previous state
+    const executedReverts: PreflightItem[] = [];
+    try {
+      for (const item of preflightItems) {
+        if (item.isUntracked) {
+          if (item.exists) {
+            await fs.unlink(item.resolvedFile);
+          }
+        } else {
+          await execa('git', ['checkout', 'HEAD', '--', item.relFile], { cwd: worktreePath });
+        }
+        executedReverts.push(item);
+      }
+    } catch (revertErr: any) {
+      // Rollback any executed changes using our snapshots
+      for (const item of executedReverts) {
+        try {
+          if (item.isUntracked) {
+            if (item.exists && item.originalContent) {
+              await fs.writeFile(item.resolvedFile, item.originalContent);
+            }
+          } else {
+            if (item.exists && item.originalContent) {
+              await fs.writeFile(item.resolvedFile, item.originalContent);
+            } else if (!item.exists) {
+              await fs.unlink(item.resolvedFile).catch(() => {});
+            }
+          }
+        } catch {
+          // Best effort rollback
+        }
+      }
+      return c.json({
+        error: `Failed to revert files: ${revertErr?.message ?? String(revertErr)}. Any modified files were rolled back.`,
+      }, 500);
+    }
+
+    const reverted = preflightItems.map((item) => item.relFile);
     return c.json({ success: true, reverted });
   } catch (error) {
     return errorResponse(c, error);

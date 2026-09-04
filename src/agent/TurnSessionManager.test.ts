@@ -216,4 +216,52 @@ describe('TurnSessionManager', () => {
     expect(mockHarness.stopped).toBe(true);
     expect(manager.getSession('/ws/repo1')).toBeUndefined();
   });
+
+  it('serializes concurrent startSession calls without creating duplicate agents for the same workspace', async () => {
+    let startCallCount = 0;
+    const delayedHarness = new MockAgentHarness();
+    const delayedProvider: ProviderAdapter = {
+      ...mockProvider,
+      createInstance: () => {
+        startCallCount++;
+        return delayedHarness;
+      },
+    };
+
+    let finishStart!: () => void;
+    delayedHarness.start = () => new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+
+    const clientA: TurnClient = { send: vi.fn() };
+    const clientB: TurnClient = { send: vi.fn() };
+
+    // Launch two startSession calls simultaneously for the same workspace
+    const pA = manager.startSession({
+      workspaceCwd: '/ws/repo-concurrent',
+      command: 'mock-provider',
+      client: clientA,
+      provider: delayedProvider,
+    });
+    const pB = manager.startSession({
+      workspaceCwd: '/ws/repo-concurrent',
+      command: 'mock-provider',
+      client: clientB,
+      provider: delayedProvider,
+    });
+
+    // Before startup resolves, createInstance should only have been called ONCE
+    expect(startCallCount).toBe(1);
+
+    // Resolve startup
+    finishStart();
+
+    const [sessionA, sessionB] = await Promise.all([pA, pB]);
+
+    // Both should receive the exact same session instance
+    expect(sessionA).toBe(sessionB);
+    expect(startCallCount).toBe(1);
+    expect(sessionA.clients.has(clientA)).toBe(true);
+    expect(sessionA.clients.has(clientB)).toBe(true);
+  });
 });

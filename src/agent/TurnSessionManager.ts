@@ -67,6 +67,7 @@ export function dispatchAgentInput(
 
 export class TurnSessionManager {
   private sessions = new Map<string, TurnSession>();
+  private pendingStarts = new Map<string, Promise<TurnSession>>();
 
   public getSession(workspaceCwd: string): TurnSession | undefined {
     return this.sessions.get(workspaceCwd);
@@ -83,6 +84,34 @@ export class TurnSessionManager {
 
   public async startSession(options: StartSessionOptions): Promise<TurnSession> {
     const { workspaceCwd, command, client, provider, session } = options;
+
+    // Check if a startup is already in flight for this workspace
+    const inFlight = this.pendingStarts.get(workspaceCwd);
+    if (inFlight) {
+      const activeSession = await inFlight;
+      if (activeSession.command === command) {
+        activeSession.clients.add(client);
+        if (activeSession.isBusy) {
+          client.send(JSON.stringify({ type: 'status', state: 'busy' }));
+          for (const evt of activeSession.bufferedTurnEvents) {
+            client.send(JSON.stringify(evt));
+          }
+          for (const approval of activeSession.pendingApprovals.values()) {
+            client.send(JSON.stringify({
+              type: 'approval_request',
+              ...approval,
+            }));
+          }
+        } else {
+          client.send(JSON.stringify({ type: 'status', state: 'idle' }));
+          if (activeSession.session?.id) {
+            client.send(JSON.stringify({ type: 'session', id: activeSession.session.id }));
+          }
+        }
+        return activeSession;
+      }
+    }
+
     const existing = this.sessions.get(workspaceCwd);
 
     if (existing) {
@@ -119,29 +148,30 @@ export class TurnSessionManager {
       this.stopSession(workspaceCwd);
     }
 
-    const startedAgent = provider.createInstance();
-    const turnSession: TurnSession = {
-      workspaceCwd,
-      command,
-      agent: startedAgent,
-      provider,
-      session,
-      turnGate: new AgentTurnGate(),
-      isBusy: false,
-      bufferedTurnEvents: [],
-      pendingApprovals: new Map(),
-      clients: new Set([client]),
-      disconnectTimer: null,
-      createdAt: Date.now(),
-      lastActiveAt: Date.now(),
-    };
+    const startPromise = (async () => {
+      const startedAgent = provider.createInstance();
+      const turnSession: TurnSession = {
+        workspaceCwd,
+        command,
+        agent: startedAgent,
+        provider,
+        session,
+        turnGate: new AgentTurnGate(),
+        isBusy: false,
+        bufferedTurnEvents: [],
+        pendingApprovals: new Map(),
+        clients: new Set([client]),
+        disconnectTimer: null,
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+      };
 
-    const broadcast = (data: Record<string, any>) => {
-      const msg = JSON.stringify(data);
-      for (const c of turnSession.clients) {
-        try { c.send(msg); } catch { /* ignore detached socket */ }
-      }
-    };
+      const broadcast = (data: Record<string, any>) => {
+        const msg = JSON.stringify(data);
+        for (const c of turnSession.clients) {
+          try { c.send(msg); } catch { /* ignore detached socket */ }
+        }
+      };
 
     startedAgent.on('data', (text: string) => {
       turnSession.lastActiveAt = Date.now();
@@ -227,10 +257,25 @@ export class TurnSessionManager {
       broadcast({ type: 'error', message: error?.message ?? String(error) });
     });
 
-    await startedAgent.start(workspaceCwd, session);
-    this.sessions.set(workspaceCwd, turnSession);
-    return turnSession;
-  }
+    try {
+      await startedAgent.start(workspaceCwd, session);
+      this.sessions.set(workspaceCwd, turnSession);
+      return turnSession;
+    } catch (err) {
+      try {
+        startedAgent.stop();
+      } catch {
+        // ignore
+      }
+      throw err;
+    } finally {
+      this.pendingStarts.delete(workspaceCwd);
+    }
+  })();
+
+  this.pendingStarts.set(workspaceCwd, startPromise);
+  return await startPromise;
+}
 
   public dispatchInput(
     workspaceCwd: string,
@@ -316,6 +361,7 @@ export class TurnSessionManager {
   }
 
   public stopSession(workspaceCwd: string): void {
+    this.pendingStarts.delete(workspaceCwd);
     const session = this.sessions.get(workspaceCwd);
     if (!session) return;
     if (session.disconnectTimer) {
@@ -333,6 +379,7 @@ export class TurnSessionManager {
   }
 
   public clear(): void {
+    this.pendingStarts.clear();
     for (const cwd of this.sessions.keys()) {
       this.stopSession(cwd);
     }
