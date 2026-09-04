@@ -124,7 +124,7 @@ export function loadChatStore(branchName: string): ChatStore {
  *  transcript is unaffected, only what survives a reload is trimmed. */
 const MAX_PERSISTED_MESSAGES = 500;
 
-export async function fetchRemoteChatStore(branchName: string): Promise<ChatStore | null> {
+export async function fetchRemoteChatStore(branchName: string): Promise<(ChatStore & { isBusy?: boolean }) | null> {
   try {
     const res = await fetch(`${API_BASE}/api/chat/thread/${encodeURIComponent(branchName)}`);
     if (!res.ok) return null;
@@ -139,6 +139,7 @@ export async function fetchRemoteChatStore(branchName: string): Promise<ChatStor
         modelsByProvider: thread.modelsByProvider || {},
         effortsByProvider: thread.effortsByProvider || {},
         messages: Array.isArray(thread.messages) ? thread.messages : [],
+        isBusy: Boolean(data.isBusy),
       };
     }
     return null;

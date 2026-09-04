@@ -53,8 +53,8 @@ import {
   getSessionTranscript,
 } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
-import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
+import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './agent/TurnSessionManager.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';
@@ -156,41 +156,7 @@ function hasTrustedLocalOrigin(origin: string | undefined): boolean {
   }
 }
 
-/** Validate and dispatch one renderer turn without letting malformed authority reach a harness. */
-export function dispatchAgentInput(
-  agent: AgentHarness,
-  provider: ProviderAdapter,
-  payload: { input?: unknown; executionProfile?: unknown },
-): string | null {
-  if (typeof payload.input !== 'string' || !payload.input.trim()) {
-    return 'A non-empty input message is required.';
-  }
-  const executionProfile = ProviderRegistry.resolveExecutionProfile(provider, payload.executionProfile);
-  if (executionProfile === null) {
-    return 'Select a supported execution profile before sending this turn.';
-  }
-  void agent.send(payload.input, executionProfile);
-  return null;
-}
-
-/** Per-socket admission guard so a second prompt is rejected, never dropped. */
-export class AgentTurnGate {
-  private active = false;
-
-  public tryBegin(): boolean {
-    if (this.active) return false;
-    this.active = true;
-    return true;
-  }
-
-  public settle(): void {
-    this.active = false;
-  }
-
-  public isActive(): boolean {
-    return this.active;
-  }
-}
+export { dispatchAgentInput, AgentTurnGate };
 
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
@@ -213,104 +179,12 @@ app.get('/ws', async (c, next) => {
   //                     | {type:'rejected', reason:'busy', message, turnId?}
   //                     | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
-    let agent: AgentHarness | null = null;
-    let activeProvider: ProviderAdapter | null = null;
-    let lastCwd: string | null = null;
-    let lastCommand: string | null = null;
-    let lastSession: AgentSession | undefined;
-    let startPromise: Promise<{ agent: AgentHarness; provider: ProviderAdapter } | null> | null = null;
-    const turnGate = new AgentTurnGate();
-
-    const startAgentInstance = async (
-      targetWs: { send: (data: string) => void },
-      command: string,
-      cwd: string,
-      session?: AgentSession,
-    ) => {
-      turnGate.settle();
-      if (agent) {
-        const previousAgent = agent;
-        agent = null;
-        activeProvider = null;
-        previousAgent.stop();
-      }
-      const provider = ProviderRegistry.getProvider(command);
-      if (!provider) {
-        targetWs.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}. Please create a dedicated adapter.` }));
-        return null;
-      }
-
-      const config = await loadConfig();
-      const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
-      if (!safeCwd) {
-        targetWs.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
-        return null;
-      }
-
-      const startedAgent = provider.createInstance();
-      agent = startedAgent;
-      activeProvider = provider;
-      lastCwd = safeCwd;
-      lastCommand = command;
-      lastSession = session;
-      const isCurrentAgent = () => agent === startedAgent;
-      startedAgent.on('data', (text: string) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({ type: 'stream', text }));
-      });
-      startedAgent.on('system', (message: string) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({ type: 'system', message }));
-      });
-      startedAgent.on('session', (id: string) => {
-        if (!isCurrentAgent()) return;
-        if (isValidSessionUuid(id)) {
-          lastSession = { ...(lastSession ?? { resume: true }), id };
-          targetWs.send(JSON.stringify({ type: 'session', id }));
-        }
-      });
-      startedAgent.on('idle', () => {
-        if (!isCurrentAgent()) return;
-        turnGate.settle();
-        targetWs.send(JSON.stringify({ type: 'status', state: 'idle' }));
-      });
-      startedAgent.on('close', (code: number) => {
-        if (!isCurrentAgent()) return;
-        turnGate.settle();
-        targetWs.send(JSON.stringify({ type: 'close', code }));
-      });
-      startedAgent.on('usage', (usage: any) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({ type: 'usage', usage }));
-      });
-      startedAgent.on('approval_request', (approval: any) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({
-          type: 'approval_request',
-          requestId: approval.requestId,
-          tool: approval.tool,
-          input: approval.input,
-          description: approval.description,
-        }));
-      });
-      startedAgent.on('file_changed', (info: any) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({
-          type: 'file_changed',
-          kind: info?.kind,
-          paths: info?.paths,
-        }));
-      });
-      startedAgent.on('error', (error: Error) => {
-        if (!isCurrentAgent()) return;
-        targetWs.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
-      });
-      await startedAgent.start(safeCwd, session);
-      return { agent: startedAgent, provider };
-    };
+    let currentCwd: string | null = null;
+    let currentWs: { send: (data: string) => void } | null = null;
 
     return {
       async onMessage(event, ws) {
+        currentWs = ws;
         if (typeof event.data === 'string') {
           if (event.data === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }));
@@ -334,6 +208,14 @@ app.get('/ws', async (c, next) => {
                 return;
               }
 
+              const config = await loadConfig();
+              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
+              if (!safeCwd) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
+                return;
+              }
+              currentCwd = safeCwd;
+
               let session: AgentSession | undefined;
               const model = ProviderRegistry.resolveModel(provider, payload.model);
               if (model === null) {
@@ -354,82 +236,68 @@ app.get('/ws', async (c, next) => {
                 session = { id: crypto.randomUUID(), resume: false, model, effort };
               }
 
-              try {
-                startPromise = startAgentInstance(ws, command, cwd, session);
-                await startPromise;
-              } finally {
-                startPromise = null;
-              }
+              await defaultTurnSessionManager.startSession({
+                workspaceCwd: safeCwd,
+                command,
+                client: ws,
+                provider,
+                session,
+              });
             } else if (payload.type === 'input') {
-              if (startPromise) {
-                try {
-                  await startPromise;
-                } catch {
-                  // Handled by client/emitter; proceed to active instance check
-                }
-              }
-
-              if (!agent || !activeProvider) {
-                const command = typeof payload.command === 'string' ? payload.command : (lastCommand ?? 'antigravity-cli');
-                const cwd = typeof payload.cwd === 'string' ? payload.cwd : lastCwd;
-                if (cwd) {
-                  try {
-                    startPromise = startAgentInstance(ws, command, cwd, lastSession);
-                    const instance = await startPromise;
-                    if (!instance) return;
-                  } finally {
-                    startPromise = null;
-                  }
-                }
-              }
-
-              if (agent && activeProvider) {
-                if (!turnGate.tryBegin()) {
-                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
-                  ws.send(JSON.stringify({
-                    type: 'rejected',
-                    reason: 'busy',
-                    message: 'The agent is still processing the current turn.',
-                    ...(turnId ? { turnId } : {}),
-                  }));
-                  return;
-                }
-                const error = dispatchAgentInput(agent, activeProvider, payload);
-                if (error) {
-                  turnGate.settle();
-                  ws.send(JSON.stringify({ type: 'error', message: error }));
-                  return;
-                }
-                if (turnGate.isActive()) {
-                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
-                  ws.send(JSON.stringify({
-                    type: 'accepted',
-                    ...(turnId ? { turnId } : {}),
-                  }));
-                  ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
-                }
-              } else {
-                const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+              const cwd = typeof payload.cwd === 'string' ? payload.cwd : currentCwd;
+              if (!cwd) {
                 ws.send(JSON.stringify({
                   type: 'error',
                   message: 'No active agent session. Please start or reconnect the agent.',
+                }));
+                return;
+              }
+              const config = await loadConfig();
+              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
+              if (!safeCwd) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid workspace directory.' }));
+                return;
+              }
+              currentCwd = safeCwd;
+
+              let session = defaultTurnSessionManager.getSession(safeCwd);
+              if (!session) {
+                const command = typeof payload.command === 'string' ? payload.command : 'antigravity-cli';
+                const provider = ProviderRegistry.getProvider(command);
+                if (!provider) {
+                  ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}.` }));
+                  return;
+                }
+                session = await defaultTurnSessionManager.startSession({
+                  workspaceCwd: safeCwd,
+                  command,
+                  client: ws,
+                  provider,
+                });
+              }
+
+              const result = defaultTurnSessionManager.dispatchInput(safeCwd, payload);
+              if (result.error) {
+                ws.send(JSON.stringify({ type: 'error', message: result.error }));
+              } else if (result.rejected) {
+                const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                ws.send(JSON.stringify({
+                  type: 'rejected',
+                  reason: 'busy',
+                  message: 'The agent is still processing the current turn.',
                   ...(turnId ? { turnId } : {}),
                 }));
               }
             } else if (payload.type === 'approval_response') {
-              const requestId = typeof payload.requestId === 'string' ? payload.requestId : '';
-              const decision = payload.decision === 'allow' ? 'allow' : 'deny';
-              const message = typeof payload.message === 'string' ? payload.message : undefined;
-              if (agent && typeof agent.respondToApproval === 'function' && requestId) {
-                agent.respondToApproval(requestId, decision, message);
+              if (currentCwd) {
+                const requestId = typeof payload.requestId === 'string' ? payload.requestId : '';
+                const decision = payload.decision === 'allow' ? 'allow' : 'deny';
+                const message = typeof payload.message === 'string' ? payload.message : undefined;
+                defaultTurnSessionManager.respondToApproval(currentCwd, requestId, decision, message);
               }
             } else if (payload.type === 'stop') {
-              turnGate.settle();
-              if (agent) {
-                const stoppedAgent = agent;
-                agent = null;
-                activeProvider = null;
-                stoppedAgent.stop();
+              if (currentCwd) {
+                defaultTurnSessionManager.stopSession(currentCwd);
               }
             }
           } catch (err) {
@@ -437,17 +305,12 @@ app.get('/ws', async (c, next) => {
           }
         }
       },
-      onOpen(_event, _ws) {
-        console.log('[WS] Client connected');
+      onOpen(_event, ws) {
+        currentWs = ws;
       },
-      onClose(_event, _ws) {
-        console.log('[WS] Client disconnected');
-        turnGate.settle();
-        if (agent) {
-          const disconnectedAgent = agent;
-          agent = null;
-          activeProvider = null;
-          disconnectedAgent.stop();
+      onClose(_event, ws) {
+        if (currentCwd && ws) {
+          defaultTurnSessionManager.unregisterClient(currentCwd, ws);
         }
       },
     };
@@ -790,7 +653,17 @@ app.get('/api/chat/thread/:workspaceId', async (c) => {
   }
   try {
     const thread = loadChatThread(workspaceId);
-    return c.json({ thread });
+    const config = await loadConfig().catch(() => null);
+    let isBusy = false;
+    if (config) {
+      try {
+        const workspacePath = resolveWorkspacePath(config.workspacesDir, workspaceId);
+        isBusy = defaultTurnSessionManager.hasActiveTurn(workspacePath);
+      } catch {
+        // Workspace not found on disk or invalid
+      }
+    }
+    return c.json({ thread, isBusy });
   } catch (error) {
     return errorResponse(c, error);
   }

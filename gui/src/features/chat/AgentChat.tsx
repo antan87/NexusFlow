@@ -555,6 +555,13 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [revertingFiles, setRevertingFiles] = useState<string[] | null>(null);
   const turnFilesRef = useRef<Set<string>>(new Set());
+  const busyRef = useRef(false);
+  const manualStopRef = useRef(false);
+  const startAgentRef = useRef<((providerId?: string, options?: StartAgentOptions) => boolean) | null>(null);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
 
   const handleRevertTurn = useCallback(async (files: string[]) => {
     setRevertingFiles(files);
@@ -655,9 +662,15 @@ export function AgentChat({ ws }: AgentChatProps) {
       if (remote.sessions && Object.keys(remote.sessions).length > 0) {
         updateSessions((currentSessions) => ({ ...remote.sessions, ...currentSessions }));
       }
+      if (remote.isBusy && !wsRef.current) {
+        const targetProvider = remote.providerId || agentName;
+        if (targetProvider && startAgentRef.current) {
+          startAgentRef.current(targetProvider, { firstMessage: null });
+        }
+      }
     });
     return () => { active = false; };
-  }, [ws.branchName, updateSessions]);
+  }, [ws.branchName, updateSessions, agentName]);
 
   useEffect(() => {
     const requestId = ++providerRequestRef.current;
@@ -860,6 +873,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [appendSystemNote]);
 
   const stopAgent = useCallback(() => {
+    manualStopRef.current = true;
     const socket = wsRef.current;
     if (!socket) return;
 
@@ -885,6 +899,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [closeTurn, noteSessionEnded]);
 
   const startAgent = useCallback((providerId = agentName, options: StartAgentOptions = {}): boolean => {
+    manualStopRef.current = false;
     if (wsRef.current) {
       options.onFailure?.();
       return false;
@@ -1179,14 +1194,29 @@ export function AgentChat({ ws }: AgentChatProps) {
       // new connection or emit a spurious "Session ended".
       if (wsRef.current !== socket) return;
       if (!dispatched) failBeforeDispatch();
+
+      const wasBusy = busyRef.current;
+      const isManual = manualStopRef.current;
+
       setConnected(false);
       setConnecting(false);
       setBusy(false);
       closeTurn();
-      if (dispatched) noteSessionEnded();
       wsRef.current = null;
       connectionProviderRef.current = null;
       setConnectionProviderId(null);
+
+      if (wasBusy && mountedRef.current && !isManual) {
+        appendSystemNote('Connection interrupted. Resuming turn...', 'note');
+        setTimeout(() => {
+          if (mountedRef.current && !manualStopRef.current && !wsRef.current) {
+            startAgentRef.current?.(providerId, { firstMessage: null });
+          }
+        }, 1200);
+        return;
+      }
+
+      if (dispatched) noteSessionEnded();
     };
 
     socket.onerror = () => {
@@ -1209,6 +1239,10 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnecting(true);
     return true;
   }, [agentName, appendSystemNote, closeTurn, effortsByProvider, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, updateSessions, ws.workspacePath]);
+
+  useEffect(() => {
+    startAgentRef.current = startAgent;
+  }, [startAgent]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
