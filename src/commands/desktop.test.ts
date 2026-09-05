@@ -8,6 +8,7 @@ import {
   GITHUB_RELEASE_API_URL,
   installDesktop,
   isAllowedDesktopReleaseUrl,
+  quoteDesktopExecArg,
 } from './desktop.js';
 
 const assetUrl = 'https://github.com/antan87/NexusFlow/releases/download/v9.9.9/NexusFlow-9.9.9.AppImage';
@@ -39,6 +40,17 @@ describe('desktop release installer', () => {
     const fetchImpl = vi.fn();
     await expect(installDesktop({ platform: 'linux', arch: 'arm64', fetchImpl })).rejects.toThrow(/x64 only/i);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('defaults to x64 when overriding platform in tests even if host architecture is arm64', async () => {
+    const originalArch = process.arch;
+    try {
+      Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
+      const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ assets: [] }), { status: 200 }));
+      await expect(installDesktop({ platform: 'linux', fetchImpl })).rejects.toThrow(/no linux appimage asset/i);
+    } finally {
+      Object.defineProperty(process, 'arch', { value: originalArch, configurable: true });
+    }
   });
 
   it('rejects an untrusted release API host', async () => {
@@ -92,7 +104,7 @@ describe('desktop release installer', () => {
       expect(result.installedPath).toContain(path.join('.local', 'share', 'nexusflow'));
       expect(path.basename(result.installedPath)).toBe('NexusFlow.AppImage');
       expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
-      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain(`Exec=${result.installedPath}`);
+      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(result.installedPath)}`);
       expect(fetchImpl).toHaveBeenCalledWith(GITHUB_RELEASE_API_URL, expect.any(Object));
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -118,7 +130,7 @@ describe('desktop release installer', () => {
       expect(second.installedPath).toBe(first.installedPath);
       expect(second.desktopEntryPath).toBe(first.desktopEntryPath);
       expect(await readFile(second.installedPath, 'utf8')).toBe(secondBinary);
-      expect(await readFile(second.desktopEntryPath!, 'utf8')).toContain(`Exec=${first.installedPath}`);
+      expect(await readFile(second.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(first.installedPath)}`);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -187,9 +199,24 @@ describe('desktop release installer', () => {
       const first = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
       await expect(installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir })).rejects.toThrow(/checksum mismatch/i);
       expect(await readFile(first.installedPath, 'utf8')).toBe(firstBinary);
-      expect(await readFile(first.desktopEntryPath!, 'utf8')).toContain(`Exec=${first.installedPath}`);
+      expect(await readFile(first.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(first.installedPath)}`);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  describe('quoteDesktopExecArg', () => {
+    it('leaves clean alphanumeric POSIX paths unquoted', () => {
+      expect(quoteDesktopExecArg('/home/user/.local/share/nexusflow/NexusFlow.AppImage')).toBe('/home/user/.local/share/nexusflow/NexusFlow.AppImage');
+    });
+
+    it('quotes paths with spaces', () => {
+      expect(quoteDesktopExecArg('/home/user/my apps/NexusFlow.AppImage')).toBe('"/home/user/my apps/NexusFlow.AppImage"');
+    });
+
+    it('quotes and escapes backslashes, double quotes, backticks, and dollar signs', () => {
+      expect(quoteDesktopExecArg('C:\\Users\\test\\.local\\share\\nexusflow\\NexusFlow.AppImage')).toBe('"C:\\\\Users\\\\test\\\\.local\\\\share\\\\nexusflow\\\\NexusFlow.AppImage"');
+      expect(quoteDesktopExecArg('/opt/app"dir/$test`cmd`')).toBe('"/opt/app\\"dir/\\$test\\`cmd\\`"');
+    });
   });
 });

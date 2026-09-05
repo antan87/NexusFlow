@@ -118,7 +118,7 @@ function checksumFromSidecar(contents: string): string {
   return match[1].toLowerCase();
 }
 
-function quoteDesktopExecArg(value: string): string {
+export function quoteDesktopExecArg(value: string): string {
   // Desktop-entry Exec values use backslash escapes rather than shell
   // expansion. Keep ordinary paths readable and quote only when needed.
   if (/^[A-Za-z0-9_./:+-]+$/.test(value)) return value;
@@ -216,7 +216,7 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   if (platform !== 'win32' && platform !== 'linux') {
     throw new Error(`Desktop installer is unsupported on ${platform}. Install the Windows or Linux release from ${GITHUB_RELEASE_PAGE_URL}.`);
   }
-  const arch = options.arch ?? process.arch;
+  const arch = options.arch ?? (options.platform ? 'x64' : process.arch);
   if (arch !== 'x64') {
     throw new Error(`Desktop installer is unsupported on ${platform}/${arch}; published desktop assets are x64 only.`);
   }
