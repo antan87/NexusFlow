@@ -108,24 +108,46 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
       throw new Error(`GitHub API returned status ${response.status}`);
     }
 
-    const data = await response.json() as GitHubRelease;
-    const latestVersion = data.tag_name.replace(/^v/, '');
+    const data = (await response.json()) as Partial<GitHubRelease>;
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid GitHub release response');
+    }
+
+    const rawTag = typeof data.tag_name === 'string' ? data.tag_name : '';
+    const semverMatch = rawTag.match(/^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/);
+    if (!semverMatch) {
+      throw new Error(`Invalid release tag format: ${rawTag}`);
+    }
+    const latestVersion = semverMatch[1];
     
     // Resolve a platform-matching release asset for read-only browser links.
     // electron-updater handles packaged desktop downloads independently.
     let downloadUrl: string | null = null;
-    const targetAsset = (data.assets ?? []).find((asset) => {
-      const name = asset.name.toLowerCase();
-      if (process.platform === 'win32') return name.endsWith('.exe') && name.includes('setup');
-      if (process.platform === 'linux') return name.endsWith('.appimage');
-      if (process.platform === 'darwin') return name.endsWith('.dmg');
-      return false;
-    });
-    if (targetAsset) {
-      downloadUrl = targetAsset.browser_download_url;
+    if (Array.isArray(data.assets)) {
+      const targetAsset = data.assets.find((asset) => {
+        if (!asset || typeof asset.name !== 'string') return false;
+        const name = asset.name.toLowerCase();
+        if (process.platform === 'win32') return name.endsWith('.exe') && name.includes('setup');
+        if (process.platform === 'linux') return name.endsWith('.appimage');
+        if (process.platform === 'darwin') return name.endsWith('.dmg');
+        return false;
+      });
+      if (targetAsset && typeof targetAsset.browser_download_url === 'string') {
+        try {
+          const parsed = new URL(targetAsset.browser_download_url);
+          if (
+            parsed.protocol === 'https:' &&
+            (parsed.hostname === 'github.com' ||
+              parsed.hostname.endsWith('.github.com') ||
+              parsed.hostname === 'objects.githubusercontent.com')
+          ) {
+            downloadUrl = parsed.toString();
+          }
+        } catch {}
+      }
     }
 
-    const releaseNotes = data.body || '';
+    const releaseNotes = typeof data.body === 'string' ? data.body.slice(0, 50000) : '';
 
     // Cache results
     config.lastUpdateCheck = new Date().toISOString();
@@ -134,12 +156,25 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
     config.latestReleaseNotes = releaseNotes;
     await saveConfig(config);
 
+    let releaseUrl: string = RELEASE_PAGE_URL;
+    if (typeof data.html_url === 'string') {
+      try {
+        const parsed = new URL(data.html_url);
+        if (
+          parsed.protocol === 'https:' &&
+          (parsed.hostname === 'github.com' || parsed.hostname.endsWith('.github.com'))
+        ) {
+          releaseUrl = parsed.toString();
+        }
+      } catch {}
+    }
+
     return {
       currentVersion,
       latestVersion,
       updateAvailable: isNewerVersion(currentVersion, latestVersion),
       downloadUrl,
-      releaseUrl: data.html_url || RELEASE_PAGE_URL,
+      releaseUrl,
       releaseNotes,
     };
   } catch {

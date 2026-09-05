@@ -301,7 +301,7 @@ export async function detectNuGetFeeds(repoPath: string): Promise<{ name: string
           const key = match[1];
           const value = match[2];
           // Exclude default public nuget feed to keep output focused on private feeds
-          if (!key.toLowerCase().includes('nuget.org') && !value.toLowerCase().includes('api.nuget.org')) {
+          if (!isPublicNuGetFeed(key, value)) {
             feeds.push({ name: key, url: value });
           }
         }
@@ -311,4 +311,19 @@ export async function detectNuGetFeeds(repoPath: string): Promise<{ name: string
     // Ignore errors
   }
   return feeds;
+}
+
+function isPublicNuGetFeed(key: string, urlStr: string): boolean {
+  const normalizedKey = key.trim().toLowerCase();
+  if (normalizedKey === 'nuget.org' || normalizedKey === 'nuget' || normalizedKey === 'nuget official package source') {
+    return true;
+  }
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'nuget.org' || host === 'api.nuget.org' || host.endsWith('.nuget.org');
+  } catch {
+    const raw = urlStr.trim().toLowerCase();
+    return raw === 'nuget.org' || raw === 'api.nuget.org';
+  }
 }

@@ -1412,7 +1412,6 @@ app.post('/api/workspace/suggest-workflow', async (c) => {
       repos: RepoInfo[];
     };
 
-    const config = await loadConfig();
     const suggestion = await suggestWorkflow(description, repos);
 
     return c.json({
@@ -1742,14 +1741,17 @@ app.get('/api/workspace/:id/services/logs/:serviceName', async (c) => {
     let content = '';
     let size = 0;
     try {
-      const stats = await fs.stat(logFile);
-      size = stats.size;
-      const start = Math.max(0, size - 50000);
       const fd = await fs.open(logFile, 'r');
-      const buffer = Buffer.alloc(size - start);
-      await fd.read(buffer, 0, buffer.length, start);
-      await fd.close();
-      content = buffer.toString('utf-8');
+      try {
+        const stats = await fd.stat();
+        size = stats.size;
+        const start = Math.max(0, size - 50000);
+        const buffer = Buffer.alloc(size - start);
+        await fd.read(buffer, 0, buffer.length, start);
+        content = buffer.toString('utf-8');
+      } finally {
+        await fd.close();
+      }
     } catch {
       content = 'No logs available yet.';
     }

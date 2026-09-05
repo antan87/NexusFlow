@@ -67,21 +67,24 @@ export async function mcpSetupCommand() {
       let configData: any = { mcpServers: {} };
       
       try {
-        await fs.access(configPath);
         const raw = await fs.readFile(configPath, 'utf8');
         // Handle empty or invalid files gracefully
         if (raw.trim()) {
             configData = JSON.parse(raw);
         }
         if (!configData.mcpServers) configData.mcpServers = {};
-      } catch (e) {
-        // File doesn't exist, we will create it if the directory exists
-        const dir = path.dirname(configPath);
-        try {
-          await fs.access(dir);
-        } catch {
-          // Directory doesn't exist, skip this environment
-          continue;
+      } catch (e: any) {
+        if (e?.code === 'ENOENT') {
+          // File doesn't exist, we will create it if the directory exists
+          const dir = path.dirname(configPath);
+          try {
+            await fs.access(dir);
+          } catch {
+            // Directory doesn't exist, skip this environment
+            continue;
+          }
+        } else {
+          throw e;
         }
       }
 

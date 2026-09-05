@@ -30,11 +30,19 @@ export interface GhStatus {
 
 /** Determines the forge kind from a hostname. */
 function forgeKind(host: string): ForgeKind {
-  const h = host.toLowerCase();
-  if (h.includes('github')) return 'github';
-  if (h.includes('gitlab')) return 'gitlab';
-  if (h.includes('dev.azure.com') || h.includes('visualstudio.com') || h.includes('azure')) return 'azure';
-  if (h.includes('bitbucket')) return 'bitbucket';
+  const h = host.toLowerCase().trim();
+  if (h === 'github.com' || h.endsWith('.github.com')) return 'github';
+  if (h === 'gitlab.com' || h.endsWith('.gitlab.com')) return 'gitlab';
+  if (
+    h === 'dev.azure.com' ||
+    h.endsWith('.dev.azure.com') ||
+    h === 'visualstudio.com' ||
+    h.endsWith('.visualstudio.com') ||
+    h.endsWith('.azure.com')
+  ) {
+    return 'azure';
+  }
+  if (h === 'bitbucket.org' || h.endsWith('.bitbucket.org')) return 'bitbucket';
   return 'unknown';
 }
 
