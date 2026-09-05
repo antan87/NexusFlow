@@ -2332,6 +2332,140 @@ describe('Server API Endpoints Unit Tests', () => {
         snap1,
       );
     });
+
+    it('rejects unmerged conflict statuses during preflight', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'status') {
+          return { stdout: 'UU conflict.ts' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['conflict.ts'] }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain('unmerged git conflicts');
+    });
+
+    it('preserves and restores Git index and file metadata when revert fails on second file', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      const aWorking = Buffer.from('a.txt working tree bytes');
+      const indexBytes = Buffer.from('binary-git-index-snapshot-12345');
+
+      vi.mocked(fs.stat).mockResolvedValue({ mode: 0o100644 } as any);
+      vi.mocked(fs.readFile).mockImplementation((async (filePath: any) => {
+        if (String(filePath).endsWith('.git/index') || String(filePath).includes('index')) {
+          return indexBytes;
+        }
+        if (String(filePath).includes('a.txt')) return aWorking;
+        return Buffer.from('');
+      }) as any);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse' && args?.[1] === '--git-path') {
+          return { stdout: '.git/index' };
+        }
+        if (cmd === 'git' && args?.[0] === 'status') {
+          const file = args[args.length - 1];
+          if (file === 'a.txt') return { stdout: 'MM a.txt' }; // staged + unstaged changes
+          if (file === 'b.txt') return { stdout: 'A  b.txt' }; // newly staged file absent from HEAD
+          return { stdout: '' };
+        }
+        if (cmd === 'git' && args?.[0] === 'checkout') {
+          const file = args[args.length - 1];
+          if (file === 'b.txt') {
+            throw new Error('git checkout HEAD failed for newly added b.txt');
+          }
+          return { stdout: '' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['a.txt', 'b.txt'] }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('git checkout HEAD failed for newly added b.txt');
+      expect(data.error).toContain('rolled back');
+
+      // Verify git index snapshot was written back to restore staged state
+      expect(fs.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining('.git/index'),
+        indexBytes,
+      );
+      // Verify a.txt working tree was restored
+      expect(fs.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining('a.txt'),
+        aWorking,
+      );
+    });
+
+    it('accurately reports failure when rollback restoration fails without overstating recovery', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('original file'));
+      vi.mocked(fs.writeFile).mockRejectedValue(new Error('EPERM: disk permission denied on rollback'));
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'status') {
+          return { stdout: ` M ${args[args.length - 1]}` };
+        }
+        if (cmd === 'git' && args?.[0] === 'checkout') {
+          const file = args[args.length - 1];
+          if (file === 'file2.ts') {
+            throw new Error('Primary checkout error on file2.ts');
+          }
+          return { stdout: '' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['file1.ts', 'file2.ts'] }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('Primary checkout error on file2.ts');
+      expect(data.error).toContain('Warning: Rollback could not fully restore state');
+      expect(data.error).not.toContain('Any modified files were rolled back.');
+    });
   });
 
   describe('/api/chat/thread endpoints (SQLite persistence)', () => {

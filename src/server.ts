@@ -2028,6 +2028,25 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
     }
 
+    // Snapshot git index so staged changes can be restored with 100% fidelity on rollback
+    let indexPath: string | null = null;
+    let originalIndexBuf: Buffer | null = null;
+    try {
+      const { stdout: gitPathOut } = await execa('git', ['rev-parse', '--git-path', 'index'], { cwd: worktreePath });
+      const relIndexPath = gitPathOut.trim();
+      if (relIndexPath) {
+        indexPath = path.resolve(worktreePath, relIndexPath);
+        try {
+          originalIndexBuf = await fs.readFile(indexPath);
+        } catch {
+          originalIndexBuf = null;
+        }
+      }
+    } catch {
+      indexPath = null;
+      originalIndexBuf = null;
+    }
+
     // Preflight: inspect all paths, statuses, and take snapshots for rollback
     interface PreflightItem {
       resolvedFile: string;
@@ -2035,6 +2054,7 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       isUntracked: boolean;
       exists: boolean;
       originalContent?: Buffer;
+      originalMode?: number;
     }
 
     const preflightItems: PreflightItem[] = [];
@@ -2048,11 +2068,27 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
         continue;
       }
 
+      // Preflight unsupported statuses: conflicts (U, AA, DD), submodules (S), typechanges (T)
+      const code = statusLine.slice(0, 2);
+      if (code.includes('U') || code === 'AA' || code === 'DD') {
+        return c.json({
+          error: `Cannot revert '${relFile}': file has unmerged git conflicts ('${statusLine}'). Resolve conflicts first.`,
+        }, 400);
+      }
+      if (code.includes('S') || code.includes('T')) {
+        return c.json({
+          error: `Cannot revert '${relFile}': file has unsupported git status ('${statusLine}').`,
+        }, 400);
+      }
+
       const isUntracked = statusLine.startsWith('??');
       let exists = false;
       let originalContent: Buffer | undefined;
+      let originalMode: number | undefined;
 
       try {
+        const stat = await fs.stat(resolvedFile);
+        originalMode = stat.mode;
         originalContent = await fs.readFile(resolvedFile);
         exists = true;
       } catch (err: any) {
@@ -2068,6 +2104,7 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
         isUntracked,
         exists,
         originalContent,
+        originalMode,
       });
     }
 
@@ -2085,24 +2122,60 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
         executedReverts.push(item);
       }
     } catch (revertErr: any) {
-      // Rollback any executed changes using our snapshots
+      const rollbackErrors: string[] = [];
+
+      // 1. Restore the Git index first if it was snapshotted
+      if (indexPath && originalIndexBuf) {
+        try {
+          await fs.writeFile(indexPath, originalIndexBuf);
+        } catch (indexErr: any) {
+          rollbackErrors.push(`Failed to restore git index: ${indexErr?.message ?? String(indexErr)}`);
+        }
+      }
+
+      // 2. Restore modified working tree files and metadata
       for (const item of executedReverts) {
         try {
           if (item.isUntracked) {
             if (item.exists && item.originalContent) {
               await fs.writeFile(item.resolvedFile, item.originalContent);
+              if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
+                try {
+                  await fs.chmod(item.resolvedFile, item.originalMode);
+                } catch {
+                  // ignore chmod failures
+                }
+              }
             }
           } else {
             if (item.exists && item.originalContent) {
               await fs.writeFile(item.resolvedFile, item.originalContent);
+              if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
+                try {
+                  await fs.chmod(item.resolvedFile, item.originalMode);
+                } catch {
+                  // ignore chmod failures
+                }
+              }
             } else if (!item.exists) {
-              await fs.unlink(item.resolvedFile).catch(() => {});
+              try {
+                await fs.unlink(item.resolvedFile);
+              } catch {
+                // ignore unlink failures
+              }
             }
           }
-        } catch {
-          // Best effort rollback
+        } catch (restoreErr: any) {
+          rollbackErrors.push(`Failed to restore ${item.relFile}: ${restoreErr?.message ?? String(restoreErr)}`);
         }
       }
+
+      if (rollbackErrors.length > 0) {
+        return c.json({
+          error: `Failed to revert files: ${revertErr?.message ?? String(revertErr)}. Warning: Rollback could not fully restore state: ${rollbackErrors.join('; ')}`,
+        }, 500);
+      }
+
       return c.json({
         error: `Failed to revert files: ${revertErr?.message ?? String(revertErr)}. Any modified files were rolled back.`,
       }, 500);

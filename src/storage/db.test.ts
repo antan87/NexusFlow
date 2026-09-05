@@ -252,5 +252,87 @@ describe('storage/db SQLite persistence', () => {
         fsMod.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it('does not publish uncommitted state and allows clean rollback if persistence fails during COMMIT', async () => {
+      const fsMod = await import('node:fs');
+      const osMod = await import('node:os');
+      const pathMod = await import('node:path');
+      const { vi } = await import('vitest');
+
+      const tempDir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'nf-db-commit-fail-'));
+      const dbPath = pathMod.join(tempDir, 'test.db');
+
+      try {
+        const diskDb = new FallbackDatabase(dbPath);
+        saveChatThread({
+          workspaceId: 'tx-commit-ws',
+          providerId: 'claude-cli',
+          sessions: {},
+          profilesByProvider: {},
+          modelsByProvider: {},
+          effortsByProvider: {},
+          messages: [{ role: 'user', content: 'Initial message' }],
+        }, diskDb);
+
+        // Verify initial state persisted
+        expect(loadChatThread('tx-commit-ws', diskDb)?.providerId).toBe('claude-cli');
+
+        // Inject failure during saveToDisk execution
+        const saveSpy = vi.spyOn(diskDb as any, 'saveToDisk').mockImplementation(() => {
+          throw new Error('Injected rename failure during atomic write');
+        });
+
+        // Attempt to save updated thread with changed provider — this will fail at COMMIT
+        expect(() => {
+          saveChatThread({
+            workspaceId: 'tx-commit-ws',
+            providerId: 'codex-cli',
+            sessions: {},
+            profilesByProvider: {},
+            modelsByProvider: {},
+            effortsByProvider: {},
+            messages: [{ role: 'user', content: 'Attempted update' }],
+          }, diskDb);
+        }).toThrow('Injected rename failure during atomic write');
+
+        saveSpy.mockRestore();
+
+        // 1. In-memory read must NOT return the failed 'codex-cli' provider
+        const inMemoryThread = loadChatThread('tx-commit-ws', diskDb);
+        expect(inMemoryThread?.providerId).toBe('claude-cli');
+        expect(inMemoryThread?.messages[0].content).toBe('Initial message');
+
+        // 2. Freshly opened database must also return the original 'claude-cli' provider
+        const freshDb = new FallbackDatabase(dbPath);
+        const freshThread = loadChatThread('tx-commit-ws', freshDb);
+        expect(freshThread?.providerId).toBe('claude-cli');
+        expect(freshThread?.messages[0].content).toBe('Initial message');
+
+        // 3. A subsequent successful mutation must persist without leaking the failed 'codex-cli'
+        saveChatThread({
+          workspaceId: 'tx-commit-ws',
+          providerId: 'claude-cli',
+          sessions: {},
+          profilesByProvider: {},
+          modelsByProvider: {},
+          effortsByProvider: {},
+          messages: [
+            { role: 'user', content: 'Initial message' },
+            { role: 'assistant', content: 'Successful follow-up' },
+          ],
+        }, diskDb);
+
+        const updatedThread = loadChatThread('tx-commit-ws', diskDb);
+        expect(updatedThread?.providerId).toBe('claude-cli');
+        expect(updatedThread?.messages).toHaveLength(2);
+
+        const freshDb2 = new FallbackDatabase(dbPath);
+        const persistedThread = loadChatThread('tx-commit-ws', freshDb2);
+        expect(persistedThread?.providerId).toBe('claude-cli');
+        expect(persistedThread?.messages).toHaveLength(2);
+      } finally {
+        fsMod.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

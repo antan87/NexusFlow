@@ -158,7 +158,11 @@ export class FallbackDatabase implements IDatabaseSync {
     }
   }
 
-  private saveToDisk(): void {
+  private saveToDisk(
+    threadsMap: Map<string, any> = this.threads,
+    turnsMap: Map<string, any[]> = this.turns,
+    approvalsMap: Map<string, any> = this.approvals,
+  ): void {
     if (this.targetPath === ':memory:') return;
     const { jsonPath, bakPath } = this.getJsonPaths();
     const dir = path.dirname(jsonPath);
@@ -169,9 +173,9 @@ export class FallbackDatabase implements IDatabaseSync {
     }
 
     const data = {
-      threads: Object.fromEntries(this.threads),
-      turns: Object.fromEntries(this.turns),
-      approvals: Object.fromEntries(this.approvals),
+      threads: Object.fromEntries(threadsMap),
+      turns: Object.fromEntries(turnsMap),
+      approvals: Object.fromEntries(approvalsMap),
     };
     const content = JSON.stringify(data, null, 2);
     const tempPath = `${jsonPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
@@ -212,6 +216,9 @@ export class FallbackDatabase implements IDatabaseSync {
 
     if (trimmed.startsWith('COMMIT')) {
       if (this.inTransaction) {
+        // Persist staging maps to disk first; if persistence fails,
+        // active maps remain untouched and caller can issue ROLLBACK.
+        this.saveToDisk(this.stagingThreads, this.stagingTurns, this.stagingApprovals);
         this.threads = this.stagingThreads;
         this.turns = this.stagingTurns;
         this.approvals = this.stagingApprovals;
@@ -219,7 +226,6 @@ export class FallbackDatabase implements IDatabaseSync {
         this.stagingThreads = new Map();
         this.stagingTurns = new Map();
         this.stagingApprovals = new Map();
-        this.saveToDisk();
       }
       return;
     }
