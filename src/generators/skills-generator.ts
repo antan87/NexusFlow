@@ -260,8 +260,19 @@ export async function generateSkills(
     }
   }
 
-  // 3. Determine which skills to deploy: explicitly enabled skills plus dynamically inferred skills
-  const enabledSet = new Set([...wsConfig.enabledSkills, ...dynamicSkillIds]);
+  // 3. Determine which skills to deploy:
+  // - In fresh workspaces (revision === 0, not opted out), automatically recommend dynamic skills.
+  // - Once a user has saved an explicit configuration (revision > 0) or marked skills as disabled,
+  //   respect their persisted choice and do not force-deploy deselected skills.
+  const disabledSet = new Set(wsConfig.disabledSkills ?? []);
+  const isDefaultConfig = (wsConfig.revision ?? 0) === 0 && (wsConfig.disabledSkills?.length ?? 0) === 0;
+  const autoSkills = isDefaultConfig
+    ? dynamicSkillIds.filter((id) => !disabledSet.has(id))
+    : [];
+
+  const enabledSet = new Set(
+    [...wsConfig.enabledSkills, ...autoSkills].filter((id) => !disabledSet.has(id)),
+  );
   const missingSkills = [...enabledSet].filter((id) => !skillMap.has(id));
   if (missingSkills.length) {
     throw new Error(`Selected skills are no longer available: ${missingSkills.join(', ')}`);

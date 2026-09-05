@@ -1,6 +1,7 @@
 import { useState, useMemo, type FormEvent } from 'react';
 import {
   Activity,
+  AlertTriangle,
   CheckCircle2,
   Clock,
   Send,
@@ -26,6 +27,7 @@ import { Spinner } from '../../components/ui/spinner.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { useWorkspaceStream, usePostWorkspaceStream } from '../../lib/api/queries.js';
 import type { Feature, WorkspaceStreamMessage } from '../../types.js';
+import { evaluateMilestoneStatus, isNegativeEvidence, type MilestoneStatus } from './milestones.js';
 
 interface WorkspaceWorkroomTabProps {
   ws: Feature;
@@ -116,19 +118,26 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
   const [selectedHarness, setSelectedHarness] = useState<'developer' | 'antigravity' | 'claude' | 'codex'>('developer');
   const [stepId, setStepId] = useState('');
   const [evidence, setEvidence] = useState('');
+  const [milestoneStatus, setMilestoneStatus] = useState<MilestoneStatus>('proposed');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const messages: WorkspaceStreamMessage[] = useMemo(() => data?.messages ?? [], [data?.messages]);
 
-  // Aggregate milestone progress from messages
+  // Aggregate milestone progress from messages using the validated status contract
   const milestones = useMemo(() => {
-    const map = new Map<string, { stepId: string; status: 'proposed' | 'verified'; lastMessage: string; harness: string }>();
+    const map = new Map<string, { stepId: string; status: MilestoneStatus; lastMessage: string; harness: string }>();
     for (const msg of messages) {
       if (msg.stepId) {
-        const isVerified = Boolean(msg.evidence || (msg.message && msg.message.toLowerCase().includes('verified')));
+        const computedStatus = evaluateMilestoneStatus({
+          status: msg.status,
+          stepProposal: msg.stepProposal,
+          message: msg.message,
+          content: msg.content,
+          evidence: msg.evidence,
+        });
         map.set(msg.stepId, {
           stepId: msg.stepId,
-          status: isVerified ? 'verified' : 'proposed',
+          status: computedStatus,
           lastMessage: msg.message || msg.content || '',
           harness: msg.harness || 'unknown',
         });
@@ -146,11 +155,13 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
       await postMutation.mutateAsync({
         message: cleanMsg,
         harness: selectedHarness,
-        ...(stepId.trim() ? { stepId: stepId.trim() } : {}),
+        ...(stepId.trim() ? { stepId: stepId.trim(), status: milestoneStatus } : {}),
         ...(evidence.trim() ? { evidence: evidence.trim() } : {}),
       });
       setMessage('');
       setEvidence('');
+      setStepId('');
+      setMilestoneStatus('proposed');
       showToast?.('Handoff update posted to workspace stream.', 'success');
     } catch (err) {
       showToast?.(`Failed to post update: ${err instanceof Error ? err.message : String(err)}`, 'error');
@@ -211,25 +222,40 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {milestones.map((m) => (
-                <div
-                  key={m.stepId}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono ${
-                    m.status === 'verified'
-                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                      : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                  }`}
-                  title={`${m.stepId} · ${m.status}: ${m.lastMessage}`}
-                >
-                  {m.status === 'verified' ? (
-                    <CheckCircle2 size={12} className="text-emerald-400" />
-                  ) : (
-                    <Clock size={12} className="text-amber-400" />
-                  )}
-                  <span className="font-semibold">{m.stepId}</span>
-                  <span className="text-[10px] opacity-75 capitalize">({m.status})</span>
-                </div>
-              ))}
+              {milestones.map((m) => {
+                const isCompleted = m.status === 'completed';
+                const isFailed = m.status === 'failed' || m.status === 'rejected';
+                const isProposed = m.status === 'proposed';
+                return (
+                  <div
+                    key={m.stepId}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono ${
+                      isCompleted
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                        : isFailed
+                        ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : isProposed
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                        : 'border-blue-500/30 bg-blue-500/10 text-blue-400'
+                    }`}
+                    title={`${m.stepId} · ${m.status}: ${m.lastMessage}`}
+                  >
+                    {isCompleted ? (
+                      <CheckCircle2 size={12} className="text-emerald-400" />
+                    ) : isFailed ? (
+                      <AlertTriangle size={12} className="text-destructive" />
+                    ) : isProposed ? (
+                      <Clock size={12} className="text-amber-400" />
+                    ) : (
+                      <Radio size={12} className="text-blue-400" />
+                    )}
+                    <span className="font-semibold">{m.stepId}</span>
+                    <span className="text-[10px] opacity-80 capitalize">
+                      ({isCompleted ? 'Completed' : isProposed ? 'Review Requested' : isFailed ? 'Failed' : 'In Progress'})
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -269,6 +295,8 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             {messages.map((entry, idx) => {
               const bodyText = entry.message || entry.content || '';
               const authorLabel = entry.author || entry.harness || 'Assistant';
+              const stepStatus = evaluateMilestoneStatus(entry);
+              const negativeEvidence = isNegativeEvidence(entry.evidence);
               return (
                 <div key={entry.id || idx} className="p-4 transition-colors hover:bg-muted/10">
                   <div className="flex items-start gap-3">
@@ -281,9 +309,15 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                         </span>
                         <HarnessBadge harness={entry.harness} author={entry.author} />
                         {entry.stepId && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary font-mono text-[10px]">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono text-[10px] ${
+                            stepStatus === 'completed'
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                              : stepStatus === 'failed'
+                              ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                              : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                          }`}>
                             <Milestone size={10} />
-                            {entry.stepId}
+                            {entry.stepId} ({stepStatus === 'completed' ? 'completed' : stepStatus === 'failed' ? 'failed' : 'proposal'})
                           </span>
                         )}
                         <time className="text-[10px] font-mono text-muted-foreground ml-auto">
@@ -296,17 +330,39 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                         <ChatMarkdown content={bodyText} />
                       </div>
 
-                      {/* Evidence block (if verified milestone) */}
+                      {/* Evidence block with verified vs proposal vs failure distinction */}
                       {entry.evidence && (
-                        <div className="mt-2.5 p-2.5 rounded-md border border-emerald-500/30 bg-emerald-500/5">
-                          <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1">
-                            <ShieldCheck size={13} />
-                            <span>Verification Evidence</span>
+                        negativeEvidence || stepStatus === 'failed' ? (
+                          <div className="mt-2.5 p-2.5 rounded-md border border-destructive/40 bg-destructive/10">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-destructive mb-1">
+                              <AlertTriangle size={13} />
+                              <span>Test Failure / Negative Evidence</span>
+                            </div>
+                            <pre className="font-mono text-[11px] text-destructive whitespace-pre-wrap break-all">
+                              {entry.evidence}
+                            </pre>
                           </div>
-                          <pre className="font-mono text-[11px] text-emerald-300/90 whitespace-pre-wrap break-all">
-                            {entry.evidence}
-                          </pre>
-                        </div>
+                        ) : stepStatus === 'completed' ? (
+                          <div className="mt-2.5 p-2.5 rounded-md border border-emerald-500/30 bg-emerald-500/5">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1">
+                              <ShieldCheck size={13} />
+                              <span>Verified Evidence (Confirmed)</span>
+                            </div>
+                            <pre className="font-mono text-[11px] text-emerald-300/90 whitespace-pre-wrap break-all">
+                              {entry.evidence}
+                            </pre>
+                          </div>
+                        ) : (
+                          <div className="mt-2.5 p-2.5 rounded-md border border-amber-500/30 bg-amber-500/5">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 mb-1">
+                              <Clock size={13} />
+                              <span>Proposal Evidence (Review Requested)</span>
+                            </div>
+                            <pre className="font-mono text-[11px] text-amber-300/90 whitespace-pre-wrap break-all">
+                              {entry.evidence}
+                            </pre>
+                          </div>
+                        )
                       )}
 
                       {/* Artifacts pills (if any) */}
@@ -396,9 +452,9 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             </div>
 
             {showAdvanced && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 rounded-md border border-border/70 bg-card/50 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 rounded-md border border-border/70 bg-card/50 text-xs">
                 <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Milestone ID (Optional)</label>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Milestone ID</label>
                   <Input
                     placeholder="e.g. step-1-api-routes"
                     value={stepId}
@@ -407,7 +463,20 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Evidence / Test Output (Optional)</label>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Milestone Status</label>
+                  <select
+                    value={milestoneStatus}
+                    onChange={(e) => setMilestoneStatus(e.target.value as MilestoneStatus)}
+                    className="h-7 w-full text-xs font-mono mt-1 rounded-md border border-border bg-card px-2 text-foreground"
+                  >
+                    <option value="proposed">Proposed (Review Requested)</option>
+                    <option value="completed">Completed (Confirmed)</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="failed">Failed / Blocker</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Evidence / Test Output</label>
                   <Input
                     placeholder="e.g. 12/12 unit tests passing"
                     value={evidence}

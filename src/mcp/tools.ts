@@ -737,22 +737,58 @@ export const tools: NexusFlowTool[] = [
         const limit = Math.max(1, Math.min((args.limit as number) || 5, 20));
 
         // Check if there is an active pinned workroom connection
+        // 1. Always load local workspace chat / handoff ledger for consistent local history
+        const chatPath = path.join(ctx.workspacePath, '.nexusflow', 'chat.jsonl');
+        let localMessages: any[] = [];
+        try {
+          const raw = await fs.readFile(chatPath, 'utf8');
+          localMessages = raw
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => {
+              try {
+                return JSON.parse(line);
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean)
+            .slice(-limit);
+        } catch {
+          // chat.jsonl doesn't exist yet
+        }
+
+        // 2. Check if a pinned remote Workroom is connected
+        let remoteSnapshot: any = null;
+        let remoteError: string | null = null;
         try {
           const client = await loadPinnedWorkroomClientForWorkspace(feature.id);
-          const snapshot = await client.snapshot();
+          remoteSnapshot = await client.snapshot();
+        } catch (err: any) {
+          const errMsg = String(err?.message ?? '');
+          if (!errMsg.includes('No active or paused Workroom') && !errMsg.includes('No pinned')) {
+            remoteError = errMsg;
+          }
+        }
+
+        if (remoteSnapshot) {
           const activeStep =
-            snapshot.workflowProgress?.steps.find(
-              (s) => s.status === 'in_progress' || s.status === 'completion_proposed',
-            ) ?? snapshot.workflowProgress?.steps.find((s) => s.status === 'pending');
+            remoteSnapshot.workflowProgress?.steps.find(
+              (s: any) => s.status === 'in_progress' || s.status === 'completion_proposed',
+            ) ?? remoteSnapshot.workflowProgress?.steps.find((s: any) => s.status === 'pending');
 
           return json({
             status: 'connected',
             mode: 'workroom',
-            roomId: snapshot.roomId,
+            workspaceId: feature.id,
+            roomId: remoteSnapshot.roomId,
+            roomName: remoteSnapshot.name,
             feature: {
-              id: snapshot.bundle.feature.id,
-              goal: snapshot.bundle.feature.goal,
+              id: remoteSnapshot.bundle.feature.id,
+              goal: remoteSnapshot.bundle.feature.goal,
             },
+            recentMessages: localMessages,
             activeStep: activeStep
               ? {
                   stepId: activeStep.stepId,
@@ -761,49 +797,36 @@ export const tools: NexusFlowTool[] = [
                   updatedAt: activeStep.updatedAt,
                 }
               : null,
-            latestHandoff: snapshot.documents?.handoff?.content ?? null,
-            recentActivity: snapshot.activity.slice(-limit).map((e) => ({
+            latestHandoff: remoteSnapshot.documents?.handoff?.content ?? null,
+            recentActivity: remoteSnapshot.activity.slice(-limit).map((e: any) => ({
               sequence: e.sequence,
               type: e.type,
               actorId: e.actorId,
               summary: e.summary,
               createdAt: e.createdAt,
             })),
-          });
-        } catch {
-          // Fallback to local workspace chat / handoff ledger
-          const chatPath = path.join(ctx.workspacePath, '.nexusflow', 'chat.jsonl');
-          let messages: any[] = [];
-          try {
-            const raw = await fs.readFile(chatPath, 'utf8');
-            messages = raw
-              .split('\n')
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line) => {
-                try {
-                  return JSON.parse(line);
-                } catch {
-                  return null;
-                }
-              })
-              .filter(Boolean)
-              .slice(-limit);
-          } catch {
-            // chat.jsonl doesn't exist yet
-          }
-
-          return json({
-            status: 'local-fallback',
-            mode: 'offline',
-            workspaceId: feature.id,
-            note:
-              messages.length === 0
-                ? 'No remote Workroom connected and no local chat history recorded yet. Use post_workroom_handoff to record a handoff.'
-                : 'No remote Workroom connected; returning recent local workspace chat entries.',
-            recentMessages: messages,
+            remoteActivity: remoteSnapshot.activity.slice(-limit).map((e: any) => ({
+              sequence: e.sequence,
+              type: e.type,
+              actorId: e.actorId,
+              summary: e.summary,
+              createdAt: e.createdAt,
+            })),
+            workflowProgress: remoteSnapshot.workflowProgress ?? null,
           });
         }
+
+        return json({
+          status: 'local-fallback',
+          mode: 'offline',
+          workspaceId: feature.id,
+          ...(remoteError ? { remoteError } : {}),
+          note:
+            localMessages.length === 0
+              ? 'No remote Workroom connected and no local chat history recorded yet. Use post_workroom_handoff to record a handoff.'
+              : 'Operating in local workspace ledger mode (.nexusflow/chat.jsonl).',
+          recentMessages: localMessages,
+        });
       } catch (error: any) {
         return errorResult(`Error reading workroom stream: ${error.message}`);
       }
@@ -812,7 +835,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'post_workroom_handoff',
     description:
-      'Post a progress update, plan notice, or handoff note to the active Workroom Handoff Stream and local workspace chat ledger (.nexusflow/chat.jsonl).',
+      'Post a progress update, plan notice, or handoff note to the local workspace chat ledger (.nexusflow/chat.jsonl) and optionally propose workflow step completion to a connected Workroom.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -820,6 +843,11 @@ export const tools: NexusFlowTool[] = [
         message: { type: 'string', minLength: 1, description: 'Markdown message, plan summary, or handoff note to post.' },
         stepId: { type: 'string', description: 'Optional workflow step ID being addressed or proposed for completion.' },
         evidence: { type: 'string', description: 'Optional verification evidence or test results for the proposed step.' },
+        status: {
+          type: 'string',
+          enum: ['proposed', 'in_progress', 'completed', 'failed'],
+          description: 'Milestone status being reported. Agent proposals default to "proposed".',
+        },
         harness: { type: 'string', description: 'Optional originating harness name (e.g. "antigravity", "claude", "codex").' },
         ...workspaceIdProp,
       },
@@ -834,6 +862,7 @@ export const tools: NexusFlowTool[] = [
         if (!message) return errorResult('Handoff message cannot be empty.');
         const stepId = args.stepId ? String(args.stepId).trim() : undefined;
         const evidence = args.evidence ? String(args.evidence).trim() : undefined;
+        const status = args.status ? String(args.status).trim() : undefined;
         const harness = args.harness ? String(args.harness).trim() : 'agent';
 
         // 1. Always append to local .nexusflow/chat.jsonl for durable offline record
@@ -844,51 +873,61 @@ export const tools: NexusFlowTool[] = [
           id: randomUUID(),
           timestamp: new Date().toISOString(),
           harness,
+          status: status || (stepId ? 'proposed' : undefined),
           message,
           ...(stepId ? { stepId } : {}),
           ...(evidence ? { evidence } : {}),
         };
         await fs.appendFile(chatPath, JSON.stringify(entry) + '\n', 'utf8');
 
-        // 2. If connected to a Workroom, sync to Workroom
+        // 2. If connected to a Workroom and stepId is provided, propose workflow step completion
         let workroomSynced = false;
         let stepResult: any = null;
+        let syncError: string | null = null;
+        let client: any = null;
+
         try {
-          const client = await loadPinnedWorkroomClientForWorkspace(feature.id);
-          const snapshot = await client.snapshot();
+          client = await loadPinnedWorkroomClientForWorkspace(feature.id);
+        } catch {
+          // Workroom not active/pinned
+        }
 
-          // Update handoff document
-          const currentHandoff = snapshot.documents?.handoff;
-          if (currentHandoff) {
-            const heading = `### ${new Date().toISOString().slice(0, 10)} — ${harness}`;
-            const updatedContent = currentHandoff.content
-              ? `${currentHandoff.content}\n\n${heading}\n${message}`
-              : `${heading}\n${message}`;
-            await client.updateDocument('handoff', updatedContent, currentHandoff.revision);
-            workroomSynced = true;
-          }
-
-          // Propose workflow step completion if requested
-          if (stepId && evidence) {
-            const step = snapshot.workflowProgress?.steps.find((s) => s.stepId === stepId);
-            if (step) {
-              const res = await client.proposeWorkflowStep(stepId, step.revision, evidence);
-              stepResult = res.step;
+        if (client) {
+          if (stepId) {
+            try {
+              const snapshot = await client.snapshot();
+              const progress = snapshot.workflowProgress;
+              if (!progress) {
+                syncError = 'Connected Workroom has no shared structured workflow selected.';
+              } else {
+                const step = progress.steps.find((s: any) => s.stepId === stepId);
+                if (!step) {
+                  syncError = `Workflow step "${stepId}" was not found in the shared room workflow.`;
+                } else {
+                  const proposalEvidence = evidence || message;
+                  const res = await client.proposeWorkflowStep(stepId, step.revision, proposalEvidence);
+                  stepResult = res.step;
+                  workroomSynced = true;
+                }
+              }
+            } catch (err: any) {
+              syncError = err instanceof Error ? err.message : String(err);
             }
           }
-        } catch {
-          // Workroom not active - local append is sufficient
         }
 
         return json({
-          status: 'posted',
+          status: syncError ? 'warning' : 'posted',
           timestamp: entry.timestamp,
           harness,
           workroomSynced,
           localChatPersisted: true,
+          ...(syncError ? { syncError } : {}),
           ...(stepResult ? { stepProposal: stepResult } : {}),
-          message: workroomSynced
-            ? 'Handoff posted to live Workroom stream and local chat ledger.'
+          message: syncError
+            ? `Handoff recorded locally in .nexusflow/chat.jsonl, but remote Workroom sync failed: ${syncError}`
+            : workroomSynced
+            ? 'Handoff recorded locally and milestone proposal submitted to live Workroom.'
             : 'Handoff recorded in local workspace chat ledger (.nexusflow/chat.jsonl).',
         });
       } catch (error: any) {

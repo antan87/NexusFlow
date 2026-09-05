@@ -952,6 +952,7 @@ export async function getWorkspaceSkillsConfig(workspacePath: string): Promise<W
     schemaVersion: 1,
     revision: 0,
     enabledSkills: [],
+    disabledSkills: [],
     enabledAgents: [],
     enabledCategories: [],
   };
@@ -987,6 +988,7 @@ export async function saveWorkspaceSkillsConfig(
         schemaVersion: 1,
         revision: currentRevision + 1,
         enabledSkills: config.enabledSkills,
+        disabledSkills: config.disabledSkills ?? current.disabledSkills ?? [],
         enabledAgents: config.enabledAgents ?? current.enabledAgents ?? [],
         enabledCategories: config.enabledCategories ?? [],
       });
