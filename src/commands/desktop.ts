@@ -211,7 +211,7 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   if (platform !== 'win32' && platform !== 'linux') {
     throw new Error(`Desktop installer is unsupported on ${platform}. Install the Windows or Linux release from ${GITHUB_RELEASE_PAGE_URL}.`);
   }
-  const arch = options.arch ?? (options.platform ? 'x64' : process.arch);
+  const arch = options.arch ?? process.arch;
   if (arch !== 'x64') {
     throw new Error(`Desktop installer is unsupported on ${platform}/${arch}; published desktop assets are x64 only.`);
   }

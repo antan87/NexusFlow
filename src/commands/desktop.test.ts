@@ -42,21 +42,11 @@ describe('desktop release installer', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('defaults to x64 when overriding platform in tests even if host architecture is arm64', async () => {
-    const originalArch = process.arch;
-    try {
-      Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
-      const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ assets: [] }), { status: 200 }));
-      await expect(installDesktop({ platform: 'linux', fetchImpl })).rejects.toThrow(/no linux appimage asset/i);
-    } finally {
-      Object.defineProperty(process, 'arch', { value: originalArch, configurable: true });
-    }
-  });
-
   it('rejects an untrusted release API host', async () => {
     const fetchImpl = vi.fn();
     await expect(installDesktop({
       platform: 'linux',
+      arch: 'x64',
       releaseApiUrl: 'https://evil.example/releases/latest',
       fetchImpl,
     })).rejects.toThrow(/untrusted.*github release host/i);
@@ -78,7 +68,7 @@ describe('desktop release installer', () => {
     try {
       fetchImpl.mockResolvedValueOnce(new Response('0'.repeat(64) + '  NexusFlow-9.9.9.AppImage\n'));
       fetchImpl.mockResolvedValueOnce(new Response('not-the-release-binary'));
-      await expect(installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir })).rejects.toThrow(/checksum mismatch/i);
+      await expect(installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir })).rejects.toThrow(/checksum mismatch/i);
       await expect(stat(path.join(tmpDir, '.local', 'share', 'nexusflow'))).rejects.toThrow();
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -89,7 +79,7 @@ describe('desktop release installer', () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       assets: [{ name: 'NexusFlow-9.9.9.AppImage', browser_download_url: assetUrl }],
     }), { status: 200 }));
-    await expect(installDesktop({ platform: 'linux', fetchImpl })).rejects.toThrow(/missing.*sidecar/i);
+    await expect(installDesktop({ platform: 'linux', arch: 'x64', fetchImpl })).rejects.toThrow(/missing.*sidecar/i);
   });
 
   it('verifies and installs a Linux AppImage without invoking a shell', async () => {
@@ -100,7 +90,7 @@ describe('desktop release installer', () => {
       .mockResolvedValueOnce(new Response(binary));
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
     try {
-      const result = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
+      const result = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
       expect(result.installedPath).toContain(path.join('.local', 'share', 'nexusflow'));
       expect(path.basename(result.installedPath)).toBe('NexusFlow.AppImage');
       expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
@@ -123,7 +113,7 @@ describe('desktop release installer', () => {
       } as any);
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
     try {
-      const result = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
+      const result = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
       expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -144,8 +134,8 @@ describe('desktop release installer', () => {
       .mockResolvedValueOnce(new Response(secondBinary));
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
     try {
-      const first = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
-      const second = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
+      const first = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+      const second = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
       expect(second.installedPath).toBe(first.installedPath);
       expect(second.desktopEntryPath).toBe(first.desktopEntryPath);
       expect(await readFile(second.installedPath, 'utf8')).toBe(secondBinary);
@@ -171,7 +161,7 @@ describe('desktop release installer', () => {
     });
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
     try {
-      const result = await installDesktop({ platform: 'win32', fetchImpl, tmpDir, spawnImpl });
+      const result = await installDesktop({ platform: 'win32', arch: 'x64', fetchImpl, tmpDir, spawnImpl });
       expect(result.assetName).toBe('NexusFlowSetup.exe');
       expect(spawnImpl).toHaveBeenCalledWith(result.installedPath, [], expect.objectContaining({ detached: true, stdio: 'ignore' }));
       expect((spawnImpl.mock.results[0]?.value as { unref: ReturnType<typeof vi.fn> }).unref).toHaveBeenCalled();
@@ -196,7 +186,7 @@ describe('desktop release installer', () => {
         queueMicrotask(() => child.emit('error', new Error('access denied')));
         return child as any;
       });
-      await expect(installDesktop({ platform: 'win32', fetchImpl, tmpDir, spawnImpl })).rejects.toThrow(/could not launch.*access denied/i);
+      await expect(installDesktop({ platform: 'win32', arch: 'x64', fetchImpl, tmpDir, spawnImpl })).rejects.toThrow(/could not launch.*access denied/i);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -215,8 +205,8 @@ describe('desktop release installer', () => {
       .mockResolvedValueOnce(new Response('partial-or-corrupt-appimage'));
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
     try {
-      const first = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
-      await expect(installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir })).rejects.toThrow(/checksum mismatch/i);
+      const first = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+      await expect(installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir })).rejects.toThrow(/checksum mismatch/i);
       expect(await readFile(first.installedPath, 'utf8')).toBe(firstBinary);
       expect(await readFile(first.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(first.installedPath)}`);
     } finally {
