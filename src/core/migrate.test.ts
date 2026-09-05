@@ -10,6 +10,9 @@ import { loadSchedules } from './scheduler.js';
 import { getSkillCategories, getAllSkills } from '../utils/skills-catalog.js';
 import { getDaemonState } from '../commands/ui.js';
 import { reconcileWorkspaceResources } from '../resources/materializer.js';
+import { addWorkspaceKnowledge } from './knowledge.js';
+import { commitWorkspaceArtifacts } from './workspace-git.js';
+import { execa } from 'execa';
 import type { SkillItem, CodexAgentItem, WorkspaceState } from '../types.js';
 import type { AnalysisCache } from './analysis-cache.js';
 
@@ -379,6 +382,177 @@ describe('core/migrate', () => {
       expect(migratedContent).toContain('### Gotcha: NexusFlow database locks');
       expect(migratedContent).toContain('Running `nexusflow migrate` acquires an exclusive lock on the database.');
       expect(migratedContent).toContain('See commit 167b4581e70e for details on nexusflow lock acquisition.');
+    });
+  });
+
+  describe('P1: Overlapping legacy directory contents migration', () => {
+    it('recursively merges overlapping subdirectories with distinct nested files without data loss', async () => {
+      const wsDir = path.join(tempDir, 'overlap-ws');
+      await fs.mkdir(path.join(wsDir, '.nexusflow/base/repo'), { recursive: true });
+      await fs.mkdir(path.join(wsDir, '.contextspace/base/repo'), { recursive: true });
+
+      const legacyFile = path.join(wsDir, '.nexusflow/base/repo/nexusflow-knowledge.md');
+      const primaryFile = path.join(wsDir, '.contextspace/base/repo/contextspace-knowledge.md');
+      const uniqueLegacyContent = 'Unique legacy user knowledge in nested workroom base';
+      const uniquePrimaryContent = 'Different existing primary knowledge';
+
+      await fs.writeFile(legacyFile, uniqueLegacyContent, 'utf-8');
+      await fs.writeFile(primaryFile, uniquePrimaryContent, 'utf-8');
+
+      const report = await migrateWorkspace(wsDir, { dryRun: false, refresh: false });
+      expect(report.isLegacy).toBe(true);
+
+      // Verify that neither file was deleted and both exist in the merged destination
+      const transferredDest = path.join(wsDir, '.contextspace/base/repo/nexusflow-knowledge.md');
+      expect(existsSync(transferredDest)).toBe(true);
+      expect(await fs.readFile(transferredDest, 'utf-8')).toBe(uniqueLegacyContent);
+
+      expect(existsSync(primaryFile)).toBe(true);
+      expect(await fs.readFile(primaryFile, 'utf-8')).toBe(uniquePrimaryContent);
+
+      // Verify source directory was completely cleaned up since all entries transferred
+      expect(existsSync(path.join(wsDir, '.nexusflow'))).toBe(false);
+
+      // Report should record clean rename with no warnings
+      expect(report.warnings.length).toBe(0);
+      expect(report.renamedFiles).toContainEqual({
+        from: '.nexusflow',
+        to: '.contextspace',
+        status: 'renamed',
+      });
+    });
+
+    it('preserves conflicting legacy files in place without overwriting destination files and reports warnings', async () => {
+      const wsDir = path.join(tempDir, 'conflict-ws');
+      await fs.mkdir(path.join(wsDir, '.nexusflow/base/repo'), { recursive: true });
+      await fs.mkdir(path.join(wsDir, '.contextspace/base/repo'), { recursive: true });
+
+      const legacyConflict = path.join(wsDir, '.nexusflow/base/repo/conflict.txt');
+      const primaryConflict = path.join(wsDir, '.contextspace/base/repo/conflict.txt');
+      const legacyDistinct = path.join(wsDir, '.nexusflow/base/repo/distinct.txt');
+
+      await fs.writeFile(legacyConflict, 'legacy version of conflict', 'utf-8');
+      await fs.writeFile(primaryConflict, 'primary version of conflict', 'utf-8');
+      await fs.writeFile(legacyDistinct, 'legacy distinct file', 'utf-8');
+
+      const report = await migrateWorkspace(wsDir, { dryRun: false, refresh: false });
+      expect(report.isLegacy).toBe(true);
+
+      // Primary file must NOT be overwritten
+      expect(await fs.readFile(primaryConflict, 'utf-8')).toBe('primary version of conflict');
+
+      // Conflicting legacy file must be PRESERVED in legacy source directory
+      expect(existsSync(legacyConflict)).toBe(true);
+      expect(await fs.readFile(legacyConflict, 'utf-8')).toBe('legacy version of conflict');
+
+      // Distinct non-conflicting file must be transferred to destination
+      const transferredDistinct = path.join(wsDir, '.contextspace/base/repo/distinct.txt');
+      expect(existsSync(transferredDistinct)).toBe(true);
+      expect(await fs.readFile(transferredDistinct, 'utf-8')).toBe('legacy distinct file');
+
+      // Legacy directory must NOT be deleted because it still holds the conflicting file
+      expect(existsSync(path.join(wsDir, '.nexusflow'))).toBe(true);
+      expect(existsSync(path.join(wsDir, '.nexusflow/base/repo'))).toBe(true);
+
+      // Report must include warning and skipped entry
+      expect(report.warnings.length).toBeGreaterThan(0);
+      expect(report.warnings[0]).toContain('Conflicting legacy file preserved');
+      expect(report.renamedFiles).toContainEqual(
+        expect.objectContaining({
+          status: 'skipped',
+          error: expect.stringContaining('conflicting files preserved'),
+        }),
+      );
+    });
+  });
+
+  describe('P1: Durable migrated artifacts trackable in workspace Git', () => {
+    it('migrates a Git-backed workspace, ensures durable files are not ignored, and commits knowledge', async () => {
+      const wsDir = path.join(tempDir, 'git-backed-ws');
+      await fs.mkdir(wsDir, { recursive: true });
+
+      // Initialize git repository
+      await execa('git', ['init'], { cwd: wsDir });
+      await execa('git', ['config', '--local', 'user.name', 'ContextSpace Test'], { cwd: wsDir });
+      await execa('git', ['config', '--local', 'user.email', 'test@contextspace.local'], { cwd: wsDir });
+
+      // Seed initial legacy workspace with .gitignore (including legacy ephemeral rules and erroneous durable ignores)
+      const initialGitignore = [
+        '/.nexusflow-analysis-cache.json',
+        'contextspace.json',
+        'contextspace.lock',
+        'contextspace-*.md',
+        '.contextspace',
+        '.contextspace*',
+      ].join('\n') + '\n';
+      await fs.writeFile(path.join(wsDir, '.gitignore'), initialGitignore, 'utf-8');
+      await fs.writeFile(
+        path.join(wsDir, 'nexusflow.json'),
+        JSON.stringify({ id: 'git-feature', branchName: 'git-feature' }, null, 2),
+      );
+      await fs.writeFile(path.join(wsDir, 'nexusflow-knowledge.md'), '# Workspace Knowledge\n\nInitial knowledge.\n');
+
+      // Stage and commit the initial state
+      await execa('git', ['add', '--', '.gitignore', 'nexusflow.json', 'nexusflow-knowledge.md'], { cwd: wsDir });
+      await execa('git', ['commit', '-m', 'chore: initial legacy workspace'], { cwd: wsDir });
+
+      // 1. Run migration without refresh
+      const report = await migrateWorkspace(wsDir, { dryRun: false, refresh: false });
+      expect(report.isLegacy).toBe(true);
+
+      // 2. Verify git add of renamed durable artifacts succeeds with exit code 0 (NOT ignored!)
+      const addResult = await execa(
+        'git',
+        ['add', '--', '.gitignore', 'contextspace.json', 'contextspace-knowledge.md'],
+        { cwd: wsDir, reject: false },
+      );
+      expect(addResult.exitCode).toBe(0);
+
+      // Verify that ephemeral files ARE ignored
+      const checkEphemeral = await execa(
+        'git',
+        ['check-ignore', '.contextspace-analysis-cache.json', '.contextspace/workspace-state.json'],
+        { cwd: wsDir, reject: false },
+      );
+      expect(checkEphemeral.exitCode).toBe(0);
+
+      // Verify that durable files are NOT ignored
+      const checkDurable = await execa(
+        'git',
+        ['check-ignore', 'contextspace.json', 'contextspace-knowledge.md'],
+        { cwd: wsDir, reject: false },
+      );
+      expect(checkDurable.exitCode).toBe(1);
+
+      // 3. Commit workspace artifacts using commitWorkspaceArtifacts
+      const commitRes = await commitWorkspaceArtifacts(wsDir, 'chore(migration): adopt ContextSpace artifacts');
+      expect(commitRes.committed).toBe(true);
+      expect(commitRes.sha).toBeDefined();
+
+      // Verify git log records the rename
+      const log = await execa('git', ['log', '-n', '1', '--name-status'], { cwd: wsDir });
+      expect(log.stdout).toContain('contextspace.json');
+      expect(log.stdout).toContain('contextspace-knowledge.md');
+
+      // 4. Add workspace knowledge and verify it auto-commits successfully
+      const knowledgeResult = await addWorkspaceKnowledge(wsDir, {
+        type: 'decision',
+        title: 'Post-Migration Durability',
+        message: 'Durable knowledge files remain fully trackable in Git after migration.',
+      });
+
+      expect(knowledgeResult.commit.status).toBe('committed');
+      const { stdout: headSha } = await execa('git', ['rev-parse', 'HEAD'], { cwd: wsDir });
+      expect(headSha.trim()).toBeTruthy();
+
+      // Verify the knowledge entry was appended to contextspace-knowledge.md
+      const updatedKnowledge = await fs.readFile(path.join(wsDir, 'contextspace-knowledge.md'), 'utf-8');
+      expect(updatedKnowledge).toContain('post-migration-durability');
+      expect(updatedKnowledge).toContain('Durable knowledge files remain fully trackable in Git after migration.');
+
+      // Verify git working directory is clean
+      const status = await execa('git', ['status', '--porcelain'], { cwd: wsDir });
+      expect(status.stdout.trim()).toBe('');
     });
   });
 });

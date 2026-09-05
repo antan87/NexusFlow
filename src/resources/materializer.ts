@@ -26,7 +26,6 @@ import { BRAND_NAME, PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME, resolveWor
 
 const PRIMARY_LOCK_FILE = path.join(PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
 const LEGACY_LOCK_FILE = path.join(LEGACY_CONFIG_DIR_NAME, 'resources.lock.json');
-const LOCK_FILE = PRIMARY_LOCK_FILE;
 
 export async function resolveResourceLockPath(workspacePath: string): Promise<string> {
   const primaryPath = path.join(workspacePath, PRIMARY_LOCK_FILE);

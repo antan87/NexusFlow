@@ -78,6 +78,109 @@ export async function isLegacyWorkspace(workspacePath: string): Promise<boolean>
   return false;
 }
 
+interface DirectoryMergeResult {
+  transferredCount: number;
+  conflicts: Array<{ legacyRel: string; primaryRel: string }>;
+  unresolvedCount: number;
+}
+
+/**
+ * Recursively merges entries from srcDir into destDir.
+ * - Non-conflicting files and directories are moved.
+ * - Conflicting files are preserved in srcDir without overwriting destDir.
+ * - Empty subdirectories are cleaned up only after verifying all entries transferred.
+ */
+async function mergeDirectoryRecursive(
+  srcDir: string,
+  destDir: string,
+  basePath: string,
+  dryRun: boolean,
+): Promise<DirectoryMergeResult> {
+  const result: DirectoryMergeResult = {
+    transferredCount: 0,
+    conflicts: [],
+    unresolvedCount: 0,
+  };
+
+  if (!existsSync(srcDir)) return result;
+
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    const legacyRel = path.relative(basePath, srcPath);
+    const primaryRel = path.relative(basePath, destPath);
+
+    if (entry.isDirectory()) {
+      if (!existsSync(destPath)) {
+        if (!dryRun) {
+          try {
+            await fs.mkdir(path.dirname(destPath), { recursive: true });
+            await fs.rename(srcPath, destPath);
+            result.transferredCount++;
+          } catch {
+            await fs.mkdir(destPath, { recursive: true });
+            const sub = await mergeDirectoryRecursive(srcPath, destPath, basePath, dryRun);
+            result.transferredCount += sub.transferredCount;
+            result.conflicts.push(...sub.conflicts);
+            result.unresolvedCount += sub.unresolvedCount;
+            try {
+              const remaining = await fs.readdir(srcPath);
+              if (remaining.length === 0) {
+                await fs.rmdir(srcPath);
+              } else {
+                result.unresolvedCount += remaining.length;
+              }
+            } catch {}
+          }
+        } else {
+          result.transferredCount++;
+        }
+      } else {
+        if (!dryRun) {
+          await fs.mkdir(destPath, { recursive: true });
+        }
+        const sub = await mergeDirectoryRecursive(srcPath, destPath, basePath, dryRun);
+        result.transferredCount += sub.transferredCount;
+        result.conflicts.push(...sub.conflicts);
+        result.unresolvedCount += sub.unresolvedCount;
+
+        if (!dryRun) {
+          try {
+            const remaining = await fs.readdir(srcPath);
+            if (remaining.length === 0) {
+              await fs.rmdir(srcPath);
+            }
+          } catch {}
+        }
+      }
+    } else {
+      // File or symlink
+      if (!existsSync(destPath)) {
+        if (!dryRun) {
+          try {
+            await fs.mkdir(path.dirname(destPath), { recursive: true });
+            await fs.rename(srcPath, destPath);
+            result.transferredCount++;
+          } catch {
+            result.conflicts.push({ legacyRel, primaryRel });
+            result.unresolvedCount++;
+          }
+        } else {
+          result.transferredCount++;
+        }
+      } else {
+        // Destination already exists; do not overwrite, preserve in legacy source
+        result.conflicts.push({ legacyRel, primaryRel });
+        result.unresolvedCount++;
+      }
+    }
+  }
+
+  return result;
+}
+
 /**
  * Migrates a single workspace from NexusFlow to ContextSpace.
  */
@@ -151,6 +254,46 @@ export async function migrateWorkspace(
   const primaryDir = path.join(resolvedPath, BRAND_CONFIG.files.configDir.primary);
   if (existsSync(legacyDir)) {
     report.isLegacy = true;
+
+    const handleMergeResult = async (mergeResult: DirectoryMergeResult) => {
+      if (!dryRun) {
+        try {
+          const remaining = await fs.readdir(legacyDir);
+          if (remaining.length === 0) {
+            await fs.rmdir(legacyDir);
+          }
+        } catch {}
+      }
+
+      for (const conflict of mergeResult.conflicts) {
+        report.warnings.push(
+          `Conflicting legacy file preserved: ${conflict.legacyRel} (target ${conflict.primaryRel} already exists)`,
+        );
+        report.renamedFiles.push({
+          from: conflict.legacyRel,
+          to: conflict.primaryRel,
+          status: 'skipped',
+          error: 'Target already exists',
+        });
+      }
+
+      const stillExists = existsSync(legacyDir);
+      if (stillExists || mergeResult.conflicts.length > 0) {
+        report.renamedFiles.push({
+          from: BRAND_CONFIG.files.configDir.legacy,
+          to: BRAND_CONFIG.files.configDir.primary,
+          status: 'skipped',
+          error: `${mergeResult.conflicts.length} conflicting files preserved in legacy directory`,
+        });
+      } else {
+        report.renamedFiles.push({
+          from: BRAND_CONFIG.files.configDir.legacy,
+          to: BRAND_CONFIG.files.configDir.primary,
+          status: 'renamed',
+        });
+      }
+    };
+
     if (!existsSync(primaryDir)) {
       if (!dryRun) {
         try {
@@ -161,12 +304,10 @@ export async function migrateWorkspace(
             status: 'renamed',
           });
         } catch (err: any) {
-          report.renamedFiles.push({
-            from: BRAND_CONFIG.files.configDir.legacy,
-            to: BRAND_CONFIG.files.configDir.primary,
-            status: 'failed',
-            error: err.message,
-          });
+          // Fall back to recursive merge if atomic rename failed
+          await fs.mkdir(primaryDir, { recursive: true });
+          const mergeResult = await mergeDirectoryRecursive(legacyDir, primaryDir, resolvedPath, dryRun);
+          await handleMergeResult(mergeResult);
         }
       } else {
         report.renamedFiles.push({
@@ -176,38 +317,9 @@ export async function migrateWorkspace(
         });
       }
     } else {
-      // Primary directory already exists; move missing files from legacy into primary
-      if (!dryRun) {
-        try {
-          const entries = await fs.readdir(legacyDir);
-          for (const entry of entries) {
-            const src = path.join(legacyDir, entry);
-            const dest = path.join(primaryDir, entry);
-            if (!existsSync(dest)) {
-              await fs.rename(src, dest);
-            }
-          }
-          await fs.rm(legacyDir, { recursive: true, force: true }).catch(() => {});
-          report.renamedFiles.push({
-            from: BRAND_CONFIG.files.configDir.legacy,
-            to: BRAND_CONFIG.files.configDir.primary,
-            status: 'renamed',
-          });
-        } catch (err: any) {
-          report.renamedFiles.push({
-            from: BRAND_CONFIG.files.configDir.legacy,
-            to: BRAND_CONFIG.files.configDir.primary,
-            status: 'failed',
-            error: err.message,
-          });
-        }
-      } else {
-        report.renamedFiles.push({
-          from: BRAND_CONFIG.files.configDir.legacy,
-          to: BRAND_CONFIG.files.configDir.primary,
-          status: 'renamed',
-        });
-      }
+      // Both legacyDir and primaryDir exist: merge recursively without overwriting conflicting content
+      const mergeResult = await mergeDirectoryRecursive(legacyDir, primaryDir, resolvedPath, dryRun);
+      await handleMergeResult(mergeResult);
     }
   }
 
@@ -260,22 +372,69 @@ export async function migrateWorkspace(
   }
 
   // 4. Update .gitignore
+  // Durable workspace artifacts must NEVER be ignored, as they are tracked by workspace Git.
+  // We only ignore ephemeral state (analysis cache, runtime workspace state, locks, staging, logs).
   const gitignorePath = path.join(resolvedPath, '.gitignore');
   try {
     const gitignore = await fs.readFile(gitignorePath, 'utf-8');
     const lines = gitignore.split('\n');
-    const needed = [
-      'contextspace.json',
-      'contextspace.lock',
-      'contextspace-*.md',
-      '.contextspace',
-      '.contextspace*',
+
+    const durablePatterns = [
+      /^(\/)?contextspace\.json$/,
+      /^(\/)?contextspace\.lock$/,
+      /^(\/)?contextspace-.*\.md$/,
+      /^(\/)?contextspace-knowledge\.md$/,
+      /^(\/)?contextspace-plan\.md$/,
+      /^(\/)?contextspace-overview\.md$/,
+      /^(\/)?contextspace-handoff\.md$/,
+      /^(\/)?\.contextspace$/,
+      /^(\/)?\.contextspace\/$/,
+      /^(\/)?\.contextspace\*$/,
+      /^(\/)?nexusflow\.json$/,
+      /^(\/)?nexusflow\.lock$/,
+      /^(\/)?nexusflow-.*\.md$/,
+      /^(\/)?nexusflow-knowledge\.md$/,
+      /^(\/)?nexusflow-plan\.md$/,
+      /^(\/)?nexusflow-overview\.md$/,
+      /^(\/)?nexusflow-handoff\.md$/,
+      /^(\/)?\.nexusflow$/,
+      /^(\/)?\.nexusflow\/$/,
+      /^(\/)?\.nexusflow\*$/,
     ];
-    const missing = needed.filter((n) => !lines.includes(n));
-    if (missing.length > 0) {
+
+    const isDurableRule = (l: string) => {
+      const t = l.trim();
+      return durablePatterns.some((p) => p.test(t));
+    };
+
+    const ephemeralRules = [
+      `/${BRAND_CONFIG.files.analysisCache.primary}`,
+      `/${BRAND_CONFIG.files.configDir.primary}/workspace-state.json`,
+      `/${BRAND_CONFIG.files.configDir.primary}/*.lock`,
+      `/${BRAND_CONFIG.files.configDir.primary}/resource-staging-*`,
+      `/${BRAND_CONFIG.files.configDir.primary}/logs/`,
+    ];
+
+    const hasRule = (rule: string) => {
+      const noSlash = rule.startsWith('/') ? rule.slice(1) : rule;
+      const withSlash = rule.startsWith('/') ? rule : '/' + rule;
+      return lines.some((l) => l.trim() === noSlash || l.trim() === withSlash);
+    };
+
+    const missingEphemeral = ephemeralRules.filter((r) => !hasRule(r));
+    const filteredLines = lines.filter((l) => !isDurableRule(l));
+
+    const changed = lines.length !== filteredLines.length || missingEphemeral.length > 0;
+    const finalLines = [...filteredLines];
+
+    if (missingEphemeral.length > 0) {
+      finalLines.push('# ContextSpace ephemeral state', ...missingEphemeral);
+    }
+
+    if (changed) {
       if (!dryRun) {
-        const appended = gitignore.trimEnd() + '\n\n# ContextSpace\n' + missing.join('\n') + '\n';
-        await fs.writeFile(gitignorePath, appended, 'utf-8');
+        const cleaned = finalLines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+        await fs.writeFile(gitignorePath, cleaned, 'utf-8');
       }
       report.updatedSentinels.push('.gitignore');
     }

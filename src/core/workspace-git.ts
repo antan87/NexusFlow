@@ -77,12 +77,31 @@ export async function commitWorkspaceArtifacts(
   try {
     await ensureWorkspaceGitRepository(workspacePath);
     const artifacts = await managedWorkspaceArtifacts(workspacePath, extra);
-    if (!artifacts.length) return { committed: false };
-    await execa('git', ['add', '--', ...artifacts], { cwd: workspacePath });
-    const diff = await execa('git', ['diff', '--cached', '--quiet', '--', ...artifacts], { cwd: workspacePath, reject: false });
+
+    // Also discover any tracked candidate artifacts that were deleted on disk (e.g. legacy files after migration)
+    const lock = await readGenerationLock(workspacePath);
+    const workspaceFile = `${path.basename(workspacePath)}.code-workspace`;
+    const candidates = new Set([...CORE_ARTIFACTS, workspaceFile, ...Object.keys(lock?.outputs ?? {}), ...extra]);
+    const deletedProbe = await execa('git', ['ls-files', '--deleted'], { cwd: workspacePath, reject: false });
+    const deletedTracked = deletedProbe.exitCode === 0
+      ? deletedProbe.stdout.split('\n').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean)
+      : [];
+    const deletedCandidates = deletedTracked.filter((item) => candidates.has(item));
+
+    const allTargets = [...artifacts, ...deletedCandidates];
+    if (!allTargets.length) return { committed: false };
+
+    if (artifacts.length) {
+      await execa('git', ['add', '--', ...artifacts], { cwd: workspacePath });
+    }
+    if (deletedCandidates.length) {
+      await execa('git', ['add', '-A', '--', ...deletedCandidates], { cwd: workspacePath });
+    }
+
+    const diff = await execa('git', ['diff', '--cached', '--quiet', '--', ...allTargets], { cwd: workspacePath, reject: false });
     if (diff.exitCode === 0) return { committed: false };
     if (diff.exitCode !== 1) throw new Error('Could not inspect staged workspace artifacts.');
-    await execa('git', ['commit', '-m', message, '--', ...artifacts], { cwd: workspacePath });
+    await execa('git', ['commit', '-m', message, '--', ...allTargets], { cwd: workspacePath });
     const { stdout } = await execa('git', ['rev-parse', 'HEAD'], { cwd: workspacePath });
     return { committed: true, sha: stdout.trim() };
   } finally {

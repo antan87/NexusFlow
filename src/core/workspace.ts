@@ -139,6 +139,11 @@ async function scaffoldWorkspaceDir(
     // analysis/runtime state from the workspace artifact repository.
     const gitignoreLines = [
       ...(!inPlace ? repos.map((repo) => `/${repo.name}/`) : []),
+      '/.contextspace-analysis-cache.json',
+      '/.contextspace/workspace-state.json',
+      '/.contextspace/*.lock',
+      '/.contextspace/resource-staging-*',
+      '/.contextspace/logs/',
       '/.nexusflow-analysis-cache.json',
       '/.nexusflow/workspace-state.json',
       '/.nexusflow/*.lock',
