@@ -139,11 +139,19 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     expect(await fse.pathExists(claudeSkill)).toBe(true);
     expect(await fse.pathExists(path.join(tempWorkspace, 'CLAUDE.md'))).toBe(true);
 
-    // Cursor, Copilot, Codex, and Antigravity share the complete portable
-    // package instead of receiving lossy rules or instruction-file conversions.
+    // 4. Verify harness-native skill packages for Codex, Copilot, and Cursor
+    const codexSkill = path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md');
+    expect(await fse.pathExists(codexSkill)).toBe(true);
+
+    const copilotSkill = path.join(tempWorkspace, '.github', 'skills', 'pr-review-toolkit', 'SKILL.md');
+    expect(await fse.pathExists(copilotSkill)).toBe(true);
+
+    const cursorSkill = path.join(tempWorkspace, '.cursor', 'skills', 'pr-review-toolkit', 'SKILL.md');
+    expect(await fse.pathExists(cursorSkill)).toBe(true);
+
+    // Verify lossy rules or instruction-file conversions are not generated
     expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'instructions', 'pr-review-toolkit.instructions.md'))).toBe(false);
-    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit'))).toBe(false);
   });
 
   it('supports custom user skills with auxiliary references/scripts and workspace assignment filtering', async () => {
@@ -201,7 +209,9 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     const claudeK8sRef = path.join(tempWorkspace, '.claude', 'skills', 'k8s-deployer', 'references', 'values-local.yaml');
     expect(await fse.pathExists(claudeK8sRef)).toBe(true);
 
-    // Codex uses the same .agents/skills package verified above.
+    // Codex
+    const codexK8sRef = path.join(tempWorkspace, '.codex', 'skills', 'k8s-deployer', 'references', 'values-local.yaml');
+    expect(await fse.pathExists(codexK8sRef)).toBe(true);
 
     // Verify un-enabled template skill was NOT deployed
     const unEnabledSkill = path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit');
