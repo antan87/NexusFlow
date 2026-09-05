@@ -33,6 +33,10 @@ export interface GlobalMigrationReport {
   migratedConfig: boolean;
   migratedProjects: boolean;
   migratedWorkflows: number;
+  migratedSchedules: boolean;
+  migratedCategories: boolean;
+  migratedSkills: number;
+  migratedVaults: number;
   sourceDir: string;
   targetDir: string;
   dryRun: boolean;
@@ -145,44 +149,80 @@ export async function migrateWorkspace(
   // 2. Migrate legacy directories (e.g., .nexusflow/ -> .contextspace/)
   const legacyDir = path.join(resolvedPath, BRAND_CONFIG.files.configDir.legacy);
   const primaryDir = path.join(resolvedPath, BRAND_CONFIG.files.configDir.primary);
-  if (existsSync(legacyDir) && !existsSync(primaryDir)) {
+  if (existsSync(legacyDir)) {
     report.isLegacy = true;
-    if (!dryRun) {
-      try {
-        await fs.rename(legacyDir, primaryDir);
+    if (!existsSync(primaryDir)) {
+      if (!dryRun) {
+        try {
+          await fs.rename(legacyDir, primaryDir);
+          report.renamedFiles.push({
+            from: BRAND_CONFIG.files.configDir.legacy,
+            to: BRAND_CONFIG.files.configDir.primary,
+            status: 'renamed',
+          });
+        } catch (err: any) {
+          report.renamedFiles.push({
+            from: BRAND_CONFIG.files.configDir.legacy,
+            to: BRAND_CONFIG.files.configDir.primary,
+            status: 'failed',
+            error: err.message,
+          });
+        }
+      } else {
         report.renamedFiles.push({
           from: BRAND_CONFIG.files.configDir.legacy,
           to: BRAND_CONFIG.files.configDir.primary,
           status: 'renamed',
         });
-      } catch (err: any) {
+      }
+    } else {
+      // Primary directory already exists; move missing files from legacy into primary
+      if (!dryRun) {
+        try {
+          const entries = await fs.readdir(legacyDir);
+          for (const entry of entries) {
+            const src = path.join(legacyDir, entry);
+            const dest = path.join(primaryDir, entry);
+            if (!existsSync(dest)) {
+              await fs.rename(src, dest);
+            }
+          }
+          await fs.rm(legacyDir, { recursive: true, force: true }).catch(() => {});
+          report.renamedFiles.push({
+            from: BRAND_CONFIG.files.configDir.legacy,
+            to: BRAND_CONFIG.files.configDir.primary,
+            status: 'renamed',
+          });
+        } catch (err: any) {
+          report.renamedFiles.push({
+            from: BRAND_CONFIG.files.configDir.legacy,
+            to: BRAND_CONFIG.files.configDir.primary,
+            status: 'failed',
+            error: err.message,
+          });
+        }
+      } else {
         report.renamedFiles.push({
           from: BRAND_CONFIG.files.configDir.legacy,
           to: BRAND_CONFIG.files.configDir.primary,
-          status: 'failed',
-          error: err.message,
+          status: 'renamed',
         });
       }
-    } else {
-      report.renamedFiles.push({
-        from: BRAND_CONFIG.files.configDir.legacy,
-        to: BRAND_CONFIG.files.configDir.primary,
-        status: 'renamed',
-      });
     }
   }
 
-  // 3. Update sentinels in markdown files
-  const markdownFiles = [
-    'AGENTS.md',
-    'CLAUDE.md',
-    'WORKSPACE.md',
+  // 3. Update sentinels in durable markdown files
+  // Note: Only generated sentinel comments and provenance lines are updated.
+  // We NEVER replace prose, decisions, code snippets, git hashes, or commands in user files.
+  // Generated views (AGENTS.md, CLAUDE.md, WORKSPACE.md) are regenerated directly from source in step 5.
+  const durableFiles = [
     BRAND_CONFIG.files.knowledge.primary,
     BRAND_CONFIG.files.plan.primary,
     BRAND_CONFIG.files.handoff.primary,
+    BRAND_CONFIG.files.overview.primary,
   ];
 
-  for (const rel of markdownFiles) {
+  for (const rel of durableFiles) {
     const filePath = path.join(resolvedPath, rel);
     try {
       let content: string;
@@ -194,14 +234,19 @@ export async function migrateWorkspace(
       }
       let updated = content;
 
-      // Update freshness sentinel tags
-      updated = updated.replace(/NEXUSFLOW:FRESHNESS:START/g, 'CONTEXTSPACE:FRESHNESS:START');
-      updated = updated.replace(/NEXUSFLOW:FRESHNESS:END/g, 'CONTEXTSPACE:FRESHNESS:END');
-      updated = updated.replace(/nexusflow refresh/g, 'ctxspace refresh');
-      updated = updated.replace(/nexusflow knowledge/g, 'ctxspace knowledge');
-      updated = updated.replace(/nexusflow finish/g, 'ctxspace finish');
-      updated = updated.replace(/nexusflow/g, 'contextspace');
-      updated = updated.replace(/NexusFlow/g, 'ContextSpace');
+      // Update freshness comment block (tags and banner lines within the block)
+      updated = updated.replace(
+        /<!--\s*NEXUSFLOW:FRESHNESS:START\s*-->([\s\S]*?)<!--\s*NEXUSFLOW:FRESHNESS:END\s*-->/g,
+        (_match, inner) => {
+          const updatedInner = inner
+            .replace(/NEXUSFLOW/g, BRAND_CONFIG.identity.name.toUpperCase())
+            .replace(/NexusFlow/g, BRAND_CONFIG.identity.name)
+            .replace(/nexusflow/g, BRAND_CONFIG.identity.cliName);
+          return `<!-- ${BRAND_CONFIG.sentinels.freshnessStart[0]} -->${updatedInner}<!-- ${BRAND_CONFIG.sentinels.freshnessEnd[0]} -->`;
+        },
+      );
+      // Update generated provenance header
+      updated = updated.replace(/<!-- AUTO-GENERATED by NexusFlow/g, `<!-- AUTO-GENERATED by ${BRAND_CONFIG.identity.name}`);
 
       if (updated !== content) {
         if (!dryRun) {
@@ -254,17 +299,55 @@ export async function migrateWorkspace(
 }
 
 /**
- * Migrates global configuration and projects registry (~/.nexusflow -> ~/.contextspace).
+ * Helper to recursively copy files and directories from src to dest.
  */
-export async function migrateGlobalConfig(options: { dryRun?: boolean } = {}): Promise<GlobalMigrationReport> {
+async function copyDirRecursive(src: string, dest: string, dryRun: boolean): Promise<number> {
+  let copied = 0;
+  if (!existsSync(src)) return 0;
+  if (!dryRun) {
+    await fs.mkdir(dest, { recursive: true });
+  }
+  const entries = await fs.readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copied += await copyDirRecursive(srcPath, destPath, dryRun);
+    } else if (entry.isFile()) {
+      if (!existsSync(destPath)) {
+        if (!dryRun) {
+          await fs.mkdir(path.dirname(destPath), { recursive: true });
+          await fs.copyFile(srcPath, destPath);
+        }
+        copied++;
+      }
+    }
+  }
+  return copied;
+}
+
+export interface GlobalMigrationOptions {
+  dryRun?: boolean;
+  sourceDir?: string;
+  targetDir?: string;
+}
+
+/**
+ * Migrates global configuration and durable user state (~/.nexusflow -> ~/.contextspace).
+ */
+export async function migrateGlobalConfig(options: GlobalMigrationOptions = {}): Promise<GlobalMigrationReport> {
   const dryRun = options.dryRun ?? false;
-  const legacyHome = path.join(os.homedir(), BRAND_CONFIG.files.configDir.legacy);
-  const primaryHome = path.join(os.homedir(), BRAND_CONFIG.files.configDir.primary);
+  const legacyHome = options.sourceDir ?? path.join(os.homedir(), BRAND_CONFIG.files.configDir.legacy);
+  const primaryHome = options.targetDir ?? path.join(os.homedir(), BRAND_CONFIG.files.configDir.primary);
 
   const report: GlobalMigrationReport = {
     migratedConfig: false,
     migratedProjects: false,
     migratedWorkflows: 0,
+    migratedSchedules: false,
+    migratedCategories: false,
+    migratedSkills: 0,
+    migratedVaults: 0,
     sourceDir: legacyHome,
     targetDir: primaryHome,
     dryRun,
@@ -298,27 +381,141 @@ export async function migrateGlobalConfig(options: { dryRun?: boolean } = {}): P
     report.migratedProjects = true;
   }
 
-  // 3. workflows/
+  // 3. schedules.json
+  const legacySchedules = path.join(legacyHome, 'schedules.json');
+  const primarySchedules = path.join(primaryHome, 'schedules.json');
+  if (existsSync(legacySchedules) && !existsSync(primarySchedules)) {
+    if (!dryRun) {
+      await fs.copyFile(legacySchedules, primarySchedules);
+    }
+    report.migratedSchedules = true;
+  }
+
+  // 4. categories.json
+  const legacyCategories = path.join(legacyHome, 'categories.json');
+  const primaryCategories = path.join(primaryHome, 'categories.json');
+  if (existsSync(legacyCategories) && !existsSync(primaryCategories)) {
+    if (!dryRun) {
+      await fs.copyFile(legacyCategories, primaryCategories);
+    }
+    report.migratedCategories = true;
+  }
+
+  // 5. daemon.json
+  const legacyDaemon = path.join(legacyHome, 'daemon.json');
+  const primaryDaemon = path.join(primaryHome, 'daemon.json');
+  if (existsSync(legacyDaemon) && !existsSync(primaryDaemon)) {
+    if (!dryRun) {
+      await fs.copyFile(legacyDaemon, primaryDaemon);
+    }
+  }
+
+  // 6. workflows/
   const legacyWorkflows = path.join(legacyHome, 'workflows');
   const primaryWorkflows = path.join(primaryHome, 'workflows');
   if (existsSync(legacyWorkflows)) {
     try {
-      const files = await fs.readdir(legacyWorkflows);
+      const entries = await fs.readdir(legacyWorkflows, { withFileTypes: true });
       if (!dryRun) {
         await fs.mkdir(primaryWorkflows, { recursive: true });
       }
-      for (const file of files) {
-        const src = path.join(legacyWorkflows, file);
-        const dest = path.join(primaryWorkflows, file);
+      for (const entry of entries) {
+        const src = path.join(legacyWorkflows, entry.name);
+        const dest = path.join(primaryWorkflows, entry.name);
         if (!existsSync(dest)) {
-          if (!dryRun) {
-            await fs.copyFile(src, dest);
+          if (entry.isDirectory()) {
+            await copyDirRecursive(src, dest, dryRun);
+          } else if (entry.isFile()) {
+            if (!dryRun) {
+              await fs.copyFile(src, dest);
+            }
           }
           report.migratedWorkflows++;
         }
       }
     } catch {}
   }
+
+  // 7. skills/
+  const legacySkills = path.join(legacyHome, 'skills');
+  const primarySkills = path.join(primaryHome, 'skills');
+  if (existsSync(legacySkills)) {
+    try {
+      const entries = await fs.readdir(legacySkills, { withFileTypes: true });
+      if (!dryRun) {
+        await fs.mkdir(primarySkills, { recursive: true });
+      }
+      for (const entry of entries) {
+        const src = path.join(legacySkills, entry.name);
+        const dest = path.join(primarySkills, entry.name);
+        if (!existsSync(dest)) {
+          if (entry.isDirectory()) {
+            await copyDirRecursive(src, dest, dryRun);
+          } else if (entry.isFile()) {
+            if (!dryRun) {
+              await fs.copyFile(src, dest);
+            }
+          }
+          report.migratedSkills++;
+        }
+      }
+    } catch {}
+  }
+
+  // 8. vault/
+  const legacyVault = path.join(legacyHome, 'vault');
+  const primaryVault = path.join(primaryHome, 'vault');
+  if (existsSync(legacyVault)) {
+    try {
+      const entries = await fs.readdir(legacyVault, { withFileTypes: true });
+      if (!dryRun) {
+        await fs.mkdir(primaryVault, { recursive: true });
+      }
+      for (const entry of entries) {
+        const src = path.join(legacyVault, entry.name);
+        const dest = path.join(primaryVault, entry.name);
+        if (!existsSync(dest)) {
+          if (entry.isDirectory()) {
+            await copyDirRecursive(src, dest, dryRun);
+          } else if (entry.isFile()) {
+            if (!dryRun) {
+              await fs.copyFile(src, dest);
+            }
+          }
+          report.migratedVaults++;
+        }
+      }
+    } catch {}
+  }
+
+  // 9. Any other unhandled files or directories in legacyHome
+  try {
+    const allEntries = await fs.readdir(legacyHome, { withFileTypes: true });
+    const handled = new Set([
+      'config.json',
+      'projects.json',
+      'schedules.json',
+      'categories.json',
+      'daemon.json',
+      'workflows',
+      'skills',
+      'vault',
+    ]);
+    for (const entry of allEntries) {
+      if (handled.has(entry.name)) continue;
+      const src = path.join(legacyHome, entry.name);
+      const dest = path.join(primaryHome, entry.name);
+      if (!existsSync(dest)) {
+        if (entry.isDirectory()) {
+          await copyDirRecursive(src, dest, dryRun);
+        } else if (entry.isFile()) {
+          if (!dryRun) {
+            await fs.copyFile(src, dest);
+          }
+        }
+      }
+    }
+  } catch {}
 
   return report;
 }

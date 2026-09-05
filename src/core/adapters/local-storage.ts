@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { StoragePort, StorageAdapterMeta } from '../ports/storage.js';
+import { resolveWorkspaceConfigDir } from '../constants.js';
 
 export class LocalStorageAdapter implements StoragePort {
   readonly meta: StorageAdapterMeta = {
@@ -17,7 +18,8 @@ export class LocalStorageAdapter implements StoragePort {
    * where the generated CLAUDE.md/WORKSPACE.md expect them.
    */
   private baseFilePath(workspacePath: string, repoName: string, filename: string): string {
-    return path.join(workspacePath, '.contextspace', 'base', repoName, filename);
+    const configDir = resolveWorkspaceConfigDir(workspacePath).path;
+    return path.join(configDir, 'base', repoName, filename);
   }
 
   private legacyBaseFilePath(workspacePath: string, repoName: string, filename: string): string {

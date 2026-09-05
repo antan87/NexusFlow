@@ -5,12 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 import { resolveResourcePath } from './resources.js';
 import { slugify } from './slug.js';
-<<<<<<< HEAD
 import { acquireLock, createMutationQueue } from '../core/locks.js';
 import { atomicWriteFile } from '../resources/fs-safety.js';
-=======
 import { resolveBrandHomeDir } from '../core/constants.js';
->>>>>>> eb5965f (refactor(brand): replace hardcoded naming references across workflows, logs, and materializer with typed brand config)
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -199,9 +196,6 @@ export async function saveWorkflowTemplate(
   return {
     id,
     custom: true,
-    ...parsed,
-  };
-}
     ...parsed,
   };
 }

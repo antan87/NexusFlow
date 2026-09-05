@@ -242,10 +242,14 @@ export function resolveFirstEnv(envKeys: readonly string[]): string | undefined 
  * Priority: CONTEXTSPACE_HOME -> NEXUSFLOW_HOME -> ~/.contextspace -> ~/.nexusflow -> ~/.contextspace
  */
 export function resolveBrandHomeDir(): string {
-  const envDir = resolveFirstEnv(BRAND_CONFIG.env.home);
-  if (envDir) {
-    return path.resolve(envDir);
-  }
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+
+  if (csHome && existsSync(path.resolve(csHome))) return path.resolve(csHome);
+  if (nfHome && existsSync(path.resolve(nfHome)) && !csHome) return path.resolve(nfHome);
+  if (csHome) return path.resolve(csHome);
+  if (nfHome) return path.resolve(nfHome);
+
   const primary = path.join(os.homedir(), BRAND_CONFIG.files.configDir.primary);
   const legacy = path.join(os.homedir(), BRAND_CONFIG.files.configDir.legacy);
   if (existsSync(primary)) return primary;
@@ -294,6 +298,43 @@ export function resolveWorkspaceFilePathSync(
     return { path: legacyPath, isLegacy: true, exists: true };
   }
   return { path: primaryPath, isLegacy: false, exists: false };
+}
+
+/**
+ * Synchronously resolves the workspace configuration directory (.contextspace vs .nexusflow).
+ */
+export function resolveWorkspaceConfigDir(
+  workspaceDir: string,
+): { path: string; isLegacy: boolean; exists: boolean } {
+  return resolveWorkspaceFilePathSync(workspaceDir, 'configDir');
+}
+
+/**
+ * Resolves a durable global state path under the home config directory,
+ * falling back to ~/.nexusflow/<relPath> if it exists and ~/.contextspace/<relPath> does not.
+ */
+export function resolveGlobalDurablePath(relPath: string): string {
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+
+  if (csHome && existsSync(path.join(path.resolve(csHome), relPath))) {
+    return path.join(path.resolve(csHome), relPath);
+  }
+  if (nfHome && existsSync(path.join(path.resolve(nfHome), relPath))) {
+    return path.join(path.resolve(nfHome), relPath);
+  }
+  if (csHome) {
+    return path.join(path.resolve(csHome), relPath);
+  }
+  if (nfHome) {
+    return path.join(path.resolve(nfHome), relPath);
+  }
+
+  const primary = path.join(os.homedir(), BRAND_CONFIG.files.configDir.primary, relPath);
+  if (existsSync(primary)) return primary;
+  const legacy = path.join(os.homedir(), BRAND_CONFIG.files.configDir.legacy, relPath);
+  if (existsSync(legacy)) return legacy;
+  return primary;
 }
 
 /**

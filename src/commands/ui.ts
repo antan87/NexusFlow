@@ -12,7 +12,7 @@ import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, resolveGlobalDurablePath } from '../core/constants.js';
 
 export interface DaemonState {
   pid: number;
@@ -22,7 +22,7 @@ export interface DaemonState {
 
 export async function getDaemonState(): Promise<DaemonState | null> {
   try {
-    const filePath = path.join(getConfigDir(), 'daemon.json');
+    const filePath = resolveGlobalDurablePath('daemon.json');
     const content = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(content);
   } catch {

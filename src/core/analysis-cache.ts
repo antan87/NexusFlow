@@ -16,9 +16,7 @@ import { execa } from 'execa';
 
 import type { ProjectAnalysis } from '../types.js';
 import { parsePorcelainZ } from '../utils/multi-git.js';
-
-/** Name of the analysis cache file, written at the workspace root. */
-const CACHE_FILE = '.nexusflow-analysis-cache.json';
+import { resolveWorkspaceFilePath, resolveWorkspaceFilePathSync, BRAND_NAME, CLI_NAME } from './constants.js';
 
 /** Memoised own version; resolved once per process. */
 let generatorVersion: string | undefined;
@@ -55,8 +53,8 @@ export function getGeneratorVersion(): string {
     // invalidating anything — which is the whole reason the version is in the
     // key, so a silent fallback would restore the bug it was added to fix.
     console.warn(
-      '  ⚠ Could not read NexusFlow\'s own version, so cached analysis will not be ' +
-      'invalidated by an upgrade. Run `nexusflow refresh --force` after upgrading.',
+      `  ⚠ Could not read ${BRAND_NAME}'s own version, so cached analysis will not be ` +
+      `invalidated by an upgrade. Run \`${CLI_NAME} refresh --force\` after upgrading.`,
     );
     resolved = 'unknown';
   }
@@ -88,7 +86,7 @@ export interface AnalysisCache {
  * Returns the path to the analysis cache file for a workspace.
  */
 export function getAnalysisCachePath(workspacePath: string): string {
-  return path.join(workspacePath, CACHE_FILE);
+  return resolveWorkspaceFilePathSync(workspacePath, 'analysisCache').path;
 }
 
 /**
@@ -101,7 +99,8 @@ export async function loadAnalysisCache(
   workspacePath: string,
 ): Promise<AnalysisCache> {
   try {
-    const raw = await fs.readFile(getAnalysisCachePath(workspacePath), 'utf-8');
+    const resolved = await resolveWorkspaceFilePath(workspacePath, 'analysisCache');
+    const raw = await fs.readFile(resolved.path, 'utf-8');
     const cache = JSON.parse(raw) as AnalysisCache;
     if (!cache.repos || typeof cache.repos !== 'object') {
       cache.repos = {};
@@ -133,8 +132,9 @@ export async function saveAnalysisCache(
       }
     }
   }
+  const resolved = await resolveWorkspaceFilePath(workspacePath, 'analysisCache');
   const data = JSON.stringify(cache, null, 2) + '\n';
-  await fs.writeFile(getAnalysisCachePath(workspacePath), data, 'utf-8');
+  await fs.writeFile(resolved.path, data, 'utf-8');
 }
 
 /**

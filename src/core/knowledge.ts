@@ -35,7 +35,7 @@ import { commitExactWorkspaceArtifacts } from './workspace-git.js';
 import * as fs from 'node:fs/promises';
 import { getActiveStorageProvider } from './adapters/registry.js';
 import { acquireLock } from './locks.js';
-import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } from './constants.js';
+import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE, BRAND_NAME, resolveWorkspaceConfigDir } from './constants.js';
 
 async function getWorkspaceKnowledgeFilename(workspacePath: string, featureId: string): Promise<string> {
   if (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE)) {
@@ -493,10 +493,11 @@ async function commitKnowledgeArtifact(
 }
 
 async function withKnowledgeLock<T>(workspacePath: string, operation: () => Promise<T>): Promise<T> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'knowledge.lock'), {
+  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
+  const release = await acquireLock(path.join(configDir, 'knowledge.lock'), {
     staleMs: 60_000,
     timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating workspace knowledge.',
+    timeoutMessage: `Another ${BRAND_NAME} operation is updating workspace knowledge.`,
   });
   try {
     return await operation();
@@ -597,10 +598,11 @@ async function insertIntoBase(
     const updated = insertUnderHeading(content, aliases, entryMarkdown);
     await writeBaseFile(workspacePath, repoName, filename, updated);
   }
+  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
   const commit = await commitKnowledgeArtifact(
     workspacePath,
     `docs(knowledge): remember ${repoName} learning`,
-    path.join('.nexusflow', 'base', repoName, filename),
+    path.join(path.basename(configDir), 'base', repoName, filename),
   );
 
   return {

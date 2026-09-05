@@ -40,10 +40,30 @@ export async function migrateCommand(
     if (globalReport.migratedProjects) {
       console.log(`    ${chalk.green('✔')} Migrated ~/.nexusflow/projects.json -> ~/.contextspace/projects.json`);
     }
+    if (globalReport.migratedSchedules) {
+      console.log(`    ${chalk.green('✔')} Migrated ~/.nexusflow/schedules.json -> ~/.contextspace/schedules.json`);
+    }
+    if (globalReport.migratedCategories) {
+      console.log(`    ${chalk.green('✔')} Migrated ~/.nexusflow/categories.json -> ~/.contextspace/categories.json`);
+    }
     if (globalReport.migratedWorkflows > 0) {
       console.log(`    ${chalk.green('✔')} Migrated ${globalReport.migratedWorkflows} workflow template(s)`);
     }
-    if (!globalReport.migratedConfig && !globalReport.migratedProjects && globalReport.migratedWorkflows === 0) {
+    if (globalReport.migratedSkills > 0) {
+      console.log(`    ${chalk.green('✔')} Migrated ${globalReport.migratedSkills} custom skill(s)`);
+    }
+    if (globalReport.migratedVaults > 0) {
+      console.log(`    ${chalk.green('✔')} Migrated ${globalReport.migratedVaults} vault feature(s)`);
+    }
+    const anyGlobalMigrated =
+      globalReport.migratedConfig ||
+      globalReport.migratedProjects ||
+      globalReport.migratedSchedules ||
+      globalReport.migratedCategories ||
+      globalReport.migratedWorkflows > 0 ||
+      globalReport.migratedSkills > 0 ||
+      globalReport.migratedVaults > 0;
+    if (!anyGlobalMigrated) {
       console.log(chalk.dim('    Global configuration is already up to date.'));
     }
     console.log();

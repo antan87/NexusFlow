@@ -52,11 +52,7 @@ describe('Workflows Utility Unit Tests', () => {
       const result = await saveWorkflowTemplate('My Temp Name', 'Strategy Content');
 
       expect(fs.writeFile).toHaveBeenCalledWith(
-<<<<<<< HEAD
         expect.stringContaining('my-temp-name.md.tmp-'),
-=======
-        path.join(resolveBrandHomeDir(), 'workflows', 'my-temp-name.md'),
->>>>>>> eb5965f (refactor(brand): replace hardcoded naming references across workflows, logs, and materializer with typed brand config)
         '# My Temp Name\n\nStrategy Content',
       );
       expect(result.id).toBe('my-temp-name');

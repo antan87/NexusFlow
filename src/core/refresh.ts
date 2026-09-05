@@ -18,6 +18,7 @@ import { generateContextFiles } from '../generators/index.js';
 import type { WorkspaceContext } from '../types.js';
 import { checkGenerationLock, type GenerationCheck } from './generation-lock.js';
 import { acquireLock } from './locks.js';
+import { BRAND_NAME, BRAND_CONFIG, resolveWorkspaceConfigDir, resolveWorkspaceFilePath } from './constants.js';
 
 /** Options for a headless refresh run. */
 export interface RefreshOptions {
@@ -58,10 +59,11 @@ export async function refreshWorkspace(
   workspacePath: string,
   options: RefreshOptions = {},
 ): Promise<RefreshReport> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'generation.lock'), {
+  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
+  const release = await acquireLock(path.join(configDir, 'generation.lock'), {
     staleMs: 5 * 60_000,
     timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow generation or refresh is already updating this workspace.',
+    timeoutMessage: `Another ${BRAND_NAME} generation or refresh is already updating this workspace.`,
   });
   try {
     return await refreshWorkspaceUnlocked(workspacePath, options);
@@ -77,7 +79,7 @@ async function refreshWorkspaceUnlocked(
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
     throw new Error(
-      `Failed to load workspace configuration. Ensure nexusflow.json exists at ${workspacePath}.`,
+      `Failed to load workspace configuration. Ensure ${BRAND_CONFIG.files.manifest.primary} or ${BRAND_CONFIG.files.manifest.legacy} exists at ${workspacePath}.`,
     );
   }
 
@@ -142,7 +144,7 @@ async function refreshWorkspaceUnlocked(
   // If a handoff bundle exists, refresh it too — it reuses the cached
   // analysis, so this no longer triggers a second full analysis pass.
   let refreshedHandoff = false;
-  const handoffPath = path.join(workspacePath, 'nexusflow-handoff.md');
+  const handoffPath = (await resolveWorkspaceFilePath(workspacePath, 'handoff')).path;
   {
     try {
       await fs.access(handoffPath);

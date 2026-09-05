@@ -10,6 +10,7 @@ import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
+import { resolveResourceLockPath } from '../resources/materializer.js';
 import { readWorkspaceFile, writeWorkspaceFile, workspaceFileExists } from '../core/storage.js';
 import {
   captureGenerationSnapshot,
@@ -278,16 +279,15 @@ export async function generateContextFiles(
   await generateSkills(renderCtx, assistants, workspacePath);
 
   try {
-    let resourceLockPath = path.join(workspacePath, '.contextspace', 'resources.lock.json');
-    if (!(await fse.pathExists(resourceLockPath))) {
-      resourceLockPath = path.join(workspacePath, '.nexusflow', 'resources.lock.json');
-    }
-    const resourceLock = (await fse.readJson(resourceLockPath)) as {
-      outputs?: Array<{ path: string }>;
-    };
-    generatedOutputs.push({ path: path.relative(workspacePath, resourceLockPath).replace(/\\/g, '/'), source: 'workspace resource selection', location: 'local' });
-    for (const output of resourceLock.outputs ?? []) {
-      generatedOutputs.push({ path: output.path, source: 'skill or agent catalog', location: 'local' });
+    const resourceLockPath = await resolveResourceLockPath(workspacePath);
+    if (await fse.pathExists(resourceLockPath)) {
+      const resourceLock = (await fse.readJson(resourceLockPath)) as {
+        outputs?: Array<{ path: string }>;
+      };
+      generatedOutputs.push({ path: path.relative(workspacePath, resourceLockPath).replace(/\\/g, '/'), source: 'workspace resource selection', location: 'local' });
+      for (const output of resourceLock.outputs ?? []) {
+        generatedOutputs.push({ path: output.path, source: 'skill or agent catalog', location: 'local' });
+      }
     }
   } catch {
     // Resource materialization lock check
