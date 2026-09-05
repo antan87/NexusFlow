@@ -59,14 +59,16 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
+import { WorkspaceWorkroomTab } from '../features/workrooms/WorkspaceWorkroomTab.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
-type SubTab = 'overview' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan' | 'skills';
+type SubTab = 'overview' | 'workroom' | 'sessions' | 'services' | 'changes' | 'knowledge' | 'plan' | 'skills';
 
 const TABS: Array<{ value: SubTab; label: string }> = [
   { value: 'overview', label: 'Overview' },
+  { value: 'workroom', label: 'Workroom' },
   { value: 'changes', label: 'Changes' },
   { value: 'services', label: 'Services' },
   { value: 'sessions', label: 'Sessions' },
@@ -551,6 +553,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
+              {subTab === 'workroom' && <WorkspaceWorkroomTab ws={selected} showToast={showToast} />}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}

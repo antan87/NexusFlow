@@ -2032,6 +2032,100 @@ app.get('/api/workspace/:id/plan', async (c) => {
   }
 });
 
+// 13c-2. Get workspace collaboration stream (.nexusflow/chat.jsonl)
+app.get('/api/workspace/:id/stream', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const chatFile = path.join(workspacePath, '.nexusflow', 'chat.jsonl');
+
+    let messages: any[] = [];
+    try {
+      const raw = await fs.readFile(chatFile, 'utf-8');
+      messages = raw
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+    } catch {
+      // No chat.jsonl yet
+    }
+
+    let isRemoteActive = false;
+    let remoteStatus: any = null;
+    try {
+      if (workroomManager.hasActiveRoom()) {
+        const status = await workroomManager.status();
+        if (status.mode === 'host' && status.localWorkspaceId === id) {
+          isRemoteActive = true;
+          remoteStatus = {
+            roomId: status.roomId,
+            url: status.url,
+            name: status.name,
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return c.json({
+      workspaceId: id,
+      messages,
+      isRemoteActive,
+      remoteStatus,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-3. Post a message to workspace collaboration stream
+app.post('/api/workspace/:id/stream', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as {
+      message: string;
+      harness?: string;
+      stepId?: string;
+      evidence?: string;
+    };
+    const message = String(body.message ?? '').trim();
+    if (!message) {
+      return c.json({ error: 'Message cannot be empty.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const chatDir = path.join(workspacePath, '.nexusflow');
+    await fs.mkdir(chatDir, { recursive: true });
+    const chatFile = path.join(chatDir, 'chat.jsonl');
+
+    const entry = {
+      id: createHash('sha256').update(Date.now() + message).digest('hex').slice(0, 12),
+      timestamp: new Date().toISOString(),
+      harness: body.harness || 'developer',
+      message,
+      ...(body.stepId ? { stepId: body.stepId } : {}),
+      ...(body.evidence ? { evidence: body.evidence } : {}),
+    };
+
+    await fs.appendFile(chatFile, JSON.stringify(entry) + '\n', 'utf-8');
+
+    return c.json({ success: true, entry });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 13d. Sync all repositories in workspace
 app.post('/api/workspace/:id/sync', async (c) => {
   try {

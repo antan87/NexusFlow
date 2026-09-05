@@ -7,6 +7,7 @@
  */
 
 import { execa } from 'execa';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -30,6 +31,7 @@ import {
   addWorkspaceKnowledge,
   addBaseKnowledge,
   promoteKnowledge,
+  searchKnowledge,
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
@@ -335,6 +337,47 @@ export const tools: NexusFlowTool[] = [
         return json(result);
       } catch (error: any) {
         return errorResult(`Error promoting knowledge: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'search_knowledge',
+    description:
+      'Search workspace and repository knowledge for relevant architecture decisions, gotchas, assumptions, and questions. Returns matching entries with scores to avoid loading the whole knowledge file.',
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search terms to find in recorded knowledge.' },
+        type: {
+          type: 'string',
+          enum: ['decision', 'gotcha', 'assumption', 'question'],
+          description: 'Optional filter by entry type.',
+        },
+        scope: { type: 'string', description: 'Optional scope filter (e.g. repo:name, path:dir, seam:name).' },
+        repo: { type: 'string', description: 'Optional repo name to search base knowledge for.' },
+        limit: { type: 'number', description: 'Maximum number of results to return (default: 5, max: 20).' },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const query = String(args.query ?? '').trim();
+        const type = args.type as KnowledgeEntryType | undefined;
+        const scope = args.scope ? String(args.scope) : undefined;
+        const repo = args.repo ? String(args.repo) : undefined;
+        const limit = typeof args.limit === 'number' ? args.limit : undefined;
+
+        const results = await searchKnowledge(ctx.workspacePath, query, {
+          type,
+          scope,
+          repo,
+          limit,
+        });
+        return json(results);
+      } catch (error: any) {
+        return errorResult(`Error searching knowledge: ${error.message}`);
       }
     },
   },
@@ -671,6 +714,188 @@ export const tools: NexusFlowTool[] = [
       }
     },
   },
+  {
+    name: 'read_workroom_stream',
+    description:
+      'Read the recent handoff stream, active workflow step, and recent events from the Workroom. Falls back to the local workspace chat ledger if no remote Workroom is connected.',
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of recent activity items or messages to return (default: 5, max: 20).',
+        },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const feature = await loadFeatureConfig(ctx.workspacePath);
+        if (!feature) return errorResult('Workspace not found.');
+        const limit = Math.max(1, Math.min((args.limit as number) || 5, 20));
+
+        // Check if there is an active pinned workroom connection
+        try {
+          const client = await loadPinnedWorkroomClientForWorkspace(feature.id);
+          const snapshot = await client.snapshot();
+          const activeStep =
+            snapshot.workflowProgress?.steps.find(
+              (s) => s.status === 'in_progress' || s.status === 'completion_proposed',
+            ) ?? snapshot.workflowProgress?.steps.find((s) => s.status === 'pending');
+
+          return json({
+            status: 'connected',
+            mode: 'workroom',
+            roomId: snapshot.roomId,
+            feature: {
+              id: snapshot.bundle.feature.id,
+              goal: snapshot.bundle.feature.goal,
+            },
+            activeStep: activeStep
+              ? {
+                  stepId: activeStep.stepId,
+                  status: activeStep.status,
+                  evidence: activeStep.evidence,
+                  updatedAt: activeStep.updatedAt,
+                }
+              : null,
+            latestHandoff: snapshot.documents?.handoff?.content ?? null,
+            recentActivity: snapshot.activity.slice(-limit).map((e) => ({
+              sequence: e.sequence,
+              type: e.type,
+              actorId: e.actorId,
+              summary: e.summary,
+              createdAt: e.createdAt,
+            })),
+          });
+        } catch {
+          // Fallback to local workspace chat / handoff ledger
+          const chatPath = path.join(ctx.workspacePath, '.nexusflow', 'chat.jsonl');
+          let messages: any[] = [];
+          try {
+            const raw = await fs.readFile(chatPath, 'utf8');
+            messages = raw
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .map((line) => {
+                try {
+                  return JSON.parse(line);
+                } catch {
+                  return null;
+                }
+              })
+              .filter(Boolean)
+              .slice(-limit);
+          } catch {
+            // chat.jsonl doesn't exist yet
+          }
+
+          return json({
+            status: 'local-fallback',
+            mode: 'offline',
+            workspaceId: feature.id,
+            note:
+              messages.length === 0
+                ? 'No remote Workroom connected and no local chat history recorded yet. Use post_workroom_handoff to record a handoff.'
+                : 'No remote Workroom connected; returning recent local workspace chat entries.',
+            recentMessages: messages,
+          });
+        }
+      } catch (error: any) {
+        return errorResult(`Error reading workroom stream: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'post_workroom_handoff',
+    description:
+      'Post a progress update, plan notice, or handoff note to the active Workroom Handoff Stream and local workspace chat ledger (.nexusflow/chat.jsonl).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', minLength: 1, description: 'Markdown message, plan summary, or handoff note to post.' },
+        stepId: { type: 'string', description: 'Optional workflow step ID being addressed or proposed for completion.' },
+        evidence: { type: 'string', description: 'Optional verification evidence or test results for the proposed step.' },
+        harness: { type: 'string', description: 'Optional originating harness name (e.g. "antigravity", "claude", "codex").' },
+        ...workspaceIdProp,
+      },
+      required: ['message'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const feature = await loadFeatureConfig(ctx.workspacePath);
+        if (!feature) return errorResult('Workspace not found.');
+        const message = String(args.message ?? '').trim();
+        if (!message) return errorResult('Handoff message cannot be empty.');
+        const stepId = args.stepId ? String(args.stepId).trim() : undefined;
+        const evidence = args.evidence ? String(args.evidence).trim() : undefined;
+        const harness = args.harness ? String(args.harness).trim() : 'agent';
+
+        // 1. Always append to local .nexusflow/chat.jsonl for durable offline record
+        const chatDir = path.join(ctx.workspacePath, '.nexusflow');
+        await fs.mkdir(chatDir, { recursive: true });
+        const chatPath = path.join(chatDir, 'chat.jsonl');
+        const entry = {
+          id: randomUUID(),
+          timestamp: new Date().toISOString(),
+          harness,
+          message,
+          ...(stepId ? { stepId } : {}),
+          ...(evidence ? { evidence } : {}),
+        };
+        await fs.appendFile(chatPath, JSON.stringify(entry) + '\n', 'utf8');
+
+        // 2. If connected to a Workroom, sync to Workroom
+        let workroomSynced = false;
+        let stepResult: any = null;
+        try {
+          const client = await loadPinnedWorkroomClientForWorkspace(feature.id);
+          const snapshot = await client.snapshot();
+
+          // Update handoff document
+          const currentHandoff = snapshot.documents?.handoff;
+          if (currentHandoff) {
+            const heading = `### ${new Date().toISOString().slice(0, 10)} — ${harness}`;
+            const updatedContent = currentHandoff.content
+              ? `${currentHandoff.content}\n\n${heading}\n${message}`
+              : `${heading}\n${message}`;
+            await client.updateDocument('handoff', updatedContent, currentHandoff.revision);
+            workroomSynced = true;
+          }
+
+          // Propose workflow step completion if requested
+          if (stepId && evidence) {
+            const step = snapshot.workflowProgress?.steps.find((s) => s.stepId === stepId);
+            if (step) {
+              const res = await client.proposeWorkflowStep(stepId, step.revision, evidence);
+              stepResult = res.step;
+            }
+          }
+        } catch {
+          // Workroom not active - local append is sufficient
+        }
+
+        return json({
+          status: 'posted',
+          timestamp: entry.timestamp,
+          harness,
+          workroomSynced,
+          localChatPersisted: true,
+          ...(stepResult ? { stepProposal: stepResult } : {}),
+          message: workroomSynced
+            ? 'Handoff posted to live Workroom stream and local chat ledger.'
+            : 'Handoff recorded in local workspace chat ledger (.nexusflow/chat.jsonl).',
+        });
+      } catch (error: any) {
+        return errorResult(`Error posting workroom handoff: ${error.message}`);
+      }
+    },
+  },
 ];
 
 /** Agent execution role for scoped tool surfaces. */
@@ -692,6 +917,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'list_workspaces',
     'list_repos',
     'read_workroom',
+    'search_knowledge',
+    'read_workroom_stream',
   ],
   review: [
     'search_workspace',
@@ -702,6 +929,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'list_workspaces',
     'list_repos',
     'read_workroom',
+    'search_knowledge',
+    'read_workroom_stream',
   ],
   ci: [
     'search_workspace',
@@ -712,6 +941,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'list_workspaces',
     'list_repos',
     'sync_workspace',
+    'search_knowledge',
+    'read_workroom_stream',
   ],
   developer: ['*'],
   interactive: ['*'],

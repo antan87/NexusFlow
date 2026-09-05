@@ -673,3 +673,117 @@ async function promoteKnowledgeUnlocked(
     ...(commitFailures.length ? { commitFailures } : {}),
   };
 }
+
+export interface KnowledgeSearchResult {
+  source: 'workspace' | 'base';
+  repo?: string;
+  section: string;
+  type: KnowledgeEntryType | null;
+  text: string;
+  score: number;
+}
+
+export interface SearchKnowledgeOptions {
+  scope?: string;
+  type?: KnowledgeEntryType;
+  repo?: string;
+  limit?: number;
+}
+
+/**
+ * Searches workspace knowledge and repository base knowledge for relevant entries.
+ * Returns concise matching entry snippets sorted by relevance.
+ */
+export async function searchKnowledge(
+  workspacePath: string,
+  query: string,
+  options: SearchKnowledgeOptions = {},
+): Promise<KnowledgeSearchResult[]> {
+  const results: KnowledgeSearchResult[] = [];
+  const limit = Math.max(1, Math.min(options.limit ?? 5, 20));
+  const queryTerms = (query || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  // 1. Search workspace knowledge
+  const wsContent = await readWorkspaceKnowledge(workspacePath);
+  if (wsContent) {
+    const entries = parseKnowledgeEntries(wsContent);
+    for (const entry of entries) {
+      if (options.type && entry.type !== options.type) continue;
+      if (options.scope) {
+        const needle = `**scope:** \`${options.scope.toLowerCase()}\``;
+        if (!entry.text.toLowerCase().includes(needle)) continue;
+      }
+      const textLower = entry.text.toLowerCase();
+      let score = 0;
+      if (queryTerms.length > 0) {
+        for (const term of queryTerms) {
+          if (textLower.includes(term)) score += 1;
+        }
+        if (score === 0) continue;
+      } else {
+        score = 1;
+      }
+      results.push({
+        source: 'workspace',
+        section: entry.section,
+        type: entry.type,
+        text: entry.text,
+        score,
+      });
+    }
+  }
+
+  // 2. Search base knowledge for configured repos
+  const feature = await loadFeatureConfig(workspacePath);
+  if (feature?.repos) {
+    const targetRepos = options.repo
+      ? [options.repo]
+      : feature.repos.map((r) => path.basename(r));
+
+    for (const repoName of targetRepos) {
+      const baseContent = await readBaseKnowledge(workspacePath, repoName).catch(() => null);
+      if (baseContent) {
+        const entries = parseKnowledgeEntries(baseContent);
+        for (const entry of entries) {
+          if (options.type && entry.type !== options.type) continue;
+          if (options.scope) {
+            const needle = `**scope:** \`${options.scope.toLowerCase()}\``;
+            if (!entry.text.toLowerCase().includes(needle)) continue;
+          }
+          const textLower = entry.text.toLowerCase();
+          let score = 0;
+          if (queryTerms.length > 0) {
+            for (const term of queryTerms) {
+              if (textLower.includes(term)) score += 1;
+            }
+            if (score === 0) continue;
+          } else {
+            score = 1;
+          }
+          results.push({
+            source: 'base',
+            repo: repoName,
+            section: entry.section,
+            type: entry.type,
+            text: entry.text,
+            score,
+          });
+        }
+      }
+    }
+  }
+
+  // Sort by score descending; prioritize workspace entries when scores tie
+  results.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.source === 'workspace' && b.source !== 'workspace') return -1;
+    if (b.source === 'workspace' && a.source !== 'workspace') return 1;
+    return 0;
+  });
+
+  return results.slice(0, limit);
+}

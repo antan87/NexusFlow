@@ -7,6 +7,7 @@ import {
   addBaseKnowledge,
   promoteKnowledge,
   readWorkspaceKnowledge,
+  searchKnowledge,
   MAX_ENTRY_CHARS,
 } from './knowledge.js';
 import * as storage from './storage.js';
@@ -381,5 +382,49 @@ describe('knowledge I/O', () => {
     expect(wsContent).not.toContain('shared learning');
     expect(wsContent).toContain('Promoted to api base knowledge');
     expect(base.get('api/nexusflow-knowledge.md')).toContain('shared learning');
+  });
+
+  describe('searchKnowledge', () => {
+    it('finds matching entries across workspace and base knowledge', async () => {
+      ws.set(
+        'feat/nexusflow-knowledge.md',
+        `# Workspace Knowledge — feat\n\n## Architecture Decisions\n\n### 2026-08-25 — worktree-isolation\n**Decision:** isolate repos dynamically\n**Scope:** \`repo:api\`\n`,
+      );
+      base.set(
+        'api/nexusflow-knowledge.md',
+        `# Base Knowledge — api\n\n## Known Gotchas\n\n### 2026-08-20 — port-conflict\n**Gotcha:** port 8080 conflicts with backend\n`,
+      );
+
+      const results = await searchKnowledge('/wsp', 'isolate');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({
+        source: 'workspace',
+        type: 'decision',
+        text: expect.stringContaining('isolate repos dynamically'),
+      });
+
+      const gotchaResults = await searchKnowledge('/wsp', 'conflict');
+      expect(gotchaResults).toHaveLength(1);
+      expect(gotchaResults[0]).toMatchObject({
+        source: 'base',
+        repo: 'api',
+        type: 'gotcha',
+        text: expect.stringContaining('port 8080 conflicts'),
+      });
+    });
+
+    it('filters by type and scope', async () => {
+      ws.set(
+        'feat/nexusflow-knowledge.md',
+        `# Workspace Knowledge — feat\n\n## Architecture Decisions\n\n### 2026-08-25 — auth-token\n**Decision:** use bearer token\n**Scope:** \`repo:api\`\n\n## Known Gotchas\n\n### 2026-08-25 — token-expiry\n**Gotcha:** token expires in 5m\n**Scope:** \`repo:api\`\n`,
+      );
+
+      const gotchas = await searchKnowledge('/wsp', 'token', { type: 'gotcha' });
+      expect(gotchas).toHaveLength(1);
+      expect(gotchas[0]!.type).toBe('gotcha');
+
+      const scoped = await searchKnowledge('/wsp', 'token', { scope: 'repo:api' });
+      expect(scoped.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

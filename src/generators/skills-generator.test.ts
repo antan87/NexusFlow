@@ -98,4 +98,63 @@ describe('skills-generator', () => {
     expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'pr-review-toolkit'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit'))).toBe(false);
   });
+
+  it('auto-deploys dynamically inferred skills even when enabledSkills is empty', async () => {
+    await saveWorkspaceSkillsConfig(tempWorkspace, {
+      enabledSkills: [],
+    });
+
+    const mockAnalysis = new Map<string, ProjectAnalysis>();
+    mockAnalysis.set('service-a', {
+      name: 'service-a',
+      path: path.join(tempWorkspace, 'service-a'),
+      techStack: { languages: ['typescript'], frameworks: [], buildTools: [], projectType: 'backend' },
+      dependencies: [{ name: 'shared-pkg', type: 'npm', version: '^1.0.0' }],
+      ports: [],
+      readmeSummary: 'Service A',
+      existingAIConfigs: [],
+      runConfig: {
+        entryPoints: [{ projectPath: 'service-a', type: 'npm', command: 'npm start', port: 8080 }],
+        databases: [],
+        sharedInfraWarnings: [],
+        committedSecrets: [],
+        externalDependencies: [],
+      },
+    });
+    mockAnalysis.set('lib-pkg', {
+      name: 'lib-pkg',
+      path: path.join(tempWorkspace, 'lib-pkg'),
+      techStack: { languages: ['typescript'], frameworks: [], buildTools: [], projectType: 'library' },
+      dependencies: [],
+      ports: [],
+      readmeSummary: 'Library',
+      existingAIConfigs: [],
+      produces: [{ name: 'shared-pkg', type: 'npm', version: '1.0.0' }],
+    });
+
+    const ctx: WorkspaceContext = {
+      feature: {
+        id: 'test-dynamic-skills',
+        branchName: 'feature-test',
+        description: 'Testing dynamic skills generation',
+        repos: [],
+        assistants: ['antigravity', 'claude'],
+        workspacePath: tempWorkspace,
+        createdAt: new Date().toISOString(),
+      },
+      repos: [
+        { name: 'service-a', path: path.join(tempWorkspace, 'service-a'), defaultBranch: 'main' },
+        { name: 'lib-pkg', path: path.join(tempWorkspace, 'lib-pkg'), defaultBranch: 'main' },
+      ],
+      analysis: mockAnalysis,
+    };
+
+    await generateSkills(ctx, ['antigravity', 'claude'], tempWorkspace);
+
+    // Both package loop and verifier should be deployed automatically
+    expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'nexusflow-local-package-loop', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'verifier-workspace', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'nexusflow-local-package-loop', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'verifier-workspace', 'SKILL.md'))).toBe(true);
+  });
 });

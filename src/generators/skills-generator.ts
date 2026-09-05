@@ -209,6 +209,7 @@ export async function generateSkills(
   }
 
   // 2. Add or update dynamic skills based on codebase analysis
+  const dynamicSkillIds: string[] = [];
   if (analysis) {
     const hasDeps = hasCrossRepoDependencies(analysis);
     const hasProds = hasProducedPackagesWithConsumers(analysis);
@@ -217,9 +218,11 @@ export async function generateSkills(
     );
 
     if (hasDeps) {
-      skillMap.set('nexusflow-local-package-loop', {
-        id: 'nexusflow-local-package-loop',
-        name: 'nexusflow-local-package-loop',
+      const id = 'nexusflow-local-package-loop';
+      dynamicSkillIds.push(id);
+      skillMap.set(id, {
+        id,
+        name: id,
         title: 'Local Package Development Loop',
         category: 'cross-repo-release',
         description: 'Guides testing cross-repo package dependencies locally without publishing.',
@@ -229,9 +232,11 @@ export async function generateSkills(
     }
 
     if (hasProds) {
-      skillMap.set('nexusflow-release-ordering', {
-        id: 'nexusflow-release-ordering',
-        name: 'nexusflow-release-ordering',
+      const id = 'nexusflow-release-ordering';
+      dynamicSkillIds.push(id);
+      skillMap.set(id, {
+        id,
+        name: id,
         title: 'Release and Merge Ordering Guidelines',
         category: 'cross-repo-release',
         description: 'Answers what repositories must be merged and released in what order.',
@@ -241,9 +246,11 @@ export async function generateSkills(
     }
 
     if (hasRunConfig) {
-      skillMap.set('verifier-workspace', {
-        id: 'verifier-workspace',
-        name: 'verifier-workspace',
+      const id = 'verifier-workspace';
+      dynamicSkillIds.push(id);
+      skillMap.set(id, {
+        id,
+        name: id,
         title: 'Local Runtime Verifier',
         category: 'testing-qa',
         description: 'Guidelines to safely launch, mock, and verify services locally.',
@@ -253,8 +260,8 @@ export async function generateSkills(
     }
   }
 
-  // 3. Determine which skills to deploy
-  const enabledSet = new Set(wsConfig.enabledSkills);
+  // 3. Determine which skills to deploy: explicitly enabled skills plus dynamically inferred skills
+  const enabledSet = new Set([...wsConfig.enabledSkills, ...dynamicSkillIds]);
   const missingSkills = [...enabledSet].filter((id) => !skillMap.has(id));
   if (missingSkills.length) {
     throw new Error(`Selected skills are no longer available: ${missingSkills.join(', ')}`);

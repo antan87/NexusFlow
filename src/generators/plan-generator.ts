@@ -236,6 +236,14 @@ export async function generateImplementationPlan(
           : 'If you add a dependency from one of these repos to another, run `nexusflow refresh` and this plan will describe the resulting order.',
       );
       md.push('');
+      if (repos.length === 1) {
+        md.push('## Implementation Guidance');
+        md.push('');
+        md.push('- **Vertical Slice**: Implement in small, testable increments and verify tests pass after each step.');
+        md.push('- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with `nexusflow knowledge add` or MCP `add_knowledge`.');
+        md.push('- **Cross-Harness Handoff**: Use `post_workroom_handoff` to post milestone updates or hand off to other agents.');
+        md.push('');
+      }
       await writeWorkspaceFile(workspacePath, feature.id, 'nexusflow-plan.md', md.join('\n'));
       console.log(chalk.green('  ✔'), 'Generated nexusflow-plan.md');
       return;
