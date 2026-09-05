@@ -91,7 +91,13 @@ export const managedOutputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('skill'),
     resourceId: resourceIdSchema,
-    adapter: z.enum(['agent-skill-v1', 'claude-skill-v1']),
+    adapter: z.enum([
+      'agent-skill-v1',
+      'claude-skill-v1',
+      'codex-skill-v1',
+      'copilot-skill-v1',
+      'cursor-skill-v1',
+    ]),
     ...managedHashAndPath,
   }),
   z.object({

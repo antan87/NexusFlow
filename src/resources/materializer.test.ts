@@ -42,14 +42,17 @@ describe('workspace resource materializer', () => {
     const first = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
     expect(first.installed).toContain('.agents/skills/portable-skill/SKILL.md');
     expect(first.installed).toContain('.claude/skills/portable-skill/SKILL.md');
+    expect(first.installed).toContain('.codex/skills/portable-skill/SKILL.md');
+    expect(first.installed).toContain('.github/skills/portable-skill/SKILL.md');
+    expect(first.installed).toContain('.cursor/skills/portable-skill/SKILL.md');
     expect(first.installed).toContain('.codex/agents/code_reviewer.toml');
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'))).toBe(true);
     expect(await fs.readFile(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'), 'utf-8')).toContain('developer_instructions');
 
     const second = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
     expect(second.installed).toEqual([]);
     expect(second.updated).toEqual([]);
-    expect(second.unchanged).toHaveLength(3);
+    expect(second.unchanged).toHaveLength(6);
   });
 
   it('removes only unchanged owned packages and permits reassignment', async () => {
@@ -57,15 +60,19 @@ describe('workspace resource materializer', () => {
     const result = await reconcileWorkspaceResources(workspace, ['codex'], [], []);
     expect(result.removed).toEqual(expect.arrayContaining([
       '.agents/skills/portable-skill/SKILL.md',
+      '.codex/skills/portable-skill/SKILL.md',
       '.codex/agents/code_reviewer.toml',
     ]));
     expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
     expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill'))).toBe(false);
     expect(await fse.pathExists(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'))).toBe(false);
 
     const reassigned = await reconcileWorkspaceResources(workspace, ['codex'], [skill], [agent]);
     expect(reassigned.installed).toEqual(expect.arrayContaining([
       '.agents/skills/portable-skill/SKILL.md',
+      '.codex/skills/portable-skill/SKILL.md',
       '.codex/agents/code_reviewer.toml',
     ]));
   });
@@ -82,7 +89,7 @@ describe('workspace resource materializer', () => {
   });
 
   it('restores the old target and lock when installing a staged replacement fails', async () => {
-    await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
+    await reconcileWorkspaceResources(workspace, ['antigravity'], [skill], []);
     const target = path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md');
     const lockPath = path.join(workspace, '.nexusflow', 'resources.lock.json');
     const beforeTarget = await fs.readFile(target, 'utf-8');
@@ -91,7 +98,7 @@ describe('workspace resource materializer', () => {
 
     await expect(reconcileWorkspaceResources(
       workspace,
-      ['codex'],
+      ['antigravity'],
       [{ ...skill, content: '# Changed\n\nNew instructions.' }],
       [],
       {

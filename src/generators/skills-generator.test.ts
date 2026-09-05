@@ -60,11 +60,18 @@ describe('skills-generator', () => {
     // 2. Antigravity: .agents/skills/<skillName>/SKILL.md
     expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
 
-    // Cursor, Copilot, Codex, and Antigravity all discover the portable package
-    // from the shared Agent Skills location. No lossy rules/instructions copies.
+    // 3. Codex: .codex/skills/<skillName>/SKILL.md
+    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
+
+    // 4. Copilot: .github/skills/<skillName>/SKILL.md
+    expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
+
+    // 5. Cursor: .cursor/skills/<skillName>/SKILL.md
+    expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
+
+    // No lossy rules/instructions copies
     expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'instructions', 'pr-review-toolkit.instructions.md'))).toBe(false);
-    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.nexusflow', 'resources.lock.json'))).toBe(true);
   });
 

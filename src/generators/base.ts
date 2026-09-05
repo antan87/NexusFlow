@@ -234,5 +234,6 @@ ${reposSection}
 
 - \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. It grows every session and is often long, so search the headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha --title "..." -m "..."\`, keeping each entry to a rule and its reason
 - \`nexusflow-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
+- \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.codex/skills/\`, \`.claude/skills/\`, \`.github/skills/\`, \`.cursor/skills/\` where supported)
 ${ownInstructions}${customCommands}${teamwork}`;
 }

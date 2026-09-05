@@ -503,7 +503,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Saving & deploying will write to <code className="font-mono text-xs text-foreground">.nexusflow/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
+        Saving & deploying will write to <code className="font-mono text-xs text-foreground">.nexusflow/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, <code className="font-mono text-xs text-foreground">.codex/skills/</code>, <code className="font-mono text-xs text-foreground">.github/skills/</code>, <code className="font-mono text-xs text-foreground">.cursor/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
       </p>
     </div>
   );

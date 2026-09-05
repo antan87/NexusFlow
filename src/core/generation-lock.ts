@@ -89,6 +89,9 @@ function inferOutputLocation(relativePath: string): 'workspace' | 'local' {
   return normalized === '.nexusflow/resources.lock.json' ||
     normalized.startsWith('.agents/skills/') ||
     normalized.startsWith('.claude/skills/') ||
+    normalized.startsWith('.codex/skills/') ||
+    normalized.startsWith('.github/skills/') ||
+    normalized.startsWith('.cursor/skills/') ||
     normalized.startsWith('.codex/agents/')
     ? 'local'
     : 'workspace';

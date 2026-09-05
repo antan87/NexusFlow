@@ -185,12 +185,24 @@ async function buildDesiredFiles(
       );
     }
     const sourceFiles = await walkSkillFiles(skill);
-    const roots = new Map<string, 'agent-skill-v1' | 'claude-skill-v1'>();
+    const roots = new Map<
+      string,
+      'agent-skill-v1' | 'claude-skill-v1' | 'codex-skill-v1' | 'copilot-skill-v1' | 'cursor-skill-v1'
+    >();
     if (assistants.some((assistant) => PORTABLE_SKILL_ASSISTANTS.has(assistant))) {
       roots.set(path.join('.agents', 'skills', skill.id), 'agent-skill-v1');
     }
     if (assistants.includes('claude')) {
       roots.set(path.join('.claude', 'skills', skill.id), 'claude-skill-v1');
+    }
+    if (assistants.includes('codex')) {
+      roots.set(path.join('.codex', 'skills', skill.id), 'codex-skill-v1');
+    }
+    if (assistants.includes('copilot')) {
+      roots.set(path.join('.github', 'skills', skill.id), 'copilot-skill-v1');
+    }
+    if (assistants.includes('cursor')) {
+      roots.set(path.join('.cursor', 'skills', skill.id), 'cursor-skill-v1');
     }
 
     for (const [root, adapter] of roots) {
@@ -267,6 +279,15 @@ function managedResourceRoot(output: ManagedOutput): string {
   }
   if (output.kind === 'skill' && output.adapter === 'claude-skill-v1') {
     return `.claude/skills/${output.resourceId}`;
+  }
+  if (output.kind === 'skill' && output.adapter === 'codex-skill-v1') {
+    return `.codex/skills/${output.resourceId}`;
+  }
+  if (output.kind === 'skill' && output.adapter === 'copilot-skill-v1') {
+    return `.github/skills/${output.resourceId}`;
+  }
+  if (output.kind === 'skill' && output.adapter === 'cursor-skill-v1') {
+    return `.cursor/skills/${output.resourceId}`;
   }
   if (output.kind === 'codex-agent' && output.adapter === 'codex-agent-v1') {
     return `.codex/agents/${output.resourceId}.toml`;
