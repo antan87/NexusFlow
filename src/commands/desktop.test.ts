@@ -111,6 +111,25 @@ describe('desktop release installer', () => {
     }
   });
 
+  it('downloads and verifies when response exposes arrayBuffer without body stream', async () => {
+    const binary = 'buffer-only-appimage';
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(releaseResponse())
+      .mockResolvedValueOnce(new Response(`${digest(binary)}  NexusFlow-9.9.9.AppImage\n`))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from(binary),
+      } as any);
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-installer-test-'));
+    try {
+      const result = await installDesktop({ platform: 'linux', fetchImpl, tmpDir, homeDir: tmpDir });
+      expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('overwrites one stable Linux AppImage path and keeps the launcher valid across releases', async () => {
     const firstBinary = 'first-appimage';
     const secondBinary = 'second-appimage';

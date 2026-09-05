@@ -129,17 +129,12 @@ async function downloadToFile(response: Response, targetPath: string): Promise<s
   if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}.`);
   const hash = createHash('sha256');
 
-  if (response.body) {
-    const nodeStream = Readable.fromWeb(response.body as any);
-    nodeStream.on('data', (chunk) => hash.update(chunk));
-    await pipeline(nodeStream, createWriteStream(targetPath, { mode: 0o600 }));
-  } else {
-    // A small mocked Response may expose only arrayBuffer(); production fetch
-    // responses for release assets provide a body stream.
-    const bytes = Buffer.from(await response.arrayBuffer());
-    hash.update(bytes);
-    await writeFile(targetPath, bytes, { mode: 0o600 });
-  }
+  const nodeStream = response.body
+    ? Readable.fromWeb(response.body as any)
+    : Readable.from(Buffer.from(await response.arrayBuffer()));
+
+  nodeStream.on('data', (chunk) => hash.update(chunk));
+  await pipeline(nodeStream, createWriteStream(targetPath, { mode: 0o600 }));
   return hash.digest('hex').toLowerCase();
 }
 
