@@ -2417,7 +2417,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
       // Verify git index snapshot was written back to restore staged state
       expect(fs.writeFile).toHaveBeenCalledWith(
-        expect.stringContaining('.git/index'),
+        expect.stringMatching(/[/\\]\.git[/\\]index/),
         indexBytes,
       );
       // Verify a.txt working tree was restored
