@@ -57,7 +57,20 @@ import type {
 } from './types.js';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
+const nativeUpdateBridge = typeof window !== 'undefined' ? window.nexusBridge?.updates : undefined;
 let toastIdCounter = 0;
+
+type UiUpdateStatus = {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  downloadUrl?: string | null;
+  releaseUrl?: string | null;
+  releaseNotes?: string | null;
+  nativeStatus?: NexusFlowDesktopUpdateState['status'];
+  progress?: number;
+  error?: string | null;
+};
 
 function AppInner() {
   const navigate = useNavigate();
@@ -81,15 +94,11 @@ function AppInner() {
   const [adapters, setAdapters] = useState<StorageAdapterMeta[]>([]);
 
   // Update Check State
-  const [updateStatus, setUpdateStatus] = useState<{
-    currentVersion: string;
-    latestVersion: string;
-    updateAvailable: boolean;
-    downloadUrl?: string | null;
-    releaseNotes?: string;
-  } | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UiUpdateStatus | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
+  const [updateDeferred, setUpdateDeferred] = useState(false);
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
 
   // Repos & tool detection come from the shared react-query cache (same data
   // the Projects/Start-work pages read) — one fetch, one source of truth.
@@ -104,7 +113,7 @@ function AppInner() {
 
   // App Autoupdate State
   const [updatingApp, setUpdatingApp] = useState(false);
-  const [updateStep, setUpdateStep] = useState<'idle' | 'downloading' | 'applying' | 'error'>('idle');
+  const [updateStep, setUpdateStep] = useState<'idle' | 'checking' | 'downloading' | 'downloaded' | 'error'>('idle');
   const [workspaceToDelete, setWorkspaceToDelete] = useState<string | null>(null);
 
 
@@ -192,24 +201,74 @@ function AppInner() {
 
   // ─── API Fetches ────────────────────────────────────────────────────────
 
-  const fetchUpdateStatus = async () => {
+  const applyNativeUpdateState = (state: NexusFlowDesktopUpdateState) => {
+    const isAvailable = ['available', 'downloading', 'downloaded', 'error'].includes(state.status)
+      && Boolean(state.version);
+    setUpdateStatus({
+      currentVersion: state.currentVersion,
+      latestVersion: state.version || state.currentVersion,
+      updateAvailable: isAvailable,
+      releaseNotes: state.releaseNotes,
+      nativeStatus: state.status,
+      progress: state.progress,
+      error: state.error,
+      releaseUrl: 'https://github.com/antan87/NexusFlow/releases/latest',
+    });
+    setAppVersion(state.currentVersion);
+    if (state.status === 'error') {
+      setUpdateCheckError(state.error || 'NexusFlow could not check or download the update.');
+    } else if (state.status !== 'checking') {
+      setUpdateCheckError(null);
+    }
+    setUpdatingApp(state.status === 'checking' || state.status === 'downloading');
+    setUpdateStep(
+      state.status === 'checking' ? 'checking'
+        : state.status === 'downloading' ? 'downloading'
+          : state.status === 'downloaded' ? 'downloaded'
+            : state.status === 'error' ? 'error' : 'idle',
+    );
+    if (state.status === 'available') setUpdateDeferred(false);
+  };
+
+  const fetchUpdateStatus = async (checkNative = true) => {
     try {
+      if (nativeUpdateBridge) {
+        const initial = await nativeUpdateBridge.getStatus();
+        applyNativeUpdateState(initial);
+        if (checkNative && initial.status !== 'unsupported') {
+          applyNativeUpdateState(await nativeUpdateBridge.check());
+        }
+        return;
+      }
       const res = await fetch(`${API_BASE}/api/update-status`);
       if (res.ok) {
         const data = await res.json();
         setUpdateStatus(data);
+        setUpdateCheckError(null);
         if (data.currentVersion) {
           setAppVersion(data.currentVersion);
         }
+      } else {
+        throw new Error(`Update check failed with HTTP ${res.status}.`);
       }
     } catch (e) {
+      setUpdateCheckError(e instanceof Error ? e.message : 'NexusFlow could not check for updates.');
       console.error('Failed to fetch update status:', e);
     }
   };
 
+  const handleCheckForUpdates = async () => {
+    setUpdateCheckError(null);
+    // A downloaded update is intentionally protected from another metadata
+    // check in the main process. Let the manual check button reopen the
+    // optional banner without losing the pending Restart & Install action.
+    if (updateStatus?.nativeStatus === 'downloaded') setUpdateDeferred(false);
+    await fetchUpdateStatus(true);
+  };
+
   const handleAutoUpdate = async () => {
-    if (!updateStatus || !updateStatus.downloadUrl) {
-      showToast('No update download URL found.', 'error');
+    if (!nativeUpdateBridge) {
+      showToast('Native installation is available in the NexusFlow desktop app. Open the release page to install it.', 'info');
       return;
     }
 
@@ -217,50 +276,36 @@ function AppInner() {
     setUpdateStep('downloading');
 
     try {
-      // 1. Download the installer
-      const downloadRes = await fetch(`${API_BASE}/api/updates/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ downloadUrl: updateStatus.downloadUrl }),
-      });
-      const downloadData = await downloadRes.json();
-
-      if (!downloadRes.ok || !downloadData.success) {
-        throw new Error(downloadData.error || 'Failed to download installer binary');
-      }
-
-      // 2. Apply the installer
-      setUpdateStep('applying');
-      const applyRes = await fetch(`${API_BASE}/api/updates/apply`, {
-        method: 'POST',
-      });
-      const applyData = await applyRes.json();
-
-      if (!applyRes.ok || !applyData.success) {
-        throw new Error(applyData.error || 'Failed to trigger application update');
-      }
-
-      const isNeutralino = typeof window !== 'undefined' && (window as any).Neutralino;
-      showToast(
-        isNeutralino
-          ? 'Update downloaded! App is restarting...'
-          : 'Update downloaded and installer launched. Restart NexusFlow to complete the update.',
-        'success'
-      );
-
-      // 3. Exit Neutralino client window to unlock files on disk
-      if (isNeutralino) {
-        setTimeout(() => {
-          (window as any).Neutralino.app.exit();
-        }, 800);
+      const nextState = await nativeUpdateBridge.download();
+      applyNativeUpdateState(nextState);
+      if (nextState.status === 'downloaded') {
+        showToast('Update downloaded. Restart NexusFlow when you are ready to install it.', 'success');
       } else {
-        setUpdateStep('idle');
-        setUpdatingApp(false);
+        showToast(`Update failed: ${nextState.error || 'The download did not complete.'}`, 'error');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Update failed:', err);
       setUpdateStep('error');
-      showToast(`Update Failed: ${err.message || 'Unknown error'}`, 'error');
+      setUpdatingApp(false);
+      showToast(`Update failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    }
+  };
+
+  const handleRestartUpdate = async () => {
+    if (!nativeUpdateBridge) return;
+    try {
+      applyNativeUpdateState(await nativeUpdateBridge.restart());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setUpdateStatus((previous) => previous ? {
+        ...previous,
+        nativeStatus: 'error',
+        error: message,
+        updateAvailable: Boolean(previous.latestVersion),
+      } : previous);
+      setUpdateCheckError(message);
+      setUpdateStep('error');
+      showToast(`Could not restart for update: ${message}`, 'error');
       setUpdatingApp(false);
     }
   };
@@ -622,6 +667,14 @@ function AppInner() {
     }
   }, []);
 
+  // Native update events originate in Electron's main process. Browser mode
+  // has no bridge, but the rest of the dashboard remains fully functional;
+  // only native update installation is unavailable there.
+  useEffect(() => {
+    if (!nativeUpdateBridge) return;
+    return nativeUpdateBridge.onEvent(applyNativeUpdateState);
+  }, []);
+
   // Keep workspace selection (and its data-loading effects) in sync with the
   // route. Clearing the selection off-route matters: the services/log polling
   // intervals below are keyed on activeWsId and would otherwise keep firing
@@ -925,8 +978,27 @@ Core Instructions:
           </div>
         ) : (
           <>
-            {/* Update Notification Banner */}
-            {updateStatus && updateStatus.updateAvailable && (
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
+              <div className="min-w-0">
+                <span className="font-semibold text-foreground">Desktop updates</span>
+                {updateCheckError ? (
+                  <p className="mt-0.5 truncate text-red-300" role="alert">{updateCheckError}</p>
+                ) : (
+                  <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
+                )}
+              </div>
+              <button
+                onClick={handleCheckForUpdates}
+                disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
+                className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {updateCheckError ? 'Check again' : 'Check for updates'}
+              </button>
+            </div>
+            {/* Update Notification Banner. Updates are always optional: Later
+                hides the banner for this session and no native installer is
+                exposed when this dashboard is running in a browser. */}
+            {updateStatus && updateStatus.updateAvailable && !updateDeferred && (
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
@@ -938,40 +1010,62 @@ Core Instructions:
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-amber-300">
-                      {updatingApp ? (
-                        updateStep === 'downloading' ? 'Downloading Update...' : 'Applying Update...'
-                      ) : (
-                        'A new version of NexusFlow is available!'
-                      )}
+                      {updateStep === 'error' ? 'NexusFlow update needs attention' : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : 'A new version of NexusFlow is available!'}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {updatingApp ? (
-                        updateStep === 'downloading' ? 'Fetching installer from GitHub Releases...' : 'Closing app and launching silent installer setup...'
-                      ) : (
-                        `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`
-                      )}
+                      {updateStep === 'error'
+                        ? (updateStatus.error || 'The update could not be completed. You can retry or use the release page.')
+                        : updateStep === 'downloaded'
+                          ? 'Restart NexusFlow when convenient to install it.'
+                          : updateStep === 'downloading'
+                            ? `Downloading from GitHub Releases… ${Math.round(updateStatus.progress || 0)}%`
+                            : `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`}
                     </p>
+                    {updateStep === 'downloading' && (
+                      <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-amber-950/50" aria-label="Update download progress">
+                        <div className="h-full bg-amber-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, updateStatus.progress || 0))}%` }} />
+                      </div>
+                    )}
+                    {updateStatus.releaseNotes && (
+                      <details className="mt-2 max-w-xl text-xs text-muted-foreground">
+                        <summary className="cursor-pointer font-semibold text-amber-200">Release notes</summary>
+                        <p className="mt-1 whitespace-pre-wrap">{updateStatus.releaseNotes}</p>
+                      </details>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  {typeof window !== 'undefined' && (window as any).Neutralino && updateStatus.downloadUrl && (
+                  {nativeUpdateBridge && updateStep === 'downloaded' && (
+                    <button
+                      onClick={handleRestartUpdate}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-lg transition-all shadow-md cursor-pointer"
+                    >
+                      Restart &amp; Install
+                    </button>
+                  )}
+                  {nativeUpdateBridge && updateStep !== 'downloaded' && (
                     <button
                       onClick={handleAutoUpdate}
                       disabled={updatingApp}
                       className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-lg transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                     >
-                      {updatingApp ? 'Installing...' : 'Install Automatically'}
+                      {updateStep === 'error' ? 'Retry download' : updatingApp ? 'Downloading…' : 'Download update'}
                     </button>
                   )}
-                  <button
-                    onClick={async () => {
-                      await safeCopyToClipboard('npm install -g @mrpatronz/nexusflow');
-                      showToast('Update command copied to clipboard!', 'success');
-                    }}
-                    disabled={updatingApp}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-[#060813] font-bold text-xs rounded-lg transition-all shadow-md shadow-amber-500/10 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  <a
+                    href={updateStatus.releaseUrl || 'https://github.com/antan87/NexusFlow/releases/latest'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 border border-amber-500/30 text-amber-200 hover:bg-amber-500/10 font-semibold text-xs rounded-lg transition-colors"
                   >
-                    Copy Update Command
+                    View release
+                  </a>
+                  <button
+                    onClick={() => setUpdateDeferred(true)}
+                    disabled={updatingApp}
+                    className="px-3 py-2 border border-border text-muted-foreground hover:text-foreground font-semibold text-xs rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Later
                   </button>
                 </div>
               </div>

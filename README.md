@@ -41,28 +41,45 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 
 | Requirement | Version | Platform Notes |
 |:---|:---|:---|
-| [Node.js](https://nodejs.org) | 20 or later | Supported across Linux, macOS, and Windows |
+| [Node.js](https://nodejs.org) | 22.13 or later | Needed for the CLI, source setup, or `npx` bootstrap; **not required by packaged desktop installers** |
 | [Git](https://git-scm.com) | 2.20 or later | Required for worktree and multi-git operations |
 | npm | Bundled with Node.js | Standard package manager |
 | `xdg-utils` | Recommended | Linux only (for auto-opening the web dashboard) |
 
-### Install from npm
+### Desktop installers (recommended)
+
+Download the first-class Windows NSIS installer or Linux AppImage from the
+[NexusFlow GitHub Releases](https://github.com/antan87/NexusFlow/releases). Each
+release includes `latest.yml`/`latest-linux.yml` update metadata and a required
+SHA-256 sidecar. The desktop app is the primary distribution and includes the
+full GUI plus optional, user-controlled native updates.
+
+After a release is published, the new explicit bootstrap command can download
+and verify the matching asset for the current x64 OS:
+
+```bash
+npx @mrpatronz/nexusflow desktop install
+```
+
+It launches the Windows installer, or installs a stable Linux AppImage under
+`~/.local/share/nexusflow/` and creates a desktop entry. It never runs from
+`npm install`/postinstall and does not support macOS or ARM assets yet.
+
+### Install the secondary npm CLI
 
 ```bash
 npm install -g @mrpatronz/nexusflow
 ```
 
-### Install from source
+### Install from source (CLI, GUI, desktop, and extension development)
 
 ```bash
 git clone https://github.com/antan87/NexusFlow.git
 cd NexusFlow
 
-# Install backend dependencies
+# Install root dependencies, then GUI/desktop/extension dependencies
 npm install
-
-# Install GUI dependencies
-cd gui && npm install && cd ..
+npm run setup              # includes the Electron runtime for source desktop start
 
 # Build everything
 npm run build
@@ -75,6 +92,19 @@ After linking, the `nexusflow` command is available system-wide.
 
 ## 🚀 Quick Start
 
+### Desktop (recommended)
+
+On Windows or Linux, download the latest NSIS installer/AppImage from
+[GitHub Releases](https://github.com/antan87/NexusFlow/releases) and launch the
+app. No Node.js or npm installation is needed. If Node.js is already available,
+the explicit post-release bootstrap is also convenient:
+
+```bash
+npx @mrpatronz/nexusflow desktop install
+```
+
+### CLI and browser dashboard
+
 ```bash
 # 1 — Initialize config (optional, defaults work out of the box)
 nexusflow init
@@ -82,7 +112,7 @@ nexusflow init
 # 2 — Create a feature workspace
 nexusflow create
 
-# 3 — Or use the GUI: desktop app (see desktop/) or browser dashboard
+# 3 — Or use the GUI: packaged desktop app or the fully functional browser dashboard
 nexusflow dashboard
 ```
 
@@ -184,7 +214,8 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `nexusflow config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
 | `nexusflow adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
 | `nexusflow mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
-| `nexusflow desktop` | Launch the Electron desktop app from the workspace `desktop/` project (requires a built CLI and `desktop/` deps installed) |
+| `nexusflow desktop` | Launch the Electron desktop app from a source checkout (requires a built CLI and `desktop/` deps installed) |
+| `nexusflow desktop install` | Download and checksum-verify the matching Windows NSIS/Linux AppImage release, then install it locally |
 
 ## 🤖 Supported AI Assistants
 
@@ -364,7 +395,7 @@ You can select a strategy workflow when creating a workspace (or define custom o
 - **Plan-Implement-Review** — A structured, multi-agent flow where an Orchestrator coordinates planning, implementation, review, and documentation.
 - **Research-Verify** — A fast iteration strategy centered on research, drafting code, and immediately running verification test suites.
 - **Solo Developer** — A simplified, lightweight direct-action workflow for minor tweaks and linear tasks.
-- **Cost-Aware Sol Control + Luna Worker** — Optional advisory instructions for using Sol at read-only planning/review gates and one Luna/max writer, with explicit rate-limit checkpoints and no silent model upgrades.
+- **Cost-Aware Sol Control + Luna Worker** — Optional advisory instructions for a cheaper Luna/max builder and a more capable/expensive Sol reviewer, with fresh-context review, acceptance-driven feedback, finite safety-guard escalation, and no silent model upgrades.
 
 ### Custom Strategies & AI Inspection
 
@@ -384,13 +415,21 @@ Open **Workrooms** in the dashboard to start or join one. A host selects one net
 
 Shared resources are immutable, digest-verified, and bounded by per-package and room-wide storage quotas. NexusFlow downloads them to a local review cache, shows the exact applied definition and complete file contents, identifies local create/update conflicts, and requires approval bound to both the package digest and the reviewed local resource revision before updating the local catalog. Optional compatibility metadata is enforced again at both download and apply: `platforms` lists `win32`, `linux`, and/or `darwin`, while `nexusflow` accepts an exact `major.minor.patch` version or space-separated comparisons such as `>=2.8.0 <3.0.0`. Hosts can quarantine a bad version, which removes it from downloads and future exports, then explicitly purge its digest to release the package bytes and room quota; both actions are audited. Quarantine and purge do not remotely erase review-cache copies that another developer already downloaded; those remain local until that developer removes them. Agent credentials can read context and propose workflow completion only; MCP Workroom reads are explicitly labeled as untrusted collaborator data and are available only to read-only/review tool roles. Human host authority is encrypted at rest and unlocked into a generation-bound HttpOnly local-dashboard session for confirmation and every other mutation. If that browser cookie is lost, a host must enter the room password to recover control; a guest must leave the locked local connection and join again. A paused host must also re-enter the room password to resume. Hosts can create encrypted portable backups; imports are fully validated before a listener starts, are quarantined if any later creation step fails, always receive new credentials and a new TLS identity, and can be inspected and discarded from the dashboard before retrying the original export.
 
-The optional **Cost-Aware Sol Control + Luna Worker** strategy can be selected locally or shared as an immutable Workroom workflow. It is advisory: NexusFlow does not currently launch those roles, enforce their models or reasoning effort, create fresh review contexts, or wait for provider rate-limit resets. The developer or selected agent harness must perform those controls and must stop for a human choice when it cannot honor them.
+The optional **Cost-Aware Sol Control + Luna Worker** strategy can be selected locally or shared as an immutable Workroom workflow. It is advisory: NexusFlow does not currently launch those roles, enforce their model/cost tiers or reasoning effort, create fresh review contexts, track acceptance, or wait for provider rate-limit resets. The developer or selected agent harness must perform those controls. Accepted, in-scope review findings return to the same cheaper builder until the explicit acceptance criteria are met; a blocked prerequisite, repeated no-progress finding, or finite safety guard requires an explicit human decision and never silently auto-accepts or loops forever.
 
 Workrooms do not provide a public relay, NAT traversal, remote commands, shared terminals, raw diff sharing, browser-only guest access, or automatic resource updates. For home working, connect both machines to the same organization VPN and choose the VPN interface when hosting.
 
 ## 🖥️ Dashboard (Desktop App & Browser)
 
-The primary GUI is the Electron desktop app in `desktop/` (`npm install && npm start` there). It embeds the same dashboard the browser sees. For browser access, run `nexusflow dashboard`; `nexusflow ui` starts the underlying server without opening anything (add `--open` to launch a browser). For the platform rationale (Electron vs Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
+The primary distribution is the Electron desktop app from GitHub Releases (or
+`nexusflow desktop install`). A source checkout can run it with
+`npm run setup && npm run build && npm start --prefix desktop`. It embeds the
+same full-featured dashboard available in a browser. For browser access, run
+`nexusflow dashboard`; `nexusflow ui` starts the underlying server without
+opening anything (add `--open` to launch a browser). The browser is fully
+functional except that native desktop update installation is unavailable; its
+update panel links to the release page. For the platform rationale (Electron vs
+Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md):
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
 - **Skills & Agents tab** — manage reusable skills, categories, drag-and-drop boxes, and workspace skill assignments
@@ -499,9 +538,9 @@ Contributions are welcome! Here's how to get set up:
 git clone https://github.com/antan87/NexusFlow.git
 cd NexusFlow
 
-# Install all dependencies
+# Install all source dependencies
 npm install
-cd gui && npm install && cd ..
+npm run setup
 
 # Start the TypeScript compiler in watch mode
 npm run dev

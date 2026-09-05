@@ -42,7 +42,7 @@ import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } fr
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
 import { projectListCommand, projectAddCommand, projectShowCommand, projectRemoveCommand } from './commands/project.js';
 import { finishCommand } from './commands/finish.js';
-import { desktopCommand } from './commands/desktop.js';
+import { desktopCommand, desktopInstallCommand } from './commands/desktop.js';
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js';
 import {
   scheduleAddCommand,
@@ -455,10 +455,15 @@ strategyCmd
   .option('--id <id>', 'Template ID to show (skips the selection prompt)')
   .action(runAction(strategyShowCommand));
 
-program
+const desktopCmd = program
   .command('desktop')
   .description('Launch the NexusFlow desktop application')
   .action(runAction(desktopCommand));
+
+desktopCmd
+  .command('install')
+  .description('Download, verify, and install the latest Windows/Linux desktop release')
+  .action(runAction(desktopInstallCommand));
 
 // Config command group
 const configCmd = program.command('config').description('View and update NexusFlow configuration');
@@ -616,4 +621,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-

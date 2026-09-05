@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import fse from 'fs-extra';
 
 import { execa } from 'execa';
-import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput, isAllowedUpdateUrl } from './server.js';
+import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as systemScanner from './utils/system-scanner.js';
@@ -1811,34 +1811,14 @@ describe('Server API Endpoints Unit Tests', () => {
       });
     });
 
-    describe('update download URL allow-list (A2.1)', () => {
-      it('accepts GitHub release hosts over HTTPS', () => {
-        expect(
-          isAllowedUpdateUrl(
-            'https://github.com/mrpatronz/nexusflow/releases/download/v1.3.0/Setup.exe',
-          ),
-        ).toBe(true);
-        expect(
-          isAllowedUpdateUrl('https://objects.githubusercontent.com/foo/Setup.exe'),
-        ).toBe(true);
-      });
+  });
 
-      it('rejects non-GitHub hosts and non-HTTPS schemes', () => {
-        expect(isAllowedUpdateUrl('https://evil.example.com/Setup.exe')).toBe(false);
-        expect(isAllowedUpdateUrl('http://github.com/Setup.exe')).toBe(false);
-        expect(isAllowedUpdateUrl('file:///C:/Setup.exe')).toBe(false);
-        expect(isAllowedUpdateUrl('not a url')).toBe(false);
-      });
-
-      it('POST /api/updates/download rejects a disallowed host', async () => {
-        const response = await app.request('/api/updates/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ downloadUrl: 'https://evil.example.com/Setup.exe' }),
-        });
-
-        expect(response.status).toBe(400);
-      });
+  describe('desktop updater ownership', () => {
+    it('does not expose the retired backend binary download/apply endpoints', async () => {
+      const download = await app.request('/api/updates/download', { method: 'POST' });
+      const apply = await app.request('/api/updates/apply', { method: 'POST' });
+      expect(download.status).toBe(404);
+      expect(apply.status).toBe(404);
     });
   });
 
@@ -2192,5 +2172,3 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 });
-
-

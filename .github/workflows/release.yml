@@ -183,10 +183,18 @@ jobs:
           fi
           npx vsce publish --no-dependencies --azure-credential
 
-  # ── Desktop installer (Windows) ───────────────────────────────────────────────
+  # ── Desktop installers (Windows NSIS + Linux AppImage) ────────────────────────
   desktop:
     needs: guard
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
@@ -199,25 +207,59 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix gui
       - run: npm ci --prefix desktop
+      - run: npm run setup --prefix desktop
 
-      # electron-builder: prepare-backend builds the CLI + gui and stages the
-      # backend, then the NSIS installer is produced at desktop/dist/NexusFlowSetup.exe.
-      - name: Build desktop installer (electron-builder)
+      # electron-builder builds the native installer and update metadata. The
+      # package script uses --publish never; the GitHub Release job attaches the
+      # generated files after both platform jobs complete.
+      - name: Build desktop installer and update metadata
         run: npm run build --prefix desktop
 
-      - name: Generate installer SHA-256 checksum
+      - name: Verify exact desktop artifact and updater metadata
+        run: node desktop/scripts/verify-release-assets.mjs --platform ${{ matrix.platform }} --dir desktop/dist
+
+      - name: Stage Windows desktop artifacts
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $hash = (Get-FileHash desktop/dist/NexusFlowSetup.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  NexusFlowSetup.exe" | Out-File -FilePath desktop/dist/NexusFlowSetup.exe.sha256 -Encoding ascii
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item desktop/dist/NexusFlowSetup.exe release-assets/NexusFlowSetup.exe
+          Copy-Item desktop/dist/latest.yml release-assets/latest.yml
+          Get-ChildItem desktop/dist -File -Filter '*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName release-assets }
+
+      - name: Stage Linux desktop artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find desktop/dist -maxdepth 1 -type f -name '*.AppImage' -exec cp {} release-assets/ \;
+          cp desktop/dist/latest-linux.yml release-assets/latest-linux.yml
+
+      - name: Generate installer SHA-256 checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem release-assets -File -Filter '*.exe' | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Generate installer SHA-256 checksum (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in release-assets/*.AppImage; do
+            sha256sum "$artifact" | sed 's#  release-assets/#  #' > "$artifact.sha256"
+          done
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nexusflow-setup
+          name: nexusflow-desktop-${{ matrix.platform }}
           path: |
-            desktop/dist/NexusFlowSetup.exe
-            desktop/dist/NexusFlowSetup.exe.sha256
+            release-assets/*
           if-no-files-found: error
 
   # ── One GitHub Release for the tag, with every artifact attached ───────────────
@@ -229,10 +271,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download installer artifact
+      - name: Download desktop artifacts
         uses: actions/download-artifact@v4
         with:
-          name: nexusflow-setup
+          pattern: nexusflow-desktop-*
+          merge-multiple: true
           path: dist
 
       - name: Create GitHub Release
@@ -243,5 +286,4 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
           files: |
-            dist/NexusFlowSetup.exe
-            dist/NexusFlowSetup.exe.sha256
+            dist/*
