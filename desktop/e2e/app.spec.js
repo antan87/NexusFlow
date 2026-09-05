@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -83,5 +83,24 @@ test.describe('desktop app', () => {
     // The preload bridge reports the backend port the window actually loaded.
     const port = await window.evaluate(() => window.nexusBridge.getServerPort());
     expect(port).toBeGreaterThan(0);
+  });
+
+  test('exposes a guarded updater IPC status', async () => {
+    const state = await window.evaluate(() => window.nexusBridge?.updates?.getStatus());
+    expect(state).toBeTruthy();
+    // Dev Electron and browser-like shells can inspect the API but cannot
+    // invoke native installation. Linux is supported only when an absolute,
+    // existing AppImage is available; the separate CI smoke step launches that
+    // actual AppImage. This unpacked boot only exercises the guarded IPC gate.
+    const appImage = process.env.APPIMAGE || '';
+    const packagedLinux = Boolean(
+      packagedExe
+      && process.platform === 'linux'
+      && path.isAbsolute(appImage)
+      && existsSync(appImage),
+    );
+    const expectedSupported = packagedLinux || Boolean(packagedExe && process.platform === 'win32');
+    expect(state.supported).toBe(expectedSupported);
+    if (!packagedExe) expect(state.status).toBe('unsupported');
   });
 });

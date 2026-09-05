@@ -1,6 +1,8 @@
 /**
  * @module utils/update-check
- * Checks for updates to the NexusFlow package on the NPM registry.
+ * Checks for the latest NexusFlow desktop release on GitHub. The server only
+ * reports read-only metadata; native downloads/installs belong to Electron or
+ * the explicit `nexusflow desktop install` command.
  */
 
 import { fileURLToPath } from 'node:url';
@@ -15,6 +17,7 @@ export interface UpdateStatus {
   latestVersion: string;
   updateAvailable: boolean;
   downloadUrl?: string | null;
+  releaseUrl?: string | null;
   releaseNotes?: string;
 }
 
@@ -26,10 +29,12 @@ interface GitHubAsset {
 
 interface GitHubRelease {
   tag_name: string;
-  html_url: string;
+  html_url?: string;
   body: string;
   assets: GitHubAsset[];
 }
+
+const RELEASE_PAGE_URL = 'https://github.com/antan87/NexusFlow/releases/latest';
 
 /**
  * Resolves the current package version by searching for package.json upward
@@ -79,6 +84,7 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
       latestVersion: config.latestVersion,
       updateAvailable: isNewerVersion(currentVersion, config.latestVersion),
       downloadUrl: config.latestDownloadUrl,
+      releaseUrl: RELEASE_PAGE_URL,
       releaseNotes: config.latestReleaseNotes,
     };
   }
@@ -96,10 +102,15 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
     const data = await response.json() as GitHubRelease;
     const latestVersion = data.tag_name.replace(/^v/, '');
     
-    // Resolve platform-matching asset (e.g. Setup.exe for Windows)
+    // Resolve a platform-matching release asset for read-only browser links.
+    // electron-updater handles packaged desktop downloads independently.
     let downloadUrl: string | null = null;
-    const targetAsset = data.assets.find(asset => {
-      return asset.name.endsWith('.exe') && asset.name.toLowerCase().includes('setup');
+    const targetAsset = (data.assets ?? []).find((asset) => {
+      const name = asset.name.toLowerCase();
+      if (process.platform === 'win32') return name.endsWith('.exe') && name.includes('setup');
+      if (process.platform === 'linux') return name.endsWith('.appimage');
+      if (process.platform === 'darwin') return name.endsWith('.dmg');
+      return false;
     });
     if (targetAsset) {
       downloadUrl = targetAsset.browser_download_url;
@@ -119,6 +130,7 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
       latestVersion,
       updateAvailable: isNewerVersion(currentVersion, latestVersion),
       downloadUrl,
+      releaseUrl: data.html_url || RELEASE_PAGE_URL,
       releaseNotes,
     };
   } catch {
@@ -129,6 +141,7 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
         latestVersion: config.latestVersion,
         updateAvailable: isNewerVersion(currentVersion, config.latestVersion),
         downloadUrl: config.latestDownloadUrl,
+        releaseUrl: RELEASE_PAGE_URL,
         releaseNotes: config.latestReleaseNotes,
       };
     }
@@ -299,4 +312,3 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
   cachedToolsStatus = { timestamp: Date.now(), data: results };
   return results;
 }
-

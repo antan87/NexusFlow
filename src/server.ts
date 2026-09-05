@@ -11,15 +11,10 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
-import { createWriteStream, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 import * as os from 'node:os';
-import { createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import { spawn } from 'node:child_process';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { configPatchSchema } from './core/config-schema.js';
@@ -543,28 +538,6 @@ async function findResourceAssignments(
     if (enabled.includes(resourceId)) assignments.push(workspace.id);
   }
   return assignments;
-}
-
-/**
- * Restrict the self-update download to GitHub release hosts over HTTPS so a
- * cross-origin caller cannot make the server fetch and later execute an
- * arbitrary binary.
- */
-export function isAllowedUpdateUrl(candidate: string): boolean {
-  try {
-    const url = new URL(candidate);
-    if (url.protocol !== 'https:') return false;
-    const host = url.hostname.toLowerCase();
-    if (host === 'github.com') {
-      return url.pathname.includes('/releases/download/');
-    }
-    return (
-      host === 'objects.githubusercontent.com' ||
-      host === 'github-releases.githubusercontent.com'
-    );
-  } catch {
-    return false;
-  }
 }
 
 // Enable CORS for the local GUI only. This server can spawn processes, run
@@ -2320,106 +2293,6 @@ app.post('/api/updates/install', async (c) => {
     }
   } catch (error) {
     return errorResponse(c, error);
-  }
-});
-
-let downloadedInstallerPath: string | null = null;
-
-// 17.7. Download matching GitHub Release installer to temporary folder
-app.post('/api/updates/download', async (c) => {
-  try {
-    const { downloadUrl } = await c.req.json() as { downloadUrl: string };
-    if (!downloadUrl) {
-      return c.json({ error: 'Download URL is required' }, 400);
-    }
-    if (!isAllowedUpdateUrl(downloadUrl)) {
-      return c.json({ error: 'Download URL is not an allowed update host' }, 400);
-    }
-
-    const tempDir = os.tmpdir();
-    const fileName = 'NexusFlowSetup_Update.exe';
-    const targetPath = path.join(tempDir, fileName);
-
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
-    }
-
-    // Node fetch body stream download and SHA-256 computation
-    const hash = createHash('sha256');
-    const fileStream = createWriteStream(targetPath);
-    if (!response.body) {
-      throw new Error('Response body is null');
-    }
-
-    const nodeStream = Readable.fromWeb(response.body as any);
-    nodeStream.on('data', (chunk) => hash.update(chunk));
-    await pipeline(nodeStream, fileStream);
-
-    const computedHash = hash.digest('hex').toLowerCase();
-
-    // Verify SHA-256 against release checksum file if published
-    try {
-      const shaUrl = `${downloadUrl}.sha256`;
-      if (isAllowedUpdateUrl(shaUrl)) {
-        const shaRes = await fetch(shaUrl);
-        if (shaRes.ok) {
-          const shaText = await shaRes.text();
-          const expectedHash = shaText.trim().split(/\s+/)[0]?.toLowerCase();
-          if (expectedHash && expectedHash.length === 64 && expectedHash !== computedHash) {
-            await fs.unlink(targetPath).catch(() => {});
-            throw new Error(`SHA-256 checksum mismatch (expected ${expectedHash}, got ${computedHash})`);
-          }
-        }
-      }
-    } catch (shaErr) {
-      if (shaErr instanceof Error && shaErr.message.includes('SHA-256 checksum mismatch')) {
-        throw shaErr;
-      }
-      // Non-fatal if sha256 sidecar does not exist on older releases
-    }
-
-    downloadedInstallerPath = targetPath;
-    return c.json({ success: true, path: targetPath, sha256: computedHash });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: `Download failed: ${msg}` }, 500);
-  }
-});
-
-// 17.8. Launch the silent installer detached and exit server
-app.post('/api/updates/apply', async (c) => {
-  if (!downloadedInstallerPath || !existsSync(downloadedInstallerPath)) {
-    return c.json({ error: 'No downloaded installer found on disk' }, 400);
-  }
-
-  try {
-    const isWin = process.platform === 'win32';
-    if (isWin) {
-      // The desktop app ships an electron-builder NSIS installer (build target
-      // 'nsis'), whose silent-install switch is `/S` — NOT Inno Setup's
-      // /VERYSILENT. With the wrong flags the one-click installer waits for UI
-      // that a detached (stdio: 'ignore') process can never provide, so the
-      // update silently fails to apply. `/S` runs it unattended and relaunches
-      // the app on finish (electron-builder default).
-      console.log(`Applying update: Spawning detached installer at: ${downloadedInstallerPath}`);
-      const child = spawn(downloadedInstallerPath, ['/S'], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      child.unref();
-    }
-
-    // Gracefully exit server process in 1 second to release file locks
-    setTimeout(() => {
-      console.log('Update installer successfully spawned. Exiting Hono server process...');
-      process.exit(0);
-    }, 1000);
-
-    return c.json({ success: true, message: 'Installer spawned, app shutting down...' });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return c.json({ error: `Failed to execute update: ${msg}` }, 500);
   }
 });
 

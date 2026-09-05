@@ -55,12 +55,21 @@ jobs:
       - name: Run GUI E2E Tests
         run: npm run test:gui
 
-  # Verify the Electron desktop app packages into a standalone build and the
-  # PACKAGED binary boots its bundled backend (the app.isPackaged path that
-  # can't be exercised in dev). Windows runners have the symlink privilege
-  # electron-builder's code-sign cache needs.
+  # Verify both first-class desktop targets package into a standalone build and
+  # their PACKAGED binaries boot the bundled backend (the app.isPackaged path
+  # that can't be exercised in dev).
   desktop-package:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            packaged_exe: dist/win-unpacked/NexusFlow.exe
+          - os: ubuntu-latest
+            platform: linux
+            packaged_exe: dist/linux-unpacked/nexusflow-desktop
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -79,21 +88,103 @@ jobs:
       - name: Install Desktop Dependencies
         run: npm ci --prefix desktop
 
+      - name: Download Electron runtime for source/E2E desktop launch
+        run: npm run setup --prefix desktop
+
       # `npm run build --prefix desktop` runs prepare-backend (builds the CLI +
       # gui, stages dist/ and prod deps into desktop/backend) then packages the
-      # NSIS installer; it also leaves the unpacked app in desktop/dist/win-unpacked.
-      - name: Package desktop app (installer + unpacked)
+      # native installer; it also leaves the unpacked app for the boot test.
+      - name: Package desktop app (installer + unpacked + update metadata)
         run: npm run build --prefix desktop
 
-      - name: Run packaged-app E2E
+      - name: Verify exact desktop artifact and updater metadata
+        run: node desktop/scripts/verify-release-assets.mjs --platform ${{ matrix.platform }} --dir desktop/dist
+
+      - name: Set packaged Linux AppImage for updater IPC test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage="$(find "$GITHUB_WORKSPACE/desktop/dist" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage" && test -f "$appimage"
+          test "${appimage:0:1}" = "/"
+          echo "APPIMAGE=$appimage" >> "$GITHUB_ENV"
+
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Run packaged-app E2E (Windows)
+        if: runner.os == 'Windows'
         working-directory: desktop
         env:
-          NEXUSFLOW_PACKAGED_EXE: dist/win-unpacked/NexusFlow.exe
+          NEXUSFLOW_PACKAGED_EXE: ${{ matrix.packaged_exe }}
         run: npm run test:e2e
+
+      - name: Run packaged-app E2E (Linux)
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        env:
+          NEXUSFLOW_PACKAGED_EXE: ${{ matrix.packaged_exe }}
+        run: xvfb-run --auto-servernum npm run test:e2e
+
+      - name: Smoke launch the actual Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage="$APPIMAGE"
+          test -x "$appimage" || chmod +x "$appimage"
+          set +e
+          timeout --kill-after=10s 180s xvfb-run --auto-servernum env APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" >/tmp/nexusflow-appimage-smoke.log 2>&1
+          code=$?
+          set -e
+          # The desktop app is expected to stay open; timeout is the success
+          # signal. Require the backend's explicit ready marker as proof that
+          # the actual AppImage booted, rather than accepting any long-running
+          # process or the separate unpacked-app E2E above.
+          grep -Eq 'NEXUSFLOW_READY_PORT=[0-9]+' /tmp/nexusflow-appimage-smoke.log
+          test "$code" -eq 124 -o "$code" -eq 137
+
+      - name: Stage Windows desktop artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desktop/release-assets | Out-Null
+          Copy-Item desktop/dist/NexusFlowSetup.exe desktop/release-assets/NexusFlowSetup.exe
+          Copy-Item desktop/dist/latest.yml desktop/release-assets/latest.yml
+          Get-ChildItem desktop/dist -File -Filter '*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName desktop/release-assets }
+
+      - name: Stage Linux desktop artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/release-assets
+          find desktop/dist -maxdepth 1 -type f -name '*.AppImage' -exec cp {} desktop/release-assets/ \;
+          cp desktop/dist/latest-linux.yml desktop/release-assets/latest-linux.yml
+
+      - name: Generate desktop artifact checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem desktop/release-assets -File -Filter '*.exe' | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Generate desktop artifact checksums (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in desktop/release-assets/*.AppImage; do
+            sha256sum "$artifact" | sed "s#  desktop/release-assets/#  #" > "$artifact.sha256"
+          done
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nexusflow-desktop-setup
-          path: desktop/dist/NexusFlowSetup.exe
+          name: nexusflow-desktop-${{ matrix.platform }}
+          path: desktop/release-assets/*
           if-no-files-found: error
