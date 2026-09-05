@@ -9,7 +9,6 @@ import { generateContextFiles } from '../generators/index.js';
 import {
   saveSkill,
   saveWorkspaceSkillsConfig,
-  getWorkspaceSkillsConfig,
   getAllSkills,
   DEFAULT_SKILLS,
 } from '../utils/skills-catalog.js';

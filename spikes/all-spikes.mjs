@@ -1,5 +1,4 @@
 import { execSync } from "node:child_process";
-import * as path from "node:path";
 
 console.log("==================================================");
 console.log("=== NEXUSFLOW RIGOROUS SPIKE VALIDATION SUITE ===");
@@ -15,8 +14,6 @@ const spikeScripts = [
   { id: 7, file: "spikes/s7-mcp-registration.mjs", desc: "MCP Tool Registration" },
 ];
 
-let allPassed = true;
-
 for (const spike of spikeScripts) {
   console.log(`\n--- Running Spike ${spike.id}: ${spike.desc} ---`);
   try {
@@ -29,7 +26,6 @@ for (const spike of spikeScripts) {
   } catch (err) {
     console.error(`[Result] Spike ${spike.id}: ❌ FAILED`);
     console.error(err.stdout || err.message);
-    allPassed = false;
     process.exit(1);
   }
 }

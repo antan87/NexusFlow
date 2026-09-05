@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { loadConfig } from '../src/core/config.js';
 import { createWorkspace } from '../src/core/workspace.js';
 import { analyzeAllRepos } from '../src/analyzers/index.js';

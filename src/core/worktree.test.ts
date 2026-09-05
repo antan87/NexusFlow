@@ -36,11 +36,9 @@ describe.skipIf(!hasGit)('createWorktree / removeWorktree (real git)', { timeout
 
   let base = '';
   let mainRepo = '';
-  let counter = 0;
 
-  beforeEach(() => {
-    counter += 1;
-    base = path.join(os.tmpdir(), `nexusflow-wt-test-${process.pid}-${counter}`);
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-wt-test-'));
     mainRepo = path.join(base, 'main');
   });
 

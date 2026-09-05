@@ -9,12 +9,11 @@ import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 import { globby } from 'globby';
 
-import { loadConfig } from './config.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { isInPlace, resolveFeatureRepoPath } from '../utils/feature.js';
 import { getConventionalTestCommand } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
-import { workspaceFileExists, baseFileExists } from './storage.js';
+import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
 import { checkGenerationLock } from './generation-lock.js';

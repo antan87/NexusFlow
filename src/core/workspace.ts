@@ -16,7 +16,6 @@ import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
-import { loadConfig } from './config.js';
 import { deleteWorkspaceFiles } from './storage.js';
 import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
 
@@ -571,14 +570,11 @@ export async function deleteWorkspace(
           const subPath = path.join(workspacePath, entry.name);
           const gitFilePath = path.join(subPath, '.git');
           try {
-            const stat = await fs.stat(gitFilePath);
-            if (stat.isFile()) {
-              const content = await fs.readFile(gitFilePath, 'utf-8');
-              const match = content.match(/gitdir:\s*(.+)[/\\]\.git[/\\]worktrees/i);
-              if (match && match[1]) {
-                const mainRepoPath = path.resolve(match[1].trim());
-                await removeWorktree(mainRepoPath, subPath, true);
-              }
+            const content = await fs.readFile(gitFilePath, 'utf-8');
+            const match = content.match(/gitdir:\s*(.+)[/\\]\.git[/\\]worktrees/i);
+            if (match && match[1]) {
+              const mainRepoPath = path.resolve(match[1].trim());
+              await removeWorktree(mainRepoPath, subPath, true);
             }
           } catch {}
         }
@@ -771,14 +767,13 @@ export async function excludeNexusFlowFiles(workspacePath: string, feature: Feat
     try {
       const gitDir = path.join(repoPath, '.git');
       let worktreeGitDir = gitDir;
-      const stat = await fs.stat(gitDir);
-      if (stat.isFile()) {
+      try {
         const fileContent = await fs.readFile(gitDir, 'utf8');
         const match = fileContent.match(/gitdir:\s*(.+)/);
         if (match) {
           worktreeGitDir = match[1].trim();
         }
-      }
+      } catch {}
 
       // git reads info/exclude from the *common* git dir, not the per-worktree
       // gitdir. For a worktree the per-worktree gitdir has a `commondir` pointer

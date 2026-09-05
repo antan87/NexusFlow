@@ -3,6 +3,7 @@ import * as http from 'http';
 import * as child_process from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { buildShellCommandLine, executeCli } from './quoting.js';
 
 let serverProcess: child_process.ChildProcess | null = null;
 let myStatusBarItem: vscode.StatusBarItem | null = null;
@@ -181,10 +182,6 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('contextspace.runDoctor', doctorHandler));
     context.subscriptions.push(vscode.commands.registerCommand('nexusflow.runDoctor', doctorHandler));
 
-function escapeShellDoubleQuotes(str: string): string {
-    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
-}
-
     // Register Commit Workspace Command
     const commitHandler = async () => {
         const message = await vscode.window.showInputBox({
@@ -192,17 +189,99 @@ function escapeShellDoubleQuotes(str: string): string {
             placeHolder: 'e.g., feat: implement new UI components'
         });
         if (message) {
-            const escaped = escapeShellDoubleQuotes(message);
-            runContextSpaceCommand(context, `commit "${escaped}"`);
+            await executeShellFreeCommand(context, ['commit', '-m', message]);
         }
     };
     context.subscriptions.push(vscode.commands.registerCommand('contextspace.commitWorkspace', commitHandler));
     context.subscriptions.push(vscode.commands.registerCommand('nexusflow.commitWorkspace', commitHandler));
 }
 
-function runContextSpaceCommand(context: vscode.ExtensionContext, command: string) {
+let outputChannel: vscode.OutputChannel | null = null;
+function getOutputChannel(): vscode.OutputChannel {
+    if (!outputChannel) {
+        outputChannel = vscode.window.createOutputChannel("ContextSpace");
+    }
+    return outputChannel;
+}
+
+export async function executeShellFreeCommand(
+    context: vscode.ExtensionContext,
+    args: string[]
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
     const folders = vscode.workspace.workspaceFolders;
-    const isCreate = command.startsWith('create');
+    const isCreate = args.length > 0 && args[0] === 'create';
+    if (!isCreate && (!folders || folders.length === 0)) {
+        vscode.window.showErrorMessage('No active workspace folders found.');
+        return { code: 1, stdout: '', stderr: 'No active workspace folders found.' };
+    }
+
+    const cwd = (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
+    const { command: cliCommand, prefixArgs } = resolveCli(context);
+    const channel = getOutputChannel();
+    channel.appendLine(`> ${cliCommand} ${[...prefixArgs, ...args].join(' ')}`);
+
+    return vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: `ContextSpace: Running ${args[0]}...`,
+            cancellable: false,
+        },
+        async () => {
+            return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+                const proc = executeCli(cliCommand, [...prefixArgs, ...args], {
+                    cwd,
+                    env: { ...process.env },
+                });
+
+                let stdout = '';
+                let stderr = '';
+
+                proc.stdout?.on('data', (data) => {
+                    const text = data.toString();
+                    stdout += text;
+                    channel.append(text);
+                });
+
+                proc.stderr?.on('data', (data) => {
+                    const text = data.toString();
+                    stderr += text;
+                    channel.append(text);
+                });
+
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        vscode.window.showInformationMessage(`ContextSpace: ${args[0]} completed successfully.`);
+                    } else {
+                        vscode.window.showErrorMessage(`ContextSpace: ${args[0]} failed (exit code ${code}).`);
+                        channel.show(true);
+                    }
+                    resolve({ code, stdout, stderr });
+                });
+
+                proc.on('error', (err) => {
+                    channel.appendLine(`[Error]: ${err.message}`);
+                    vscode.window.showErrorMessage(`ContextSpace: Failed to execute command: ${err.message}`);
+                    channel.show(true);
+                    resolve({ code: 1, stdout, stderr: err.message });
+                });
+            });
+        }
+    );
+}
+
+function runContextSpaceCommand(context: vscode.ExtensionContext, commandOrArgs: string | string[]) {
+    const folders = vscode.workspace.workspaceFolders;
+    const args = Array.isArray(commandOrArgs)
+        ? commandOrArgs
+        : commandOrArgs.trim().split(/\s+/).filter(Boolean);
+
+    // Any command with user input (such as commit) routes to shell-free execution for security
+    if (args.length > 0 && args[0] === 'commit') {
+        executeShellFreeCommand(context, args);
+        return;
+    }
+
+    const isCreate = args.length > 0 && args[0] === 'create';
     
     if (!isCreate && (!folders || folders.length === 0)) {
         vscode.window.showErrorMessage('No active workspace folders found.');
@@ -223,11 +302,15 @@ function runContextSpaceCommand(context: vscode.ExtensionContext, command: strin
         terminal.sendText('\u0003', true);
     }
     terminal.show(true);
-    const invocation = prefixArgs.length > 0
-        ? `${cliCommand} "${prefixArgs[0]}"`
-        : cliCommand;
-    terminal.sendText(`${invocation} ${command}`);
+    const fullCommandLine = buildShellCommandLine(
+        cliCommand,
+        [...prefixArgs, ...args],
+        vscode.env.shell
+    );
+    terminal.sendText(fullCommandLine);
 }
+
+const runNexusFlowCommand = runContextSpaceCommand;
 
 export function deactivate() {
     if (serverProcess) {

@@ -4,8 +4,6 @@
  * `nexusflow-plan.md` implementation plan with build-order phases.
  */
 
-import path from 'node:path';
-import fse from 'fs-extra';
 import chalk from 'chalk';
 import { writeWorkspaceFile } from '../core/storage.js';
 import { findInterRepoDependencies } from '../analyzers/detect-deps.js';

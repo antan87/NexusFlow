@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { select, search } from '@inquirer/prompts';
+import { search } from '@inquirer/prompts';
 import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';

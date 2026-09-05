@@ -38,7 +38,6 @@ export async function refreshCommand(
     const strategyId = options.strategy;
 
     if (strategyId === 'auto') {
-      const config = await loadConfig();
       const { resolveRepoInfos } = await import('../core/workspace.js');
       const repos = await resolveRepoInfos(feature.repos);
       try {

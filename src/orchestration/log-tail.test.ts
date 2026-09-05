@@ -33,10 +33,13 @@ describe('tailLogFile', () => {
   let dir: string;
   let file: string;
 
+  const INITIAL_CONTENT = 'existing\n';
+  const INITIAL_SIZE = Buffer.byteLength(INITIAL_CONTENT, 'utf-8');
+
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-tail-'));
     file = path.join(dir, 'svc.log');
-    await fs.writeFile(file, 'existing\n', 'utf-8');
+    await fs.writeFile(file, INITIAL_CONTENT, 'utf-8');
   });
 
   afterEach(async () => {
@@ -44,8 +47,7 @@ describe('tailLogFile', () => {
   });
 
   it('emits only bytes appended after the start offset', async () => {
-    const size = (await fs.stat(file)).size;
-    const wait = collectUntil(file, size, (j) => j.includes('new line'));
+    const wait = collectUntil(file, INITIAL_SIZE, (j) => j.includes('new line'));
     await fs.appendFile(file, 'new line\n', 'utf-8');
     const { chunks, stop } = await wait;
     stop();
@@ -54,8 +56,7 @@ describe('tailLogFile', () => {
   });
 
   it('resets and streams from the top after truncation', async () => {
-    const size = (await fs.stat(file)).size; // 'existing\n' → 9 bytes
-    const wait = collectUntil(file, size, (j) => j.includes('fresh'));
+    const wait = collectUntil(file, INITIAL_SIZE, (j) => j.includes('fresh'));
     // Rewrite to content SHORTER than the current offset (as PM2 does on
     // rotation) so size < offset triggers the reset-to-top path.
     await fs.writeFile(file, 'fresh\n', 'utf-8');
@@ -65,9 +66,8 @@ describe('tailLogFile', () => {
   });
 
   it('decodes a multi-byte character split across two appends', async () => {
-    const size = (await fs.stat(file)).size;
     const euro = Buffer.from('€', 'utf-8'); // 3 bytes: e2 82 ac
-    const wait = collectUntil(file, size, (j) => j.includes('€'));
+    const wait = collectUntil(file, INITIAL_SIZE, (j) => j.includes('€'));
     await fs.appendFile(file, euro.subarray(0, 1)); // first byte only
     await new Promise((r) => setTimeout(r, 40));
     await fs.appendFile(file, euro.subarray(1)); // remaining bytes
@@ -77,9 +77,8 @@ describe('tailLogFile', () => {
   });
 
   it('stop() ends polling (no chunks after stop)', async () => {
-    const size = (await fs.stat(file)).size;
     const seen: string[] = [];
-    const handle = tailLogFile(file, (c) => seen.push(c), { intervalMs: 15, startOffset: size });
+    const handle = tailLogFile(file, (c) => seen.push(c), { intervalMs: 15, startOffset: INITIAL_SIZE });
     handle.stop();
     await fs.appendFile(file, 'ignored\n', 'utf-8');
     await new Promise((r) => setTimeout(r, 80));

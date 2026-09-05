@@ -5,7 +5,6 @@ import {
   formatTerminalTitle,
   escapePsSingleQuote,
   escapePosixSingleQuote,
-  SUPPORTED_ASSISTANTS,
 } from './terminal-launch.js';
 import { execa, execaSync } from 'execa';
 import { TERMINAL_TITLE_PREFIX } from '../core/constants.js';
