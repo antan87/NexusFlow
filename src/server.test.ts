@@ -2193,6 +2193,16 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('POST /api/workspace/:id/changes/revert', () => {
+    beforeEach(() => {
+      vi.mocked(fs.open).mockImplementation((async (p: any) => {
+        return {
+          readFile: vi.fn().mockImplementation(async () => fs.readFile(p)),
+          stat: vi.fn().mockImplementation(async () => fs.stat(p)),
+          close: vi.fn().mockResolvedValue(undefined),
+        } as any;
+      }) as any);
+    });
+
     it('rejects non-local origins', async () => {
       const res = await app.request('/api/workspace/test-ws/changes/revert', {
         method: 'POST',

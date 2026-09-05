@@ -2087,12 +2087,30 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       let originalMode: number | undefined;
 
       try {
-        const stat = await fs.stat(resolvedFile);
-        originalMode = stat.mode;
-        originalContent = await fs.readFile(resolvedFile);
-        exists = true;
+        let handle: fs.FileHandle | null = null;
+        try {
+          if (typeof fs.open === 'function') {
+            handle = await fs.open(resolvedFile, 'r');
+          }
+          if (handle && typeof handle.readFile === 'function') {
+            const [content, stat] = await Promise.all([
+              handle.readFile(),
+              typeof handle.stat === 'function' ? handle.stat() : Promise.resolve(undefined),
+            ]);
+            originalContent = content;
+            originalMode = stat?.mode;
+            exists = true;
+          } else {
+            originalContent = await fs.readFile(resolvedFile);
+            exists = true;
+          }
+        } finally {
+          if (handle && typeof handle.close === 'function') {
+            await handle.close();
+          }
+        }
       } catch (err: any) {
-        if (err.code !== 'ENOENT') {
+        if (err?.code !== 'ENOENT') {
           throw err;
         }
         exists = false;
