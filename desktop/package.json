@@ -5,18 +5,19 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "setup": "install-electron",
     "prepare-backend": "node scripts/prepare-backend.mjs",
     "pack": "npm run prepare-backend && electron-builder --dir",
-    "build": "npm run prepare-backend && electron-builder",
+    "build": "npm run prepare-backend && electron-builder --publish never",
     "test:e2e": "playwright test"
   },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
   "devDependencies": {
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3"
-  },
-  "allowScripts": {
-    "electron@43.1.0": true
   },
   "build": {
     "appId": "se.hogia.nexusflow",
@@ -52,7 +53,27 @@
       "target": "dmg"
     },
     "linux": {
-      "target": "AppImage"
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NexusFlow-${version}.AppImage"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "antan87",
+        "repo": "NexusFlow",
+        "releaseType": "release"
+      }
+    ],
+    "generateUpdatesFilesForAllChannels": true,
+    "directories": {
+      "output": "dist"
     }
   }
 }

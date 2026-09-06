@@ -1,12 +1,18 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { spawn, spawnSync } from 'child_process';
-import { existsSync, createWriteStream } from 'fs';
+import { existsSync, statSync, createWriteStream } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import updaterPackage from 'electron-updater';
+import { isExactLocalOrigin, isTrustedIpcEvent } from './lib/security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const { autoUpdater } = updaterPackage;
+
+const UPDATE_EVENT = 'update:event';
+const SUPPORTED_UPDATE_PLATFORMS = new Set(['win32', 'linux']);
 
 const BACKEND_READY_TIMEOUT_MS = 20000;
 
@@ -27,9 +33,198 @@ let backendProcess;
 let assignedPort = 0;
 let readyTimer = null;
 // True once we are deliberately tearing the app down (window closed / before-quit),
-// so the backend 'exit' handler can tell our own kill apart from the backend
-// exiting on its own (e.g. the update hand-off, below).
+// so the backend 'exit' handler can tell our own kill apart from an unexpected
+// backend exit.
 let appQuitting = false;
+
+/**
+ * Keep updater state in the main process. Renderer code receives this small,
+ * serializable projection rather than an electron-updater object, which can
+ * contain functions and internal request details.
+ */
+let updateState = {
+  supported: false,
+  status: 'unsupported',
+  currentVersion: app.getVersion(),
+  version: null,
+  releaseNotes: null,
+  progress: 0,
+  error: null,
+};
+
+function isSupportedUpdatePlatform() {
+  if (!app.isPackaged || !SUPPORTED_UPDATE_PLATFORMS.has(process.platform)) return false;
+  // electron-updater's Linux target is AppImage. An unpacked
+  // linux-unpacked executable can boot for CI, but it has no updater-backed
+  // installation location; only an actual absolute APPIMAGE is supported.
+  if (process.platform === 'linux') {
+    const appImage = process.env.APPIMAGE || '';
+    try {
+      return path.isAbsolute(appImage) && existsSync(appImage) && statSync(appImage).isFile();
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function updateProjection() {
+  return { ...updateState };
+}
+
+function assertTrustedIpcEvent(event) {
+  if (!isTrustedIpcEvent(event, mainWindow, assignedPort)) {
+    throw new Error('Untrusted renderer IPC sender.');
+  }
+}
+
+function publishUpdateEvent(status, patch = {}) {
+  updateState = {
+    ...updateState,
+    ...patch,
+    status,
+    currentVersion: app.getVersion(),
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(UPDATE_EVENT, updateProjection());
+  }
+}
+
+function updateInfoProjection(info) {
+  if (!info) return {};
+  return {
+    version: typeof info.version === 'string' ? info.version : null,
+    releaseDate: typeof info.releaseDate === 'string' ? info.releaseDate : null,
+    releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : null,
+  };
+}
+
+function isAllowedReleaseLink(candidate) {
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) {
+      return false;
+    }
+    if (url.pathname === '/antan87/NexusFlow/releases/latest') return true;
+    return /^\/antan87\/NexusFlow\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function setUpdaterError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  publishUpdateEvent('error', { error: message, progress: 0 });
+  return updateProjection();
+}
+
+function registerUpdateIpc() {
+  // These handlers are registered even in development/unsupported builds so
+  // the renderer gets a structured `supported: false` response instead of an
+  // unhandled IPC rejection. Every operation remains guarded in the main
+  // process; no renderer-controlled URL/command is accepted.
+  ipcMain.handle('update:get-status', (event) => {
+    assertTrustedIpcEvent(event);
+    return updateProjection();
+  });
+  ipcMain.handle('update:check', async (event) => {
+    assertTrustedIpcEvent(event);
+    // A check must not replace an in-progress download or a downloaded update;
+    // doing so would make the GUI lose its restart/install action. A failed
+    // download remains retryable through update:download below.
+    if (!isSupportedUpdatePlatform() || updateState.status === 'downloading' || updateState.status === 'downloaded') {
+      return updateProjection();
+    }
+    try {
+      await autoUpdater.checkForUpdates();
+      return updateProjection();
+    } catch (error) {
+      return setUpdaterError(error);
+    }
+  });
+  ipcMain.handle('update:download', async (event) => {
+    assertTrustedIpcEvent(event);
+    // A failed transfer keeps the verified release version in state, so the
+    // user can retry without another forced check. Never retry an error that
+    // did not identify a concrete update version.
+    const retryable = updateState.status === 'available'
+      || (updateState.status === 'error' && Boolean(updateState.version));
+    if (!isSupportedUpdatePlatform() || !retryable) return updateProjection();
+    try {
+      publishUpdateEvent('downloading', { progress: 0, error: null });
+      await autoUpdater.downloadUpdate();
+      return updateProjection();
+    } catch (error) {
+      return setUpdaterError(error);
+    }
+  });
+  ipcMain.handle('update:restart', (event) => {
+    assertTrustedIpcEvent(event);
+    if (!isSupportedUpdatePlatform() || updateState.status !== 'downloaded') return updateProjection();
+    // electron-updater closes the app, swaps the installed files, and relaunches
+    // it. The backend is stopped by before-quit, releasing all file locks first.
+    autoUpdater.quitAndInstall(false, true);
+    return updateProjection();
+  });
+}
+
+/**
+ * Wire electron-updater once, and only for packaged Windows/Linux builds.
+ * Development and browser mode intentionally have no native installer API.
+ */
+function configureAutoUpdater() {
+  registerUpdateIpc();
+  if (!isSupportedUpdatePlatform()) {
+    updateState = {
+      ...updateState,
+      supported: false,
+      status: 'unsupported',
+      error: null,
+    };
+    return;
+  }
+
+  updateState = { ...updateState, supported: true, status: 'idle', error: null };
+  // Updates are opt-in from the GUI. In particular, never download or install
+  // an update just because the app was opened or quit.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('checking-for-update', () => publishUpdateEvent('checking', {
+    // Do not let a failed metadata check inherit an older version and become a
+    // false download retry. A newly emitted update-available event fills this
+    // back in when a release is actually found.
+    version: null,
+    releaseNotes: null,
+    progress: 0,
+    error: null,
+  }));
+  autoUpdater.on('update-available', (info) => publishUpdateEvent('available', {
+    ...updateInfoProjection(info),
+    progress: 0,
+    error: null,
+  }));
+  autoUpdater.on('update-not-available', (info) => publishUpdateEvent('not-available', {
+    ...updateInfoProjection(info),
+    progress: 0,
+    error: null,
+  }));
+  autoUpdater.on('download-progress', (progress) => publishUpdateEvent('downloading', {
+    progress: Number.isFinite(progress?.percent) ? Math.max(0, Math.min(100, progress.percent)) : 0,
+    error: null,
+  }));
+  autoUpdater.on('update-downloaded', (info) => publishUpdateEvent('downloaded', {
+    ...updateInfoProjection(info),
+    progress: 100,
+    error: null,
+  }));
+  autoUpdater.on('error', (error) => setUpdaterError(error));
+
+  // Checking is non-blocking and never downloads. The user still chooses when
+  // to download/install from the GUI.
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((error) => setUpdaterError(error));
+  }, 1500);
+}
 
 import { escapeHtml } from './lib/html.js';
 
@@ -59,12 +254,20 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('data:')) return;
-    if (assignedPort && !url.startsWith(`http://localhost:${assignedPort}`)) {
+    // User-initiated navigation may stay on the exact dashboard origin only.
+    // A localhost port prefix, userinfo URL, or data: page is not trusted.
+    if (!isExactLocalOrigin(url, assignedPort)) {
       event.preventDefault();
     }
   });
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // The browser dashboard can link to the release page. In the desktop app,
+    // open only that fixed HTTPS destination outside the renderer.
+    if (isAllowedReleaseLink(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
 
   // Start the NexusFlow backend server dynamically on port 0 (OS assigns port).
   // Dev: run ../dist with node on PATH. Packaged: run the backend bundled under
@@ -124,19 +327,9 @@ function createWindow() {
     // We killed it ourselves during shutdown — nothing to do.
     if (appQuitting) return;
     if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
-    if (code === 0) {
-      // The backend only exits(0) on its own to hand off to the update
-      // installer (POST /api/updates/apply). That installer must overwrite the
-      // running NexusFlow.exe, so the app has to fully quit to release the file
-      // lock — otherwise the silent (/S) install stalls against the locked
-      // binary and the update never applies. electron-builder relaunches the
-      // app after install.
-      diag('backend exited cleanly — quitting app so the update installer can replace the exe');
-      app.quit();
-    } else {
-      // Unexpected death: surface it instead of leaving a dead, disconnected window.
-      showBackendError(`The backend process stopped unexpectedly (code ${code ?? 'null'}, signal ${signal ?? 'none'}).`);
-    }
+    // A backend exit is always unexpected now: native update installation is
+    // owned by Electron, not an HTTP endpoint in the backend process.
+    showBackendError(`The backend process stopped unexpectedly (code ${code ?? 'null'}, signal ${signal ?? 'none'}).`);
   });
 
   // If the backend never reports a port, tell the user rather than hang.
@@ -172,7 +365,10 @@ function createWindow() {
   });
 
   // Expose the port to the frontend via IPC
-  ipcMain.handle('get-server-port', () => assignedPort);
+  ipcMain.handle('get-server-port', (event) => {
+    assertTrustedIpcEvent(event);
+    return assignedPort;
+  });
 }
 
 // Kill the backend and its whole tree — the child is a listening server that
@@ -194,7 +390,10 @@ function stopBackend() {
   try { logStream?.end(); logStream = null; } catch { /* ignore */ }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  configureAutoUpdater();
+  createWindow();
+});
 
 app.on('before-quit', stopBackend);
 

@@ -1,7 +1,7 @@
 // Stages the NexusFlow backend for packaging: builds the CLI, copies dist/ and
 // the package manifests into desktop/backend/, and installs production-only
 // dependencies there. electron-builder then ships desktop/backend as an
-// extraResource, and main.js runs backend/dist/index.js via Electron-as-Node.
+// extraResource, and main.js runs backend/dist/desktop-server.js via Electron-as-Node.
 import { execSync } from 'node:child_process';
 import { existsSync, rmSync, mkdirSync, cpSync, copyFileSync } from 'node:fs';
 import path from 'node:path';

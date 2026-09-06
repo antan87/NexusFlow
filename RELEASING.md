@@ -7,7 +7,7 @@ single version:
 |---|---|---|
 | npm | `@mrpatronz/nexusflow` (CLI + server + bundled GUI) | npm registry |
 | VS Code extension | `nexusflow.nexusflow-vscode` | VS Code Marketplace |
-| Desktop | `NexusFlowSetup.exe` (Windows installer) | GitHub Releases |
+| Desktop | `NexusFlowSetup.exe` (Windows NSIS), `NexusFlow-<version>.AppImage` (Linux), plus `latest.yml`/`latest-linux.yml` and `.sha256` sidecars | GitHub Releases |
 
 ## The one rule: version lives in the root `package.json`
 
@@ -26,33 +26,55 @@ CI runs `node scripts/sync-version.mjs --check` and **fails on any drift**.
 
 ## How to cut a release
 
-From a clean working tree on `main`:
+The release workflow is dispatched explicitly from the protected default branch.
+Do not push a hand-created tag: the workflow guard creates the immutable tag only
+after it has verified the requested version and synchronized source files.
+
+Start from a clean working tree. From a feature branch, bump and synchronize the
+version without creating a local tag, then open and merge a reviewed PR through
+the protected `main` branch:
 
 ```bash
-npm version minor        # or patch / major — bumps root, runs sync-version, commits, tags vX.Y.Z
-git push --follow-tags   # pushing the tag triggers .github/workflows/release.yml
+npm version minor --no-git-tag-version   # or patch / major
+git status                               # review the synchronized version files
+git commit -m "chore: prepare release"   # version hook already staged the synced files
+git push origin HEAD
 ```
 
-`npm version` runs the `version` lifecycle script (`sync-version.mjs && git add -A`),
-so the synced files land in the same tagged commit automatically. That's it — one
-command bumps every channel, one tag ships them together.
+After the PR is merged, dispatch the release using the exact version in the merged
+`package.json` (the dispatch is intentionally separate from the source PR):
+
+```bash
+VERSION=$(node -p "require('./package.json').version")
+gh api "repos/antan87/NexusFlow/dispatches" \
+  -f event_type=release \
+  -F "client_payload[version]=$VERSION"
+```
+
+The `npm version` command runs the `version` lifecycle script
+(`sync-version.mjs && git add -A`), so all channel manifests are reviewed in the
+same PR. The repository-dispatch event loads the workflow from protected `main`;
+it does not rely on a tag push triggering workflow code from an unreviewed ref.
 
 The [`release.yml`](./.github/workflows/release.yml) workflow then:
 
-1. **`guard`** — asserts the tag matches `package.json` and every file is in sync.
-2. **`npm` / `vscode` / `desktop`** run in parallel, each with an "already published?"
-   idempotency guard so re-running a partially-failed release is safe.
+1. **`guard`** — verifies the dispatch came from protected `main`, checks the requested
+   version against `package.json`, runs the sync check, and creates the immutable tag.
+2. **`npm` / `vscode` / `desktop`** run in parallel. npm and Marketplace skip versions
+   that are already published; desktop rebuilds its installers and metadata on each
+   run. npm uses trusted OIDC publishing; the Marketplace job is enabled only when
+   the repository variable `VSCODE_PUBLISHING_ENABLED=true` and Azure OIDC credentials
+   are present.
 3. **`github-release`** — creates **one** GitHub Release for the tag with generated
-   notes and attaches `NexusFlowSetup.exe`.
+   notes and attaches both desktop installers, their checksum sidecars, and the
+   electron-updater metadata (`latest.yml` and `latest-linux.yml`).
 
 ## Version baseline
 
-Lockstep must never push a version *lower* than what a registry already has. When this
-scheme was adopted the live maxes were npm `0.2.19` and Marketplace `1.1.0`, so the
-unified line started at **`1.2.0`** (a valid increase for both). Always move forward.
-
-Because the repository is already at `1.2.0`, the **first** release just needs the tag —
-`git tag v1.2.0 && git push origin v1.2.0`. Every release after that uses `npm version`.
+Lockstep versions must always move forward from the versions already published to
+npm, the Marketplace, and GitHub Releases. Check the live channel versions before
+choosing a bump; never lower the root `package.json` version and never bypass the
+protected PR plus dispatch guard with a manual tag.
 
 ## Prereleases
 
@@ -64,18 +86,30 @@ Tags with a semver prerelease suffix (e.g. `v1.2.0-rc.1`):
 
 Use these to rehearse the pipeline end-to-end before a real release.
 
-## Required secrets
+## Required credentials
 
-- `NPM_TOKEN` — npm automation token (npm job; provenance also needs the job's
-  `id-token: write`, already configured).
-- `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` — OIDC for `vsce publish` (no stored PAT).
+- npm trusted publishing is configured through the package/repository OIDC trust;
+  the workflow requests `id-token: write` and does not use an `NPM_TOKEN` secret.
+- `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` — Azure OIDC for `vsce publish`, used only
+  when the repository variable `VSCODE_PUBLISHING_ENABLED=true`.
 
 ## Local dry-run checks (no publishing)
 
 ```bash
 node scripts/sync-version.mjs --check   # all channels agree with root
-npm run build && npm pack --dry-run     # tarball contains only dist/ (+ README, LICENSE)
-cd extension && npx vsce package        # produces a .vsix at the synced version
-# Windows only — electron-builder produces desktop/dist/NexusFlowSetup.exe:
+npm run build && npm pack --dry-run     # inspect the generated package contents
+(cd extension && npx vsce package)      # produces a .vsix at the synced version
+
+# On Windows, electron-builder produces the NSIS installer; on Linux it produces
+# the AppImage. Both builds also emit electron-updater metadata:
 npm run build --prefix desktop
+```
+
+## Explicit desktop bootstrap (mutating)
+
+After the package and desktop release are published, bootstrap the matching native
+desktop release from the installed CLI:
+
+```bash
+nexusflow desktop install
 ```
