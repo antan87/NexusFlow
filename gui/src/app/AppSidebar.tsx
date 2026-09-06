@@ -70,7 +70,7 @@ export function AppSidebar({
   onSelectWorkspace,
 }: AppSidebarProps) {
   const { pathname } = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { open: openFloatingChat } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
@@ -402,6 +402,24 @@ export function AppSidebar({
               <BookOpen size={13} />
               <span>Getting Started</span>
             </NavLink>
+
+            <fieldset className="mx-1 my-2 rounded-lg border border-border p-2">
+              <legend className="px-1 text-[10px] font-medium text-muted-foreground">Color theme</legend>
+              <div className="grid grid-cols-2 gap-1">
+                {(['sunset', 'aurora'] as const).map((palette) => (
+                  <button
+                    key={palette}
+                    type="button"
+                    aria-pressed={colorTheme === palette}
+                    onClick={() => setColorTheme(palette)}
+                    className={cn('flex items-center justify-center gap-1.5 rounded-md px-1.5 py-2 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring', colorTheme === palette ? 'bg-accent text-accent-foreground ring-1 ring-primary/40' : 'text-muted-foreground hover:bg-accent')}
+                  >
+                    <span aria-hidden="true" className={cn('size-3 rounded-full', palette === 'sunset' ? 'bg-gradient-to-br from-amber-300 via-orange-400 to-rose-500' : 'bg-gradient-to-br from-teal-300 via-cyan-400 to-indigo-500')} />
+                    {palette === 'sunset' ? 'Sunset' : 'Aurora'}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
 
             {/* Theme toggle */}
             <button

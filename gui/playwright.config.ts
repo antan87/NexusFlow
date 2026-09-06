@@ -18,7 +18,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:4173',
+    baseURL: 'http://127.0.0.1:4173',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -35,8 +35,8 @@ export default defineConfig({
   /* Keep React's development StrictMode checks active in E2E. Production
    * bundling is verified separately by `npm run build`. */
   webServer: {
-    command: 'npm run dev -- --port 4173',
-    url: 'http://localhost:4173',
+    command: 'npm run dev -- --port 4173 --host 127.0.0.1',
+    url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
   },
 });

@@ -64,6 +64,7 @@ export const BRAND_CONFIG = {
   },
   storage: {
     themeKey: 'contextspace-theme',
+    colorThemeKey: 'contextspace-color-theme',
     legacyThemeKey: 'nexusflow-theme',
     chatPrefix: 'contextspace_chat_',
     legacyChatPrefix: 'nexusflow_chat_',
@@ -102,6 +103,7 @@ export const WORKROOM_LEGACY_ROOM_EXTENSION = BRAND_CONFIG.workrooms.legacyRoomE
 export const WORKROOM_INVITE_PROTOCOL = BRAND_CONFIG.workrooms.inviteProtocol;
 export const WORKROOM_LEGACY_INVITE_PROTOCOL = BRAND_CONFIG.workrooms.legacyInviteProtocol;
 export const THEME_STORAGE_KEY = BRAND_CONFIG.storage.themeKey;
+export const COLOR_THEME_STORAGE_KEY = BRAND_CONFIG.storage.colorThemeKey;
 export const LEGACY_THEME_STORAGE_KEY = BRAND_CONFIG.storage.legacyThemeKey;
 export const CHAT_STORAGE_PREFIX = BRAND_CONFIG.storage.chatPrefix;
 export const LEGACY_CHAT_STORAGE_PREFIX = BRAND_CONFIG.storage.legacyChatPrefix;

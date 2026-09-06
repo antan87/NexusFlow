@@ -9,11 +9,16 @@
     <script>
       // Apply the persisted theme before first paint to avoid a light flash.
       (function () {
+        var stored;
+        var palette = 'sunset';
         try {
-          var stored = localStorage.getItem('contextspace-theme') || localStorage.getItem('nexusflow-theme');
-          var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-          if (dark) document.documentElement.classList.add('dark');
-        } catch (e) { /* ignore */ }
+          stored = localStorage.getItem('contextspace-theme') || localStorage.getItem('nexusflow-theme');
+          if (localStorage.getItem('contextspace-color-theme') === 'aurora') palette = 'aurora';
+        } catch (e) { /* Use system appearance when storage is unavailable. */ }
+        var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.dataset.colorTheme = palette;
+        if (palette === 'aurora') document.querySelector('link[rel="icon"]').href = '/favicon-aurora.svg';
       })();
     </script>
   </head>
