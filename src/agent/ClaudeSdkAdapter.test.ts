@@ -188,4 +188,35 @@ describe('ClaudeSdkAdapter', () => {
       expect(idleFired).toBe(true);
     });
   });
+
+  it('emits approval_request when listener is present and resolves via respondToApproval', async () => {
+    const { handle, approvals } = createMockHandle([
+      { type: 'approval_required', requestId: 'req-interactive', tool: 'Bash', input: { command: 'npm test' } },
+    ]);
+
+    const mockAdapter = createMockAdapter(handle);
+    const adapter = new ClaudeSdkAdapter(undefined, mockAdapter);
+
+    const receivedRequests: any[] = [];
+    adapter.on('approval_request', (req) => {
+      receivedRequests.push(req);
+      adapter.respondToApproval(req.requestId, 'allow');
+    });
+
+    await adapter.start('C:/test/workspace');
+    await adapter.send('Run tests', 'workspace-write');
+
+    await vi.waitFor(() => {
+      expect(receivedRequests).toHaveLength(1);
+      expect(receivedRequests[0]).toEqual({
+        requestId: 'req-interactive',
+        tool: 'Bash',
+        input: { command: 'npm test' },
+        description: undefined,
+      });
+      expect(approvals).toEqual([
+        { requestId: 'req-interactive', decision: { behavior: 'allow' } },
+      ]);
+    });
+  });
 });

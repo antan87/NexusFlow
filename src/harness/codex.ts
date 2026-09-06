@@ -4,6 +4,7 @@ import * as path from "node:path";
 import {
   Codex,
   type CodexOptions,
+  type SandboxMode,
   type Thread,
   type ThreadEvent,
   type ThreadItem,
@@ -69,34 +70,66 @@ export class CodexAdapter implements HarnessAdapter {
     this.client = clientFactory ? clientFactory(this.clientOpts) : new Codex(this.clientOpts);
   }
 
+  private getClient(spec: StartSpec | ResumeSpec): Codex {
+    const apiKey =
+      spec.env?.OPENAI_API_KEY ??
+      spec.env?.CODEX_API_KEY ??
+      this.clientOpts.apiKey;
+
+    let env: Record<string, string> | undefined = this.clientOpts.env;
+    if (spec.env) {
+      const combined: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined) combined[k] = v;
+      }
+      if (this.clientOpts.env) {
+        Object.assign(combined, this.clientOpts.env);
+      }
+      Object.assign(combined, spec.env);
+      env = combined;
+    }
+
+    const config: Record<string, unknown> = {
+      ...(this.clientOpts.config as Record<string, unknown> | undefined),
+    };
+
+    if (spec.mcpServers) {
+      config.mcp_servers = spec.mcpServers;
+    }
+
+    const options: CodexOptions = {
+      ...this.clientOpts,
+      ...(apiKey ? { apiKey } : {}),
+      ...(env ? { env } : {}),
+      ...(Object.keys(config).length > 0
+        ? { config: config as unknown as NonNullable<CodexOptions['config']> }
+        : {}),
+    };
+
+    return this.clientFactory ? this.clientFactory(options) : new Codex(options);
+  }
+
   async start(spec: StartSpec): Promise<SessionHandle> {
     const auth = await this.authStatus(spec.workspace, spec.env);
     if (!auth.configured) {
       throw new AuthRequiredError(this.vendor, auth.message ?? "Authentication required");
     }
-    const client = spec.mcpServers
-      ? (this.clientFactory
-          ? this.clientFactory({
-              ...this.clientOpts,
-              config: {
-                ...this.clientOpts.config,
-                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-              },
-            })
-          : new Codex({
-              ...this.clientOpts,
-              config: {
-                ...this.clientOpts.config,
-                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-              },
-            }))
-      : this.client;
+    const client = this.getClient(spec);
+
+    const sandboxMode: SandboxMode =
+      spec.permissionMode === "acceptEdits" ||
+      spec.permissionMode === "bypassPermissions" ||
+      (spec.permissionMode as string) === "workspace-write"
+        ? "workspace-write"
+        : "read-only";
 
     const thread = client.startThread({
       workingDirectory: spec.workspace.rootPath,
       // NexusFlow workspaces are multi-repo roots => usually NOT a git repo.
       // Without this, Codex refuses to run (verified in Spike 4).
       skipGitRepoCheck: true,
+      sandboxMode,
+      approvalPolicy: "never",
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.nativeOptions as Record<string, unknown>),
     });
@@ -117,25 +150,20 @@ export class CodexAdapter implements HarnessAdapter {
         "no native fork; emulate via history replay (Phase 3)",
       );
     }
-    const client = spec.mcpServers
-      ? (this.clientFactory
-          ? this.clientFactory({
-              ...this.clientOpts,
-              config: {
-                ...this.clientOpts.config,
-                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-              },
-            })
-          : new Codex({
-              ...this.clientOpts,
-              config: {
-                ...this.clientOpts.config,
-                mcp_servers: spec.mcpServers as unknown as NonNullable<CodexOptions['config']>,
-              },
-            }))
-      : this.client;
+    const client = this.getClient(spec);
+
+    const sandboxMode: SandboxMode =
+      spec.permissionMode === "acceptEdits" ||
+      spec.permissionMode === "bypassPermissions" ||
+      (spec.permissionMode as string) === "workspace-write"
+        ? "workspace-write"
+        : "read-only";
 
     const thread = client.resumeThread(spec.sessionId, {
+      workingDirectory: spec.workspace.rootPath,
+      skipGitRepoCheck: true,
+      sandboxMode,
+      approvalPolicy: "never",
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.nativeOptions as ThreadOptions),
     });

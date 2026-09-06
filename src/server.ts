@@ -17,6 +17,7 @@ import { execa } from 'execa';
 import * as os from 'node:os';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
@@ -47,8 +48,8 @@ import {
   getSessionTranscript,
 } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
-import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './agent/session.js';
+import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './agent/TurnSessionManager.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';
@@ -150,41 +151,7 @@ function hasTrustedLocalOrigin(origin: string | undefined): boolean {
   }
 }
 
-/** Validate and dispatch one renderer turn without letting malformed authority reach a harness. */
-export function dispatchAgentInput(
-  agent: AgentHarness,
-  provider: ProviderAdapter,
-  payload: { input?: unknown; executionProfile?: unknown },
-): string | null {
-  if (typeof payload.input !== 'string' || !payload.input.trim()) {
-    return 'A non-empty input message is required.';
-  }
-  const executionProfile = ProviderRegistry.resolveExecutionProfile(provider, payload.executionProfile);
-  if (executionProfile === null) {
-    return 'Select a supported execution profile before sending this turn.';
-  }
-  void agent.send(payload.input, executionProfile);
-  return null;
-}
-
-/** Per-socket admission guard so a second prompt is rejected, never dropped. */
-export class AgentTurnGate {
-  private active = false;
-
-  public tryBegin(): boolean {
-    if (this.active) return false;
-    this.active = true;
-    return true;
-  }
-
-  public settle(): void {
-    this.active = false;
-  }
-
-  public isActive(): boolean {
-    return this.active;
-  }
-}
+export { dispatchAgentInput, AgentTurnGate };
 
 app.get('/ws', async (c, next) => {
   // Prevent Cross-Site WebSocket Hijacking (CSWSH)
@@ -207,12 +174,12 @@ app.get('/ws', async (c, next) => {
   //                     | {type:'rejected', reason:'busy', message, turnId?}
   //                     | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
-    let agent: AgentHarness | null = null;
-    let activeProvider: ProviderAdapter | null = null;
-    const turnGate = new AgentTurnGate();
+    let currentCwd: string | null = null;
+    let currentWs: { send: (data: string) => void } | null = null;
 
     return {
       async onMessage(event, ws) {
+        currentWs = ws;
         if (typeof event.data === 'string') {
           if (event.data === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }));
@@ -224,36 +191,25 @@ app.get('/ws', async (c, next) => {
             if (payload.type === 'ping') {
               ws.send(JSON.stringify({ type: 'pong' }));
             } else if (payload.type === 'start') {
-              turnGate.settle();
-              if (agent) {
-                const previousAgent = agent;
-                agent = null;
-                activeProvider = null;
-                previousAgent.stop();
+              const command = payload.command;
+              const cwd = payload.cwd;
+              if (typeof cwd !== 'string' || !cwd.trim()) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Workspace directory cwd is required.' }));
+                return;
               }
-              const provider = ProviderRegistry.getProvider(payload.command);
+              const provider = ProviderRegistry.getProvider(command);
               if (!provider) {
-                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${payload.command}. Please create a dedicated adapter.` }));
+                ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}. Please create a dedicated adapter.` }));
                 return;
               }
 
               const config = await loadConfig();
-              if (typeof payload.cwd !== 'string' || !payload.cwd.trim()) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Workspace directory cwd is required.' }));
-                return;
-              }
-              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, payload.cwd);
+              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
               if (!safeCwd) {
                 ws.send(JSON.stringify({ type: 'error', message: 'Invalid or uncontained workspace directory.' }));
                 return;
               }
-              const freshness = await checkGenerationLock(safeCwd, { markDocuments: true });
-              if (!freshness.fresh) {
-                ws.send(JSON.stringify({
-                  type: 'system',
-                  message: `⚠ NexusFlow generated context is stale or drifted. ${freshness.drift.map((item) => item.message).join(' ')}`,
-                }));
-              }
+              currentCwd = safeCwd;
 
               let session: AgentSession | undefined;
               const model = ProviderRegistry.resolveModel(provider, payload.model);
@@ -264,110 +220,92 @@ app.get('/ws', async (c, next) => {
                 }));
                 return;
               }
+              const effort = typeof payload.effort === 'string' && payload.effort.trim() ? payload.effort.trim() : undefined;
               if (payload.sessionId !== undefined && payload.sessionId !== null) {
                 if (!isValidSessionUuid(payload.sessionId)) {
                   ws.send(JSON.stringify({ type: 'error', message: 'Invalid session id.' }));
                   return;
                 }
-                session = { id: payload.sessionId, resume: Boolean(payload.resume), model };
-              } else if (model) {
-                session = { id: crypto.randomUUID(), resume: false, model };
+                session = { id: payload.sessionId, resume: Boolean(payload.resume), model, effort };
+              } else if (model || effort) {
+                session = { id: crypto.randomUUID(), resume: false, model, effort };
               }
 
-              const startedAgent = provider.createInstance();
-              agent = startedAgent;
-              activeProvider = provider;
-              const isCurrentAgent = () => agent === startedAgent;
-              startedAgent.on('data', (text: string) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'stream', text }));
+              await defaultTurnSessionManager.startSession({
+                workspaceCwd: safeCwd,
+                command,
+                client: ws,
+                provider,
+                session,
               });
-              startedAgent.on('system', (message: string) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'system', message }));
-              });
-              startedAgent.on('session', (id: string) => {
-                if (!isCurrentAgent()) return;
-                // Provider output is still boundary input. Only inert UUIDs
-                // may be persisted by the renderer and sent back in argv.
-                if (isValidSessionUuid(id)) {
-                  ws.send(JSON.stringify({ type: 'session', id }));
-                }
-              });
-              startedAgent.on('idle', () => {
-                if (!isCurrentAgent()) return;
-                turnGate.settle();
-                ws.send(JSON.stringify({ type: 'status', state: 'idle' }));
-              });
-              startedAgent.on('close', (code: number) => {
-                if (!isCurrentAgent()) return;
-                turnGate.settle();
-                ws.send(JSON.stringify({ type: 'close', code }));
-              });
-              startedAgent.on('usage', (usage: any) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'usage', usage }));
-              });
-              startedAgent.on('error', (error: Error) => {
-                if (!isCurrentAgent()) return;
-                ws.send(JSON.stringify({ type: 'error', message: error?.message ?? String(error) }));
-              });
-              startedAgent.start(safeCwd, session);
             } else if (payload.type === 'input') {
-              if (agent && activeProvider) {
-                if (!turnGate.tryBegin()) {
-                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
-                  ws.send(JSON.stringify({
-                    type: 'rejected',
-                    reason: 'busy',
-                    message: 'The agent is still processing the current turn.',
-                    ...(turnId ? { turnId } : {}),
-                  }));
+              const cwd = typeof payload.cwd === 'string' ? payload.cwd : currentCwd;
+              if (!cwd) {
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: 'No active agent session. Please start or reconnect the agent.',
+                }));
+                return;
+              }
+              const config = await loadConfig();
+              const safeCwd = await resolveExactLaunchWorkspace(config.workspacesDir, cwd);
+              if (!safeCwd) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid workspace directory.' }));
+                return;
+              }
+              currentCwd = safeCwd;
+
+              const existingSession = defaultTurnSessionManager.getSession(safeCwd);
+              if (!existingSession) {
+                const command = typeof payload.command === 'string' ? payload.command : 'antigravity-cli';
+                const provider = ProviderRegistry.getProvider(command);
+                if (!provider) {
+                  ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}.` }));
                   return;
                 }
-                const error = dispatchAgentInput(agent, activeProvider, payload);
-                if (error) {
-                  turnGate.settle();
-                  ws.send(JSON.stringify({ type: 'error', message: error }));
-                  return;
-                }
-                // Some harness validation failures emit error + idle
-                // synchronously from send(); do not overwrite that settled
-                // state with a late busy frame.
-                if (turnGate.isActive()) {
-                  const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
-                  ws.send(JSON.stringify({
-                    type: 'accepted',
-                    ...(turnId ? { turnId } : {}),
-                  }));
-                  ws.send(JSON.stringify({ type: 'status', state: 'busy' }));
-                }
+                await defaultTurnSessionManager.startSession({
+                  workspaceCwd: safeCwd,
+                  command,
+                  client: ws,
+                  provider,
+                });
+              }
+
+              const result = defaultTurnSessionManager.dispatchInput(safeCwd, payload);
+              if (result.error) {
+                ws.send(JSON.stringify({ type: 'error', message: result.error }));
+              } else if (result.rejected) {
+                const turnId = isValidSessionUuid(payload.turnId) ? payload.turnId : undefined;
+                ws.send(JSON.stringify({
+                  type: 'rejected',
+                  reason: 'busy',
+                  message: 'The agent is still processing the current turn.',
+                  ...(turnId ? { turnId } : {}),
+                }));
+              }
+            } else if (payload.type === 'approval_response') {
+              if (currentCwd) {
+                const requestId = typeof payload.requestId === 'string' ? payload.requestId : '';
+                const decision = payload.decision === 'allow' ? 'allow' : 'deny';
+                const message = typeof payload.message === 'string' ? payload.message : undefined;
+                defaultTurnSessionManager.respondToApproval(currentCwd, requestId, decision, message);
               }
             } else if (payload.type === 'stop') {
-              turnGate.settle();
-              if (agent) {
-                const stoppedAgent = agent;
-                agent = null;
-                activeProvider = null;
-                stoppedAgent.stop();
+              if (currentCwd) {
+                defaultTurnSessionManager.stopSession(currentCwd);
               }
             }
           } catch (err) {
-            console.error('[WS] Failed to parse message', err);
+            console.error('Error handling WebSocket message:', err);
           }
         }
       },
-      onOpen(_event, _ws) {
-        console.log('[WS] Client connected');
+      onOpen(_event, ws) {
+        currentWs = ws;
       },
-      onClose(_event, _ws) {
-        console.log('[WS] Client disconnected');
-        turnGate.settle();
-        if (agent) {
-          const disconnectedAgent = agent;
-          agent = null;
-          activeProvider = null;
-          disconnectedAgent.stop();
+      onClose(_event, ws) {
+        if (currentCwd && ws) {
+          defaultTurnSessionManager.unregisterClient(currentCwd, ws);
         }
       },
     };
@@ -625,6 +563,127 @@ app.post('/api/adapters/status/refresh', async (c) => {
     return c.json({ error: 'Only Claude Code and Codex status can be refreshed.' }, 400);
   }
   return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: providerId }));
+});
+
+app.post('/api/chat/upload-attachment', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  try {
+    const body = await c.req.json().catch(() => null) as {
+      dataUrl?: unknown;
+      filename?: unknown;
+      workspacePath?: unknown;
+    } | null;
+
+    if (!body || typeof body.dataUrl !== 'string' || !body.dataUrl.startsWith('data:image/')) {
+      return c.json({ error: 'A valid image dataUrl is required.' }, 400);
+    }
+
+    const matches = body.dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (!matches) {
+      return c.json({ error: 'Malformed image dataUrl format.' }, 400);
+    }
+
+    const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((20 * 1024 * 1024 * 4) / 3);
+    if (matches[2].length > MAX_ATTACHMENT_BASE64_CHARS) {
+      return c.json({ error: 'Image attachment exceeds maximum allowed size of 20MB.' }, 413);
+    }
+
+    const rawExt = matches[1].toLowerCase();
+    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+    const buffer = Buffer.from(matches[2], 'base64');
+    const imageId = crypto.randomUUID();
+    const config = await loadConfig();
+    const workspaceDir = typeof body.workspacePath === 'string'
+      ? await resolveExactLaunchWorkspace(config.workspacesDir, body.workspacePath)
+      : null;
+
+    const targetDir = workspaceDir
+      ? path.join(workspaceDir, '.nexusflow', 'attachments')
+      : path.join(getConfigDir(), 'attachments');
+
+    await fs.mkdir(targetDir, { recursive: true });
+    const targetFile = path.join(targetDir, `${imageId}.${ext}`);
+    await fs.writeFile(targetFile, buffer);
+
+    return c.json({
+      id: imageId,
+      filename: typeof body.filename === 'string' ? body.filename : `image-${imageId}.${ext}`,
+      path: targetFile,
+      size: buffer.length,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.get('/api/chat/thread/:workspaceId', async (c) => {
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    const thread = loadChatThread(workspaceId);
+    const config = await loadConfig().catch(() => null);
+    let isBusy = false;
+    if (config) {
+      try {
+        const workspacePath = resolveWorkspacePath(config.workspacesDir, workspaceId);
+        isBusy = defaultTurnSessionManager.hasActiveTurn(workspacePath);
+      } catch {
+        // Workspace not found on disk or invalid
+      }
+    }
+    return c.json({ thread, isBusy });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/chat/thread/:workspaceId', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    const body = await c.req.json().catch(() => null) as any;
+    if (!body || typeof body !== 'object') {
+      return c.json({ error: 'Valid chat thread payload is required.' }, 400);
+    }
+    saveChatThread({
+      workspaceId,
+      providerId: typeof body.providerId === 'string' ? body.providerId : null,
+      sessions: typeof body.sessions === 'object' && body.sessions !== null ? body.sessions : {},
+      profilesByProvider: typeof body.profilesByProvider === 'object' && body.profilesByProvider !== null ? body.profilesByProvider : {},
+      modelsByProvider: typeof body.modelsByProvider === 'object' && body.modelsByProvider !== null ? body.modelsByProvider : {},
+      effortsByProvider: typeof body.effortsByProvider === 'object' && body.effortsByProvider !== null ? body.effortsByProvider : {},
+      messages: Array.isArray(body.messages) ? body.messages : [],
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.delete('/api/chat/thread/:workspaceId', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+  const workspaceId = c.req.param('workspaceId');
+  if (!workspaceId) {
+    return c.json({ error: 'workspaceId is required' }, 400);
+  }
+  try {
+    clearChatThread(workspaceId);
+    return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
 });
 
 // 1. Get current configuration
@@ -1903,6 +1962,226 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     return c.json({ diff });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13b. Revert changes to specific files in workspace sub-repositories
+app.post('/api/workspace/:id/changes/revert', async (c) => {
+  if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
+    return c.json({ error: 'A local browser origin is required.' }, 403);
+  }
+
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => null) as { repo?: string; files?: string[] } | null;
+    const files = Array.isArray(body?.files) ? body.files.filter((f): f is string => typeof f === 'string' && f.trim().length > 0) : [];
+    if (files.length === 0) {
+      return c.json({ error: 'Missing files array in request body.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+
+    const repoName = typeof body?.repo === 'string' && body.repo ? body.repo : (feature?.repos[0] ? path.basename(feature.repos[0]) : null);
+
+    let worktreePath: string;
+    if (feature && isInPlace(feature)) {
+      const matches = repoName ? feature.repos.filter((r) => path.basename(r) === repoName) : feature.repos;
+      if (matches.length === 0) {
+        return c.json({ error: `Unknown repo in this workspace.` }, 404);
+      }
+      if (matches.length > 1) {
+        return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
+      }
+      worktreePath = matches[0]!;
+    } else {
+      worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
+    }
+
+    // Snapshot git index so staged changes can be restored with 100% fidelity on rollback
+    let indexPath: string | null = null;
+    let originalIndexBuf: Buffer | null = null;
+    try {
+      const { stdout: gitPathOut } = await execa('git', ['rev-parse', '--git-path', 'index'], { cwd: worktreePath });
+      const relIndexPath = gitPathOut.trim();
+      if (relIndexPath) {
+        indexPath = path.resolve(worktreePath, relIndexPath);
+        try {
+          originalIndexBuf = await fs.readFile(indexPath);
+        } catch (readErr: any) {
+          if (readErr?.code !== 'ENOENT') {
+            return c.json({
+              error: `Failed to snapshot Git index before revert: ${readErr?.message ?? String(readErr)}`,
+            }, 500);
+          }
+          originalIndexBuf = null;
+        }
+      }
+    } catch (gitErr: any) {
+      return c.json({
+        error: `Failed to resolve Git index path before revert: ${gitErr?.message ?? String(gitErr)}`,
+      }, 500);
+    }
+
+    // Preflight: inspect all paths, statuses, and take snapshots for rollback
+    interface PreflightItem {
+      resolvedFile: string;
+      relFile: string;
+      isUntracked: boolean;
+      exists: boolean;
+      originalContent?: Buffer;
+      originalMode?: number;
+    }
+
+    const preflightItems: PreflightItem[] = [];
+    for (const file of files) {
+      const resolvedFile = assertWithin(worktreePath, path.join(worktreePath, file));
+      const relFile = path.relative(worktreePath, resolvedFile);
+
+      const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', relFile], { cwd: worktreePath });
+      const statusLine = statusOut.trim();
+      if (!statusLine) {
+        continue;
+      }
+
+      // Preflight unsupported statuses: conflicts (U, AA, DD), submodules (S), typechanges (T)
+      const code = statusLine.slice(0, 2);
+      if (code.includes('U') || code === 'AA' || code === 'DD') {
+        return c.json({
+          error: `Cannot revert '${relFile}': file has unmerged git conflicts ('${statusLine}'). Resolve conflicts first.`,
+        }, 400);
+      }
+      if (code.includes('S') || code.includes('T')) {
+        return c.json({
+          error: `Cannot revert '${relFile}': file has unsupported git status ('${statusLine}').`,
+        }, 400);
+      }
+
+      const isUntracked = statusLine.startsWith('??');
+      let exists = false;
+      let originalContent: Buffer | undefined;
+      let originalMode: number | undefined;
+
+      try {
+        let handle: fs.FileHandle | null = null;
+        try {
+          if (typeof fs.open === 'function') {
+            handle = await fs.open(resolvedFile, 'r');
+          }
+          if (handle && typeof handle.readFile === 'function') {
+            const [content, stat] = await Promise.all([
+              handle.readFile(),
+              typeof handle.stat === 'function' ? handle.stat() : Promise.resolve(undefined),
+            ]);
+            originalContent = content;
+            originalMode = stat?.mode;
+            exists = true;
+          } else {
+            originalContent = await fs.readFile(resolvedFile);
+            exists = true;
+          }
+        } finally {
+          if (handle && typeof handle.close === 'function') {
+            await handle.close();
+          }
+        }
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') {
+          throw err;
+        }
+        exists = false;
+      }
+
+      preflightItems.push({
+        resolvedFile,
+        relFile,
+        isUntracked,
+        exists,
+        originalContent,
+        originalMode,
+      });
+    }
+
+    // Execution with rollback protection: if any operation fails, restore previous state
+    const executedReverts: PreflightItem[] = [];
+    try {
+      for (const item of preflightItems) {
+        if (item.isUntracked) {
+          if (item.exists) {
+            await fs.unlink(item.resolvedFile);
+          }
+        } else {
+          await execa('git', ['checkout', 'HEAD', '--', item.relFile], { cwd: worktreePath });
+        }
+        executedReverts.push(item);
+      }
+    } catch (revertErr: any) {
+      const rollbackErrors: string[] = [];
+
+      // 1. Restore the Git index first if it was snapshotted
+      if (indexPath && originalIndexBuf) {
+        try {
+          await fs.writeFile(indexPath, originalIndexBuf);
+        } catch (indexErr: any) {
+          rollbackErrors.push(`Failed to restore git index: ${indexErr?.message ?? String(indexErr)}`);
+        }
+      }
+
+      // 2. Restore modified working tree files and metadata
+      for (const item of executedReverts) {
+        try {
+          if (item.isUntracked) {
+            if (item.exists && item.originalContent) {
+              await fs.writeFile(item.resolvedFile, item.originalContent);
+              if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
+                try {
+                  await fs.chmod(item.resolvedFile, item.originalMode);
+                } catch (chmodErr: any) {
+                  rollbackErrors.push(`Failed to restore mode on ${item.relFile}: ${chmodErr?.message ?? String(chmodErr)}`);
+                }
+              }
+            }
+          } else {
+            if (item.exists && item.originalContent) {
+              await fs.writeFile(item.resolvedFile, item.originalContent);
+              if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
+                try {
+                  await fs.chmod(item.resolvedFile, item.originalMode);
+                } catch (chmodErr: any) {
+                  rollbackErrors.push(`Failed to restore mode on ${item.relFile}: ${chmodErr?.message ?? String(chmodErr)}`);
+                }
+              }
+            } else if (!item.exists) {
+              try {
+                await fs.unlink(item.resolvedFile);
+              } catch (unlinkErr: any) {
+                if (unlinkErr?.code !== 'ENOENT') {
+                  rollbackErrors.push(`Failed to remove checked-out file ${item.relFile}: ${unlinkErr?.message ?? String(unlinkErr)}`);
+                }
+              }
+            }
+          }
+        } catch (restoreErr: any) {
+          rollbackErrors.push(`Failed to restore ${item.relFile}: ${restoreErr?.message ?? String(restoreErr)}`);
+        }
+      }
+
+      if (rollbackErrors.length > 0) {
+        return c.json({
+          error: `Failed to revert files: ${revertErr?.message ?? String(revertErr)}. Warning: Rollback could not fully restore state: ${rollbackErrors.join('; ')}`,
+        }, 500);
+      }
+
+      return c.json({
+        error: `Failed to revert files: ${revertErr?.message ?? String(revertErr)}. Any modified files were rolled back.`,
+      }, 500);
+    }
+
+    const reverted = preflightItems.map((item) => item.relFile);
+    return c.json({ success: true, reverted });
   } catch (error) {
     return errorResponse(c, error);
   }

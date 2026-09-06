@@ -80,9 +80,7 @@ export async function detectAIAssistants(): Promise<DetectedAI[]> {
     {
       name: 'copilot' as AIAssistant,
       displayName: 'GitHub Copilot',
-      // Copilot is convention-based; always available as an option, but only
-      // launchable as a session when its CLI is installed.
-      detected: true,
+      detected: hasCopilot,
       ...(hasCopilot ? { command: 'copilot' } : {}),
     },
     {

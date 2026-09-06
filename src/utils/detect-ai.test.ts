@@ -23,7 +23,7 @@ describe('detectAIAssistants', () => {
       { name: 'claude', displayName: 'Claude Code', detected: true, command: 'claude' },
       { name: 'antigravity', displayName: 'Antigravity', detected: true, command: 'agy' },
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
-      { name: 'copilot', displayName: 'GitHub Copilot', detected: true },
+      { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
     ]);
   });
@@ -37,7 +37,7 @@ describe('detectAIAssistants', () => {
       { name: 'claude', displayName: 'Claude Code', detected: false },
       { name: 'antigravity', displayName: 'Antigravity', detected: false },
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
-      { name: 'copilot', displayName: 'GitHub Copilot', detected: true },
+      { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
     ]);
   });

@@ -121,7 +121,9 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
-  models: getAvailableModels('claude-cli'),
+  get models() {
+    return getAvailableModels('claude-cli');
+  },
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'client-assigned',
@@ -149,6 +151,9 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
+  get models() {
+    return getAvailableModels('antigravity-cli');
+  },
   capabilities: {
     transport: 'cli-print',
     // agy assigns ids for new conversations; --conversation only resumes an
@@ -178,7 +183,9 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
-  models: getAvailableModels('codex-cli'),
+  get models() {
+    return getAvailableModels('codex-cli');
+  },
   capabilities: {
     transport: 'cli-print',
     sessionIdentity: 'provider-assigned',
@@ -205,15 +212,21 @@ ProviderRegistry.register({
   },
   isConfigured: () => copilotCliStatus().usable,
   getStatusMessage: () => copilotCliStatus().message,
+  getSetupHelp: () => setupHelp(copilotCliStatus()),
+  invalidateStatus: () => copilotCliStatus.invalidate(),
   createInstance: () => new CopilotAcpAdapter()
 });
 
 const claudeSdkStatus = cachedStatus(() => {
   const hasCredential = Boolean(
     process.env.ANTHROPIC_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN ||
     process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    process.env.CLAUDE_CODE_USE_BEDROCK === '1' ||
     process.env.AWS_ACCESS_KEY_ID ||
-    process.env.GOOGLE_APPLICATION_CREDENTIALS
+    process.env.CLAUDE_CODE_USE_VERTEX === '1' ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+    process.env.CLAUDE_CODE_USE_FOUNDRY === '1'
   );
   if (hasCredential) return { usable: true };
   return claudeCliStatus();
@@ -242,10 +255,12 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
-  models: getAvailableModels('claude-sdk'),
+  get models() {
+    return getAvailableModels('claude-sdk');
+  },
   capabilities: {
     transport: 'sdk',
-    sessionIdentity: 'client-assigned',
+    sessionIdentity: 'provider-assigned',
     workspaceAccess: 'harness-managed',
     sessionIdFormat: 'uuid',
   },
@@ -273,7 +288,9 @@ ProviderRegistry.register({
     },
   ],
   defaultExecutionProfile: 'review',
-  models: getAvailableModels('codex-sdk'),
+  get models() {
+    return getAvailableModels('codex-sdk');
+  },
   capabilities: {
     transport: 'sdk',
     sessionIdentity: 'provider-assigned',

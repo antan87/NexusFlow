@@ -11,7 +11,7 @@ import {
   type AcpConnection,
   type AcpTransportFactory,
 } from './AcpCliAdapter.js';
-import { buildCopilotAcpArgs } from './CopilotAcpAdapter.js';
+import { buildCopilotAcpArgs, CopilotAcpAdapter } from './CopilotAcpAdapter.js';
 
 const SESSION_ID = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -211,6 +211,35 @@ describe('AcpCliAdapter', () => {
     expect(errors[0]).toMatch(/invalid session id/i);
   });
 
+  it('handles agent_thought_chunk as active turn activity and streams thought tokens', async () => {
+    let client: acp.Client;
+    const connection = makeConnection({
+      prompt: vi.fn(async (): Promise<acp.PromptResponse> => {
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'Thinking about the solution...' },
+          },
+        });
+        return { stopReason: 'end_turn' };
+      }),
+    });
+    const fixture = makeHarness(connection);
+    const output: string[] = [];
+    const errors: string[] = [];
+    fixture.harness.on('data', (text) => output.push(text));
+    fixture.harness.on('error', (error: Error) => errors.push(error.message));
+
+    const start = fixture.harness.start('C:\\workspace');
+    client = fixture.getClient();
+    await start;
+    await fixture.harness.send('Think about this');
+
+    expect(output).toEqual(['Thinking about the solution...']);
+    expect(errors).toEqual([]);
+  });
+
   it('reports a successful turn with no recognizable message', async () => {
     const { harness } = makeHarness(makeConnection());
     const errors: string[] = [];
@@ -269,6 +298,34 @@ describe('AcpCliAdapter', () => {
     expect(errors).toEqual(['GitHub Copilot CLI failed: transport broke']);
     expect(idle).toHaveLength(1);
   });
+
+  it('emits approval_request and resolves via respondToApproval when listener is attached', async () => {
+    const connection = makeConnection();
+    const { harness, getClient } = makeHarness(connection);
+    await harness.start('C:\\workspace');
+
+    const client = getClient();
+    const requests: any[] = [];
+    harness.on('approval_request', (req) => {
+      requests.push(req);
+      harness.respondToApproval(req.requestId, 'allow');
+    });
+
+    const permissionPromise = client.requestPermission({
+      options: [
+        { kind: 'allow_once', optionId: 'opt-allow' },
+        { kind: 'reject_once', optionId: 'opt-deny' },
+      ],
+      toolCall: { title: 'Terminal Command', kind: 'execute' } as any,
+    } as any);
+
+    const response = await permissionPromise;
+    expect(requests).toHaveLength(1);
+    expect(requests[0].tool).toBe('Terminal Command');
+    expect(response).toEqual({
+      outcome: { outcome: 'selected', optionId: 'opt-allow' },
+    });
+  });
 });
 
 describe('isSafeAcpSessionId', () => {
@@ -276,5 +333,17 @@ describe('isSafeAcpSessionId', () => {
     expect(isSafeAcpSessionId('ses_abc-123')).toBe(true);
     expect(isSafeAcpSessionId('ses_abc\n123')).toBe(false);
     expect(isSafeAcpSessionId('x'.repeat(201))).toBe(false);
+  });
+});
+
+describe('CopilotAcpAdapter session id validation', () => {
+  it('accepts UUID and safe opaque ACP session IDs, rejecting unsafe IDs', () => {
+    const adapter = new CopilotAcpAdapter();
+    const validate = (adapter as any).options.validateSessionId;
+    expect(validate('123e4567-e89b-12d3-a456-426614174000')).toBe(true);
+    expect(validate('ses_abc-123')).toBe(true);
+    expect(validate('session-xyz_999')).toBe(true);
+    expect(validate('invalid\nsession')).toBe(false);
+    expect(validate('')).toBe(false);
   });
 });
