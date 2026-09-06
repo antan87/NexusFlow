@@ -105,8 +105,8 @@ function isAllowedReleaseLink(candidate) {
     if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) {
       return false;
     }
-    if (url.pathname === '/antan87/NexusFlow/releases/latest') return true;
-    return /^\/antan87\/NexusFlow\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
+    if (url.pathname === '/antan87/NexusFlow/releases/latest' || url.pathname === '/antan87/ContextSpace/releases/latest') return true;
+    return /^\/antan87\/(NexusFlow|ContextSpace)\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
   } catch {
     return false;
   }

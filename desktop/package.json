@@ -64,7 +64,7 @@
           ]
         }
       ],
-      "artifactName": "NexusFlow-${version}.AppImage"
+      "artifactName": "ContextSpace-${version}.AppImage"
     },
     "publish": [
       {

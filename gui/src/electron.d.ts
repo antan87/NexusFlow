@@ -21,6 +21,7 @@ declare global {
   }
 
   interface Window {
+    contextspaceBridge?: NexusFlowDesktopBridge;
     nexusBridge?: NexusFlowDesktopBridge;
   }
 }

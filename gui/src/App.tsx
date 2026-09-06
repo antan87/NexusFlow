@@ -59,7 +59,7 @@ import type {
 } from './types.js';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-const nativeUpdateBridge = typeof window !== 'undefined' ? window.nexusBridge?.updates : undefined;
+const nativeUpdateBridge = typeof window !== 'undefined' ? (window.contextspaceBridge?.updates || window.nexusBridge?.updates) : undefined;
 let toastIdCounter = 0;
 
 type UiUpdateStatus = {
@@ -218,7 +218,7 @@ function AppInner() {
     });
     setAppVersion(state.currentVersion);
     if (state.status === 'error') {
-      setUpdateCheckError(state.error || 'NexusFlow could not check or download the update.');
+      setUpdateCheckError(state.error || 'ContextSpace could not check or download the update.');
     } else if (state.status !== 'checking') {
       setUpdateCheckError(null);
     }
@@ -254,7 +254,7 @@ function AppInner() {
         throw new Error(`Update check failed with HTTP ${res.status}.`);
       }
     } catch (e) {
-      setUpdateCheckError(e instanceof Error ? e.message : 'NexusFlow could not check for updates.');
+      setUpdateCheckError(e instanceof Error ? e.message : 'ContextSpace could not check for updates.');
       console.error('Failed to fetch update status:', e);
     }
   };
@@ -270,7 +270,7 @@ function AppInner() {
 
   const handleAutoUpdate = async () => {
     if (!nativeUpdateBridge) {
-      showToast('Native installation is available in the NexusFlow desktop app. Open the release page to install it.', 'info');
+      showToast('Native installation is available in the ContextSpace desktop app. Open the release page to install it.', 'info');
       return;
     }
 
@@ -281,7 +281,7 @@ function AppInner() {
       const nextState = await nativeUpdateBridge.download();
       applyNativeUpdateState(nextState);
       if (nextState.status === 'downloaded') {
-        showToast('Update downloaded. Restart NexusFlow when you are ready to install it.', 'success');
+        showToast('Update downloaded. Restart ContextSpace when you are ready to install it.', 'success');
       } else {
         showToast(`Update failed: ${nextState.error || 'The download did not complete.'}`, 'error');
       }
@@ -1012,13 +1012,13 @@ Core Instructions:
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-amber-300">
-                      {updateStep === 'error' ? 'NexusFlow update needs attention' : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : 'A new version of NexusFlow is available!'}
+                      {updateStep === 'error' ? 'ContextSpace update needs attention' : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : 'A new version of ContextSpace is available!'}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {updateStep === 'error'
                         ? (updateStatus.error || 'The update could not be completed. You can retry or use the release page.')
                         : updateStep === 'downloaded'
-                          ? 'Restart NexusFlow when convenient to install it.'
+                          ? 'Restart ContextSpace when convenient to install it.'
                           : updateStep === 'downloading'
                             ? `Downloading from GitHub Releases… ${Math.round(updateStatus.progress || 0)}%`
                             : `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`}
@@ -1082,7 +1082,7 @@ Core Instructions:
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>
                   <p className="text-sm text-muted-foreground mb-6">
-                    The NexusFlow GUI could not connect to the local server. Make sure you started the GUI correctly via <code>nexusflow ui</code> or that the backend is running.
+                    The ContextSpace GUI could not connect to the local server. Make sure you started the GUI correctly via <code>ctxspace ui</code> or that the backend is running.
                   </p>
                   <button
                     onClick={() => {

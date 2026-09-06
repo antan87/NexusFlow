@@ -70,7 +70,7 @@ function isSafeReleaseApiUrl(candidate: string): boolean {
     return url.protocol === 'https:'
       && url.hostname.toLowerCase() === 'api.github.com'
       && !url.port
-      && url.pathname === '/repos/antan87/NexusFlow/releases/latest'
+      && (url.pathname === '/repos/antan87/NexusFlow/releases/latest' || url.pathname === '/repos/antan87/ContextSpace/releases/latest')
       && !url.username
       && !url.password;
   } catch {
@@ -89,7 +89,7 @@ export function isAllowedDesktopReleaseUrl(candidate: string): boolean {
     if (url.protocol !== 'https:' || url.port || url.username || url.password) return false;
     const host = url.hostname.toLowerCase();
     if (host === 'github.com') {
-      return /^\/antan87\/NexusFlow\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname);
+      return /^\/antan87\/(NexusFlow|ContextSpace)\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname);
     }
     return host === 'objects.githubusercontent.com'
       || host === 'github-releases.githubusercontent.com'
@@ -187,16 +187,16 @@ async function launchWindowsInstaller(
   });
 }
 
-async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string): Promise<void> {
+async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string, appName: string = BRAND_NAME): Promise<void> {
   const contents = [
     '[Desktop Entry]',
     'Type=Application',
-    'Name=NexusFlow',
+    `Name=${appName}`,
     'Comment=Multi-repo workspace manager for AI-assisted development',
     `Exec=${quoteDesktopExecArg(appImagePath)}`,
     'Terminal=false',
     'Categories=Development;Utility;',
-    'StartupWMClass=NexusFlow',
+    `StartupWMClass=${appName}`,
     '',
   ].join('\n');
   await writeFile(entryPath, contents, { encoding: 'utf8', mode: 0o644 });
@@ -273,20 +273,22 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     }
 
     const homeDir = options.homeDir ?? os.homedir();
-    const installDir = path.join(homeDir, '.local', 'share', INSTALLER_DIR_NAME);
+    const appName = assetName.toLowerCase().startsWith('contextspace') ? 'ContextSpace' : 'NexusFlow';
+    const installDirName = appName.toLowerCase();
+    const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');
     // Keep the launcher target stable across releases. A versioned filename
     // would leave an old desktop entry behind and make updates appear to
     // succeed while launching the previous AppImage.
-    const installedPath = path.join(installDir, 'NexusFlow.AppImage');
-    const desktopEntryPath = path.join(desktopDir, 'nexusflow.desktop');
+    const installedPath = path.join(installDir, `${appName}.AppImage`);
+    const desktopEntryPath = path.join(desktopDir, `${appName.toLowerCase()}.desktop`);
     stagedPath = `${installedPath}.tmp-${process.pid}-${Date.now()}`;
     await mkdir(installDir, { recursive: true, mode: 0o755 });
     await mkdir(desktopDir, { recursive: true, mode: 0o755 });
     await copyFile(downloadedPath, stagedPath);
     await chmod(stagedPath, 0o755);
     await rename(stagedPath, installedPath);
-    await writeLinuxDesktopEntry(desktopEntryPath, installedPath);
+    await writeLinuxDesktopEntry(desktopEntryPath, installedPath, appName);
     await rm(tempRoot, { recursive: true, force: true });
     return { platform, assetName, sha256: actualHash, installedPath, desktopEntryPath };
   } catch (error) {
@@ -367,7 +369,7 @@ export async function desktopCommand(): Promise<void> {
 
 /** Explicit, user-initiated desktop installer command. */
 export async function desktopInstallCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Desktop Installer\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Desktop Installer\n`));
   const result = await installDesktop();
   if (result.platform === 'win32') {
     console.log(chalk.green(`Downloaded and verified ${result.assetName}. Launching the Windows installer…`));

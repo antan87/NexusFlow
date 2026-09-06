@@ -90,7 +90,7 @@ test.describe('desktop app', () => {
   });
 
   test('exposes a guarded updater IPC status', async () => {
-    const state = await window.evaluate(() => window.nexusBridge?.updates?.getStatus());
+    const state = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.updates?.getStatus());
     expect(state).toBeTruthy();
     // Dev Electron and browser-like shells can inspect the API but cannot
     // invoke native installation. Linux is supported only when an absolute,
