@@ -2038,13 +2038,19 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
         indexPath = path.resolve(worktreePath, relIndexPath);
         try {
           originalIndexBuf = await fs.readFile(indexPath);
-        } catch {
+        } catch (readErr: any) {
+          if (readErr?.code !== 'ENOENT') {
+            return c.json({
+              error: `Failed to snapshot Git index before revert: ${readErr?.message ?? String(readErr)}`,
+            }, 500);
+          }
           originalIndexBuf = null;
         }
       }
-    } catch {
-      indexPath = null;
-      originalIndexBuf = null;
+    } catch (gitErr: any) {
+      return c.json({
+        error: `Failed to resolve Git index path before revert: ${gitErr?.message ?? String(gitErr)}`,
+      }, 500);
     }
 
     // Preflight: inspect all paths, statuses, and take snapshots for rollback
@@ -2160,8 +2166,8 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
               if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
                 try {
                   await fs.chmod(item.resolvedFile, item.originalMode);
-                } catch {
-                  // ignore chmod failures
+                } catch (chmodErr: any) {
+                  rollbackErrors.push(`Failed to restore mode on ${item.relFile}: ${chmodErr?.message ?? String(chmodErr)}`);
                 }
               }
             }
@@ -2171,15 +2177,17 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
               if (item.originalMode !== undefined && typeof fs.chmod === 'function') {
                 try {
                   await fs.chmod(item.resolvedFile, item.originalMode);
-                } catch {
-                  // ignore chmod failures
+                } catch (chmodErr: any) {
+                  rollbackErrors.push(`Failed to restore mode on ${item.relFile}: ${chmodErr?.message ?? String(chmodErr)}`);
                 }
               }
             } else if (!item.exists) {
               try {
                 await fs.unlink(item.resolvedFile);
-              } catch {
-                // ignore unlink failures
+              } catch (unlinkErr: any) {
+                if (unlinkErr?.code !== 'ENOENT') {
+                  rollbackErrors.push(`Failed to remove checked-out file ${item.relFile}: ${unlinkErr?.message ?? String(unlinkErr)}`);
+                }
               }
             }
           }

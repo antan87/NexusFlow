@@ -2476,6 +2476,157 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.error).toContain('Warning: Rollback could not fully restore state');
       expect(data.error).not.toContain('Any modified files were rolled back.');
     });
+
+    it('fails preflight if an existing Git index cannot be snapshotted', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse' && args?.[1] === '--git-path') {
+          return { stdout: '.git/index' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      vi.mocked(fs.readFile).mockImplementation((async (filePath: any) => {
+        if (String(filePath).includes('index')) {
+          const err = new Error('EACCES: permission denied on .git/index');
+          (err as any).code = 'EACCES';
+          throw err;
+        }
+        return Buffer.from('');
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['file1.ts'] }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('Failed to snapshot Git index before revert');
+      expect(data.error).toContain('EACCES');
+    });
+
+    it('accurately reports failure when unlinking a previously absent tracked file fails during rollback', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      // Both tracked files were deleted before the request
+      vi.mocked(fs.open).mockImplementation((async (p: any) => {
+        const err = new Error(`ENOENT: no such file or directory, open '${p}'`);
+        (err as any).code = 'ENOENT';
+        throw err;
+      }) as any);
+      vi.mocked(fs.readFile).mockImplementation((async (p: any) => {
+        if (String(p).includes('index')) return Buffer.from('index-data');
+        const err = new Error(`ENOENT: no such file or directory, open '${p}'`);
+        (err as any).code = 'ENOENT';
+        throw err;
+      }) as any);
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse' && args?.[1] === '--git-path') {
+          return { stdout: '.git/index' };
+        }
+        if (cmd === 'git' && args?.[0] === 'status') {
+          const file = args[args.length - 1];
+          if (file === 'del1.ts') return { stdout: ' D del1.ts' };
+          if (file === 'del2.ts') return { stdout: ' D del2.ts' };
+          return { stdout: '' };
+        }
+        if (cmd === 'git' && args?.[0] === 'checkout') {
+          const file = args[args.length - 1];
+          if (file === 'del2.ts') {
+            throw new Error('Checkout failed on del2.ts');
+          }
+          return { stdout: '' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      // Unlinking del1.ts during rollback fails with EACCES
+      vi.mocked(fs.unlink).mockImplementation((async (p: any) => {
+        if (String(p).includes('del1.ts')) {
+          const err = new Error('EACCES: permission denied, unlink');
+          (err as any).code = 'EACCES';
+          throw err;
+        }
+        return undefined;
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['del1.ts', 'del2.ts'] }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('Checkout failed on del2.ts');
+      expect(data.error).toContain('Warning: Rollback could not fully restore state');
+      expect(data.error).toContain('Failed to remove checked-out file del1.ts');
+      expect(data.error).not.toContain('Any modified files were rolled back.');
+    });
+
+    it('accurately reports failure when mode restoration via chmod fails during rollback', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'test-ws',
+        branchName: 'test-ws',
+        repos: ['/mock/workspaces/test-ws'],
+        assistants: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as any);
+
+      vi.mocked(fs.stat).mockResolvedValue({ mode: 0o755 } as any);
+      vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('file-bytes'));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      vi.mocked(fs.chmod).mockRejectedValue(new Error('EPERM: operation not permitted, chmod'));
+
+      vi.mocked(execa).mockImplementation((async (cmd: any, args?: readonly string[]) => {
+        if (cmd === 'git' && args?.[0] === 'rev-parse' && args?.[1] === '--git-path') {
+          return { stdout: '.git/index' };
+        }
+        if (cmd === 'git' && args?.[0] === 'status') {
+          return { stdout: ` M ${args[args.length - 1]}` };
+        }
+        if (cmd === 'git' && args?.[0] === 'checkout') {
+          const file = args[args.length - 1];
+          if (file === 'file2.ts') {
+            throw new Error('Lock contention on file2.ts');
+          }
+          return { stdout: '' };
+        }
+        return { stdout: '' };
+      }) as any);
+
+      const res = await app.request('/api/workspace/test-ws/changes/revert', {
+        method: 'POST',
+        headers: { 'Origin': 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: ['file1.ts', 'file2.ts'] }),
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('Lock contention on file2.ts');
+      expect(data.error).toContain('Warning: Rollback could not fully restore state');
+      expect(data.error).toContain('Failed to restore mode on file1.ts');
+      expect(data.error).not.toContain('Any modified files were rolled back.');
+    });
   });
 
   describe('/api/chat/thread endpoints (SQLite persistence)', () => {
