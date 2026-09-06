@@ -17,10 +17,10 @@ import { getConfigDir, ensureConfigDir } from './config.js';
 import { acquireLock, createMutationQueue } from './locks.js';
 import { syncWorkspace } from './sync.js';
 import { refreshWorkspace } from './refresh.js';
-import { resolveGlobalDurablePath } from './constants.js';
+import { resolveGlobalDurablePath, STORE_SCHEDULES_FILE } from './constants.js';
 
-/** Name of the schedules file inside ~/.nexusflow. */
-const SCHEDULES_FILE = 'schedules.json';
+/** Name of the schedules file inside global config dir. */
+const SCHEDULES_FILE = STORE_SCHEDULES_FILE;
 const SCHEDULES_LOCK_FILE = `${SCHEDULES_FILE}.lock`;
 const RUN_LOCK_DIR = 'schedule-runs';
 const STORE_LOCK_TIMEOUT_MS = 10_000;

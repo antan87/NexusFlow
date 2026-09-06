@@ -16,9 +16,10 @@ import { ensureConfigDir, getConfigDir } from './config.js';
 import { detectDefaultBranch, isGitRepo } from '../utils/git.js';
 import { slugify } from '../utils/slug.js';
 import { debugLog } from '../utils/debug.js';
+import { STORE_PROJECTS_FILE } from './constants.js';
 
-/** Name of the registry file inside ~/.nexusflow. */
-const PROJECTS_FILE_NAME = 'projects.json';
+/** Name of the registry file inside global config dir. */
+const PROJECTS_FILE_NAME = STORE_PROJECTS_FILE;
 
 /** On-disk shape of the registry file. */
 interface ProjectsFile {

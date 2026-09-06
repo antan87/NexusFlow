@@ -70,6 +70,8 @@ export const BRAND_CONFIG = {
     legacyChatPrefix: 'nexusflow_chat_',
     chatLaunchConsumedKey: 'contextspace.chatLaunch.consumed',
     legacyChatLaunchConsumedKey: 'nexusflow.chatLaunch.consumed',
+    floatingChatKey: 'contextspace_floating_chat_state_v1',
+    legacyFloatingChatKey: 'nexusflow_floating_chat_state_v1',
   },
 } as const;
 
@@ -109,3 +111,5 @@ export const CHAT_STORAGE_PREFIX = BRAND_CONFIG.storage.chatPrefix;
 export const LEGACY_CHAT_STORAGE_PREFIX = BRAND_CONFIG.storage.legacyChatPrefix;
 export const CHAT_LAUNCH_CONSUMED_KEY = BRAND_CONFIG.storage.chatLaunchConsumedKey;
 export const LEGACY_CHAT_LAUNCH_CONSUMED_KEY = BRAND_CONFIG.storage.legacyChatLaunchConsumedKey;
+export const FLOATING_CHAT_STORAGE_KEY = BRAND_CONFIG.storage.floatingChatKey;
+export const LEGACY_FLOATING_CHAT_STORAGE_KEY = BRAND_CONFIG.storage.legacyFloatingChatKey;

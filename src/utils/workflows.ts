@@ -7,7 +7,12 @@ import { resolveResourcePath } from './resources.js';
 import { slugify } from './slug.js';
 import { acquireLock, createMutationQueue } from '../core/locks.js';
 import { atomicWriteFile } from '../resources/fs-safety.js';
-import { resolveBrandHomeDir } from '../core/constants.js';
+import {
+  resolveBrandHomeDir,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_CATALOG_LOCK_FILE,
+  RESOURCE_WORKFLOWS_DIR,
+} from '../core/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,7 +20,7 @@ const runCatalogMutation = createMutationQueue();
 
 async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
   return runCatalogMutation(async () => {
-    const release = await acquireLock(path.join(resolveBrandHomeDir(), '.locks', 'resource-catalog.lock'), {
+    const release = await acquireLock(path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_CATALOG_LOCK_FILE), {
       staleMs: 60_000,
       timeoutMs: 10_000,
       timeoutMessage: 'Timed out waiting for the resource catalog lock.',
@@ -29,7 +34,7 @@ async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function getUserWorkflowsDir(): string {
-  return path.join(resolveBrandHomeDir(), 'workflows');
+  return path.join(resolveBrandHomeDir(), RESOURCE_WORKFLOWS_DIR);
 }
 
 export interface WorkflowTemplate {

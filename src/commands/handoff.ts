@@ -10,7 +10,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
-import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
+import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, PRIMARY_MANIFEST_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
 
 /**
  * Runs the handoff command.
@@ -238,13 +238,12 @@ function extractSection(content: string, header: string | string[]): string {
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

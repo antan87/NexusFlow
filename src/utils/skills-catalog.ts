@@ -23,6 +23,8 @@ import {
   RESOURCE_CATALOG_LOCK_FILE,
   RESOURCE_METADATA_KEY,
   LEGACY_RESOURCE_METADATA_KEY,
+  STORE_CATEGORIES_FILE,
+  RESOURCE_SKILLS_DIR,
 } from '../core/constants.js';
 import {
   formatValidationError,
@@ -468,11 +470,11 @@ export const getNexusFlowHome = getContextSpaceHome;
 
 
 export function getUserCategoriesPath(): string {
-  return resolveGlobalDurablePath('categories.json');
+  return resolveGlobalDurablePath(STORE_CATEGORIES_FILE);
 }
 
 export function getUserSkillsDir(): string {
-  return resolveGlobalDurablePath('skills');
+  return resolveGlobalDurablePath(RESOURCE_SKILLS_DIR);
 }
 
 const PORTABLE_SKILL_SUPPORT_DIRECTORIES = new Set(['scripts', 'references', 'assets', 'agents']);

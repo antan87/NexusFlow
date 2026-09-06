@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import { loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceDiffReport } from '../core/diff.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 interface DiffOptions {
   /** Restrict the diff to these repos (by directory name). */
@@ -93,7 +93,7 @@ export async function diffCommand(workspaceArg?: string, options?: DiffOptions):
     console.log(`\n📂 ${chalk.bold.cyan(res.name)}:`);
     console.log(chalk.dim(res.summary.split('\n').map(l => `  ${l}`).join('\n')));
     if (res.unpushed && res.unpushed > 0) {
-      console.log(chalk.yellow(`  ⬆ ${res.unpushed} commit${res.unpushed === 1 ? '' : 's'} not pushed to origin — run "nexusflow commit" or "git push"`));
+      console.log(chalk.yellow(`  ⬆ ${res.unpushed} commit${res.unpushed === 1 ? '' : 's'} not pushed to origin — run "${CLI_NAME} commit" or "git push"`));
     }
   }
 

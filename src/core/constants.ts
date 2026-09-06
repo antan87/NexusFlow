@@ -17,6 +17,8 @@ export const CLI_NAME = BRAND_CONFIG.identity.cliName;
 export const CLI_ALIASES = BRAND_CONFIG.identity.cliAliases;
 export const MCP_SERVER_NAME = BRAND_CONFIG.mcp.serverName;
 export const LEGACY_MCP_SERVER_NAME = BRAND_CONFIG.mcp.legacyServerName;
+export const MCP_ADAPTER_SERVER_NAME = BRAND_CONFIG.mcp.adapterServerName;
+export const LEGACY_MCP_ADAPTER_SERVER_NAME = BRAND_CONFIG.mcp.legacyAdapterServerName;
 
 // Workspace Manifests
 export const PRIMARY_MANIFEST_FILE = BRAND_CONFIG.files.manifest.primary;
@@ -103,4 +105,17 @@ export const WORKROOM_INVITE_PROTOCOLS = BRAND_CONFIG.workrooms.inviteProtocols;
 export const WORKROOM_DEFAULT_INVITE_PROTOCOL = BRAND_CONFIG.workrooms.defaultInviteProtocol;
 export const WORKROOM_EXPORT_EXTENSION = BRAND_CONFIG.workrooms.roomExportExtension;
 export const WORKROOM_LEGACY_EXPORT_EXTENSION = BRAND_CONFIG.workrooms.legacyRoomExportExtension;
+
+// Workflows & Built-in Resource Directories
+export const RESOURCE_WORKFLOWS_DIR = BRAND_CONFIG.resources.workflowsDir;
+export const PACKAGE_LOOP_SKILL_ID = BRAND_CONFIG.resources.packageLoopSkillId;
+export const LEGACY_PACKAGE_LOOP_SKILL_ID = BRAND_CONFIG.resources.legacyPackageLoopSkillId;
+export const RELEASE_ORDERING_SKILL_ID = BRAND_CONFIG.resources.releaseOrderingSkillId;
+export const LEGACY_RELEASE_ORDERING_SKILL_ID = BRAND_CONFIG.resources.legacyReleaseOrderingSkillId;
+
+// Global Persistent Stores
+export const STORE_CONFIG_FILE = BRAND_CONFIG.stores.config;
+export const STORE_PROJECTS_FILE = BRAND_CONFIG.stores.projects;
+export const STORE_SCHEDULES_FILE = BRAND_CONFIG.stores.schedules;
+export const STORE_CATEGORIES_FILE = BRAND_CONFIG.stores.categories;
 

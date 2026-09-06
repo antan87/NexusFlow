@@ -188,7 +188,7 @@ export async function adapterInitCommand(adapterName: string): Promise<void> {
 
   // package.json
   const pkg = {
-    name: `nexusflow-${adapterName}`,
+    name: `${CLI_NAME}-${adapterName}`,
     version: '1.0.0',
     type: 'module',
     main: 'dist/index.js',
@@ -197,7 +197,7 @@ export async function adapterInitCommand(adapterName: string): Promise<void> {
       dev: 'tsc --watch',
     },
     peerDependencies: {
-      '@mrpatronz/nexusflow': '>=0.2.0',
+      [ENGINE_NPM_PACKAGE]: '>=0.2.0',
     },
     devDependencies: {
       typescript: '^5.0.0',

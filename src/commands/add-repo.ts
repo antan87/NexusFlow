@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { listWorkspaces, loadFeatureConfig, addRepoToWorkspace } from '../core/workspace.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 import type { Feature, RepoInfo } from '../types.js';
 
 /**
@@ -69,7 +69,7 @@ export async function addRepoCommand(
         workspacePath = directPath;
         workspaceName = manifest.branchName;
       } else {
-        console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${workspaceArg}`));
+        console.error(chalk.red(`✖ Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${workspaceArg}`));
         return;
       }
     }
@@ -162,7 +162,7 @@ export async function addRepoCommand(
     await addRepoToWorkspace(workspacePath, repoPathToAdd);
     spinner.succeed(`Successfully added ${chalk.bold(repoName)} to workspace ${chalk.bold(workspaceName)}`);
     console.log(chalk.dim('  - Checked out git worktree'));
-    console.log(chalk.dim('  - Updated nexusflow.json and .gitignore'));
+    console.log(chalk.dim(`  - Updated ${PRIMARY_MANIFEST_FILE} and .gitignore`));
     console.log(chalk.dim('  - Re-analyzed workspace codebases'));
     console.log(chalk.dim('  - Regenerated LLM instruction context files'));
     console.log();

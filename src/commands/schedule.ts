@@ -25,7 +25,7 @@ import {
   setScheduleEnabled,
   type ScheduleTask,
 } from '../core/scheduler.js';
-import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 import { findActiveServerPort } from './ui.js';
 
 /**
@@ -111,7 +111,7 @@ export async function scheduleListCommand(options?: { json?: boolean }): Promise
     console.log();
   }
 
-  console.log(chalk.dim('Jobs run while a NexusFlow server is active ("nexusflow ui"). Use "nexusflow schedule run <id>" to run one immediately.\n'));
+  console.log(chalk.dim(`Jobs run while a ${BRAND_NAME} server is active ("${CLI_NAME} ui"). Use "${CLI_NAME} schedule run <id>" to run one immediately.\n`));
 }
 
 /**
@@ -122,7 +122,7 @@ export async function scheduleRemoveCommand(id: string): Promise<void> {
   if (removed) {
     console.log(chalk.green(`✅ Removed schedule ${chalk.bold(id)}\n`));
   } else {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
   }
 }
 
@@ -134,7 +134,7 @@ export async function scheduleToggleCommand(id: string, enabled: boolean): Promi
   if (job) {
     console.log(chalk.green(`✅ ${enabled ? 'Enabled' : 'Disabled'} schedule ${chalk.bold(id)}\n`));
   } else {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
   }
 }
 
@@ -145,7 +145,7 @@ export async function scheduleRunCommand(id: string): Promise<void> {
   const store = await loadSchedules();
   const job = store.jobs.find((j) => j.id === id);
   if (!job) {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
     return;
   }
 
@@ -165,13 +165,12 @@ export async function scheduleRunCommand(id: string): Promise<void> {
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

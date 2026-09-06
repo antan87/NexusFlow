@@ -9,6 +9,7 @@ import * as path from 'node:path';
 
 import type { Feature, ServiceConfig, OrchestrationDetection } from '../types.js';
 import { normalizeFeature, resolveFeatureRepoPath } from '../utils/feature.js';
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from '../core/constants.js';
 
 /**
  * Detects existing orchestration tool configs in a directory.
@@ -303,11 +304,11 @@ export async function detectAllServices(
   // core/workspace.js — to keep this module free of import cycles.
   let feature: Feature | null = null;
   try {
-    const raw = await fs.readFile(path.join(workspacePath, 'contextspace.json'), 'utf-8');
+    const raw = await fs.readFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), 'utf-8');
     feature = normalizeFeature(JSON.parse(raw) as Feature);
   } catch {
     try {
-      const raw = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+      const raw = await fs.readFile(path.join(workspacePath, LEGACY_MANIFEST_FILE), 'utf-8');
       feature = normalizeFeature(JSON.parse(raw) as Feature);
     } catch {
       // No/invalid manifest — fall back to scanning subdirectories below.

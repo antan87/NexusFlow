@@ -45,10 +45,10 @@ function activateStorageProvider(config: NexusFlowConfig, quiet: boolean): void 
   }
 }
 
-import { LEGACY_CONFIG_DIR_NAME, resolveBrandHomeDir } from './constants.js';
+import { LEGACY_CONFIG_DIR_NAME, resolveBrandHomeDir, STORE_CONFIG_FILE } from './constants.js';
 
 /** Name of the config file. */
-const CONFIG_FILE_NAME = 'config.json';
+const CONFIG_FILE_NAME = STORE_CONFIG_FILE;
 
 /**
  * Returns the absolute path to the ContextSpace config directory (~/.contextspace).

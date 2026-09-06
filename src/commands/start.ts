@@ -120,7 +120,7 @@ async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
 
   if (workspaces.length === 0) {
     console.log(chalk.yellow('No workspaces found.'));
-    console.log(chalk.dim('  Run "nexusflow create" first.\n'));
+    console.log(chalk.dim(`  Run "${CLI_NAME} create" first.\n`));
     return null;
   }
 

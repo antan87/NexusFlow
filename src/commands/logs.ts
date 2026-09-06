@@ -10,8 +10,7 @@ import { select } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { showLogs, getServiceStatus } from '../orchestration/index.js';
-import { BRAND_NAME } from '../core/constants.js';
-import { existsSync } from 'node:fs';
+import { BRAND_NAME, resolveWorkspaceFilePathSync } from '../core/constants.js';
 
 /**
  * Shows logs and status for services in a workspace.
@@ -30,9 +29,7 @@ export async function logsCommand(workspaceArg?: string, lines: number = 30): Pr
   await getServiceStatus(workspacePath);
 
   // Show logs
-  const primaryLogDir = path.join(workspacePath, '.contextspace-logs');
-  const legacyLogDir = path.join(workspacePath, '.nexusflow-logs');
-  const logDir = existsSync(primaryLogDir) ? primaryLogDir : (existsSync(legacyLogDir) ? legacyLogDir : primaryLogDir);
+  const logDir = resolveWorkspaceFilePathSync(workspacePath, 'logsDir').path;
   await showLogs(workspacePath, logDir, lines);
 
   console.log();

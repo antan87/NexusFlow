@@ -12,7 +12,7 @@ import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
-import { BRAND_NAME, resolveGlobalDurablePath } from '../core/constants.js';
+import { BRAND_NAME, CLI_NAME, resolveGlobalDurablePath } from '../core/constants.js';
 
 export interface DaemonState {
   pid: number;
@@ -169,7 +169,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
         console.log(chalk.dim('  Opening browser...'));
         openBrowser(url);
       } else {
-        console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or 'nexusflow dashboard' to open it.`));
+        console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or '${CLI_NAME} dashboard' to open it.`));
       }
       return;
     } catch (err) {

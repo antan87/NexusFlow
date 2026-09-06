@@ -52,10 +52,13 @@ export interface BrandConfigSchema {
     readonly port: readonly string[];
     readonly packagedExe: readonly string[];
     readonly desktopLog: readonly string[];
+    readonly desktopUri: readonly string[];
   };
   readonly mcp: {
     readonly serverName: string;
     readonly legacyServerName: string;
+    readonly adapterServerName: string;
+    readonly legacyAdapterServerName: string;
     readonly packageName: string;
     readonly legacyPackageName: string;
   };
@@ -80,6 +83,7 @@ export interface BrandConfigSchema {
   readonly resources: {
     readonly skillsDir: string;
     readonly agentsDir: string;
+    readonly workflowsDir: string;
     readonly locksDir: string;
     readonly catalogLockFile: string;
     readonly adminLockFile: string;
@@ -87,6 +91,16 @@ export interface BrandConfigSchema {
     readonly legacyOwnershipName: string;
     readonly metadataKey: string;
     readonly legacyMetadataKey: string;
+    readonly packageLoopSkillId: string;
+    readonly legacyPackageLoopSkillId: string;
+    readonly releaseOrderingSkillId: string;
+    readonly legacyReleaseOrderingSkillId: string;
+  };
+  readonly stores: {
+    readonly config: string;
+    readonly projects: string;
+    readonly schedules: string;
+    readonly categories: string;
   };
   readonly github: {
     readonly owner: string;
@@ -219,10 +233,13 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     port: ['CONTEXTSPACE_PORT', 'CS_PORT', 'NEXUSFLOW_PORT', 'NF_PORT'],
     packagedExe: ['CONTEXTSPACE_PACKAGED_EXE', 'NEXUSFLOW_PACKAGED_EXE'],
     desktopLog: ['CONTEXTSPACE_DESKTOP_LOG', 'NEXUSFLOW_DESKTOP_LOG'],
+    desktopUri: ['CONTEXTSPACE_DESKTOP_URI', 'NEXUSFLOW_DESKTOP_URI'],
   },
   mcp: {
     serverName: 'contextspace-mcp',
     legacyServerName: 'nexusflow-mcp',
+    adapterServerName: 'contextspace',
+    legacyAdapterServerName: 'nexusflow',
     packageName: '@mrpatronz/contextspace',
     legacyPackageName: '@mrpatronz/nexusflow',
   },
@@ -247,6 +264,7 @@ export const BRAND_CONFIG: BrandConfigSchema = {
   resources: {
     skillsDir: 'skills',
     agentsDir: 'agents',
+    workflowsDir: 'workflows',
     locksDir: '.locks',
     catalogLockFile: 'resource-catalog.lock',
     adminLockFile: 'resource-administration.lock',
@@ -254,6 +272,16 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     legacyOwnershipName: 'NexusFlow',
     metadataKey: 'contextspace',
     legacyMetadataKey: 'nexusflow',
+    packageLoopSkillId: 'contextspace-local-package-loop',
+    legacyPackageLoopSkillId: 'nexusflow-local-package-loop',
+    releaseOrderingSkillId: 'contextspace-release-ordering',
+    legacyReleaseOrderingSkillId: 'nexusflow-release-ordering',
+  },
+  stores: {
+    config: 'config.json',
+    projects: 'projects.json',
+    schedules: 'schedules.json',
+    categories: 'categories.json',
   },
   github: {
     owner: 'antan87',
@@ -474,3 +502,21 @@ export function getFreshnessSentinelRegex(): RegExp {
 export function createFreshnessMarker(snapshotSha: string, command: string = `${BRAND_CONFIG.identity.cliName} refresh --check`): string {
   return `<!-- ${BRAND_CONFIG.sentinels.freshnessStart[0]} -->\n> **${BRAND_CONFIG.identity.name} snapshot:** ${BRAND_CONFIG.identity.name}@${snapshotSha}. Verify live state with \`${command}\`.\n<!-- ${BRAND_CONFIG.sentinels.freshnessEnd[0]} -->`;
 }
+
+export type StoreKey = keyof typeof BRAND_CONFIG.stores;
+
+/**
+ * Resolves the path of a global persistent store file (config, projects, schedules, categories)
+ * with transparent fallback to the legacy ~/.nexusflow/<file> if present.
+ */
+export function resolveUserStorePath(storeKey: StoreKey): string {
+  return resolveGlobalDurablePath(BRAND_CONFIG.stores[storeKey]);
+}
+
+/**
+ * Resolves a lock file inside the global locks directory.
+ */
+export function resolveResourceLockPath(lockFileName: string): string {
+  return path.join(resolveBrandHomeDir(), BRAND_CONFIG.resources.locksDir, lockFileName);
+}
+
