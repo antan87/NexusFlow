@@ -125,6 +125,47 @@ describe('Claude stream-json decoding', () => {
       { type: 'error', message: 'Claude could not complete the turn.', source: 'provider' },
     ]);
   });
+
+  it('handles empty or non-string result and extracts usage and total_cost_usd on success', () => {
+    expect(decodeClaudeLine(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      session_id: SESSION_ID,
+      result: '',
+      usage: {
+        input_tokens: 150,
+        output_tokens: 45,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 10,
+      },
+      total_cost_usd: 0.0035,
+    }))).toEqual([
+      { type: 'session', id: SESSION_ID },
+      {
+        type: 'complete',
+        text: '',
+        usage: {
+          input_tokens: 150,
+          output_tokens: 45,
+          cache_read_input_tokens: 20,
+          cache_creation_input_tokens: 10,
+        },
+        totalCostUsd: 0.0035,
+      },
+    ]);
+
+    expect(decodeClaudeLine(JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      session_id: SESSION_ID,
+      result: null,
+    }))).toEqual([
+      { type: 'session', id: SESSION_ID },
+      { type: 'complete', text: '' },
+    ]);
+  });
 });
 
 describe('ClaudeCliAdapter acknowledged session lifecycle', () => {
@@ -382,6 +423,69 @@ describe('ClaudeCliAdapter acknowledged session lifecycle', () => {
 
     expect(errors).toEqual([
       expect.stringMatching(/without a recognized result/i),
+    ]);
+  });
+
+  it('completes successfully and emits usage when result is empty but text was streamed', async () => {
+    const adapter = new TestClaudeCliAdapter();
+    const errors: string[] = [];
+    const data: string[] = [];
+    const usages: any[] = [];
+    adapter.on('error', (error: Error) => errors.push(error.message));
+    adapter.on('data', (text: string) => data.push(text));
+    adapter.on('usage', (u: any) => usages.push(u));
+    await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+
+    await adapter.send('Stream and complete');
+    adapter.processes[0].child.stdout.emit('data', Buffer.from(
+      initRecord() +
+      `${JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Streamed message' } },
+      })}\n` +
+      `${JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: SESSION_ID,
+        result: '',
+        usage: { input_tokens: 100, output_tokens: 25 },
+        total_cost_usd: 0.001,
+      })}\n`,
+    ));
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(errors).toEqual([]);
+    expect(data).toEqual(['Streamed message']);
+    expect(usages).toEqual([{
+      inputTokens: 100,
+      outputTokens: 25,
+      cachedInputTokens: 0,
+      costUsdEstimate: 0.001,
+    }]);
+  });
+
+  it('fails the turn when result is empty and no text was streamed', async () => {
+    const adapter = new TestClaudeCliAdapter();
+    const errors: string[] = [];
+    adapter.on('error', (error: Error) => errors.push(error.message));
+    await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+
+    await adapter.send('No stream and empty result');
+    adapter.processes[0].child.stdout.emit('data', Buffer.from(
+      initRecord() +
+      `${JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: SESSION_ID,
+        result: '',
+      })}\n`,
+    ));
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(errors).toEqual([
+      expect.stringMatching(/Claude completed without a recognized text result/i),
     ]);
   });
 });

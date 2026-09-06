@@ -172,6 +172,9 @@ export function detectAntigravityCliStatus(options: DetectOptions = {}): CliStat
     : {
       usable: false,
       message: 'The Antigravity CLI (`agy`) was not found on PATH.',
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'agy',
+      recoveryLabel: 'Copy CLI command',
     };
 }
 
@@ -248,6 +251,9 @@ export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliS
     return {
       usable: false,
       message: 'The GitHub Copilot CLI was not found on PATH. Install it, then run `copilot login`.',
+      setupIssue: 'missing-cli',
+      recoveryCommand: 'copilot login',
+      recoveryLabel: 'Copy sign-in command',
     };
   }
 
@@ -258,6 +264,9 @@ export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliS
     return {
       usable: false,
       message: 'GitHub Copilot CLI does not support classic `ghp_` tokens. Remove the overriding token and run `copilot login`.',
+      setupIssue: 'signed-out',
+      recoveryCommand: 'copilot login',
+      recoveryLabel: 'Copy sign-in command',
     };
   }
 
@@ -286,5 +295,8 @@ export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliS
     message: helpStatus.error
       ? `NexusFlow could not inspect GitHub Copilot CLI ACP support (${helpStatus.error}). Update Copilot CLI and try again.`
       : 'The installed GitHub Copilot CLI does not expose ACP. Update it, then run `copilot login`.',
+    setupIssue: 'probe-failed',
+    recoveryCommand: helpStatus.error ? 'copilot help' : 'copilot login',
+    recoveryLabel: helpStatus.error ? 'Copy status command' : 'Copy sign-in command',
   };
 }

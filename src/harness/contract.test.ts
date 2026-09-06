@@ -122,6 +122,216 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       expect(aborted).toBe(true);
       await handle.dispose();
     });
+
+    it('maps file modification tools (Write, Edit, MultiEdit, FileEdit, FileWrite) to file_changed events', async () => {
+      async function* fakeToolQuery() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          session_id: '123e4567-e89b-12d3-a456-426614174000',
+        };
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call-1',
+                name: 'Write',
+                input: { file_path: 'src/index.ts' },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-2',
+                name: 'Edit',
+                input: { path: 'src/app.ts' },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-3',
+                name: 'MultiEdit',
+                input: { paths: ['src/a.ts', 'src/b.ts'] },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-4',
+                name: 'FileEdit',
+                input: { filePath: 'src/c.ts' },
+              },
+              {
+                type: 'tool_use',
+                id: 'call-5',
+                name: 'FileWrite',
+                input: { file_path: 'src/d.ts' },
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: 'All done',
+        };
+      }
+
+      const mockQueryFn = vi.fn().mockReturnValue(fakeToolQuery());
+      const adapter = new ClaudeCodeAdapter(undefined, mockQueryFn as any);
+
+      const handle = await adapter.start({
+        prompt: 'Edit files',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
+      });
+
+      const events: HarnessEvent[] = [];
+      for await (const ev of handle.events) {
+        events.push(ev);
+        if (ev.type === 'turn_completed') break;
+      }
+
+      expect(events).toContainEqual({
+        type: 'file_changed',
+        kind: 'write',
+        paths: ['src/index.ts'],
+      });
+      expect(events).toContainEqual({
+        type: 'file_changed',
+        kind: 'edit',
+        paths: ['src/app.ts'],
+      });
+      expect(events).toContainEqual({
+        type: 'file_changed',
+        kind: 'edit',
+        paths: ['src/a.ts', 'src/b.ts'],
+      });
+      expect(events).toContainEqual({
+        type: 'file_changed',
+        kind: 'edit',
+        paths: ['src/c.ts'],
+      });
+      expect(events).toContainEqual({
+        type: 'file_changed',
+        kind: 'write',
+        paths: ['src/d.ts'],
+      });
+
+      await handle.dispose();
+    });
+
+    it('extracts rich error details from msg.errors on turn_failed', async () => {
+      async function* fakeErrorQuery() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          session_id: '123e4567-e89b-12d3-a456-426614174000',
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          errors: ['Permission denied to execute command', 'File is locked'],
+        };
+      }
+
+      const mockQueryFn = vi.fn().mockReturnValue(fakeErrorQuery());
+      const adapter = new ClaudeCodeAdapter(undefined, mockQueryFn as any);
+
+      const handle = await adapter.start({
+        prompt: 'Fail please',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
+      });
+
+      const events: HarnessEvent[] = [];
+      for await (const ev of handle.events) {
+        events.push(ev);
+        if (ev.type === 'turn_failed') break;
+      }
+
+      expect(events).toContainEqual({
+        type: 'turn_failed',
+        error: { message: 'Permission denied to execute command; File is locked' },
+        fatal: true,
+      });
+
+      await handle.dispose();
+    });
+
+    it('extracts rich error details from msg.result on turn_failed', async () => {
+      async function* fakeResultErrorQuery() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          session_id: '123e4567-e89b-12d3-a456-426614174000',
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'Rate limit exceeded: 429 Too Many Requests',
+        };
+      }
+
+      const mockQueryFn = vi.fn().mockReturnValue(fakeResultErrorQuery());
+      const adapter = new ClaudeCodeAdapter(undefined, mockQueryFn as any);
+
+      const handle = await adapter.start({
+        prompt: 'Fail please',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { ANTHROPIC_API_KEY: 'sk-ant-test' },
+      });
+
+      const events: HarnessEvent[] = [];
+      for await (const ev of handle.events) {
+        events.push(ev);
+        if (ev.type === 'turn_failed') break;
+      }
+
+      expect(events).toContainEqual({
+        type: 'turn_failed',
+        error: { message: 'Rate limit exceeded: 429 Too Many Requests' },
+        fatal: true,
+      });
+
+      await handle.dispose();
+    });
+
+    it('supports ANTHROPIC_AUTH_TOKEN, Bedrock, Vertex, Foundry, and OAuth credentials in authStatus', async () => {
+      const adapter = new ClaudeCodeAdapter();
+
+      const authTokenStatus = await adapter.authStatus(undefined, { ANTHROPIC_AUTH_TOKEN: 'auth-token-123' });
+      expect(authTokenStatus).toEqual({
+        configured: true,
+        method: 'api-key',
+        hasApiKeyFallback: false,
+      });
+
+      const bedrockStatus = await adapter.authStatus(undefined, { CLAUDE_CODE_USE_BEDROCK: '1' });
+      expect(bedrockStatus).toEqual({
+        configured: true,
+        method: 'cloud-gateway',
+        hasApiKeyFallback: false,
+      });
+
+      const vertexStatus = await adapter.authStatus(undefined, { CLAUDE_CODE_USE_VERTEX: '1' });
+      expect(vertexStatus).toEqual({
+        configured: true,
+        method: 'cloud-gateway',
+        hasApiKeyFallback: false,
+      });
+
+      const foundryStatus = await adapter.authStatus(undefined, { CLAUDE_CODE_USE_FOUNDRY: '1' });
+      expect(foundryStatus).toEqual({
+        configured: true,
+        method: 'cloud-gateway',
+        hasApiKeyFallback: false,
+      });
+
+      const oauthStatus = await adapter.authStatus(undefined, { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-tok' });
+      expect(oauthStatus).toEqual({
+        configured: true,
+        method: 'subscription-oauth',
+        hasApiKeyFallback: false,
+      });
+    });
   });
 
   describe('CodexAdapter Contract & MCP Smoke Test', () => {
@@ -359,10 +569,115 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       });
 
       expect(mockClient.resumeThread).toHaveBeenCalledWith('codex-thread-resumed', {
-        model: 'gpt-5.6-terra',
+        workingDirectory: 'C:/test',
+        skipGitRepoCheck: true,
         sandboxMode: 'read-only',
+        approvalPolicy: 'never',
+        model: 'gpt-5.6-terra',
       });
       expect(mockThread.runStreamed).not.toHaveBeenCalled();
+
+      await handle.dispose();
+    });
+
+    it('maps permissionMode to sandboxMode and sets approvalPolicy never on start and resume', async () => {
+      const mockThread = {
+        id: 'codex-thread-perm',
+        runStreamed: vi.fn(),
+      };
+      const mockClient = {
+        startThread: vi.fn().mockReturnValue(mockThread),
+        resumeThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      const adapter = new CodexAdapter({}, () => mockClient as any);
+
+      // 1. acceptEdits -> workspace-write
+      const handle1 = await adapter.start({
+        prompt: 'test',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+        permissionMode: 'acceptEdits',
+      });
+      expect(mockClient.startThread).toHaveBeenCalledWith(expect.objectContaining({
+        sandboxMode: 'workspace-write',
+        approvalPolicy: 'never',
+        skipGitRepoCheck: true,
+      }));
+      await handle1.dispose();
+
+      // 2. default -> read-only
+      const handle2 = await adapter.start({
+        prompt: 'test',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+        permissionMode: 'default',
+      });
+      expect(mockClient.startThread).toHaveBeenCalledWith(expect.objectContaining({
+        sandboxMode: 'read-only',
+        approvalPolicy: 'never',
+        skipGitRepoCheck: true,
+      }));
+      await handle2.dispose();
+
+      // 3. resume with bypassPermissions -> workspace-write
+      const handle3 = await adapter.resume({
+        sessionId: 'codex-thread-perm',
+        mode: 'resume',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { OPENAI_API_KEY: 'sk-test' },
+        permissionMode: 'bypassPermissions',
+      });
+      expect(mockClient.resumeThread).toHaveBeenCalledWith('codex-thread-perm', expect.objectContaining({
+        sandboxMode: 'workspace-write',
+        approvalPolicy: 'never',
+        skipGitRepoCheck: true,
+      }));
+      await handle3.dispose();
+    });
+
+    it('forwards env, API keys, and nested mcp_servers to Codex client options', async () => {
+      const mockThread = {
+        id: 'codex-thread-cfg',
+        runStreamed: vi.fn(),
+      };
+      const mockClient = {
+        startThread: vi.fn().mockReturnValue(mockThread),
+      };
+
+      let capturedClientOpts: any = null;
+      const adapter = new CodexAdapter({}, (opts) => {
+        capturedClientOpts = opts;
+        return mockClient as any;
+      });
+
+      const handle = await adapter.start({
+        prompt: 'test',
+        workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+        env: { CODEX_API_KEY: 'sk-codex-custom-key', CUSTOM_VAR: 'value1' },
+        mcpServers: {
+          myserver: {
+            command: 'node',
+            args: ['server.js'],
+          },
+        },
+      });
+
+      expect(capturedClientOpts).toMatchObject({
+        apiKey: 'sk-codex-custom-key',
+        env: expect.objectContaining({
+          CODEX_API_KEY: 'sk-codex-custom-key',
+          CUSTOM_VAR: 'value1',
+        }),
+        config: {
+          mcp_servers: {
+            myserver: {
+              command: 'node',
+              args: ['server.js'],
+            },
+          },
+        },
+      });
 
       await handle.dispose();
     });

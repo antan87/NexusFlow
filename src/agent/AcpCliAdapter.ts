@@ -170,6 +170,10 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
   private acceptAgentMessages = false;
   private turnProducedMessage = false;
   private stderrTail = '';
+  private readonly pendingPermissions = new Map<string, {
+    resolve: (response: acp.RequestPermissionResponse) => void;
+    params: acp.RequestPermissionRequest;
+  }>();
 
   constructor(options: AcpCliAdapterOptions) {
     super();
@@ -195,7 +199,21 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
 
   private async connect(cwd: string, requestedSession?: AgentSession): Promise<void> {
     const client: acp.Client = {
-      requestPermission: async (params) => decideReadOnlyPermission(params),
+      requestPermission: async (params) => {
+        if (this.listenerCount('approval_request') > 0) {
+          return new Promise<acp.RequestPermissionResponse>((resolve) => {
+            const requestId = crypto.randomUUID();
+            this.pendingPermissions.set(requestId, { resolve, params });
+            this.emit('approval_request', {
+              requestId,
+              tool: params.toolCall?.title || 'ACP action',
+              input: params.toolCall?.rawInput ? (params.toolCall.rawInput as Record<string, unknown>) : { options: params.options },
+              description: params.toolCall?.kind,
+            });
+          });
+        }
+        return decideReadOnlyPermission(params);
+      },
       sessionUpdate: async (params) => this.handleSessionUpdate(params),
     };
 
@@ -259,7 +277,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     const update = params.update;
     if (
       this.acceptAgentMessages
-      && update.sessionUpdate === 'agent_message_chunk'
+      && (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk')
       && update.content.type === 'text'
       && update.content.text
     ) {
@@ -353,11 +371,42 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
   }
 
   private stopTransport(kill: boolean): void {
+    for (const pending of this.pendingPermissions.values()) {
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+    }
+    this.pendingPermissions.clear();
     const child = this.transport?.process ?? null;
     child?.stdin?.end();
     if (kill) killTree(child, { detached: process.platform !== 'win32' });
     this.transport = null;
     this.sessionId = null;
+  }
+
+  public respondToApproval(requestId: string, decision: 'allow' | 'deny', _message?: string): void {
+    const pending = this.pendingPermissions.get(requestId);
+    if (!pending) return;
+    this.pendingPermissions.delete(requestId);
+
+    if (decision === 'allow') {
+      const allowOption = (['allow_once', 'allow_always'] as acp.PermissionOptionKind[])
+        .map(kind => pending.params.options.find(o => o.kind === kind))
+        .find(Boolean);
+      if (allowOption) {
+        pending.resolve({ outcome: { outcome: 'selected', optionId: allowOption.optionId } });
+        this.emit('system', `Approved tool execution.`);
+        return;
+      }
+    }
+
+    const rejectOption = (['reject_once', 'reject_always'] as acp.PermissionOptionKind[])
+      .map(kind => pending.params.options.find(o => o.kind === kind))
+      .find(Boolean);
+    if (rejectOption) {
+      pending.resolve({ outcome: { outcome: 'selected', optionId: rejectOption.optionId } });
+    } else {
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+    }
+    this.emit('system', `Denied tool execution.`);
   }
 
   private async shutdownTransport(transport: AcpTransport, sessionId: string | null): Promise<void> {

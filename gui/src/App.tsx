@@ -10,6 +10,8 @@ import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
 import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
+import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
+import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
@@ -1158,6 +1160,9 @@ Core Instructions:
         onConfirm={confirmDeleteWorkspace}
         loading={deleteWsLoading !== null}
       />
+
+      <FloatingChatModal workspaces={workspaces} />
+      <FloatingChatLauncher />
 
       <ToastStack
         toasts={toasts}

@@ -1,21 +1,50 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw } from 'lucide-react';
+import { Send, PlaySquare, Square, Cpu, Bot, History, Copy, Check, RefreshCw, Hash, Zap, X, Image as ImageIcon, Sparkles, Shield, ChevronDown, FileCode } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
+import { Badge } from '../../components/ui/badge.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
-import { loadChatStore, saveChatStore, clearChatStore, type ChatMessage } from './chatStore.js';
+import { loadChatStore, saveChatStore, clearChatStore, fetchRemoteChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
+
+interface AttachedImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+  file?: File;
+}
+
+interface PendingApproval {
+  requestId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  description?: string;
+}
+
+const REASONING_EFFORT_OPTIONS = [
+  { id: '', label: 'Auto Effort', description: 'Model/provider default reasoning depth' },
+  { id: 'low', label: 'Low Effort', description: 'Fast responses with lightweight reasoning' },
+  { id: 'medium', label: 'Medium Effort', description: 'Balanced reasoning depth and latency' },
+  { id: 'high', label: 'High Effort', description: 'Deep multi-step reasoning and verification' },
+  { id: 'max', label: 'Max Effort', description: 'Maximum thinking budget for complex tasks' },
+] as const;
+
+function reasoningEffortLabelForId(id: string): string {
+  if (!id) return 'Auto';
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
 
 interface AgentChatProps {
   ws: Feature;
@@ -76,6 +105,13 @@ const PROVIDER_RECOVERY_COMMANDS: Record<string, ReadonlySet<string>> = {
     'npm install -g @openai/codex',
     'codex login',
     'codex login status',
+  ]),
+  'antigravity-cli': new Set([
+    'agy',
+  ]),
+  'copilot-cli': new Set([
+    'copilot login',
+    'copilot help',
   ]),
 };
 
@@ -239,10 +275,18 @@ function recoveryFor(provider: ChatProvider): { command: string; label: string }
   };
 }
 
+function formatShortProfileLabel(label?: string): string {
+  if (!label) return 'Review';
+  if (label.toLowerCase().includes('review')) return 'Review';
+  if (label.toLowerCase().includes('edit') || label.toLowerCase().includes('write')) return 'Edit';
+  return label;
+}
+
 function modelLabelForId(provider: ChatProvider, modelId: string): string {
+  if (!modelId) return 'Auto';
   const found = provider.models?.find(model => model.id === modelId);
   if (found) return found.label;
-  return modelId || 'Automatic';
+  return modelId;
 }
 
 function reconcileModelSelections(
@@ -325,7 +369,22 @@ const MessageBubble = memo(function MessageBubble({
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
       <div className={`group relative max-w-[85%] rounded-lg p-3 ${isUser ? 'bg-primary text-primary-foreground' : 'border border-border bg-card text-foreground'}`}>
         {isUser ? (
-          <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+          <div className="flex flex-col gap-2">
+            {msg.images && msg.images.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {msg.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img}
+                    alt="Attached"
+                    className="max-h-48 max-w-full rounded-lg border border-white/20 object-contain shadow-xs cursor-pointer hover:opacity-95"
+                    onClick={() => window.open(img, '_blank')}
+                  />
+                ))}
+              </div>
+            )}
+            {msg.content && <div className="whitespace-pre-wrap text-sm">{msg.content}</div>}
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             {hasAnsi ? (
@@ -334,6 +393,21 @@ const MessageBubble = memo(function MessageBubble({
               </div>
             ) : (
               <ChatMarkdown content={msg.content} />
+            )}
+            {msg.filesChanged && msg.filesChanged.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1.5 rounded-md border border-border/70 bg-muted/30 p-2 text-xs">
+                <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                  <FileCode size={13} className="text-primary" />
+                  <span>{msg.filesChanged.length} file{msg.filesChanged.length > 1 ? 's' : ''} modified</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {msg.filesChanged.map((f, i) => (
+                    <span key={i} className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground border border-border/50">
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
             )}
             <button
               onClick={() => onCopy(idx, msg.content)}
@@ -375,8 +449,10 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [agentName, setAgentName] = useState('');
   const [profilesByProvider, setProfilesByProvider] = useState(initialStore.profilesByProvider);
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string>>(initialStore.modelsByProvider ?? {});
+  const [effortsByProvider, setEffortsByProvider] = useState<Record<string, string>>(initialStore.effortsByProvider ?? {});
   const [connectionProviderId, setConnectionProviderId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [sessions, setSessions] = useState(initialStore.sessions);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [sessionSwitching, setSessionSwitching] = useState(false);
   const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
@@ -385,6 +461,51 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
+    setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
+  }, []);
+
+  const handleImageFiles = useCallback((files: FileList | File[]) => {
+    const allFiles = Array.from(files);
+    const nonImages = allFiles.filter(f => !f.type.startsWith('image/'));
+    if (nonImages.length > 0) {
+      appendSystemNote(`${nonImages.length} non-image file(s) ignored. Only image attachments are supported.`, 'note');
+    }
+
+    const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    for (const file of imageFiles) {
+      if (file.size > 20 * 1024 * 1024) {
+        appendSystemNote(`Image "${file.name}" exceeds the 20MB limit and was not attached.`, 'error');
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          setAttachedImages(current => [
+            ...current,
+            { id: crypto.randomUUID(), name: file.name, dataUrl, file }
+          ]);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  }, [appendSystemNote]);
+
+  const updateSessions = useCallback((updater: (prev: ChatStore['sessions']) => ChatStore['sessions']) => {
+    setSessions((prev) => {
+      const next = updater(prev);
+      sessionsRef.current = next;
+      return next;
+    });
+    setSessionRevision(c => c + 1);
+  }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -397,7 +518,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   const turnOpenRef = useRef(false);
   const endedNoteRef = useRef(false);
   // Latest snapshot for the debounced/unmount flush.
-  const latestRef = useRef({ messages, agentName, profilesByProvider, modelsByProvider });
+  const latestRef = useRef({ messages, agentName, profilesByProvider, modelsByProvider, effortsByProvider });
   const profilesByProviderRef = useRef(profilesByProvider);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedIntentRef = useRef<string | null>(null);
@@ -407,11 +528,32 @@ export function AgentChat({ ws }: AgentChatProps) {
   const sessionSwitchingRef = useRef(false);
   const sessionLoadRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
   const launchIntent = useMemo(() => readChatLaunchIntent(location.state), [location.state]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const turnFilesRef = useRef<Set<string>>(new Set());
+  const busyRef = useRef(false);
+  const manualStopRef = useRef(false);
+  const startAgentRef = useRef<((providerId?: string, options?: StartAgentOptions) => boolean) | null>(null);
 
   useEffect(() => {
-    latestRef.current = { messages, agentName, profilesByProvider, modelsByProvider };
+    busyRef.current = busy;
+  }, [busy]);
+
+  const handleApprovalDecision = useCallback((requestId: string, decision: 'allow' | 'deny') => {
+    const socket = wsRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'approval_response',
+        requestId,
+        decision,
+      }));
+    }
+    setPendingApprovals(prev => prev.filter(a => a.requestId !== requestId));
+  }, []);
+
+  useEffect(() => {
+    latestRef.current = { messages, agentName, profilesByProvider, modelsByProvider, effortsByProvider };
     profilesByProviderRef.current = profilesByProvider;
-  }, [messages, agentName, profilesByProvider, modelsByProvider]);
+  }, [messages, agentName, profilesByProvider, modelsByProvider, effortsByProvider]);
 
   const flushPersist = useCallback(() => {
     persistTimer.current = null;
@@ -421,6 +563,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       providerId: latestRef.current.agentName || initialStore.providerId,
       profilesByProvider: latestRef.current.profilesByProvider,
       modelsByProvider: latestRef.current.modelsByProvider,
+      effortsByProvider: latestRef.current.effortsByProvider,
       messages: latestRef.current.messages,
     });
   }, [ws.branchName, initialStore.providerId]);
@@ -451,6 +594,29 @@ export function AgentChat({ ws }: AgentChatProps) {
       flushPersist();
     };
   }, [flushPersist]);
+
+  useEffect(() => {
+    let active = true;
+    fetchRemoteChatStore(ws.branchName).then((remote) => {
+      if (!active || !remote) return;
+      setMessages((current) => {
+        if (current.length === 0 && remote.messages.length > 0) {
+          return remote.messages;
+        }
+        return current;
+      });
+      if (remote.sessions && Object.keys(remote.sessions).length > 0) {
+        updateSessions((currentSessions) => ({ ...remote.sessions, ...currentSessions }));
+      }
+      if (remote.isBusy && !wsRef.current) {
+        const targetProvider = remote.providerId || agentName;
+        if (targetProvider && startAgentRef.current) {
+          startAgentRef.current(targetProvider, { firstMessage: null });
+        }
+      }
+    });
+    return () => { active = false; };
+  }, [ws.branchName, updateSessions, agentName]);
 
   useEffect(() => {
     const requestId = ++providerRequestRef.current;
@@ -486,11 +652,15 @@ export function AgentChat({ ws }: AgentChatProps) {
           return changed ? next : current;
         });
 
-        // Prefer the provider used last time, else the first configured one.
+        // Prefer the provider used last time, else the workspace's configured assistant, else the first configured one.
+        const defaultProviderForWs = ws.assistants?.[0] ? providerForAssistant(ws.assistants[0]) : undefined;
         const persisted = initialStore.providerId
           ? nextProviders.find((p: ChatProvider) => p.id === initialStore.providerId)
           : undefined;
-        const firstProvider = persisted || nextProviders.find((p: ChatProvider) => p.isConfigured) || nextProviders[0];
+        const matchingWsProvider = defaultProviderForWs
+          ? nextProviders.find((p: ChatProvider) => p.id === defaultProviderForWs && p.isConfigured)
+          : undefined;
+        const firstProvider = persisted || matchingWsProvider || nextProviders.find((p: ChatProvider) => p.isConfigured) || nextProviders[0];
         // A StrictMode replay or delayed response must not overwrite a user
         // selection or the provider already bound to a connection.
         if (firstProvider) setAgentName(current => current || firstProvider.id);
@@ -506,7 +676,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       active = false;
       controller.abort();
     };
-  }, [initialStore.providerId]);
+  }, [initialStore.providerId, ws.assistants]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -533,13 +703,29 @@ export function AgentChat({ ws }: AgentChatProps) {
     && !connecting
     && !sessionSwitching;
 
+  const switchProvider = useCallback((newProviderId: string) => {
+    if (busy || connecting || sessionSwitching) return;
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setConnected(false);
+    setConnectionProviderId(null);
+    setRetryableKickoff(null);
+    setAgentName(newProviderId);
+    latestRef.current.agentName = newProviderId;
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    flushPersist();
+  }, [busy, connecting, sessionSwitching, flushPersist]);
+
   const profileForProvider = useCallback((providerId: string, providerOverride?: ChatProvider) => {
     const provider = providerOverride ?? providers.find(candidate => candidate.id === providerId);
     if (!provider?.executionProfiles?.length) return undefined;
     const selected = profilesByProviderRef.current[providerId];
-    return provider.executionProfiles.some(profile => profile.id === selected)
-      ? selected
-      : provider.defaultExecutionProfile;
+    if (selected && provider.executionProfiles.some(profile => profile.id === selected)) {
+      return selected;
+    }
+    return provider.defaultExecutionProfile ?? 'review';
   }, [providers]);
 
   const closeTurn = useCallback(() => {
@@ -547,41 +733,84 @@ export function AgentChat({ ws }: AgentChatProps) {
     setTurnOpen(false);
   }, []);
 
-  const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
-    setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
-  }, []);
-
   // Dispatch a user turn on a given socket: send it, echo the bubble, mark busy.
-  const sendTurn = useCallback((
+  const sendTurn = useCallback(async (
     socket: WebSocket,
     text: string,
     executionProfile?: ChatExecutionProfile,
+    imagesToSend?: AttachedImage[],
   ) => {
     const turnId = crypto.randomUUID();
+    const currentImages = imagesToSend ?? attachedImages;
+    let uploadedPaths: string[] = [];
+    let imageUrls: string[] = [];
+
+    if (currentImages.length > 0) {
+      const payloads = await Promise.all(currentImages.map(async (img) => {
+        try {
+          const res = await fetch(`${API_BASE}/api/chat/upload-attachment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              dataUrl: img.dataUrl,
+              filename: img.name,
+              workspacePath: ws.workspacePath,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            return { dataUrl: img.dataUrl, path: data.path as string };
+          }
+          const errData = await res.json().catch(() => ({ error: 'Upload failed' }));
+          appendSystemNote(`Image "${img.name}" could not be uploaded: ${errData.error || res.statusText}`, 'error');
+        } catch (err) {
+          console.error('Failed to upload image attachment', err);
+          appendSystemNote(`Image "${img.name}" failed to upload.`, 'error');
+        }
+        return { dataUrl: img.dataUrl, path: null };
+      }));
+      uploadedPaths = payloads.map(p => p.path).filter((p): p is string => Boolean(p));
+      imageUrls = payloads.map(p => p.dataUrl);
+    }
+
+    let turnPrompt = text;
+    if (uploadedPaths.length > 0) {
+      const fileRefText = uploadedPaths.map(p => `[Attached image: ${p}]`).join('\n');
+      turnPrompt = turnPrompt ? `${turnPrompt}\n\n${fileRefText}` : fileRefText;
+    }
+
     const message: ChatMessage = {
       role: 'user',
       content: text,
       ts: Date.now(),
       ...(executionProfile ? { executionProfile } : {}),
+      ...(imageUrls.length > 0 ? { images: imageUrls } : {}),
     };
-    pendingAdmissionsRef.current.push({ turnId, text, message });
+    pendingAdmissionsRef.current.push({ turnId, text: turnPrompt, message });
+    const effort = effortsByProvider[agentName];
     try {
       socket.send(JSON.stringify({
         type: 'input',
-        input: text,
+        input: turnPrompt,
         turnId,
         ...(executionProfile ? { executionProfile } : {}),
+        command: agentName,
+        cwd: ws.workspacePath,
+        ...(effort ? { effort } : {}),
       }));
-    } catch (error) {
+    } catch {
       pendingAdmissionsRef.current = pendingAdmissionsRef.current
         .filter(admission => admission.turnId !== turnId);
-      throw error;
+      setMessages(prev => prev.filter(m => m !== message));
+      setInput(current => current ? `${turnPrompt}\n\n${current}` : turnPrompt);
+      appendSystemNote('Failed to send message to the agent.', 'error');
     }
     setMessages(prev => [...prev, message]);
     setInput('');
+    setAttachedImages([]);
     setBusy(true);
     closeTurn();
-  }, [closeTurn]);
+  }, [agentName, appendSystemNote, attachedImages, closeTurn, effortsByProvider, ws.workspacePath]);
 
   const noteSessionEnded = useCallback(() => {
     if (endedNoteRef.current) return;
@@ -590,6 +819,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [appendSystemNote]);
 
   const stopAgent = useCallback(() => {
+    manualStopRef.current = true;
     const socket = wsRef.current;
     if (!socket) return;
 
@@ -615,6 +845,7 @@ export function AgentChat({ ws }: AgentChatProps) {
   }, [closeTurn, noteSessionEnded]);
 
   const startAgent = useCallback((providerId = agentName, options: StartAgentOptions = {}): boolean => {
+    manualStopRef.current = false;
     if (wsRef.current) {
       options.onFailure?.();
       return false;
@@ -665,6 +896,9 @@ export function AgentChat({ ws }: AgentChatProps) {
     const failBeforeDispatch = () => {
       if (failureReported || dispatched || !mountedRef.current) return;
       failureReported = true;
+      setBusy(false);
+      setConnecting(false);
+      setConnected(false);
       appendSystemNote('Could not open the local agent connection. Your current chat was preserved; retry explicitly when ready.', 'error');
       options.onFailure?.();
     };
@@ -689,6 +923,10 @@ export function AgentChat({ ws }: AgentChatProps) {
       };
       if (selectedModel) {
         startPayload.model = selectedModel;
+      }
+      const selectedEffort = effortsByProvider[providerId];
+      if (selectedEffort) {
+        startPayload.effort = selectedEffort;
       }
       const nextSessions = { ...sessionsRef.current };
       if (options.resetSession) delete nextSessions[providerId];
@@ -756,7 +994,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       // Only commit session/chat replacement after both frames have been
       // accepted by an open transport. A failed kickoff therefore cannot
       // erase the user's prior local conversation.
-      sessionsRef.current = nextSessions;
+      updateSessions(() => nextSessions);
       dispatched = true;
       setConnecting(false);
       setConnected(true);
@@ -797,33 +1035,57 @@ export function AgentChat({ ws }: AgentChatProps) {
           });
         } else if (payload.type === 'session' && typeof payload.id === 'string') {
           const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id);
-          const pendingSession = sessionsRef.current[providerId];
-          const matchesRequestedSession = selectedProvider.capabilities.sessionIdentity !== 'client-assigned'
-            || pendingSession?.id.toLowerCase() === payload.id.toLowerCase();
-          if (validId && matchesRequestedSession) {
-            const acknowledgedId = selectedProvider.capabilities.sessionIdentity === 'client-assigned'
-              ? pendingSession!.id
-              : payload.id;
-            sessionsRef.current = {
-              ...sessionsRef.current,
-              [providerId]: { id: acknowledgedId, started: true },
-            };
-            setSessionRevision(current => current + 1);
-          } else {
-            appendSystemNote(
-              'The local CLI returned an unexpected session identity. This turn will not be resumed automatically.',
-              'error',
-            );
+          if (validId) {
+            updateSessions(prev => ({
+              ...prev,
+              [providerId]: { id: payload.id, started: true },
+            }));
           }
+        } else if (payload.type === 'approval_request' && typeof payload.requestId === 'string') {
+          setPendingApprovals(prev => [
+            ...prev.filter(a => a.requestId !== payload.requestId),
+            {
+              requestId: payload.requestId,
+              tool: typeof payload.tool === 'string' ? payload.tool : 'Tool',
+              input: (payload.input && typeof payload.input === 'object') ? payload.input : {},
+              description: typeof payload.description === 'string' ? payload.description : undefined,
+            },
+          ]);
         } else if (payload.type === 'accepted' && typeof payload.turnId === 'string') {
           pendingAdmissionsRef.current = pendingAdmissionsRef.current
             .filter(admission => admission.turnId !== payload.turnId);
+        } else if (payload.type === 'file_changed') {
+          if (Array.isArray(payload.paths)) {
+            for (const p of payload.paths) {
+              if (typeof p === 'string' && p.trim()) {
+                turnFilesRef.current.add(p.trim());
+              }
+            }
+          }
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
-          if (payload.state !== 'busy') closeTurn();
+          if (payload.state !== 'busy') {
+            const filesModified = Array.from(turnFilesRef.current);
+            turnFilesRef.current.clear();
+            if (filesModified.length > 0) {
+              setMessages((prev) => {
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'assistant') {
+                    const updated = [...prev];
+                    const existing = updated[i].filesChanged || [];
+                    const merged = Array.from(new Set([...existing, ...filesModified]));
+                    updated[i] = { ...updated[i], filesChanged: merged };
+                    return updated;
+                  }
+                }
+                return prev;
+              });
+            }
+            closeTurn();
+            setPendingApprovals([]);
+          }
         } else if (payload.type === 'system') {
           appendSystemNote(payload.message, 'note');
-          closeTurn();
         } else if (payload.type === 'rejected' && payload.reason === 'busy') {
           const rejectedIndex = pendingAdmissionsRef.current
             .findIndex(admission => admission.turnId === payload.turnId);
@@ -842,12 +1104,25 @@ export function AgentChat({ ws }: AgentChatProps) {
           );
         } else if (payload.type === 'error') {
           pendingAdmissionsRef.current = [];
+          setPendingApprovals([]);
+          turnFilesRef.current.clear();
+          if (typeof payload.message === 'string' && payload.message.toLowerCase().includes('session')) {
+            updateSessions(prev => {
+              const next = { ...prev };
+              delete next[providerId];
+              return next;
+            });
+          }
           appendSystemNote(payload.message, 'error');
           setBusy(false);
+          setConnecting(false);
           closeTurn();
         } else if (payload.type === 'close') {
           pendingAdmissionsRef.current = [];
+          setPendingApprovals([]);
+          turnFilesRef.current.clear();
           setConnected(false);
+          setConnecting(false);
           setBusy(false);
           closeTurn();
           noteSessionEnded();
@@ -865,24 +1140,40 @@ export function AgentChat({ ws }: AgentChatProps) {
       // new connection or emit a spurious "Session ended".
       if (wsRef.current !== socket) return;
       if (!dispatched) failBeforeDispatch();
+
+      const wasBusy = busyRef.current;
+      const isManual = manualStopRef.current;
+
       setConnected(false);
       setConnecting(false);
       setBusy(false);
       closeTurn();
-      if (dispatched) noteSessionEnded();
       wsRef.current = null;
       connectionProviderRef.current = null;
       setConnectionProviderId(null);
+
+      if (wasBusy && mountedRef.current && !isManual) {
+        appendSystemNote('Connection interrupted. Resuming turn...', 'note');
+        setTimeout(() => {
+          if (mountedRef.current && !manualStopRef.current && !wsRef.current) {
+            startAgentRef.current?.(providerId, { firstMessage: null });
+          }
+        }, 1200);
+        return;
+      }
+
+      if (dispatched) noteSessionEnded();
     };
 
     socket.onerror = () => {
       if (wsRef.current !== socket) return;
       failBeforeDispatch();
+      setBusy(false);
+      setConnecting(false);
       if (!dispatched) {
         wsRef.current = null;
         connectionProviderRef.current = null;
         setConnectionProviderId(null);
-        setConnecting(false);
         setConnected(false);
         socket.close();
       }
@@ -893,17 +1184,34 @@ export function AgentChat({ ws }: AgentChatProps) {
     setConnectionProviderId(providerId);
     setConnecting(true);
     return true;
-  }, [agentName, appendSystemNote, closeTurn, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, ws.workspacePath]);
+  }, [agentName, appendSystemNote, closeTurn, effortsByProvider, input, modelsByProvider, noteSessionEnded, profileForProvider, providers, updateSessions, ws.workspacePath]);
+
+  useEffect(() => {
+    startAgentRef.current = startAgent;
+  }, [startAgent]);
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
-    const providerId = connectionProviderRef.current;
-    if (!text || !wsRef.current || !providerId || busy || sessionSwitchingRef.current) return;
+    if ((!text && attachedImages.length === 0) || busy || sessionSwitchingRef.current) return;
+    const socket = wsRef.current;
+    const providerId = connectionProviderRef.current || agentName;
+    if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
+      if (socket) {
+        try {
+          socket.close();
+        } catch {
+          // Ignore socket closure error
+        }
+        wsRef.current = null;
+      }
+      startAgent(providerId, { firstMessage: text });
+      return;
+    }
     const provider = providers.find(candidate => candidate.id === providerId);
     const executionProfile = profileForProvider(providerId, provider);
     if (provider?.executionProfiles?.length && !executionProfile) return;
-    sendTurn(wsRef.current, text, executionProfile);
-  }, [busy, input, profileForProvider, providers, sendTurn]);
+    void sendTurn(socket, text, executionProfile, attachedImages);
+  }, [agentName, attachedImages, busy, connected, input, profileForProvider, providers, sendTurn, startAgent]);
 
   const copyMessage = useCallback((idx: number, content: string) => {
     navigator.clipboard.writeText(content).then(() => {
@@ -1008,10 +1316,10 @@ export function AgentChat({ ws }: AgentChatProps) {
         return started;
       }
 
-      sessionsRef.current = {
-        ...sessionsRef.current,
+      updateSessions(prev => ({
+        ...prev,
         [providerId]: { id: session.id, started: true },
-      };
+      }));
       commitTranscript();
       return true;
     } catch (error) {
@@ -1021,7 +1329,7 @@ export function AgentChat({ ws }: AgentChatProps) {
       finishSessionSwitch(requestId);
       return false;
     }
-  }, [appendSystemNote, finishSessionSwitch, providers, startAgent, stopAgent]);
+  }, [appendSystemNote, finishSessionSwitch, providers, startAgent, stopAgent, updateSessions]);
 
   const pickSession = useCallback((session: PickableSession) => {
     void loadSession(session);
@@ -1190,9 +1498,11 @@ export function AgentChat({ ws }: AgentChatProps) {
       if (wsRef.current) stopAgent();
       // Forget only the selected provider's session; switching providers later
       // can still resume its own independently-scoped conversation.
-      const remainingSessions = { ...sessionsRef.current };
-      delete remainingSessions[agentName];
-      sessionsRef.current = remainingSessions;
+      updateSessions(prev => {
+        const remaining = { ...prev };
+        delete remaining[agentName];
+        return remaining;
+      });
       endedNoteRef.current = false;
       setMessages([]);
       clearChatStore(ws.branchName);
@@ -1222,6 +1532,18 @@ export function AgentChat({ ws }: AgentChatProps) {
     }
   };
 
+  const [copiedSessionId, setCopiedSessionId] = useState(false);
+  const activeSessionId = sessions[agentName]?.id;
+
+  const copySessionId = (id: string) => {
+    safeCopyToClipboard(id).then(() => {
+      setCopiedSessionId(true);
+      setTimeout(() => {
+        if (mountedRef.current) setCopiedSessionId(false);
+      }, 1500);
+    });
+  };
+
   return (
     <div className="flex h-full flex-col bg-card">
       <div className="flex shrink-0 items-center justify-between border-b border-border bg-card px-4 py-3">
@@ -1234,6 +1556,17 @@ export function AgentChat({ ws }: AgentChatProps) {
           </StatusBadge>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {activeSessionId && (
+            <button
+              onClick={() => copySessionId(activeSessionId)}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border/60"
+              title={`Session ID: ${activeSessionId} (Click to copy)`}
+            >
+              <Hash size={11} className="opacity-60" />
+              <span>{activeSessionId.slice(0, 8)}...</span>
+              {copiedSessionId ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} className="opacity-60" />}
+            </button>
+          )}
           {messages.length > 0 && (
             <button onClick={clearChat} className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-destructive-foreground">
               Clear
@@ -1246,7 +1579,7 @@ export function AgentChat({ ws }: AgentChatProps) {
           >
             <History size={14} />
           </button>
-          {connected && (
+          {(connected || busy || connecting) && (
             <Button size="sm" variant="outline" onClick={stopAgent}>
               <Square size={14} className="text-destructive-foreground" />
               Stop
@@ -1280,12 +1613,19 @@ export function AgentChat({ ws }: AgentChatProps) {
           </div>
         )}
         {messages.map((msg, idx) => (
-          <MessageBubble key={idx} msg={msg} idx={idx} copied={copiedIdx === idx} onCopy={copyMessage} />
+          <MessageBubble
+            key={idx}
+            msg={msg}
+            idx={idx}
+            copied={copiedIdx === idx}
+            onCopy={copyMessage}
+          />
         ))}
         {showThinking && (
           <div className="flex justify-start">
-            <div className="rounded-lg border border-border bg-card px-4 py-3 text-muted-foreground">
-              <RefreshCw size={14} className="animate-spin" />
+            <div className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground shadow-xs animate-pulse">
+              <RefreshCw size={13} className="animate-spin text-primary" />
+              <span>{currentProvider?.name || 'Agent'} is thinking and executing...</span>
             </div>
           </div>
         )}
@@ -1339,78 +1679,101 @@ export function AgentChat({ ws }: AgentChatProps) {
             )}
           </div>
         )}
-        <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
-          <div className="flex items-center gap-2 border-b border-border/50 p-2">
-            <Menu>
-              <MenuTrigger
-                aria-label="Select Provider"
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent',
-                  connected ? 'pointer-events-none opacity-50' : 'text-foreground',
+        {pendingApprovals.map((req) => (
+          <div
+            key={req.requestId}
+            role="alert"
+            aria-live="polite"
+            className="flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs shadow-xs animate-fade-in"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 font-semibold text-amber-500">
+                <Shield size={14} className="animate-pulse shrink-0" />
+                <span>Tool Approval Required</span>
+                <Badge variant="outline" className="text-[10px] uppercase font-mono border-amber-500/40 text-amber-600 dark:text-amber-400">
+                  {req.tool}
+                </Badge>
+                {req.description && (
+                  <span className="text-[11px] font-normal text-muted-foreground italic">
+                    ({req.description})
+                  </span>
                 )}
-              >
-                {currentProvider?.icon === 'Bot' ? <Bot size={14} className="text-primary" /> : <Cpu size={14} className="text-primary" />}
-                {currentProvider?.name || 'Select Agent'}
-              </MenuTrigger>
-              <MenuPopup align="start" side="top">
-                {providers.map((p) => (
-                  <MenuItem key={p.id} onClick={() => { if (!connected) setAgentName(p.id); }}>
-                    {p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />}
-                    {p.name}
-                  </MenuItem>
-                ))}
-              </MenuPopup>
-            </Menu>
-            <div className="h-4 w-px bg-border"></div>
-            {currentProvider?.executionProfiles?.length && currentExecutionProfile ? (
-              <>
-                <Menu>
-                  <MenuTrigger
-                    aria-label="Select execution profile"
-                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
-                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {currentExecutionProfile.label}
-                  </MenuTrigger>
-                  <MenuPopup align="start" side="top" className="max-w-80">
-                    {currentProvider.executionProfiles.map((profile) => (
-                      <MenuItem
-                        key={profile.id}
-                        onClick={() => setProfilesByProvider(current => ({
-                          ...current,
-                          [currentProvider.id]: profile.id,
-                        }))}
-                      >
-                        <span className="flex flex-col">
-                          <span className="font-medium">{profile.label}</span>
-                          <span className="text-xs text-muted-foreground">{profile.description}</span>
-                        </span>
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </Menu>
-                <span
-                  className="min-w-0 truncate text-xs text-muted-foreground"
-                  title={currentExecutionProfile.description}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => handleApprovalDecision(req.requestId, 'allow')}
+                  className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 cursor-pointer"
                 >
-                  {currentExecutionProfile.description}
-                </span>
-              </>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {currentProvider?.accessLabel ?? 'Harness-managed access'}
-              </span>
+                  <Check size={12} />
+                  <span>Approve</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleApprovalDecision(req.requestId, 'deny')}
+                  className="h-7 text-xs text-destructive hover:bg-destructive/10 border-border/80 gap-1 cursor-pointer"
+                >
+                  <X size={12} />
+                  <span>Deny</span>
+                </Button>
+              </div>
+            </div>
+            {req.input && (
+              <div className="rounded-md bg-background/80 p-2 font-mono text-[11px] text-foreground overflow-x-auto max-h-24 select-text">
+                {typeof req.input.command === 'string'
+                  ? `Command: ${req.input.command}`
+                  : typeof req.input.path === 'string'
+                  ? `File: ${req.input.path}`
+                  : JSON.stringify(req.input, null, 2)}
+              </div>
             )}
-            {currentProvider?.models?.length && (
-              <>
-                <div className="h-4 w-px bg-border"></div>
+          </div>
+        ))}
+        <div className="flex w-full flex-col rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-border/50 bg-muted/20 px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Harness Selector */}
+              <Menu>
+                <MenuTrigger
+                  aria-label="Select Provider"
+                  disabled={busy || connecting || sessionSwitching}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {currentProvider?.icon === 'Bot' ? <Bot size={13} className="text-primary" /> : <Cpu size={13} className="text-primary" />}
+                  <span>{currentProvider?.name ?? 'Select Agent'}</span>
+                  <ChevronDown size={11} className="opacity-50 ml-0.5" />
+                </MenuTrigger>
+                <MenuPopup align="start" side="top">
+                  {providers.filter(p => p.isConfigured || p.setupIssue !== 'missing-cli').map((p) => (
+                    <MenuItem
+                      key={p.id}
+                      onClick={() => switchProvider(p.id)}
+                      className={cn(
+                        'flex items-center gap-2 text-xs cursor-pointer',
+                        p.id === displayedProviderId && 'font-semibold text-primary',
+                      )}
+                    >
+                      {p.icon === 'Bot' ? <Bot size={14} /> : <Cpu size={14} />}
+                      <span className="flex-1">{p.name}</span>
+                      {p.id === displayedProviderId && <Check size={12} className="text-primary ml-auto" />}
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+
+              {/* Model Selector */}
+              {currentProvider?.models?.length && (
                 <Menu>
                   <MenuTrigger
                     aria-label="Select model"
                     disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
-                    className="flex cursor-pointer items-center rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                   >
-                    {modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}
+                    <Sparkles size={12} className="text-amber-500 shrink-0" />
+                    <span className="max-w-44 truncate">{modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
                   <MenuPopup align="start" side="top" className="max-w-80">
                     {currentProvider.models.map((m) => (
@@ -1422,20 +1785,162 @@ export function AgentChat({ ws }: AgentChatProps) {
                         }))}
                       >
                         <span className="flex flex-col">
-                          <span className="font-medium">{m.label}</span>
+                          <span className="font-medium flex items-center gap-1.5">
+                            <Sparkles size={11} className="text-amber-500" />
+                            {m.label}
+                          </span>
                           <span className="text-xs text-muted-foreground">{m.description}</span>
                         </span>
                       </MenuItem>
                     ))}
                   </MenuPopup>
                 </Menu>
-              </>
-            )}
+              )}
+
+              {/* Execution Profile Selector */}
+              {currentProvider?.executionProfiles?.length && currentExecutionProfile && (
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Select execution profile"
+                    disabled={connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                    title={currentExecutionProfile.description}
+                  >
+                    <Shield size={12} className={currentExecutionProfile.id === 'workspace-write' ? "text-amber-500 shrink-0" : "text-emerald-500 shrink-0"} />
+                    <span>{formatShortProfileLabel(currentExecutionProfile.label)}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="top" className="max-w-80">
+                    {currentProvider.executionProfiles.map((profile) => (
+                      <MenuItem
+                        key={profile.id}
+                        onClick={() => setProfilesByProvider(current => ({
+                          ...current,
+                          [currentProvider.id]: profile.id,
+                        }))}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium flex items-center gap-1.5">
+                            <Shield size={12} className={profile.id === 'workspace-write' ? "text-amber-500" : "text-emerald-500"} />
+                            {profile.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{profile.description}</span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              )}
+
+              {/* Reasoning Effort Selector */}
+              {currentProvider && (
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Select reasoning effort"
+                    disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <Zap size={12} className={effortsByProvider[currentProvider.id] ? "text-amber-500 fill-amber-500/20 shrink-0" : "text-muted-foreground shrink-0"} />
+                    <span>{reasoningEffortLabelForId(effortsByProvider[currentProvider.id] ?? '')}</span>
+                    <ChevronDown size={11} className="opacity-50 ml-0.5" />
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="top" className="max-w-72">
+                    {REASONING_EFFORT_OPTIONS.map((e) => (
+                      <MenuItem
+                        key={e.id}
+                        onClick={() => setEffortsByProvider(current => ({
+                          ...current,
+                          [currentProvider.id]: e.id,
+                        }))}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium flex items-center gap-1.5">
+                            {e.id && <Zap size={12} className="text-amber-500" />}
+                            {e.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{e.description}</span>
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              )}
+            </div>
+
+            {/* Right Side: Tools & Actions */}
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.length) handleImageFiles(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || sessionSwitching}
+                className="flex cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background/90 p-1.5 text-muted-foreground shadow-2xs transition-colors hover:bg-accent hover:text-foreground hover:border-border disabled:pointer-events-none disabled:opacity-50"
+                title="Attach image (or paste / drop into chat)"
+              >
+                <ImageIcon size={14} className="text-primary" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-end gap-2 p-2">
+          {attachedImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-b border-border/40 px-3 py-2 bg-muted/20">
+              {attachedImages.map((img) => (
+                <div key={img.id} className="group relative flex items-center rounded-lg border border-border/80 bg-card p-1 shadow-xs">
+                  <img src={img.dataUrl} alt={img.name} className="h-14 w-14 rounded-md object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setAttachedImages(current => current.filter(i => i.id !== img.id))}
+                    className="absolute -top-1.5 -right-1.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90 transition-colors"
+                    title="Remove image"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div
+            className={cn("flex items-end gap-2 p-2", isDragging && "ring-2 ring-primary ring-inset rounded-b-xl bg-accent/30")}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (e.dataTransfer?.files?.length) {
+                handleImageFiles(e.dataTransfer.files);
+              }
+            }}
+          >
             <Textarea
               value={input}
               disabled={sessionSwitching}
+              onPaste={(e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                const imageFiles: File[] = [];
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.startsWith('image/')) {
+                    const file = items[i].getAsFile();
+                    if (file) imageFiles.push(file);
+                  }
+                }
+                if (imageFiles.length > 0) {
+                  e.preventDefault();
+                  handleImageFiles(imageFiles);
+                }
+              }}
               onChange={(e) => {
                 setInput(e.target.value);
                 const el = e.target;
@@ -1447,7 +1952,9 @@ export function AgentChat({ ws }: AgentChatProps) {
                   e.preventDefault();
                   if (busy || connecting || sessionSwitchingRef.current) return;
                   if (!connected) {
-                    startAgent();
+                    if (canStart) {
+                      startAgent();
+                    }
                   } else {
                     sendMessage();
                   }
@@ -1469,7 +1976,7 @@ export function AgentChat({ ws }: AgentChatProps) {
               <Button
                 className="h-11 shrink-0 rounded-lg"
                 onClick={sendMessage}
-                disabled={!input.trim() || busy || sessionSwitching}
+                disabled={(!input.trim() && attachedImages.length === 0) || busy || sessionSwitching}
               >
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                 Send

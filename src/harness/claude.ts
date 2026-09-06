@@ -5,6 +5,7 @@ import {
   type Options,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { detectClaudeCliStatus } from "../agent/cliAvailability.js";
 import {
   type HarnessAdapter,
   type SessionHandle,
@@ -18,6 +19,7 @@ import type {
   AuthStatus,
   HarnessEvent,
   NormalizedUsage,
+  PatchKind,
   ResumeSpec,
   SerializedError,
   StartSpec,
@@ -44,6 +46,66 @@ function serializeError(err: unknown): SerializedError {
     };
   }
   return { message: String(err) };
+}
+
+function extractFileChangedEvent(toolName: string, input: any): HarnessEvent | null {
+  const name = toolName.replace(/^(mcp__nexusflow__|nexusflow__)/, "");
+  let kind: PatchKind | null = null;
+  if (name === "Write" || name === "FileWrite") {
+    kind = "write";
+  } else if (name === "Edit" || name === "MultiEdit" || name === "FileEdit") {
+    kind = "edit";
+  }
+  if (!kind) return null;
+
+  const paths: string[] = [];
+  if (typeof input === "object" && input !== null) {
+    if (typeof input.file_path === "string") {
+      paths.push(input.file_path);
+    } else if (typeof input.path === "string") {
+      paths.push(input.path);
+    } else if (typeof input.filePath === "string") {
+      paths.push(input.filePath);
+    }
+    if (Array.isArray(input.paths)) {
+      for (const p of input.paths) {
+        if (typeof p === "string" && !paths.includes(p)) paths.push(p);
+      }
+    }
+    if (Array.isArray(input.files)) {
+      for (const f of input.files) {
+        const p = typeof f === "string" ? f : f?.path || f?.file_path;
+        if (typeof p === "string" && !paths.includes(p)) paths.push(p);
+      }
+    }
+  }
+
+  return {
+    type: "file_changed",
+    kind,
+    paths,
+  };
+}
+
+function extractClaudeErrorMessage(msg: any, subtype?: string): string {
+  if (Array.isArray(msg?.errors) && msg.errors.length > 0) {
+    const errorStrings = msg.errors
+      .map((e: unknown) => (typeof e === "string" ? e : (e as any)?.message ?? String(e)))
+      .filter((s: string) => typeof s === "string" && s.trim().length > 0);
+    if (errorStrings.length > 0) {
+      return errorStrings.join("; ").slice(0, 2000);
+    }
+  }
+  if (typeof msg?.error === "string" && msg.error.trim().length > 0) {
+    return msg.error.trim().slice(0, 2000);
+  }
+  if (typeof msg?.error?.message === "string" && msg.error.message.trim().length > 0) {
+    return msg.error.message.trim().slice(0, 2000);
+  }
+  if (typeof msg?.result === "string" && msg.result.trim().length > 0) {
+    return msg.result.trim().slice(0, 2000);
+  }
+  return subtype ? `claude turn failed: ${subtype}` : "claude turn failed";
 }
 
 export class ClaudeCodeAdapter implements HarnessAdapter {
@@ -77,18 +139,26 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   async authStatus(_workspace?: WorkspaceRef, env?: Record<string, string>): Promise<AuthStatus> {
-    const hasApiKey = Boolean(env?.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY);
-    const hasOAuth = Boolean(
-      env?.CLAUDE_CODE_OAUTH_TOKEN ??
-      process.env.CLAUDE_CODE_OAUTH_TOKEN
-    );
+    const mergedEnv = env ? { ...process.env, ...env } : process.env;
+    const hasApiKey = Boolean(mergedEnv.ANTHROPIC_API_KEY);
+    const hasAuthToken = Boolean(mergedEnv.ANTHROPIC_AUTH_TOKEN);
+    const hasOAuth = Boolean(mergedEnv.CLAUDE_CODE_OAUTH_TOKEN);
+    const hasBedrock =
+      mergedEnv.CLAUDE_CODE_USE_BEDROCK === "1" ||
+      Boolean(mergedEnv.AWS_ACCESS_KEY_ID);
+    const hasVertex =
+      mergedEnv.CLAUDE_CODE_USE_VERTEX === "1" ||
+      Boolean(mergedEnv.GOOGLE_APPLICATION_CREDENTIALS);
+    const hasFoundry = mergedEnv.CLAUDE_CODE_USE_FOUNDRY === "1";
+
+    const hasOtherCredentials = hasOAuth || hasBedrock || hasVertex || hasFoundry;
 
     // Anthropic documented precedence: API key bills first when both exist
-    if (hasApiKey) {
+    if (hasApiKey || hasAuthToken) {
       return {
         configured: true,
         method: "api-key",
-        hasApiKeyFallback: hasOAuth,
+        hasApiKeyFallback: hasOtherCredentials,
       };
     }
     if (hasOAuth) {
@@ -98,10 +168,29 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         hasApiKeyFallback: false,
       };
     }
+    if (hasBedrock || hasVertex || hasFoundry) {
+      return {
+        configured: true,
+        method: "cloud-gateway",
+        hasApiKeyFallback: false,
+      };
+    }
+
+    const cliStatus = detectClaudeCliStatus({ env: mergedEnv });
+    if (cliStatus.usable) {
+      return {
+        configured: true,
+        method: "subscription-oauth",
+        hasApiKeyFallback: false,
+      };
+    }
+
     return {
       configured: false,
       method: "unauthenticated",
-      message: "No Anthropic API key or Claude Code OAuth token detected.",
+      message:
+        cliStatus.message ??
+        "No Anthropic API key, Claude Code credentials, or CLI login detected.",
     };
   }
 
@@ -365,6 +454,10 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
               tool: block.name,
               input: block.input,
             });
+            const fileChanged = extractFileChangedEvent(block.name, block.input);
+            if (fileChanged) {
+              push(fileChanged);
+            }
           }
         }
         break;
@@ -395,7 +488,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         } else {
           push({
             type: "turn_failed",
-            error: { message: `claude turn failed: ${msg.subtype}` },
+            error: { message: extractClaudeErrorMessage(msg, msg.subtype) },
             fatal: msg.subtype === "error_during_execution",
           });
         }

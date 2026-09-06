@@ -1,4 +1,4 @@
-import { AcpCliAdapter, type AcpTransportFactory } from './AcpCliAdapter.js';
+import { AcpCliAdapter, isSafeAcpSessionId, type AcpTransportFactory } from './AcpCliAdapter.js';
 import { findExecutable } from './cliAvailability.js';
 import { isValidSessionUuid } from './session.js';
 
@@ -23,7 +23,7 @@ export class CopilotAcpAdapter extends AcpCliAdapter {
       args: buildCopilotAcpArgs(),
       label: 'GitHub Copilot CLI',
       loginCommand: 'copilot login',
-      validateSessionId: isValidSessionUuid,
+      validateSessionId: (id) => isValidSessionUuid(id) || isSafeAcpSessionId(id),
       transportFactory,
     });
   }

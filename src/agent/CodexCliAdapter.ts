@@ -117,13 +117,15 @@ export function buildCodexTurnArgs(
   sessionId?: string,
   executionProfile: AgentExecutionProfile = 'review',
   model?: string,
+  effort?: string,
 ): string[] {
   const runConfig = codexRunConfig(executionProfile);
   const modelArgs = model ? ['--model', model] : [];
+  const effortArgs = effort ? ['-c', `model_reasoning_effort="${effort}"`, '-c', `reasoning_effort="${effort}"`] : [];
   if (sessionId) {
-    return ['exec', 'resume', '--json', ...modelArgs, ...runConfig, sessionId, '-'];
+    return ['exec', 'resume', '--json', '--skip-git-repo-check', ...modelArgs, ...effortArgs, ...runConfig, sessionId, '-'];
   }
-  return ['exec', '--json', '--color', 'never', ...modelArgs, ...runConfig, '-'];
+  return ['exec', '--json', '--color', 'never', '--skip-git-repo-check', ...modelArgs, ...effortArgs, ...runConfig, '-'];
 }
 
 export class CodexCliAdapter extends CliAdapterBase {
@@ -173,7 +175,12 @@ export class CodexCliAdapter extends CliAdapterBase {
     const sessionId = isFirstTurn
       ? (this.requestedSession?.resume ? this.requestedSession.id : undefined)
       : this.activeSessionId;
-    return buildCodexTurnArgs(sessionId, executionProfile, this.requestedSession?.model);
+    return buildCodexTurnArgs(
+      sessionId,
+      executionProfile,
+      this.requestedSession?.model,
+      this.requestedSession?.effort,
+    );
   }
 
   protected handleStdout(text: string): boolean {
