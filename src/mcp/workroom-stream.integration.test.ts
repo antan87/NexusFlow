@@ -8,6 +8,7 @@ import { findTool } from './tools.js';
 import { startHostedWorkroom, type HostedWorkroom } from '../workrooms/host.js';
 import { PinnedWorkroomClient } from '../workrooms/client.js';
 import { WorkroomAuthorizationError, WORKROOM_SCHEMA_VERSION } from '../workrooms/contracts.js';
+import { evaluateMilestoneStatus } from '../workrooms/milestones.js';
 import * as workroomManager from '../workrooms/manager.js';
 import * as workspace from '../core/workspace.js';
 import type { NexusFlowConfig } from '../types.js';
@@ -107,7 +108,7 @@ describe('Connected Workroom Stream Integration', () => {
       description: 'Stream integration test workspace',
       mode: 'worktree',
       repos: [],
-      assistants: ['antigravity', 'claude'],
+      assistants: ['antigravity', 'claude', 'codex'],
       workspacePath: workspaceDir,
       createdAt: new Date().toISOString(),
     });
@@ -122,16 +123,16 @@ describe('Connected Workroom Stream Integration', () => {
     expect(readTool).toBeDefined();
 
     // -------------------------------------------------------------------------
-    // TEST 1: Agent 1 (e.g. Antigravity) calls post_workroom_handoff with stepId
-    //         proposing completion to the live Workroom over HTTPS
+    // TEST 1: Agent (e.g. Codex) calls post_workroom_handoff claiming status: "completed"
+    //         Verify status is capped at "proposed" and remote proposal is completion_proposed
     // -------------------------------------------------------------------------
     const postResult = await postTool.handler(
       {
         message: 'Completed verification test suite with 100% pass rate.',
         stepId: 'step-verify',
         evidence: 'npm test passed: 14 test suites, 862 tests passed.',
-        status: 'proposed',
-        harness: 'antigravity',
+        status: 'completed', // Agent attempts to claim completed
+        harness: 'codex',
       },
       { config: mockConfig, workspacePath: workspaceDir },
     );
@@ -139,23 +140,30 @@ describe('Connected Workroom Stream Integration', () => {
     expect(postResult.isError).toBeFalsy();
     const postPayload = JSON.parse(postResult.content[0]!.text);
     expect(postPayload.status).toBe('posted');
+    expect(postPayload.effectiveMilestoneStatus).toBe('proposed'); // Capped!
+    expect(postPayload.author).toBe('agent');
     expect(postPayload.workroomSynced).toBe(true);
     expect(postPayload.localChatPersisted).toBe(true);
-    expect(postPayload.harness).toBe('antigravity');
+    expect(postPayload.harness).toBe('codex');
     expect(postPayload.stepProposal).toMatchObject({
       stepId: 'step-verify',
       status: 'completion_proposed',
       evidence: 'npm test passed: 14 test suites, 862 tests passed.',
     });
 
-    // Verify local chat ledger was written to disk
-    const chatContent = await fs.readFile(path.join(workspaceDir, '.nexusflow', 'chat.jsonl'), 'utf8');
-    expect(chatContent).toContain('Completed verification test suite');
-    expect(chatContent).toContain('antigravity');
+    // Verify local chat ledger was written to disk with capped status and author: agent
+    const chatLines = (await fs.readFile(path.join(workspaceDir, '.nexusflow', 'chat.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(chatLines).toHaveLength(1);
+    expect(chatLines[0].status).toBe('proposed');
+    expect(chatLines[0].author).toBe('agent');
+    expect(chatLines[0].stepProposal.status).toBe('completion_proposed');
 
     // -------------------------------------------------------------------------
     // TEST 2: Agent 2 (e.g. Claude) calls read_workroom_stream
-    //         verifies unified stream: local ledger + live remote state
+    //         Verifies proposal state remains unconfirmed (proposed) in evaluator
     // -------------------------------------------------------------------------
     const readResult = await readTool.handler(
       { limit: 10 },
@@ -172,17 +180,45 @@ describe('Connected Workroom Stream Integration', () => {
       status: 'completion_proposed',
       evidence: 'npm test passed: 14 test suites, 862 tests passed.',
     });
-    // Local messages are present and populated
     expect(readPayload.recentMessages).toHaveLength(1);
-    expect(readPayload.recentMessages[0].harness).toBe('antigravity');
-    expect(readPayload.recentMessages[0].stepId).toBe('step-verify');
-    // Remote activity was emitted
-    expect(readPayload.recentActivity.length).toBeGreaterThanOrEqual(1);
+    expect(readPayload.recentMessages[0].harness).toBe('codex');
+
+    // Milestone evaluator on read message evaluates to proposed, NOT completed
+    const evaluatedStatus = evaluateMilestoneStatus(readPayload.recentMessages[0]);
+    expect(evaluatedStatus).toBe('proposed');
 
     // -------------------------------------------------------------------------
-    // TEST 3: Authority Boundaries & Actionable Error Handling
+    // TEST 3: Trusted Human Confirmation via Workroom Authority
+    //         Human host transitions step to completed in Workroom
     // -------------------------------------------------------------------------
-    // 3a. Agent token attempting human-only operation (updateDocument or transitionWorkflowStep)
+    const stepRevision = postPayload.stepProposal.revision;
+    await host.service.transitionWorkflowStep(
+      host.hostToken,
+      'step-verify',
+      'completed',
+      stepRevision,
+    );
+
+    // Stream reader now reflects remote authoritative completion
+    const readAfterConfirm = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    const confirmedPayload = JSON.parse(readAfterConfirm.content[0]!.text);
+    const remoteStep = confirmedPayload.workflowProgress.steps.find((s: any) => s.stepId === 'step-verify');
+    expect(remoteStep.status).toBe('completed');
+
+    // Milestone evaluation with authoritative remote completed state evaluates to completed
+    const evaluatedConfirmed = evaluateMilestoneStatus({
+      ...readPayload.recentMessages[0],
+      stepProposal: remoteStep,
+    });
+    expect(evaluatedConfirmed).toBe('completed');
+
+    // -------------------------------------------------------------------------
+    // TEST 4: Authority Boundaries & Actionable Error Handling
+    // -------------------------------------------------------------------------
+    // 4a. Agent token attempting human-only operation (updateDocument or transitionWorkflowStep)
     //     must be hard-rejected with 401 WorkroomAuthorizationError by the server
     await expect(
       agentClient.updateDocument('handoff', 'Agent trying human edit', 0),
@@ -192,8 +228,8 @@ describe('Connected Workroom Stream Integration', () => {
       agentClient.transitionWorkflowStep('step-verify', 'completed', 1),
     ).rejects.toBeInstanceOf(WorkroomAuthorizationError);
 
-    // 3b. Agent posting handoff for a non-existent stepId receives an explicit syncError warning,
-    //     NOT silent success
+    // 4b. Agent posting handoff for a non-existent stepId receives an explicit syncError warning,
+    //     NOT silent success, and evaluates to failed
     const invalidStepResult = await postTool.handler(
       {
         message: 'Trying non-existent step.',
@@ -209,5 +245,8 @@ describe('Connected Workroom Stream Integration', () => {
     expect(invalidPayload.workroomSynced).toBe(false);
     expect(invalidPayload.localChatPersisted).toBe(true);
     expect(invalidPayload.syncError).toContain('Workflow step "does-not-exist" was not found');
+
+    // Evaluating the failed proposal entry returns failed
+    expect(evaluateMilestoneStatus(invalidPayload)).toBe('failed');
   }, 30_000);
 });

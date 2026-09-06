@@ -845,8 +845,9 @@ export const tools: NexusFlowTool[] = [
         evidence: { type: 'string', description: 'Optional verification evidence or test results for the proposed step.' },
         status: {
           type: 'string',
-          enum: ['proposed', 'in_progress', 'completed', 'failed'],
-          description: 'Milestone status being reported. Agent proposals default to "proposed".',
+          enum: ['proposed', 'in_progress', 'failed'],
+          description:
+            'Milestone status being reported. Agent reports are capped at proposed, in_progress, or failed. Terminal completed status requires trusted human confirmation.',
         },
         harness: { type: 'string', description: 'Optional originating harness name (e.g. "antigravity", "claude", "codex").' },
         ...workspaceIdProp,
@@ -865,22 +866,16 @@ export const tools: NexusFlowTool[] = [
         const status = args.status ? String(args.status).trim() : undefined;
         const harness = args.harness ? String(args.harness).trim() : 'agent';
 
-        // 1. Always append to local .nexusflow/chat.jsonl for durable offline record
-        const chatDir = path.join(ctx.workspacePath, '.nexusflow');
-        await fs.mkdir(chatDir, { recursive: true });
-        const chatPath = path.join(chatDir, 'chat.jsonl');
-        const entry = {
-          id: randomUUID(),
-          timestamp: new Date().toISOString(),
-          harness,
-          status: status || (stepId ? 'proposed' : undefined),
-          message,
-          ...(stepId ? { stepId } : {}),
-          ...(evidence ? { evidence } : {}),
-        };
-        await fs.appendFile(chatPath, JSON.stringify(entry) + '\n', 'utf8');
+        // Cap agent-originated reports at proposed/in-progress/failed:
+        // Agents can NEVER self-declare confirmed completion.
+        let effectiveStatus: string | undefined = status;
+        if (!effectiveStatus && stepId) {
+          effectiveStatus = 'proposed';
+        } else if (effectiveStatus === 'completed') {
+          effectiveStatus = 'proposed';
+        }
 
-        // 2. If connected to a Workroom and stepId is provided, propose workflow step completion
+        // 1. If connected to a Workroom and stepId is provided, propose workflow step completion
         let workroomSynced = false;
         let stepResult: any = null;
         let syncError: string | null = null;
@@ -916,10 +911,30 @@ export const tools: NexusFlowTool[] = [
           }
         }
 
+        // 2. Always append to local .nexusflow/chat.jsonl for durable offline record
+        const chatDir = path.join(ctx.workspacePath, '.nexusflow');
+        await fs.mkdir(chatDir, { recursive: true });
+        const chatPath = path.join(chatDir, 'chat.jsonl');
+        const entry = {
+          id: randomUUID(),
+          timestamp: new Date().toISOString(),
+          harness,
+          author: 'agent',
+          status: effectiveStatus,
+          message,
+          ...(stepId ? { stepId } : {}),
+          ...(evidence ? { evidence } : {}),
+          ...(stepResult ? { stepProposal: stepResult } : {}),
+          ...(syncError ? { syncError } : {}),
+        };
+        await fs.appendFile(chatPath, JSON.stringify(entry) + '\n', 'utf8');
+
         return json({
           status: syncError ? 'warning' : 'posted',
+          effectiveMilestoneStatus: effectiveStatus,
           timestamp: entry.timestamp,
           harness,
+          author: 'agent',
           workroomSynced,
           localChatPersisted: true,
           ...(syncError ? { syncError } : {}),

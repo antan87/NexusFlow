@@ -2095,6 +2095,8 @@ app.post('/api/workspace/:id/stream', async (c) => {
     const body = (await c.req.json()) as {
       message: string;
       harness?: string;
+      author?: string;
+      status?: string;
       stepId?: string;
       evidence?: string;
     };
@@ -2109,13 +2111,20 @@ app.post('/api/workspace/:id/stream', async (c) => {
     await fs.mkdir(chatDir, { recursive: true });
     const chatFile = path.join(chatDir, 'chat.jsonl');
 
+    const isHuman = body.author === 'human' || body.harness === 'developer' || body.harness === 'human';
+    const status = body.status ? String(body.status).trim() : (body.stepId ? 'proposed' : undefined);
+    const effectiveStatus = (!isHuman && status === 'completed') ? 'proposed' : status;
+
     const entry = {
       id: createHash('sha256').update(Date.now() + message).digest('hex').slice(0, 12),
       timestamp: new Date().toISOString(),
-      harness: body.harness || 'developer',
+      harness: body.harness || (isHuman ? 'developer' : 'agent'),
+      author: isHuman ? 'human' : 'agent',
+      status: effectiveStatus,
       message,
       ...(body.stepId ? { stepId: body.stepId } : {}),
       ...(body.evidence ? { evidence: body.evidence } : {}),
+      ...(isHuman && effectiveStatus === 'completed' ? { confirmedBy: 'human', confirmedAt: new Date().toISOString() } : {}),
     };
 
     await fs.appendFile(chatFile, JSON.stringify(entry) + '\n', 'utf-8');

@@ -130,7 +130,12 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
       if (msg.stepId) {
         const computedStatus = evaluateMilestoneStatus({
           status: msg.status,
+          author: msg.author,
+          harness: msg.harness,
+          confirmedBy: msg.confirmedBy,
+          confirmedAt: msg.confirmedAt,
           stepProposal: msg.stepProposal,
+          syncError: msg.syncError,
           message: msg.message,
           content: msg.content,
           evidence: msg.evidence,
@@ -152,9 +157,11 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
     if (!cleanMsg || postMutation.isPending) return;
 
     try {
+      const isHumanAuthor = selectedHarness === 'developer';
       await postMutation.mutateAsync({
         message: cleanMsg,
         harness: selectedHarness,
+        author: isHumanAuthor ? 'human' : 'agent',
         ...(stepId.trim() ? { stepId: stepId.trim(), status: milestoneStatus } : {}),
         ...(evidence.trim() ? { evidence: evidence.trim() } : {}),
       });

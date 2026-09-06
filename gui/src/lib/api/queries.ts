@@ -492,7 +492,14 @@ export function useWorkspaceStream(workspaceId: string | null, options: { refetc
 export function usePostWorkspaceStream(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { message: string; harness?: string; stepId?: string; evidence?: string }) =>
+    mutationFn: (body: {
+      message: string;
+      harness?: string;
+      author?: string;
+      status?: string;
+      stepId?: string;
+      evidence?: string;
+    }) =>
       apiFetch<{ success: boolean; entry: WorkspaceStreamMessage }>(
         `/api/workspace/${encodeURIComponent(workspaceId)}/stream`,
         {
