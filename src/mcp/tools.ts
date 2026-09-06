@@ -29,7 +29,6 @@ import { finishWorkspace } from '../core/finish.js';
 import {
   addWorkspaceKnowledge,
   addBaseKnowledge,
-  promoteKnowledge,
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
@@ -401,12 +400,15 @@ export const tools: NexusFlowTool[] = [
       try {
         const logDir = resolveWorkspaceFilePathSync(ctx.workspacePath, 'logsDir').path;
         const logFilePath = path.join(logDir, `${serviceName}.log`);
+        let content: string;
         try {
-          await fs.access(logFilePath);
-        } catch {
-          return errorResult(`Log file for service "${serviceName}" not found. Ensure the service is running via "${CLI_NAME} start".`);
+          content = await fs.readFile(logFilePath, 'utf8');
+        } catch (err: any) {
+          if (err?.code === 'ENOENT') {
+            return errorResult(`Log file for service "${serviceName}" not found. Ensure the service is running via "${CLI_NAME} start".`);
+          }
+          throw err;
         }
-        const content = await fs.readFile(logFilePath, 'utf8');
         const tail = content.split('\n').slice(-lines).join('\n');
         return text(tail || '(empty log)');
       } catch (error: any) {

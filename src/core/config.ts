@@ -159,7 +159,12 @@ export async function loadConfig(options: { quiet?: boolean } = {}): Promise<Nex
 export async function saveConfig(config: NexusFlowConfig): Promise<void> {
   await ensureConfigDir();
 
-  const configPath = path.join(getConfigDir(), CONFIG_FILE_NAME);
+  const configDir = path.resolve(getConfigDir());
+  const configPath = path.resolve(configDir, CONFIG_FILE_NAME);
+  if (path.dirname(configPath) !== configDir) {
+    throw new Error('Invalid config path destination');
+  }
+
   const data = JSON.stringify(config, null, 2) + '\n';
   await fs.writeFile(configPath, data, 'utf-8');
 

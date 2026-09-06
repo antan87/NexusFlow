@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './workflows.js';
 import { acquireLock } from '../core/locks.js';

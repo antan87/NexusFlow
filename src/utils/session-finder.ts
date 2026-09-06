@@ -629,23 +629,28 @@ export function clearSessionFinderCache(): void {
 async function getAntigravityWorkspaces(agDir: string): Promise<string[]> {
   const agHistoryPath = path.join(agDir, 'history.jsonl');
   try {
-    const stat = await fs.stat(agHistoryPath);
-    if (agHistoryCache && agHistoryCache.mtime === stat.mtimeMs) {
-      return agHistoryCache.workspaces;
+    const handle = await fs.open(agHistoryPath, 'r');
+    try {
+      const stat = await handle.stat();
+      if (agHistoryCache && agHistoryCache.mtime === stat.mtimeMs) {
+        return agHistoryCache.workspaces;
+      }
+      const historyContent = await handle.readFile({ encoding: 'utf-8' });
+      const lines = historyContent.split('\n').filter(Boolean);
+      const workspaces: string[] = [];
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.conversationId && typeof entry.workspace === 'string') {
+            workspaces.push(entry.workspace);
+          }
+        } catch {}
+      }
+      agHistoryCache = { mtime: stat.mtimeMs, workspaces };
+      return workspaces;
+    } finally {
+      await handle.close();
     }
-    const historyContent = await fs.readFile(agHistoryPath, 'utf-8');
-    const lines = historyContent.split('\n').filter(Boolean);
-    const workspaces: string[] = [];
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.conversationId && typeof entry.workspace === 'string') {
-          workspaces.push(entry.workspace);
-        }
-      } catch {}
-    }
-    agHistoryCache = { mtime: stat.mtimeMs, workspaces };
-    return workspaces;
   } catch {
     agHistoryCache = null;
     return [];

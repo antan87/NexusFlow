@@ -5,7 +5,7 @@
  */
 
 import chalk from 'chalk';
-import { exec, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
 import * as net from 'node:net';

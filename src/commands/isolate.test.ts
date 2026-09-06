@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isolateCommand } from './isolate.js';
 import * as workspace from '../core/workspace.js';
 import * as resolveWs from '../utils/resolve-workspace.js';
-import * as inquirer from '@inquirer/prompts';
 
 vi.mock('../core/workspace.js');
 vi.mock('../utils/resolve-workspace.js');

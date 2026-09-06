@@ -6,8 +6,7 @@
  */
 
 import chalk from 'chalk';
-import { confirm, input, checkbox, select } from '@inquirer/prompts';
-import * as path from 'node:path';
+import { confirm, checkbox, select } from '@inquirer/prompts';
 
 import { loadFeatureConfig, deleteWorkspace } from '../core/workspace.js';
 import { stopServices } from '../orchestration/runner.js';
