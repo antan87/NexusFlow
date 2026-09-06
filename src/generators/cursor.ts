@@ -8,9 +8,10 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import type { WorkspaceContext } from '../types.js';
 import { GENERATED_SNAPSHOT_HEADER, GENERATED_VIEW_HEADER } from '../core/generation-lock.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
- * Generates a `.cursor/rules/nexusflow.mdc` file at the workspace root.
+ * Generates a `.cursor/rules/contextspace.mdc` file at the workspace root.
  *
  * Cursor reads `.mdc` rule files from `.cursor/rules/` for project-wide
  * instructions. The YAML frontmatter controls when the rule is applied.
@@ -26,7 +27,7 @@ export async function generateCursorConfig(
     .replace(`${GENERATED_SNAPSHOT_HEADER}\n\n`, '');
 
   const content = `---
-description: "NexusFlow workspace context for multi-repo feature development"
+description: "${BRAND_NAME} workspace context for multi-repo feature development"
 alwaysApply: true
 ---
 
@@ -35,13 +36,17 @@ ${GENERATED_VIEW_HEADER}
 ${canonical}`;
 
   const rulesDir = path.join(workspacePath, '.cursor', 'rules');
-  const filePath = path.join(rulesDir, 'nexusflow.mdc');
+  const filePath = path.join(rulesDir, 'contextspace.mdc');
+  const legacyFilePath = path.join(rulesDir, 'nexusflow.mdc');
 
   try {
     await fse.ensureDir(rulesDir);
     await fse.writeFile(filePath, content, 'utf-8');
+    if (await fse.pathExists(legacyFilePath)) {
+      await fse.remove(legacyFilePath).catch(() => {});
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to write nexusflow.mdc: ${message}`);
+    throw new Error(`Failed to write contextspace.mdc: ${message}`);
   }
 }

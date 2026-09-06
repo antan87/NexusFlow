@@ -1876,7 +1876,7 @@ describe('Server API Endpoints Unit Tests', () => {
           });
           expect(reclaimed.status).toBe(200);
           const humanCookie = reclaimed.headers.get('set-cookie')?.split(';', 1)[0];
-          expect(humanCookie).toContain('nexusflow_workroom_human=');
+          expect(humanCookie).toContain('contextspace_workroom_human=');
           const unlocked = await app.request('/api/workrooms/session', {
             headers: { ...headers, Cookie: `${bootstrapCookie}; ${humanCookie}` },
           });
@@ -1895,7 +1895,7 @@ describe('Server API Endpoints Unit Tests', () => {
         expect(bootstrapResponse.status).toBe(200);
         const bootstrap = await bootstrapResponse.json() as { token: string };
         const cookie = bootstrapResponse.headers.get('set-cookie')?.split(';', 1)[0];
-        expect(cookie).toContain('nexusflow_workroom_bootstrap=');
+        expect(cookie).toContain('contextspace_workroom_bootstrap=');
 
         const response = await app.request('/api/workrooms/stop', {
           method: 'POST',

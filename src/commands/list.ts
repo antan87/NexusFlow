@@ -7,6 +7,7 @@ import chalk from 'chalk';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces } from '../core/workspace.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 /**
  * Lists all existing workspaces, showing feature name, repos, and status.
@@ -23,11 +24,11 @@ export async function listCommand(options?: { json?: boolean }): Promise<void> {
   if (workspaces.length === 0) {
     console.log(chalk.yellow('\nNo workspaces found.'));
     console.log(chalk.dim(`  Workspaces directory: ${config.workspacesDir}`));
-    console.log(chalk.dim('  Run "nexusflow create" to create your first workspace.\n'));
+    console.log(chalk.dim(`  Run "${CLI_NAME} create" to create your first workspace.\n`));
     return;
   }
 
-  console.log(chalk.bold.cyan(`\n📂 NexusFlow Workspaces (${workspaces.length})\n`));
+  console.log(chalk.bold.cyan(`\n📂 ${BRAND_NAME} Workspaces (${workspaces.length})\n`));
 
   for (const ws of workspaces) {
     const repoCount = ws.repos.length;

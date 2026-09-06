@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Single source of truth for the NexusFlow version.
+// Single source of truth for the ContextSpace version.
 //
 // The version in the root package.json is authoritative. This script propagates
 // it to every other version-bearing file so all release channels (npm, VS Code

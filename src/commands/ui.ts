@@ -12,6 +12,7 @@ import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
+import { BRAND_NAME, CLI_NAME, resolveGlobalDurablePath } from '../core/constants.js';
 
 export interface DaemonState {
   pid: number;
@@ -21,7 +22,7 @@ export interface DaemonState {
 
 export async function getDaemonState(): Promise<DaemonState | null> {
   try {
-    const filePath = path.join(getConfigDir(), 'daemon.json');
+    const filePath = resolveGlobalDurablePath('daemon.json');
     const content = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(content);
   } catch {
@@ -115,7 +116,7 @@ export async function findAvailablePort(startPort: number, attempts = 100): Prom
 export async function uiCommand(options: { port?: string; daemon?: boolean; serverOnly?: boolean; strictPort?: boolean; open?: boolean }): Promise<void> {
   const requestedPort = options.port ? parseInt(options.port, 10) : 3000;
 
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Web Dashboard\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Web Dashboard\n`));
 
   let targetPort = requestedPort;
   const isRequestedPortActive = await isPortActive(requestedPort);
@@ -168,7 +169,7 @@ export async function uiCommand(options: { port?: string; daemon?: boolean; serv
         console.log(chalk.dim('  Opening browser...'));
         openBrowser(url);
       } else {
-        console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or 'nexusflow dashboard' to open it.`));
+        console.log(chalk.dim(`  Dashboard available at ${url} — use the desktop app or '${CLI_NAME} dashboard' to open it.`));
       }
       return;
     } catch (err) {

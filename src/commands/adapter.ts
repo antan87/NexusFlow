@@ -10,13 +10,14 @@
  */
 
 import chalk from 'chalk';
+import type { StorageAdapterMeta } from '../core/ports/storage.js';
 import { input, confirm } from '@inquirer/prompts';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { listStorageProviders, getStorageProvider } from '../core/adapters/registry.js';
 import { loadConfig, saveConfig } from '../core/config.js';
-import type { StorageAdapterMeta, AdapterConfigField } from '../core/ports/storage.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_CONFIG_DIR_NAME, GITHUB_REPO_URL, ENGINE_NPM_PACKAGE } from '../core/constants.js';
 
 /**
  * Lists all registered storage adapters in a formatted table.
@@ -187,7 +188,7 @@ export async function adapterInitCommand(adapterName: string): Promise<void> {
 
   // package.json
   const pkg = {
-    name: `nexusflow-${adapterName}`,
+    name: `${CLI_NAME}-${adapterName}`,
     version: '1.0.0',
     type: 'module',
     main: 'dist/index.js',
@@ -196,7 +197,7 @@ export async function adapterInitCommand(adapterName: string): Promise<void> {
       dev: 'tsc --watch',
     },
     peerDependencies: {
-      '@mrpatronz/nexusflow': '>=0.2.0',
+      [ENGINE_NPM_PACKAGE]: '>=0.2.0',
     },
     devDependencies: {
       typescript: '^5.0.0',
@@ -222,20 +223,20 @@ export async function adapterInitCommand(adapterName: string): Promise<void> {
 
   // src/index.ts — starter adapter
   const indexContent = `/**
- * NexusFlow Storage Adapter: ${adapterName}
+ * ${BRAND_NAME} Storage Adapter: ${adapterName}
  *
  * Implement the StoragePort interface to create a custom storage backend.
- * See: https://github.com/antan87/NexusFlow#adapters
+ * See: ${GITHUB_REPO_URL}#adapters
  */
 
-import type { StoragePort, StorageAdapterMeta, NexusFlowPlugin } from '@mrpatronz/nexusflow';
-// If the above import fails, use relative path to nexusflow's type definitions.
+import type { StoragePort, StorageAdapterMeta, Plugin } from '${ENGINE_NPM_PACKAGE}';
+// If the above import fails, use relative path to ${CLI_NAME}'s type definitions.
 
 class ${toPascalCase(adapterName)}Adapter implements StoragePort {
   readonly meta: StorageAdapterMeta = {
     name: '${adapterName}',
     displayName: '${toTitleCase(adapterName)}',
-    description: 'A custom NexusFlow storage adapter.',
+    description: 'A custom ${BRAND_NAME} storage adapter.',
     configFields: [
       // Add your configuration fields here, e.g.:
       // { key: 'endpoint', label: 'API Endpoint', type: 'string', required: true, description: 'URL of the storage API' },
@@ -283,8 +284,8 @@ class ${toPascalCase(adapterName)}Adapter implements StoragePort {
   }
 }
 
-const plugin: NexusFlowPlugin = {
-  name: 'nexusflow-${adapterName}',
+const plugin: Plugin = {
+  name: '${CLI_NAME}-${adapterName}',
   version: '1.0.0',
   register(context) {
     context.registerStorageProvider('${adapterName}', new ${toPascalCase(adapterName)}Adapter());
@@ -296,9 +297,9 @@ export default plugin;
   await fs.writeFile(path.join(targetDir, 'src', 'index.ts'), indexContent, 'utf8');
 
   // README.md
-  const readme = `# nexusflow-${adapterName}
+  const readme = `# ${BRAND_NAME} ${adapterName} Storage Adapter
 
-A custom storage adapter for [NexusFlow](https://github.com/antan87/NexusFlow).
+A custom storage adapter for [${BRAND_NAME}](${GITHUB_REPO_URL}).
 
 ## Development
 
@@ -309,11 +310,11 @@ npm run build
 
 ## Usage
 
-Add to your NexusFlow config (\`~/.nexusflow/config.json\`):
+Add to your ${BRAND_NAME} config (\`~/${PRIMARY_CONFIG_DIR_NAME}/config.json\`):
 
 \`\`\`json
 {
-  "plugins": ["./path/to/nexusflow-${adapterName}/dist/index.js"],
+  "plugins": ["./path/to/${CLI_NAME}-${adapterName}/dist/index.js"],
   "storageProvider": "${adapterName}"
 }
 \`\`\`
@@ -321,7 +322,7 @@ Add to your NexusFlow config (\`~/.nexusflow/config.json\`):
 Or activate via CLI:
 
 \`\`\`bash
-nexusflow adapter use ${adapterName}
+${CLI_NAME} adapter use ${adapterName}
 \`\`\`
 `;
   await fs.writeFile(path.join(targetDir, 'README.md'), readme, 'utf8');

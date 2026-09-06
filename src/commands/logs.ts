@@ -10,6 +10,7 @@ import { select } from '@inquirer/prompts';
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { showLogs, getServiceStatus } from '../orchestration/index.js';
+import { BRAND_NAME, resolveWorkspaceFilePathSync } from '../core/constants.js';
 
 /**
  * Shows logs and status for services in a workspace.
@@ -18,7 +19,7 @@ import { showLogs, getServiceStatus } from '../orchestration/index.js';
  * @param lines        - Number of log lines to show per service.
  */
 export async function logsCommand(workspaceArg?: string, lines: number = 30): Promise<void> {
-  console.log(chalk.bold.cyan('\n📋 NexusFlow — Service Logs\n'));
+  console.log(chalk.bold.cyan(`\n📋 ${BRAND_NAME} — Service Logs\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
@@ -28,7 +29,7 @@ export async function logsCommand(workspaceArg?: string, lines: number = 30): Pr
   await getServiceStatus(workspacePath);
 
   // Show logs
-  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  const logDir = resolveWorkspaceFilePathSync(workspacePath, 'logsDir').path;
   await showLogs(workspacePath, logDir, lines);
 
   console.log();

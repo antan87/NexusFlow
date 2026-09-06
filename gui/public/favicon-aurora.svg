@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs><linearGradient id="brand" x1="30" y1="20" x2="160" y2="180" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#5eead4"/>
+    <stop offset="50%" stop-color="#22d3ee"/>
+    <stop offset="100%" stop-color="#818cf8"/>
+  </linearGradient></defs>
+  <path d="M 178.8 63.3 A 87 87 0 1 0 178.8 136.7 L 141.7 119.4 A 46 46 0 1 1 141.7 80.6 Z" fill="url(#brand)"/>
+</svg>

@@ -21,6 +21,7 @@ import {
   type KnowledgeEntryType,
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 const VALID_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption', 'question'];
 /** Types that exist in the per-repo base knowledge file. */
@@ -136,7 +137,7 @@ function sliceSection(content: string, name: string): string | null {
  * file, or (with `--repo`) to a repo's persistent base knowledge.
  */
 export async function knowledgeAddCommand(workspaceArg: string | undefined, options: AddOptions): Promise<void> {
-  console.log(chalk.bold.cyan('\n🧠 NexusFlow — Add Knowledge\n'));
+  console.log(chalk.bold.cyan(`\n🧠 ${BRAND_NAME} — Add Knowledge\n`));
 
   const type = parseType(options.type);
   if (!type) return;
@@ -255,7 +256,7 @@ export async function knowledgePromoteCommand(
   workspaceArg: string | undefined,
   options: PromoteOptions,
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n🧠 NexusFlow — Promote Knowledge to Base\n'));
+  console.log(chalk.bold.cyan(`\n🧠 ${BRAND_NAME} — Promote Knowledge to Base\n`));
 
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:');
   if (!workspacePath) return;

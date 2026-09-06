@@ -7,7 +7,7 @@ criteria are met.
 
 ## Capability boundary
 
-This is an advisory coordination strategy. NexusFlow stores and injects these
+This is an advisory coordination strategy. ContextSpace stores and injects these
 instructions but does not itself launch roles, enforce model, cost tier, or
 reasoning-effort selection, guarantee provider pricing/capability, create a
 fresh reviewer context, track acceptance, or wait for provider rate-limit

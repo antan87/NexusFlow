@@ -8,6 +8,7 @@ import { ClaudeSdkAdapter } from './ClaudeSdkAdapter.js';
 import { CodexSdkAdapter } from './CodexSdkAdapter.js';
 import { acquireLock, type ReleaseLock } from '../core/locks.js';
 import { checkGenerationLock } from '../core/generation-lock.js';
+import { resolveWorkspaceFilePath } from '../core/constants.js';
 
 export interface TeamAgentSpec {
   id: string;
@@ -135,7 +136,8 @@ export class MultiAgentOrchestrator extends EventEmitter {
     let releaseMutationLock: ReleaseLock | null = null;
     const isSharedWorktree = specs.every(s => !s.worktreePath || s.worktreePath === this.workspacePath);
     if (isSharedWorktree) {
-      const lockPath = path.join(this.workspacePath, '.nexusflow-mutation.lock');
+      const lockRes = await resolveWorkspaceFilePath(this.workspacePath, 'mutationLock');
+      const lockPath = lockRes.path;
       try {
         releaseMutationLock = await acquireLock(lockPath, {
           staleMs: 60_000,

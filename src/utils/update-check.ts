@@ -11,6 +11,15 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 
 import { loadConfig, saveConfig } from '../core/config.js';
+import {
+  GITHUB_RELEASE_API_URL,
+  GITHUB_RELEASE_PAGE_URL,
+  GITHUB_USER_AGENT,
+  ENGINE_ID,
+  ENGINE_NAME,
+  ENGINE_COMMAND,
+  ENGINE_NPM_PACKAGE,
+} from '../core/constants.js';
 
 export interface UpdateStatus {
   currentVersion: string;
@@ -34,7 +43,7 @@ interface GitHubRelease {
   assets: GitHubAsset[];
 }
 
-const RELEASE_PAGE_URL = 'https://github.com/antan87/NexusFlow/releases/latest';
+const RELEASE_PAGE_URL = GITHUB_RELEASE_PAGE_URL;
 
 /**
  * Resolves the current package version by searching for package.json upward
@@ -90,8 +99,8 @@ export async function checkForUpdates(force = false): Promise<UpdateStatus | nul
   }
 
   try {
-    const response = await fetch('https://api.github.com/repos/antan87/NexusFlow/releases/latest', {
-      headers: { 'User-Agent': 'NexusFlow-Updater' },
+    const response = await fetch(GITHUB_RELEASE_API_URL, {
+      headers: { 'User-Agent': GITHUB_USER_AGENT },
       signal: AbortSignal.timeout(4000),
     });
 
@@ -184,10 +193,10 @@ export function printUpdateBanner(status: UpdateStatus): void {
   if (!status.updateAvailable) return;
 
   const msg = `Update available: ${chalk.red(status.currentVersion)} → ${chalk.green(status.latestVersion)}`;
-  const runMsg = `Run ${chalk.cyan('npm install -g @mrpatronz/nexusflow')} to update!`;
+  const runMsg = `Run ${chalk.cyan(`npm install -g ${ENGINE_NPM_PACKAGE}`)} to update!`;
 
   const cleanMsg = `Update available: ${status.currentVersion} → ${status.latestVersion}`;
-  const cleanRunMsg = `Run npm install -g @mrpatronz/nexusflow to update!`;
+  const cleanRunMsg = `Run npm install -g ${ENGINE_NPM_PACKAGE} to update!`;
   const width = Math.max(cleanMsg.length, cleanRunMsg.length) + 2;
 
   const padMsg = ' '.repeat(width - cleanMsg.length);
@@ -226,11 +235,11 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
   const currentVersion = getCurrentVersion();
   const tools = [
     {
-      id: 'nexusflow',
-      name: 'NexusFlow Engine',
-      command: 'nexusflow',
-      npmPackage: '@mrpatronz/nexusflow',
-      updateCmd: 'npm install -g @mrpatronz/nexusflow',
+      id: ENGINE_ID,
+      name: ENGINE_NAME,
+      command: ENGINE_COMMAND,
+      npmPackage: ENGINE_NPM_PACKAGE,
+      updateCmd: `npm install -g ${ENGINE_NPM_PACKAGE}`,
       getCurrent: async () => currentVersion,
     },
     {

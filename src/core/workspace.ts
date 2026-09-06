@@ -18,9 +18,10 @@ import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import { loadConfig } from './config.js';
 import { deleteWorkspaceFiles } from './storage.js';
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
 
 /** Name of the per-workspace manifest file. */
-const MANIFEST_FILE = 'nexusflow.json';
+const MANIFEST_FILE = PRIMARY_MANIFEST_FILE;
 
 /**
  * Derives the workspace directory path for a given branch name.
@@ -138,6 +139,11 @@ async function scaffoldWorkspaceDir(
     // analysis/runtime state from the workspace artifact repository.
     const gitignoreLines = [
       ...(!inPlace ? repos.map((repo) => `/${repo.name}/`) : []),
+      '/.contextspace-analysis-cache.json',
+      '/.contextspace/workspace-state.json',
+      '/.contextspace/*.lock',
+      '/.contextspace/resource-staging-*',
+      '/.contextspace/logs/',
       '/.nexusflow-analysis-cache.json',
       '/.nexusflow/workspace-state.json',
       '/.nexusflow/*.lock',
@@ -196,9 +202,9 @@ async function scaffoldWorkspaceDir(
     await fs.mkdir(cursorDir, { recursive: true });
     const cursorMcp = {
       "mcpServers": {
-        "nexusflow": {
+        [BRAND_CONFIG.mcp.serverName]: {
           "command": "npx",
-          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run"]
+          "args": ["-y", BRAND_CONFIG.mcp.packageName, "mcp", "run"]
         }
       }
     };
@@ -323,9 +329,9 @@ export async function listWorkspaces(
       return;
     }
 
-    // Check if current directory contains a nexusflow.json manifest
+    // Check if current directory contains a contextspace.json or legacy nexusflow.json manifest
     const hasManifest = entries.some(
-      (e) => e.isFile() && e.name === MANIFEST_FILE,
+      (e) => e.isFile() && (e.name === PRIMARY_MANIFEST_FILE || e.name === LEGACY_MANIFEST_FILE),
     );
     if (hasManifest) {
       const loaded = await loadFeatureConfig(dir);
@@ -348,7 +354,7 @@ export async function listWorkspaces(
 }
 
 /**
- * Saves a {@link Feature} as `nexusflow.json` inside the given workspace.
+ * Saves a {@link Feature} as `contextspace.json` inside the given workspace.
  *
  * @param workspacePath - Absolute path to the workspace directory.
  * @param feature       - The feature definition to persist.
@@ -367,8 +373,7 @@ export async function saveFeatureConfig(
 }
 
 /**
- * Loads a {@link Feature} from the `nexusflow.json` manifest inside a
- * workspace directory.
+ * Loads a {@link Feature} from the manifest inside a workspace directory.
  *
  * @param workspacePath - Absolute path to the workspace directory.
  * @returns The loaded feature, or `null` if the manifest doesn't exist or is
@@ -384,9 +389,15 @@ export async function loadFeatureConfig(
 
   // 2. Legacy fallback: manifests written into the central vault before the
   //    manifest was pinned to the workspace root.
-  const vaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, MANIFEST_FILE);
+  const vaultManifest = path.join(os.homedir(), '.contextspace', 'vault', featureId, MANIFEST_FILE);
   try {
     const raw = await fs.readFile(vaultManifest, 'utf-8');
+    return normalizeFeature(JSON.parse(raw) as Feature);
+  } catch {}
+
+  const legacyVaultManifest = path.join(os.homedir(), '.nexusflow', 'vault', featureId, LEGACY_MANIFEST_FILE);
+  try {
+    const raw = await fs.readFile(legacyVaultManifest, 'utf-8');
     return normalizeFeature(JSON.parse(raw) as Feature);
   } catch {}
 
@@ -407,9 +418,20 @@ export async function loadFeatureConfig(
 export async function loadWorkspaceManifest(
   workspacePath: string,
 ): Promise<Feature | null> {
+  let manifestPath = path.join(workspacePath, PRIMARY_MANIFEST_FILE);
+  let raw: string | null = null;
   try {
-    const manifestPath = path.join(workspacePath, MANIFEST_FILE);
-    const raw = await fs.readFile(manifestPath, 'utf-8');
+    raw = await fs.readFile(manifestPath, 'utf-8');
+  } catch {
+    manifestPath = path.join(workspacePath, LEGACY_MANIFEST_FILE);
+    try {
+      raw = await fs.readFile(manifestPath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  try {
     const feature = JSON.parse(raw) as Feature;
     if (!feature.createdAt) {
       try {
@@ -426,7 +448,7 @@ export async function loadWorkspaceManifest(
 }
 
 /**
- * Traverses up parent directories to find a directory containing `nexusflow.json`.
+ * Traverses up parent directories to find a directory containing `contextspace.json` or `nexusflow.json`.
  *
  * @param startPath - Path to start searching from.
  * @returns Absolute path to the workspace root directory, or null if not found.
@@ -434,16 +456,22 @@ export async function loadWorkspaceManifest(
 export async function findWorkspaceRoot(startPath: string): Promise<string | null> {
   let current = path.resolve(startPath);
   while (true) {
-    const manifestPath = path.join(current, MANIFEST_FILE);
+    const primary = path.join(current, PRIMARY_MANIFEST_FILE);
+    const legacy = path.join(current, LEGACY_MANIFEST_FILE);
     try {
-      await fs.access(manifestPath);
+      await fs.access(primary);
       return current;
     } catch {
-      const parent = path.dirname(current);
-      if (parent === current) {
-        break; // Reached root directory
+      try {
+        await fs.access(legacy);
+        return current;
+      } catch {
+        const parent = path.dirname(current);
+        if (parent === current) {
+          break; // Reached root directory
+        }
+        current = parent;
       }
-      current = parent;
     }
   }
   return null;
@@ -725,10 +753,15 @@ export async function excludeNexusFlowFiles(workspacePath: string, feature: Feat
     'CLAUDE.md',
     'AGENTS.md',
     'WORKSPACE.md',
-    'nexusflow-knowledge.md',
-    'nexusflow-plan.md',
+    BRAND_CONFIG.files.knowledge.primary,
+    BRAND_CONFIG.files.knowledge.legacy,
+    BRAND_CONFIG.files.plan.primary,
+    BRAND_CONFIG.files.plan.legacy,
+    'contextspace-conventions-*.md',
     'nexusflow-conventions-*.md',
+    'contextspace-map-*.md',
     'nexusflow-map-*.md',
+    'contextspace-diff-context.md',
     'nexusflow-diff-context.md',
     '.cursor/rules/',
     '.vscode/settings.json'

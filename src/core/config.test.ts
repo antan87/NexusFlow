@@ -21,7 +21,7 @@ describe('config core module', () => {
   describe('getConfigDir', () => {
     it('should return path based on home directory', () => {
       const dir = getConfigDir();
-      expect(dir).toContain('.nexusflow');
+      expect(dir).toContain('.contextspace');
     });
   });
 
@@ -39,7 +39,7 @@ describe('config core module', () => {
 
       await ensureConfigDir();
 
-      expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining('.nexusflow'), { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining('.contextspace'), { recursive: true });
     });
   });
 

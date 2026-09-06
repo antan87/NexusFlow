@@ -13,6 +13,7 @@ import { detectEditors } from '../utils/detect-editors.js';
 import { openInEditor } from '../utils/open-editor.js';
 import { promptSelectEditor } from '../utils/prompts.js';
 import { findSessions } from '../utils/session-finder.js';
+import { CLI_NAME } from '../core/constants.js';
 
 /**
  * Lets the user pick an existing workspace and open it in an editor.
@@ -23,7 +24,7 @@ export async function openCommand(): Promise<void> {
 
   if (workspaces.length === 0) {
     console.log(chalk.yellow('\nNo workspaces found.'));
-    console.log(chalk.dim('  Run "nexusflow create" to create your first workspace.\n'));
+    console.log(chalk.dim(`  Run "${CLI_NAME} create" to create your first workspace.\n`));
     return;
   }
 

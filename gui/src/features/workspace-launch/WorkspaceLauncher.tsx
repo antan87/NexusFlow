@@ -45,6 +45,7 @@ import { useWorkspaceLaunchTargets, useWorkspaceRecentSessions } from '../../lib
 import { useConfig } from '../../lib/api/queries.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { cn } from '../../lib/utils.js';
+import { EXTENSION_NAME } from '../../brand.js';
 import type { AISession, WorkspaceLaunchIcon, WorkspaceLaunchTarget } from '../../types.js';
 
 const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -364,7 +365,7 @@ export function WorkspaceLauncher({
                   <LauncherIcon icon="vscode" />
                   <span>
                     <span className="block font-medium">Current VS Code window</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Open through the installed NexusFlow extension.</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Open through the installed {EXTENSION_NAME} extension.</span>
                   </span>
                 </button>
               </section>

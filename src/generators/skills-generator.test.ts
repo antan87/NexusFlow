@@ -7,6 +7,7 @@ import fse from 'fs-extra';
 import { generateSkills } from './skills-generator.js';
 import { saveWorkspaceSkillsConfig } from '../utils/skills-catalog.js';
 import type { WorkspaceContext, ProjectAnalysis, AIAssistant } from '../types.js';
+import { PRIMARY_CONFIG_DIR_NAME } from '../core/constants.js';
 
 describe('skills-generator', () => {
   let tempWorkspace: string;
@@ -72,7 +73,7 @@ describe('skills-generator', () => {
     // No lossy rules/instructions copies
     expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'instructions', 'pr-review-toolkit.instructions.md'))).toBe(false);
-    expect(await fse.pathExists(path.join(tempWorkspace, '.nexusflow', 'resources.lock.json'))).toBe(true);
+    expect(await fse.pathExists(path.join(tempWorkspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json'))).toBe(true);
   });
 
   it('respects empty enabledSkills array and deploys nothing when all are disabled', async () => {

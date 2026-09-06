@@ -2,6 +2,7 @@ import chalk from 'chalk';
 
 import { getWorkspaceProgress } from '../core/progress.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 function yesNo(value: boolean | undefined): string {
   if (value === undefined) return '—';
@@ -17,7 +18,7 @@ export async function progressCommand(workspaceArg?: string, options: { json?: b
     return;
   }
 
-  console.log(chalk.bold.cyan('\n📈 NexusFlow — Live Implementation Progress\n'));
+  console.log(chalk.bold.cyan(`\n📈 ${BRAND_NAME} — Live Implementation Progress\n`));
   console.log('Repo\tBranch\tExpected\tAligned\tClean\tPushed\tPR');
   for (const repo of report.repos) {
     console.log([

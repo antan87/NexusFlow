@@ -32,10 +32,10 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 surface-card">
+    <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
       <header className="flex justify-between items-center mb-4">
         <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (nexusflow-knowledge.md)
+          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (contextspace-knowledge.md)
         </h4>
         <div className="flex items-center gap-2">
           {!isEditingKnowledge && knowledgeContent && (
@@ -107,11 +107,11 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
           No knowledge file generated yet.
         </div>
       ) : viewMode === 'preview' ? (
-        <div className="max-h-[500px] overflow-auto rounded-md border border-border/70 bg-muted/20 p-4">
+        <div className="max-h-[550px] overflow-auto rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4">
           <ChatMarkdown content={knowledgeContent} />
         </div>
       ) : (
-        <div className="max-h-[500px] overflow-auto whitespace-pre-wrap rounded-md border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+        <div className="max-h-[550px] overflow-auto whitespace-pre-wrap rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {knowledgeContent}
         </div>
       )}

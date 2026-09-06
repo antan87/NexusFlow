@@ -35,9 +35,27 @@ import { commitExactWorkspaceArtifacts } from './workspace-git.js';
 import * as fs from 'node:fs/promises';
 import { getActiveStorageProvider } from './adapters/registry.js';
 import { acquireLock } from './locks.js';
+import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE, BRAND_NAME, CLI_NAME, resolveWorkspaceConfigDir } from './constants.js';
 
-/** The knowledge filename used for both the workspace and base layers. */
-const KNOWLEDGE_FILE = 'nexusflow-knowledge.md';
+async function getWorkspaceKnowledgeFilename(workspacePath: string, featureId: string): Promise<string> {
+  if (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE)) {
+    return PRIMARY_KNOWLEDGE_FILE;
+  }
+  if (await workspaceFileExists(workspacePath, featureId, LEGACY_KNOWLEDGE_FILE)) {
+    return LEGACY_KNOWLEDGE_FILE;
+  }
+  return PRIMARY_KNOWLEDGE_FILE;
+}
+
+async function getBaseKnowledgeFilename(workspacePath: string, repoName: string): Promise<string> {
+  if (await baseFileExists(workspacePath, repoName, PRIMARY_KNOWLEDGE_FILE)) {
+    return PRIMARY_KNOWLEDGE_FILE;
+  }
+  if (await baseFileExists(workspacePath, repoName, LEGACY_KNOWLEDGE_FILE)) {
+    return LEGACY_KNOWLEDGE_FILE;
+  }
+  return PRIMARY_KNOWLEDGE_FILE;
+}
 
 /** Categories of learning that can be captured. */
 export type KnowledgeEntryType =
@@ -428,7 +446,7 @@ function normaliseMessage(message: string): string {
 
 function validateNewEntry(entry: KnowledgeEntry): KnowledgeEntry {
   if (entry.type === 'progress') {
-    throw new Error('Progress is derived from live git state and cannot be authored as knowledge. Use `nexusflow progress`.');
+    throw new Error(`Progress is derived from live git state and cannot be authored as knowledge. Use \`${CLI_NAME} progress\`.`);
   }
   return {
     ...entry,
@@ -475,10 +493,11 @@ async function commitKnowledgeArtifact(
 }
 
 async function withKnowledgeLock<T>(workspacePath: string, operation: () => Promise<T>): Promise<T> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'knowledge.lock'), {
+  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
+  const release = await acquireLock(path.join(configDir, 'knowledge.lock'), {
     staleMs: 60_000,
     timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating workspace knowledge.',
+    timeoutMessage: `Another ${BRAND_NAME} operation is updating workspace knowledge.`,
   });
   try {
     return await operation();
@@ -490,10 +509,11 @@ async function withKnowledgeLock<T>(workspacePath: string, operation: () => Prom
 /** Reads the workspace knowledge file, or `null` when it does not exist. */
 export async function readWorkspaceKnowledge(workspacePath: string): Promise<string | null> {
   const featureId = await resolveFeatureId(workspacePath);
-  if (!(await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE))) {
+  const filename = await getWorkspaceKnowledgeFilename(workspacePath, featureId);
+  if (!(await workspaceFileExists(workspacePath, featureId, filename))) {
     return null;
   }
-  return readWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE);
+  return readWorkspaceFile(workspacePath, featureId, filename);
 }
 
 /** Reads a repo's base knowledge file, or `null` when it does not exist. */
@@ -502,10 +522,11 @@ export async function readBaseKnowledge(
   repoName: string,
 ): Promise<string | null> {
   const configuredRepo = await requireConfiguredRepoName(workspacePath, repoName);
-  if (!(await baseFileExists(workspacePath, configuredRepo, KNOWLEDGE_FILE))) {
+  const filename = await getBaseKnowledgeFilename(workspacePath, configuredRepo);
+  if (!(await baseFileExists(workspacePath, configuredRepo, filename))) {
     return null;
   }
-  return readBaseFile(workspacePath, configuredRepo, KNOWLEDGE_FILE);
+  return readBaseFile(workspacePath, configuredRepo, filename);
 }
 
 /** Appends a formatted entry to the workspace knowledge file (creating it if missing). */
@@ -522,9 +543,10 @@ async function addWorkspaceKnowledgeUnlocked(
 ): Promise<KnowledgeWriteResult> {
   const checked = validateNewEntry(entry);
   const featureId = await resolveFeatureId(workspacePath);
-  const exists = await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE);
+  const filename = await getWorkspaceKnowledgeFilename(workspacePath, featureId);
+  const exists = await workspaceFileExists(workspacePath, featureId, filename);
   const content = exists
-    ? await readWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE)
+    ? await readWorkspaceFile(workspacePath, featureId, filename)
     : `# Workspace Knowledge — ${featureId}\n`;
 
   const aliases = SECTION_ALIASES[checked.type].workspace;
@@ -533,16 +555,16 @@ async function addWorkspaceKnowledgeUnlocked(
   const duplicate = content.includes(entryMarkdown);
   if (!duplicate) {
     const updated = insertUnderHeading(content, aliases, entryMarkdown);
-    await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, updated);
+    await writeWorkspaceFile(workspacePath, featureId, filename, updated);
   }
   const commit = await commitKnowledgeArtifact(
     workspacePath,
     `docs(knowledge): remember ${checked.title}`,
-    KNOWLEDGE_FILE,
+    filename,
   );
 
   return {
-    location: resolveWorkspaceFileUrl(workspacePath, featureId, KNOWLEDGE_FILE),
+    location: resolveWorkspaceFileUrl(workspacePath, featureId, filename),
     section: aliases[0],
     createdFile: !exists,
     duplicate,
@@ -564,25 +586,27 @@ async function insertIntoBase(
   if (!aliases) {
     throw new Error(`'${type}' entries cannot be stored in base (repo) knowledge.`);
   }
-  const exists = await baseFileExists(workspacePath, repoName, KNOWLEDGE_FILE);
+  const filename = await getBaseKnowledgeFilename(workspacePath, repoName);
+  const exists = await baseFileExists(workspacePath, repoName, filename);
   const content = exists
-    ? await readBaseFile(workspacePath, repoName, KNOWLEDGE_FILE)
+    ? await readBaseFile(workspacePath, repoName, filename)
     : buildBaseKnowledgeContent(repoName);
 
   assertNoHeadingConflict(content, entryMarkdown);
   const duplicate = content.includes(entryMarkdown);
   if (!duplicate) {
     const updated = insertUnderHeading(content, aliases, entryMarkdown);
-    await writeBaseFile(workspacePath, repoName, KNOWLEDGE_FILE, updated);
+    await writeBaseFile(workspacePath, repoName, filename, updated);
   }
+  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
   const commit = await commitKnowledgeArtifact(
     workspacePath,
     `docs(knowledge): remember ${repoName} learning`,
-    path.join('.nexusflow', 'base', repoName, KNOWLEDGE_FILE),
+    path.join(path.basename(configDir), 'base', repoName, filename),
   );
 
   return {
-    location: resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE),
+    location: resolveBaseFileUrl(workspacePath, repoName, filename),
     section: aliases[0],
     createdFile: !exists,
     duplicate,
@@ -627,7 +651,8 @@ async function promoteKnowledgeUnlocked(
   const { repoName, entries, mode = 'copy' } = options;
   const promotable = entries.filter((e) => e.type && SECTION_ALIASES[e.type].base);
 
-  let baseLocation = resolveBaseFileUrl(workspacePath, repoName, KNOWLEDGE_FILE);
+  const baseFilename = await getBaseKnowledgeFilename(workspacePath, repoName);
+  let baseLocation = resolveBaseFileUrl(workspacePath, repoName, baseFilename);
   const commitFailures: string[] = [];
   for (const e of promotable) {
     // Preserve the entry's original markdown rather than reformatting it: `text`
@@ -646,8 +671,9 @@ async function promoteKnowledgeUnlocked(
 
   if (mode === 'move' && promotable.length > 0) {
     const featureId = await resolveFeatureId(workspacePath);
-    if (await workspaceFileExists(workspacePath, featureId, KNOWLEDGE_FILE)) {
-      let content = await readWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE);
+    const wsFilename = await getWorkspaceKnowledgeFilename(workspacePath, featureId);
+    if (await workspaceFileExists(workspacePath, featureId, wsFilename)) {
+      let content = await readWorkspaceFile(workspacePath, featureId, wsFilename);
       const date = todayIso();
       for (const e of promotable) {
         content = content.replace(
@@ -655,11 +681,11 @@ async function promoteKnowledgeUnlocked(
           `- Promoted to ${repoName} base knowledge on ${date}.`,
         );
       }
-      await writeWorkspaceFile(workspacePath, featureId, KNOWLEDGE_FILE, content);
+      await writeWorkspaceFile(workspacePath, featureId, wsFilename, content);
       const commit = await commitKnowledgeArtifact(
         workspacePath,
         `docs(knowledge): promote to ${repoName}`,
-        KNOWLEDGE_FILE,
+        wsFilename,
       );
       if (commit.status === 'failed') {
         commitFailures.push(commit.message ?? 'Workspace knowledge commit failed.');

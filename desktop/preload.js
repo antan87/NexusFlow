@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('nexusBridge', {
+const bridgeApi = {
   getServerPort: () => ipcRenderer.invoke('get-server-port'),
   updates: {
     getStatus: () => ipcRenderer.invoke('update:get-status'),
@@ -14,4 +14,7 @@ contextBridge.exposeInMainWorld('nexusBridge', {
       return () => ipcRenderer.removeListener('update:event', handler);
     },
   },
-});
+};
+
+contextBridge.exposeInMainWorld('contextspaceBridge', bridgeApi);
+contextBridge.exposeInMainWorld('nexusBridge', bridgeApi);

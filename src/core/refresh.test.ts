@@ -81,7 +81,7 @@ describe('refreshWorkspace', () => {
     await refreshWorkspace('/ws');
 
     expect(locks.acquireLock).toHaveBeenCalledWith(
-      expect.stringMatching(/[\\/]\.nexusflow[\\/]generation\.lock$/),
+      expect.stringMatching(/[\\/]\.(?:contextspace|nexusflow)[\\/]generation\.lock$/),
       expect.objectContaining({ timeoutMs: 30_000 }),
     );
     expect(release).toHaveBeenCalledOnce();

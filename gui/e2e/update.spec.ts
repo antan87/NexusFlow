@@ -77,7 +77,7 @@ test.describe('desktop update controls', () => {
 
     await page.evaluate(() => { (window as any).__nexusTestAllowUpdateRetry = true; });
     await page.getByRole('button', { name: 'Check again' }).click();
-    await expect(page.getByText('A new version of NexusFlow is available!')).toBeVisible();
+    await expect(page.getByText('A new version of ContextSpace is available!')).toBeVisible();
     await page.getByText('Release notes').click();
     await expect(page.getByText('Safer desktop updates')).toBeVisible();
 

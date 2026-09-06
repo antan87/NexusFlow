@@ -1,4 +1,4 @@
-# Desktop platform: should NexusFlow stay on Electron?
+# Desktop platform: should ContextSpace stay on Electron?
 
 Decision aid for the team. The desktop app is an Electron shell (`desktop/main.js`)
 that starts the bundled Node backend on an OS-assigned local port and loads the
@@ -14,7 +14,7 @@ the shell's native side. Ours cannot, cheaply:
 - The backend **is a Node application** (Hono server, the whole `src/` CLI codebase).
 - The chat feature **spawns local CLI processes** (`claude`, `agy`) and manages them.
 - The GUI is served over localhost HTTP and also works in a plain browser
-  (`nexusflow dashboard`), so the desktop shell is deliberately thin.
+  (`ctxspace dashboard`), so the desktop shell is deliberately thin.
 
 Any non-Electron shell still has to run that Node backend somehow.
 
@@ -25,7 +25,7 @@ Any non-Electron shell still has to run that Node backend somehow.
 | Shell runtime | Bundles Chromium + Node | Rust binary + OS webview (WebView2/WebKit) | Tiny binary + OS webview | Go binary + OS webview |
 | Installer size | ~80–120 MB | ~3–10 MB shell, **but** + Node sidecar (~40–80 MB) for our backend | ~2 MB shell + same Node problem | ~8–15 MB + same Node problem |
 | Memory | ~150–300 MB | Lower (shared OS webview) | Lower | Lower |
-| Runs our Node backend | Natively (it *is* Node) | As a bundled **sidecar binary** (pkg/SEA/Bun-compiled `nexusflow`) — extra build pipeline | Same sidecar problem (we already left it) | Same sidecar problem, or rewrite server in Go |
+| Runs our Node backend | Natively (it *is* Node) | As a bundled **sidecar binary** (pkg/SEA/Bun-compiled `ctxspace`) — extra build pipeline | Same sidecar problem (we already left it) | Same sidecar problem, or rewrite server in Go |
 | Extra toolchain | None (npm only) | Rust + platform build deps | None | Go |
 | Webview consistency | Identical Chromium everywhere | WebView2 on Windows is fine; WebKit on macOS/Linux differs (CSS/JS quirks) | Same webview caveats + small ecosystem | Same webview caveats |
 | Process spawning (claude/agy CLIs) | Backend does it today, unchanged | Allowed via sidecar/shell API, more permission plumbing | Limited APIs (a reason the old shell stayed thin) | Fine from Go, but our spawning code is TS |

@@ -101,6 +101,27 @@ describe('desktop release installer', () => {
     }
   });
 
+  it('verifies and installs a ContextSpace Linux AppImage into contextspace directory', async () => {
+    const binary = 'verified-contextspace-appimage';
+    const csAssetUrl = 'https://github.com/antan87/ContextSpace/releases/download/v2.10.0/ContextSpace-2.10.0.AppImage';
+    const csSidecarUrl = `${csAssetUrl}.sha256`;
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(releaseResponse('ContextSpace-2.10.0.AppImage', csAssetUrl, csSidecarUrl))
+      .mockResolvedValueOnce(new Response(`${digest(binary)}  ContextSpace-2.10.0.AppImage\n`))
+      .mockResolvedValueOnce(new Response(binary));
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'contextspace-installer-test-'));
+    try {
+      const result = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+      expect(result.installedPath).toContain(path.join('.local', 'share', 'contextspace'));
+      expect(path.basename(result.installedPath)).toBe('ContextSpace.AppImage');
+      expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
+      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(result.installedPath)}`);
+      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain('Name=ContextSpace');
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('downloads and verifies when response exposes arrayBuffer without body stream', async () => {
     const binary = 'buffer-only-appimage';
     const fetchImpl = vi.fn()

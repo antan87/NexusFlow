@@ -59,8 +59,8 @@ describe('projects core module', () => {
   });
 
   describe('getProjectsFilePath', () => {
-    it('lives inside ~/.nexusflow', () => {
-      expect(getProjectsFilePath().replace(/\\/g, '/')).toContain('.nexusflow/projects.json');
+    it('lives inside ~/.contextspace', () => {
+      expect(getProjectsFilePath().replace(/\\/g, '/')).toContain('.contextspace/projects.json');
     });
   });
 

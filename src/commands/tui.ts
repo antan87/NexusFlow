@@ -13,6 +13,7 @@ import { execa } from 'execa';
 import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig, listWorkspaces } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, type WorkspaceRepo, type RepoStatus } from '../utils/multi-git.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_MANIFEST_FILE, MCP_SERVER_NAME } from '../core/constants.js';
 
 const COMMANDS = ['sync', 'doctor', 'refresh', 'status', 'start', 'stop', 'logs', 'list', 'create', 'open', 'remove', 'add-repo', 'help'];
 
@@ -43,7 +44,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
       const config = await loadConfig();
       const workspaces = await listWorkspaces(config.workspacesDir);
       if (workspaces.length === 0) {
-        console.log(chalk.yellow('\nNo workspaces found. Run "nexusflow create" to initialize one.\n'));
+        console.log(chalk.yellow(`\nNo workspaces found. Run "${CLI_NAME} create" to initialize one.\n`));
         return;
       }
       // Use the first active workspace as default
@@ -57,7 +58,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
   try {
     repos = await getWorkspaceRepos(workspacePath);
   } catch {
-    console.log(chalk.red(`\nCould not resolve repos. Make sure nexusflow.json exists in ${workspacePath}\n`));
+    console.log(chalk.red(`\nCould not resolve repos. Make sure ${PRIMARY_MANIFEST_FILE} exists in ${workspacePath}\n`));
     return;
   }
 
@@ -68,7 +69,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     repos,
     repoStatuses: {},
     consoleLogs: [
-      'NexusFlow TUI Command Center v2.0 - Initialized Successfully.',
+      `${BRAND_NAME} TUI Command Center v2.0 - Initialized Successfully.`,
       'Connecting workspace streams...',
       `Active Workspace Path: ${workspacePath}`,
       'Ready. Press [/] to type commands, or [s] to sync, [d] to run diagnostics.',
@@ -118,7 +119,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     process.stdout.write('\x1B[H');
 
     // Row 0: Top Header Banner
-    const bannerTitle = ` ⚡ NexusFlow Workspace Console [🌿 ${state.branchName}] `;
+    const bannerTitle = ` ⚡ ${BRAND_NAME} Workspace Console [🌿 ${state.branchName}] `;
     const statusText = ` SYSTEM: ONLINE (Port 3000) `;
     const headerFill = cols - bannerTitle.length - statusText.length - 2;
     process.stdout.write(
@@ -161,7 +162,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     const rightLines: string[] = [];
     rightLines.push(chalk.cyan.bold(' 🤖 Model Context Protocol (MCP) & Status '));
     rightLines.push(' '.repeat(rightWidth));
-    rightLines.push(`   ${chalk.bold('MCP Server:')} nexusflow-mcp (State: ${chalk.green('Active')})`);
+    rightLines.push(`   ${chalk.bold('MCP Server:')} ${MCP_SERVER_NAME} (State: ${chalk.green('Active')})`);
     rightLines.push('   Registered tools:');
     rightLines.push(`     ⚙  ${chalk.cyan('search_workspace')}      Search workspace files fast`);
     rightLines.push(`     ⚙  ${chalk.cyan('get_service_logs')}      Tail running logs`);
@@ -234,7 +235,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
       process.stdout.write(filledSuggestion + '\n');
 
       // Focus Input mode
-      const promptText = ` nexusflow > ${state.inputValue}`;
+      const promptText = ` ${CLI_NAME} > ${state.inputValue}`;
       process.stdout.write(chalk.bold.cyan(promptText) + ' '.repeat(Math.max(0, cols - promptText.length - 12)) + chalk.dim('[ESC] Cancel') + '\n');
     } else {
       // General Keyboard Command mode
@@ -296,7 +297,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
         
         if (cmd) {
           state.activeCommandRunning = true;
-          log(`Running: nexusflow ${cmd}...`);
+          log(`Running: ${CLI_NAME} ${cmd}...`);
           draw();
 
           try {
@@ -315,7 +316,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
               cleanup();
 
               // Clear alternate screen and show standard terminal
-              console.log(chalk.bold.cyan(`\nEntering interactive mode for "nexusflow ${cmd}"...\n`));
+              console.log(chalk.bold.cyan(`\nEntering interactive mode for "${CLI_NAME} ${cmd}"...\n`));
 
               try {
                 await execa(process.execPath, [script, ...args], {
@@ -336,7 +337,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
               }
 
               if (!workspaceExists) {
-                console.log(chalk.bold.cyan('\n👋 Workspace deleted. Exiting NexusFlow TUI Dashboard.\n'));
+                console.log(chalk.bold.cyan(`\n👋 Workspace deleted. Exiting ${BRAND_NAME} TUI Dashboard.\n`));
                 process.exit(0);
               }
 
@@ -421,7 +422,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
       // --- Handle single key shortcuts mode ---
       if (key.name === 'q') {
         cleanup();
-        console.log(chalk.bold.cyan('\n👋 Exited NexusFlow TUI Dashboard.\n'));
+        console.log(chalk.bold.cyan(`\n👋 Exited ${BRAND_NAME} TUI Dashboard.\n`));
         process.exit(0);
       } else if (str === '/') {
         state.inputMode = true;

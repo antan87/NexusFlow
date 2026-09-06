@@ -19,13 +19,13 @@ const BACKEND_READY_TIMEOUT_MS = 20000;
 // Reliable diagnostics: Playwright doesn't consistently surface the Electron
 // main-process console, so mirror startup + backend output to a log file
 // (overridable via NEXUSFLOW_DESKTOP_LOG) as well as stderr.
-const LOG_PATH = process.env.NEXUSFLOW_DESKTOP_LOG || path.join(os.tmpdir(), 'nexusflow-desktop.log');
+const LOG_PATH = process.env.CONTEXTSPACE_DESKTOP_LOG || process.env.NEXUSFLOW_DESKTOP_LOG || path.join(os.tmpdir(), 'contextspace-desktop.log');
 let logStream;
 try { logStream = createWriteStream(LOG_PATH, { flags: 'w' }); } catch { logStream = null; }
 function diag(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
   try { logStream?.write(line); } catch { /* ignore */ }
-  try { process.stderr.write(`[nf] ${line}`); } catch { /* ignore */ }
+  try { process.stderr.write(`[cs] ${line}`); } catch { /* ignore */ }
 }
 
 let mainWindow;
@@ -105,8 +105,8 @@ function isAllowedReleaseLink(candidate) {
     if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) {
       return false;
     }
-    if (url.pathname === '/antan87/NexusFlow/releases/latest') return true;
-    return /^\/antan87\/NexusFlow\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
+    if (url.pathname === '/antan87/NexusFlow/releases/latest' || url.pathname === '/antan87/ContextSpace/releases/latest') return true;
+    return /^\/antan87\/(NexusFlow|ContextSpace)\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
   } catch {
     return false;
   }
@@ -233,7 +233,7 @@ function showBackendError(detail) {
   const html = `<!doctype html><meta charset="utf-8">
     <style>body{font:14px system-ui;background:#1e1e1e;color:#ddd;padding:40px;line-height:1.6}
     code{background:#333;padding:2px 6px;border-radius:4px}</style>
-    <h2>NexusFlow could not start its backend</h2>
+    <h2>ContextSpace could not start its backend</h2>
     <p>${escapeHtml(detail)}</p>
     <p>In development the backend is run from <code>../dist</code> with <code>node</code>;
     a packaged build runs the bundled backend under <code>resources/backend</code>. If this
@@ -242,9 +242,11 @@ function showBackendError(detail) {
 }
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -344,8 +346,8 @@ function createWindow() {
     const output = data.toString();
     diag(`[backend:out] ${output.trimEnd()}`);
 
-    // Match only our explicit ready token — never arbitrary URLs in output.
-    const match = output.match(/NEXUSFLOW_READY_PORT=(\d+)/);
+    // Match explicit ready token
+    const match = output.match(/(?:CONTEXTSPACE|NEXUSFLOW)_READY_PORT=(\d+)/);
     if (match && !assignedPort) {
       assignedPort = parseInt(match[1], 10);
       if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }

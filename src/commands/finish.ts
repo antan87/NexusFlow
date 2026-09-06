@@ -16,6 +16,7 @@ import { finishWorkspace, type RepoFinishReport } from '../core/finish.js';
 import { getWorkspaceRepos } from '../utils/multi-git.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { readWorkspaceKnowledge, parseKnowledgeEntries, promoteKnowledge, type KnowledgeEntryType } from '../core/knowledge.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 interface FinishCommandOptions {
   message?: string;
@@ -37,7 +38,7 @@ export async function finishCommand(
   workspaceArg: string | undefined,
   options: FinishCommandOptions,
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n🏁 NexusFlow — Finish Feature\n'));
+  console.log(chalk.bold.cyan(`\n🏁 ${BRAND_NAME} — Finish Feature\n`));
 
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace to finish:');
   if (!workspacePath) return;

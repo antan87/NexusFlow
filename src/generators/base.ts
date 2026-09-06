@@ -174,8 +174,8 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
   const hasIsolated = inPlace && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
   const structureRule = inPlace
     ? (hasIsolated
-        ? '**RULE**: Repos marked `[isolated worktree]` MUST be edited inside their dedicated worktree path. Unisolated repos are in READ-ONLY reference mode: before modifying files in any unisolated repository, you MUST invoke the `isolate_repo` MCP tool (or run `nexusflow isolate <repo>`).'
-        : '**RULE**: These repositories are in READ-ONLY reference mode on host branches. Before making ANY file modifications, you MUST invoke the `isolate_repo` MCP tool (or run `nexusflow isolate <repo>`) to create a dedicated feature worktree.')
+        ? '**RULE**: Repos marked `[isolated worktree]` MUST be edited inside their dedicated worktree path. Unisolated repos are in READ-ONLY reference mode: before modifying files in any unisolated repository, you MUST invoke the `isolate_repo` MCP tool (or run `ctxspace isolate <repo>`).'
+        : '**RULE**: These repositories are in READ-ONLY reference mode on host branches. Before making ANY file modifications, you MUST invoke the `isolate_repo` MCP tool (or run `ctxspace isolate <repo>`) to create a dedicated feature worktree.')
     : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
   // Repos that already ship their own assistant instructions; those override
@@ -220,7 +220,7 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
 ${rows.join('\n')}
 
 ${structureRule}${startHint}`
-    : `This workspace has no repositories yet — add one with \`nexusflow add-repo\`.`;
+    : `This workspace has no repositories yet — add one with \`ctxspace add-repo\`.`;
 
   const freshness = ctx.generation ? `${renderFreshnessBanner(ctx.generation)}\n\n` : '';
 
@@ -232,8 +232,8 @@ ${reposSection}
 
 ## Where to look
 
-- \`nexusflow-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup or search headings for your topic and read only those entries, not the whole file. Add with \`nexusflow knowledge add -t decision|gotcha --title "..." -m "..."\`, keeping each entry to a rule and its reason
-- \`nexusflow-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
+- \`contextspace-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup or search headings for your topic and read only those entries, not the whole file. Add with \`ctxspace knowledge add -t decision|gotcha --title "..." -m "..."\`, keeping each entry to a rule and its reason
+- \`contextspace-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
 - \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.codex/skills/\`, \`.claude/skills/\`, \`.github/skills/\`, \`.cursor/skills/\` where supported)
 - Cross-harness collaboration — Use MCP \`read_workroom_stream\` and \`post_workroom_handoff\` to coordinate plans and handoffs across AI agents
 ${ownInstructions}${customCommands}${teamwork}`;

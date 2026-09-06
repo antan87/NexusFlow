@@ -1,7 +1,7 @@
 <p align="center">
-  <h1 align="center">🔗 NexusFlow</h1>
+  <h1 align="center">🌌 ContextSpace</h1>
   <p align="center">
-    <strong>Multi-repo workspace manager for AI-assisted development</strong>
+    <strong>Deterministic Multi-Repo Context Engine for Autonomous AI Assistants</strong>
   </p>
   <p align="center">
     Group repositories · Generate AI context · Resume LLM sessions · Orchestrate services
@@ -10,17 +10,17 @@
 
 ---
 
-NexusFlow combines multiple Git repositories into a single feature workspace and generates the context files that your AI coding assistant needs to understand all of them at once. It can create isolated **git worktrees** on clean feature branches, or work in-place directly in your source repositories when you want to manage branches yourself.
+ContextSpace combines multiple Git repositories into a single feature workspace and generates the deterministic context files that your AI coding assistant needs to understand all of them at once. It can create isolated **git worktrees** on clean feature branches, or work in-place directly in your source repositories when you want to manage branches yourself.
 
-> **New to NexusFlow?** Jump to the [Getting Started Guide](GETTING_STARTED.md) for a hands-on walkthrough.
+> **New to ContextSpace?** Jump to the [Getting Started Guide](GETTING_STARTED.md) for a hands-on walkthrough.
 
 ## ✨ Features
 
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories
-- **Project registry** — save named, persistent repo groups in `~/.nexusflow/projects.json` and reuse them from the CLI or API
+- **Project registry** — save named, persistent repo groups in `~/.contextspace/projects.json` and reuse them from the CLI or API
 - **The full feature loop** — `create` opens a workspace, `finish` closes it: commit + push every repo, open PRs (or print compare links), promote learnings, and optionally clean up
 - **Knowledge that accumulates durably** — titled, scoped decisions and gotchas are auto-committed to the workspace artifact repository, then reusable entries can be promoted into per-repo memory
-- **Provenance-checked AI context** — `nexusflow.lock` records repo fingerprints and generated-view hashes; `nexusflow refresh --check` and `doctor` expose stale or modified context loudly
+- **Provenance-checked AI context** — `contextspace.lock` records repo fingerprints and generated-view hashes; `ctxspace refresh --check` and `doctor` expose stale or modified context loudly
 - **Single-source AI context generation** — `AGENTS.md` is canonical; stamped Claude, Copilot, Cursor, and skill views are generated artifacts
 - **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
 - **Smart codebase analysis** — detects tech stacks, ports, API endpoints, dependencies, and existing AI configs across all projects
@@ -28,12 +28,11 @@ NexusFlow combines multiple Git repositories into a single feature workspace and
 - **Owned Resource Deployment** — installs portable skills to native discovery folders and Codex agents to `.codex/agents/`, refusing unmanaged collisions and preserving locally modified files
 - **Teamwork Strategy Workflows** — predefine coordination flows and subagent behaviors (e.g. plan-implement-review) and inspect them with local AI coding assistant harnesses
 - **Session history & resumption** — browse past conversation transcripts from Antigravity, Claude Code, OpenAI Codex, and GitHub Copilot, then resume where you left off
-
 - **Incremental, token-efficient refresh** — an analysis cache fingerprints each repo (HEAD + dirty files), so `refresh`/`sync` only re-analyze repos that changed and unchanged maps stay byte-identical (keeping your AI assistant's prompt cache warm)
 - **Scheduled workspace jobs** — recurring `sync`/`refresh` per workspace (e.g. every 2h) that run while the dashboard server is up, so context files stay fresh without manual runs
 - **Service orchestration** — start, stop, and tail logs for all services in a workspace with a single command
 - **Interactive Web Dashboard** — rich dark-themed GUI for managing workspaces, viewing sessions, and streaming logs
-- **CLI-first** — every action available from the terminal via the `nexusflow` command
+- **CLI-first** — every action available from the terminal via the `ctxspace` command (aliases: `contextspace`, `cs`, `nexusflow`)
 
 ## 📦 Installation
 
@@ -68,14 +67,14 @@ It launches the Windows installer, or installs a stable Linux AppImage under
 ### Install the secondary npm CLI
 
 ```bash
-npm install -g @mrpatronz/nexusflow
+npm install -g @mrpatronz/contextspace
 ```
 
 ### Install from source (CLI, GUI, desktop, and extension development)
 
 ```bash
-git clone https://github.com/antan87/NexusFlow.git
-cd NexusFlow
+git clone https://github.com/antan87/ContextSpace.git
+cd ContextSpace
 
 # Install root dependencies, then GUI/desktop/extension dependencies
 npm install
@@ -88,7 +87,7 @@ npm run build
 npm link
 ```
 
-After linking, the `nexusflow` command is available system-wide.
+After linking, the `ctxspace` (and aliases `contextspace`, `cs`, `nexusflow`) commands are available system-wide.
 
 ## 🚀 Quick Start
 
@@ -100,20 +99,20 @@ app. No Node.js or npm installation is needed. If Node.js is already available,
 the explicit post-release bootstrap is also convenient:
 
 ```bash
-npx @mrpatronz/nexusflow desktop install
+npx @mrpatronz/contextspace desktop install
 ```
 
 ### CLI and browser dashboard
 
 ```bash
 # 1 — Initialize config (optional, defaults work out of the box)
-nexusflow init
+ctxspace init
 
 # 2 — Create a feature workspace
-nexusflow create
+ctxspace create
 
 # 3 — Or use the GUI: packaged desktop app or the fully functional browser dashboard
-nexusflow dashboard
+ctxspace dashboard
 ```
 
 The `create` wizard walks you through:
@@ -127,27 +126,27 @@ The `create` wizard walks you through:
 
 ## 📚 Projects
 
-A project is a named, persistent group of source repositories stored centrally in `~/.nexusflow/projects.json`. Project ids are slugified from the name, so `Hogia Billing` becomes `hogia-billing`. Use either the `project` command group or its `proj` alias:
+A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with automatic fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name, so `Hogia Billing` becomes `hogia-billing`. Use either the `project` command group or its `proj` alias:
 
 | Command | Description |
 |:---|:---|
-| `nexusflow project add -n, --name <name> -r, --repos <paths...> [-d, --description <text>]` | Register a project; omit `--repos` to use the interactive repo picker |
-| `nexusflow project list` | List registered projects (alias: `ls`) |
-| `nexusflow project show [id]` | Show a registered project |
-| `nexusflow project remove [id] [-y, --yes]` | Remove a project from the registry (alias: `rm`) |
+| `ctxspace project add -n, --name <name> -r, --repos <paths...> [-d, --description <text>]` | Register a project; omit `--repos` to use the interactive repo picker |
+| `ctxspace project list` | List registered projects (alias: `ls`) |
+| `ctxspace project show [id]` | Show a registered project |
+| `ctxspace project remove [id] [-y, --yes]` | Remove a project from the registry (alias: `rm`) |
 
 Removing a project only edits the registry — it never deletes repositories or workspaces on disk. The HTTP API exposes the same registry through `GET /api/projects`, `POST /api/projects`, `PUT /api/projects/:id`, and `DELETE /api/projects/:id`.
 
 ## 🧭 Work Modes
 
-`nexusflow create` offers registered projects first (ad-hoc repo scanning is still available), then asks how the workspace should work:
+`ctxspace create` offers registered projects first (ad-hoc repo scanning is still available), then asks how the workspace should work:
 
 | Mode | What it does |
 |:---|:---|
-| **Isolated worktrees** | The classic flow: NexusFlow creates a feature branch and git worktree per repo inside the workspace directory. |
-| **In-place** | NexusFlow works directly in the source repositories. No branches or worktrees are created; you provide a workspace name, and the workspace directory only holds `nexusflow.json` plus generated AI context files. |
+| **Isolated worktrees** | The classic flow: ContextSpace creates a feature branch and git worktree per repo inside the workspace directory. |
+| **In-place** | ContextSpace works directly in the source repositories. No branches or worktrees are created; you provide a workspace name, and the workspace directory only holds `contextspace.json` plus generated AI context files. |
 
-In in-place workspaces, `nexusflow sync` never mutates source-repo branches because you manage them yourself; it only reconciles stale generated views. `nexusflow finish` commits and pushes each repo's current branch, and only offers PR/compare links when that branch differs from the default branch. Deleting an in-place workspace never touches the source repositories, `nexusflow list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
+In in-place workspaces, `ctxspace sync` never mutates source-repo branches because you manage them yourself; it only reconciles stale generated views. `ctxspace finish` commits and pushes each repo's current branch, and only offers PR/compare links when that branch differs from the default branch. Deleting an in-place workspace never touches the source repositories, `ctxspace list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
 
 For API callers, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
@@ -170,9 +169,9 @@ In isolated worktree mode:
 │   └── instructions/                 # Scoped skill instructions for Copilot
 ├── .cursor/
 │   └── rules/                        # Context & rules for Cursor (.mdc)
-├── nexusflow.json                    # Feature config (branch, repos, etc.)
-├── nexusflow-overview.md             # AI-generated workspace analysis
-├── nexusflow-knowledge.md            # Persistent workspace memory (decisions & gotchas)
+├── contextspace.json                 # Feature config (branch, repos, etc.)
+├── contextspace-knowledge.md         # Persistent workspace memory (decisions & gotchas)
+├── contextspace-plan.md              # AI dependency build & merge plan
 ├── my-api/                           # ← Git worktree on feature branch
 └── my-frontend/                      # ← Git worktree on feature branch
 ```
@@ -185,41 +184,41 @@ Open this folder in your editor → your AI assistant picks up the context and s
 
 | Command | Description |
 |:---|:---|
-| `nexusflow create` | Interactive wizard to create a new worktree or in-place workspace |
-| `nexusflow list` | List all existing workspaces, tagging in-place ones with `[in-place]` (alias: `ls`) |
-| `nexusflow open` | Re-open a workspace in your editor |
-| `nexusflow init` | Configure NexusFlow settings |
-| `nexusflow project` | Manage registered repo groups: `add`, `list`/`ls`, `show`, `remove`/`rm` (alias: `proj`) |
-| `nexusflow add-repo` | Add a repository to an existing workspace (alias: `add`) |
-| `nexusflow remove` | Delete a workspace and prune its git worktrees when present (alias: `rm`) |
-| `nexusflow start` | Start all services in a workspace (auto-detected) |
-| `nexusflow stop` | Stop all running services |
-| `nexusflow status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
-| `nexusflow progress` | Derive implementation progress from live branch, push, and available PR state |
-| `nexusflow logs` | Tail aggregated logs from all services |
-| `nexusflow ui` | Start the dashboard server — the backend the desktop app embeds (`--port`, `--open`, `--strict-port`) |
-| `nexusflow dashboard` | Open the dashboard in your browser (alias: `dash`) |
-| `nexusflow tui` | Open the interactive terminal (TUI) dashboard |
-| `nexusflow diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
-| `nexusflow commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
-| `nexusflow sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
-| `nexusflow finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
-| `nexusflow review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
-| `nexusflow knowledge` | Capture titled decisions/gotchas/assumptions/questions with optional `--scope` and `--evidence`; `show`, `promote` into per-repo base knowledge |
-| `nexusflow refresh`| Regenerate plan and AI context files; use `--check` for a non-regenerating CI/pre-commit freshness gate |
-| `nexusflow remote` | Add, push, or pull the workspace artifact repository remote without touching child repo remotes |
-| `nexusflow handoff` | Generate a compact handoff bundle (`nexusflow-handoff.md`) for session resumption |
-| `nexusflow schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
-| `nexusflow doctor` | Run health checks and diagnostics to verify workspace integrity |
-| `nexusflow config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
-| `nexusflow adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
-| `nexusflow mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
-| `nexusflow desktop` | Launch the Electron desktop app from a source checkout (requires a built CLI and `desktop/` deps installed) |
-| `nexusflow desktop install` | Download and checksum-verify the matching Windows NSIS/Linux AppImage release, then install it locally |
+| `ctxspace create` | Interactive wizard to create a new worktree or in-place workspace |
+| `ctxspace list` | List all existing workspaces, tagging in-place ones with `[in-place]` (alias: `ls`) |
+| `ctxspace open` | Re-open a workspace in your editor |
+| `ctxspace init` | Configure ContextSpace settings |
+| `ctxspace project` | Manage registered repo groups: `add`, `list`/`ls`, `show`, `remove`/`rm` (alias: `proj`) |
+| `ctxspace add-repo` | Add a repository to an existing workspace (alias: `add`) |
+| `ctxspace remove` | Delete a workspace and prune its git worktrees when present (alias: `rm`) |
+| `ctxspace start` | Start all services in a workspace (auto-detected) |
+| `ctxspace stop` | Stop all running services |
+| `ctxspace status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
+| `ctxspace progress` | Derive implementation progress from live branch, push, and available PR state |
+| `ctxspace logs` | Tail aggregated logs from all services |
+| `ctxspace ui` | Start the dashboard server — the backend the desktop app embeds (`--port`, `--open`, `--strict-port`) |
+| `ctxspace dashboard` | Open the dashboard in your browser (alias: `dash`) |
+| `ctxspace tui` | Open the interactive terminal (TUI) dashboard |
+| `ctxspace diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
+| `ctxspace commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
+| `ctxspace sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
+| `ctxspace finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
+| `ctxspace review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
+| `ctxspace knowledge` | Capture titled decisions/gotchas/assumptions/questions with optional `--scope` and `--evidence`; `show`, `promote` into per-repo base knowledge |
+| `ctxspace refresh`| Regenerate plan and AI context files; use `--check` for a non-regenerating CI/pre-commit freshness gate |
+| `ctxspace remote` | Add, push, or pull the workspace artifact repository remote without touching child repo remotes |
+| `ctxspace handoff` | Generate a compact handoff bundle (`contextspace-handoff.md`) for session resumption |
+| `ctxspace schedule` | Manage recurring workspace jobs: `add`, `list`, `remove`, `enable`, `disable`, `run` |
+| `ctxspace doctor` | Run health checks and diagnostics to verify workspace integrity |
+| `ctxspace config` | View and update configuration: `show`, `get <key>`, `set <key> <value>` |
+| `ctxspace adapter` | Manage storage adapters: `list`, `use`, `info`, `init` |
+| `ctxspace mcp` | Manage the MCP server for AI assistants: `run`, `setup` |
+| `ctxspace desktop` | Launch the Electron desktop app from a source checkout (requires a built CLI and `desktop/` deps installed) |
+| `ctxspace desktop install` | Download and checksum-verify the matching Windows NSIS/Linux AppImage release, then install it locally |
 
 ## 🤖 Supported AI Assistants
 
-NexusFlow auto-detects which assistants are available on your machine and generates the right context files and skills for each:
+ContextSpace auto-detects which assistants are available on your machine and generates the right context files and skills for each:
 
 | Assistant | Config File & Skills Target | How It's Detected |
 |:---|:---|:---|
@@ -227,22 +226,22 @@ NexusFlow auto-detects which assistants are available on your machine and genera
 | **Claude Code** | `CLAUDE.md` & `.claude/skills/` | `claude` in PATH |
 | **OpenAI Codex** | `AGENTS.md`, `.agents/skills/` & `.codex/agents/` | `codex` in PATH |
 | **GitHub Copilot** | `.github/copilot-instructions.md` & `.agents/skills/` | Always available |
-| **Cursor** | `.cursor/rules/nexusflow.mdc` & `.agents/skills/` | `cursor` in PATH |
+| **Cursor** | `.cursor/rules/contextspace.mdc` & `.agents/skills/` | `cursor` in PATH |
 
 
 ## 🔁 The Feature Loop: create → work → learn → finish
 
-NexusFlow is built around a single loop:
+ContextSpace is built around a single loop:
 
-1. **`nexusflow create`** — open a worktree or in-place workspace with AI context files generated. Along the way you can **scaffold a brand-new project** (a fresh local git repo in your dev directory) and, per repo, **check out an existing branch** — local or remote — instead of creating the feature branch.
+1. **`ctxspace create`** — open a worktree or in-place workspace with AI context files generated. Along the way you can **scaffold a brand-new project** (a fresh local git repo in your dev directory) and, per repo, **check out an existing branch** — local or remote — instead of creating the feature branch.
 2. **Work** — your AI assistant edits code across repos. As it goes, it records learnings:
    ```bash
-   nexusflow knowledge add -t decision --title "worktree isolation" -m "Chose worktrees over submodules for isolation"
-   nexusflow knowledge add -t gotcha --title "windows ebusy" --scope "path:src/core/workspace.ts" -m "fs.rm needs maxRetries on Windows (EBUSY)"
-   nexusflow progress
+   ctxspace knowledge add -t decision --title "worktree isolation" -m "Chose worktrees over submodules for isolation"
+   ctxspace knowledge add -t gotcha --title "windows ebusy" --scope "path:src/core/workspace.ts" -m "fs.rm needs maxRetries on Windows (EBUSY)"
+   ctxspace progress
    ```
-   Entries land under searchable dated slug headings in `nexusflow-knowledge.md`. Identical retries are idempotent. If the storage write succeeds but Git auto-commit fails, NexusFlow reports "recorded but not committed" instead of inviting a duplicate retry. Git auto-commit applies to local workspace storage; custom adapters retain their own durability contract. The 300-character body cap remains enforced; implementation progress is never authored and is derived live instead.
-3. **`nexusflow finish`** — close it out:
+   Entries land under searchable dated slug headings in `contextspace-knowledge.md`. Identical retries are idempotent. If the storage write succeeds but Git auto-commit fails, ContextSpace reports "recorded but not committed" instead of inviting a duplicate retry. Git auto-commit applies to local workspace storage; custom adapters retain their own durability contract. The 300-character body cap remains enforced; implementation progress is never authored and is derived live instead.
+3. **`ctxspace finish`** — close it out:
    - Shows a preflight status table (branch, dirty files, unpushed commits) per repo.
    - Commits any remaining changes and pushes every branch; worktree-mode repos on the wrong branch or in a detached HEAD are skipped, while in-place workspaces use each repo's current branch.
    - Opens a PR per repo with the GitHub CLI when it's installed and authenticated; otherwise prints a ready-to-click **compare URL** for GitHub, GitLab, Azure DevOps, or Bitbucket.
@@ -250,13 +249,13 @@ NexusFlow is built around a single loop:
    - With `--cleanup`, removes the workspace once everything is confirmed pushed (never while you're `cd`'d inside it, and never touching source repositories for in-place workspaces).
 
    ```bash
-   nexusflow finish --dry-run        # preview what would happen
-   nexusflow finish -m "Ship feature" --cleanup
+   ctxspace finish --dry-run        # preview what would happen
+   ctxspace finish -m "Ship feature" --cleanup
    ```
 
 ## 🔌 MCP Server & Tools
 
-`nexusflow mcp setup` registers NexusFlow's MCP server with Claude Desktop, Cursor, and VS Code so your assistant can drive the whole loop without leaving the session. The server exposes:
+`ctxspace mcp setup` registers ContextSpace's MCP server with Claude Desktop, Cursor, and VS Code so your assistant can drive the whole loop without leaving the session. The server exposes:
 
 An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` tool surface. The explicit `nexusflow mcp setup` command installs `--role interactive` for the full workspace-management experience; use `--role readonly` or `--role review` for untrusted or inspection-only agents.
 
@@ -275,11 +274,11 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `get_service_logs` | Tail a running service's logs |
 
 
-Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `NEXUSFLOW_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
+Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 
 ## 🕐 Session History & Resumption
 
-NexusFlow can discover and display your past AI coding sessions across all supported assistants. This lets you:
+ContextSpace can discover and display your past AI coding sessions across all supported assistants. This lets you:
 
 - **Browse** conversation transcripts from previous sessions
 - **Search** through your interaction history
@@ -303,11 +302,11 @@ GET /api/session/:assistant/:sessionId/transcript
 
 ## 🗄️ Pluggable Storage & Vault Adapters
 
-NexusFlow supports multiple storage backends to control where workspace context maps, plans, and persistent AI knowledge files are stored. This allows keeping your Git repository workspaces completely clean from AI file clutter.
+ContextSpace supports multiple storage backends to control where workspace context maps, plans, and persistent AI knowledge files are stored. This allows keeping your Git repository workspaces completely clean from AI file clutter.
 
 Available storage providers:
 - **Local (`local`)** — Stores files directly in the workspace directory (default).
-- **Central Vault (`central-vault`)** — Stores files in a centralized folder on your machine at `~/.nexusflow/vault/`. The folder is plain markdown, so it can be opened as (or symlinked into) an Obsidian vault.
+- **Central Vault (`central-vault`)** — Stores files in a centralized folder on your machine at `~/.contextspace/vault/` (with fallback to `~/.nexusflow/vault/`). The folder is plain markdown, so it can be opened as (or symlinked into) an Obsidian vault.
 
 ### CLI Adapter Management
 
@@ -315,16 +314,16 @@ Configure storage adapters from the command line:
 
 ```bash
 # List all registered storage adapters and the active provider
-nexusflow adapter list
+ctxspace adapter list
 
 # View configurations and fields for a specific adapter
-nexusflow adapter info central-vault
+ctxspace adapter info central-vault
 
 # Switch to a different adapter (e.g. central-vault) and configure its settings
-nexusflow adapter use central-vault
+ctxspace adapter use central-vault
 
 # Scaffolds a template for creating a new custom storage adapter plugin
-nexusflow adapter init my-custom-plugin
+ctxspace adapter init my-custom-plugin
 ```
 
 ## 🕐 Scheduled Workspace Jobs
@@ -333,24 +332,24 @@ Keep workspaces fresh without manual runs — schedule recurring `sync` or `refr
 
 ```bash
 # Rebase + regenerate context every 2 hours
-nexusflow schedule add --task sync --every 2h
+ctxspace schedule add --task sync --every 2h
 
 # Nightly context refresh for a specific workspace
-nexusflow schedule add ~/dev/workspaces/my-feature --task refresh --every 1d
+ctxspace schedule add ~/dev/workspaces/my-feature --task refresh --every 1d
 
 # Inspect, pause, or run jobs
-nexusflow schedule list
-nexusflow schedule disable <id>
-nexusflow schedule run <id>
+ctxspace schedule list
+ctxspace schedule disable <id>
+ctxspace schedule run <id>
 ```
 
-Jobs are stored in `~/.nexusflow/schedules.json` and executed while a NexusFlow server is running — start one with `nexusflow ui` (use `--daemon` for a background host). A job whose interval elapsed while no server was running simply runs on the next scheduler tick.
+Jobs are stored in `~/.contextspace/schedules.json` (fallback: `~/.nexusflow/schedules.json`) and executed while a ContextSpace server is running — start one with `ctxspace ui` (use `--daemon` for a background host). A job whose interval elapsed while no server was running simply runs on the next scheduler tick.
 
-Scheduled runs are **token-efficient by design**: they use the same analysis cache as `nexusflow refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
+Scheduled runs are **token-efficient by design**: they use the same analysis cache as `ctxspace refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
 ## 🧩 Resource Library
 
-NexusFlow provides separate libraries for portable Agent Skills and Codex-native custom agents. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
+ContextSpace provides separate libraries for portable Agent Skills and Codex-native custom agents. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
 
 Skills bundle metadata triggers (for AI autonomous discovery) with full Markdown execution playbooks, auxiliary reference runbooks (`references/`), and automation scripts (`scripts/`).
 
@@ -361,7 +360,7 @@ Skills are grouped into clear visual accordion boxes by category. You can drag a
 #### Built-in Category Templates & Skills:
 - 🔀 **Pull Requests & Review**: `pr-review-toolkit`, `pr-description-gen`, `merge-conflict-resolver`
 - 🧪 **Testing & Quality Assurance**: `verifier-workspace`, `e2e-runner`, `unit-test-coverage`
-- 📦 **Cross-Repo & Release Ordering**: `nexusflow-local-package-loop`, `nexusflow-release-ordering`
+- 📦 **Cross-Repo & Release Ordering**: `cross-repo-local-package-loop`, `release-ordering`
 - 🗄️ **Database & Migrations**: `schema-migration-validator`, `sql-fluff-linter`
 - 🛡️ **Security & Auditing**: `secret-scanner`, `security-auditor`
 
@@ -375,7 +374,7 @@ The Codex Agent Library supports creating, editing, importing, and deleting basi
 
 ### Cross-Harness Deployment
 
-When a workspace is refreshed, NexusFlow reconciles enabled resources through `.nexusflow/resources.lock.json`. It refuses unmanaged target collisions, removes only unchanged NexusFlow-owned outputs, and reports modified-file conflicts instead of overwriting them.
+When a workspace is refreshed, ContextSpace reconciles enabled resources through `.contextspace/resources.lock.json` (fallback: `.nexusflow/resources.lock.json`). It refuses unmanaged target collisions, removes only unchanged ContextSpace-owned outputs, and reports modified-file conflicts instead of overwriting them.
 
 | Assistant Harness | Deployment Path | Format |
 |:---|:---|:---|
@@ -389,7 +388,7 @@ Codex custom agents are separate resources and deploy to `.codex/agents/<name>.t
 
 ## 👥 Teamwork Strategy Workflows
 
-NexusFlow allows you to predefine orchestration workflows and cooperation rules that govern how multiple AI subagents coordinate when solving complex, multi-repo software engineering tasks.
+ContextSpace allows you to predefine orchestration workflows and cooperation rules that govern how multiple AI subagents coordinate when solving complex, multi-repo software engineering tasks.
 
 You can select a strategy workflow when creating a workspace (or define custom ones). Built-in templates include:
 - **Plan-Implement-Review** — A structured, multi-agent flow where an Orchestrator coordinates planning, implementation, review, and documentation.
@@ -400,7 +399,7 @@ You can select a strategy workflow when creating a workspace (or define custom o
 ### Custom Strategies & AI Inspection
 
 You can create, edit, or delete custom strategies directly via the Web Dashboard's **Team Strategies** tab. Strategies are written in clean Markdown guidelines and stored in:
-`~/.nexusflow/workflows/`
+`~/.contextspace/workflows/` (with fallback to `~/.nexusflow/workflows/`)
 
 The dashboard integrates an **AI Strategy Analysis** inspector:
 1. Select an AI assistant harness installed on your machine (e.g. *Claude Code*, *Antigravity*).
@@ -422,14 +421,14 @@ Workrooms do not provide a public relay, NAT traversal, remote commands, shared 
 ## 🖥️ Dashboard (Desktop App & Browser)
 
 The primary distribution is the Electron desktop app from GitHub Releases (or
-`nexusflow desktop install`). A source checkout can run it with
+`ctxspace desktop install`). A source checkout can run it with
 `npm run setup && npm run build && npm start --prefix desktop`. It embeds the
 same full-featured dashboard available in a browser. For browser access, run
-`nexusflow dashboard`; `nexusflow ui` starts the underlying server without
+`ctxspace dashboard`; `ctxspace ui` starts the underlying server without
 opening anything (add `--open` to launch a browser). The browser is fully
 functional except that native desktop update installation is unavailable; its
 update panel links to the release page. For the platform rationale (Electron vs
-Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md):
+Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). The dashboard is a full-featured dark-themed GUI:
 
 - **Workspaces tab** — create, browse, and manage feature workspaces
 - **Skills & Agents tab** — manage reusable skills, categories, drag-and-drop boxes, and workspace skill assignments
@@ -437,7 +436,7 @@ Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md):
 - **Open with…** — launch the workspace directly in a detected Codex Desktop, Claude Desktop, VS Code, VS Code Insiders, Cursor, JetBrains IDE, or other supported editor; unavailable apps stay out of the primary picker
 - **AI & Sessions (GA)** — use the embedded first-party Claude/Codex SDK or local CLI harnesses with provider-owned model selection, then inspect and resume recorded sessions; subscription sign-ins are reused when available
 - **Logs panel** — real-time aggregated service log output
-- **Config panel** — edit NexusFlow settings from the browser
+- **Config panel** — edit ContextSpace settings from the browser
 
 
 The deprecated `POST /api/open-editor` endpoint remains available to older GUI clients only for recognized graphical editors. Interactive terminal editors such as Vim, Neovim, Nano, and Emacs are not supported by that detached HTTP launch route because it cannot provide a TTY.
@@ -448,7 +447,7 @@ When running the Vite development server separately on `http://localhost:5173`, 
 
 ## ⚙️ Configuration
 
-NexusFlow stores its config at `~/.nexusflow/config.json`:
+ContextSpace stores its config at `~/.contextspace/config.json` (fallback: `~/.nexusflow/config.json`):
 
 ```json
 {
@@ -467,28 +466,29 @@ NexusFlow stores its config at `~/.nexusflow/config.json`:
 | `scanDepth` | `2` | How many levels deep to scan for repos |
 | `defaultAssistant` | `null` | Pre-select an assistant during workspace creation |
 
-Run `nexusflow init` to interactively set these values.
+Run `ctxspace init` to interactively set these values.
 
 ## 🏗️ Architecture
 
 ```
-NexusFlow/
+ContextSpace/
 ├── src/
 │   ├── index.ts              # CLI entry point (Commander.js)
 │   ├── server.ts             # Hono API server (REST endpoints)
 │   ├── types.ts              # Shared TypeScript interfaces
 │   ├── commands/             # CLI command handlers
-│   │   ├── create.ts         #   nexusflow create
-│   │   ├── init.ts           #   nexusflow init
-│   │   ├── list.ts           #   nexusflow list
-│   │   ├── open.ts           #   nexusflow open
-│   │   ├── start.ts          #   nexusflow start
-│   │   ├── stop.ts           #   nexusflow stop
-│   │   ├── status.ts         #   nexusflow status
-│   │   ├── logs.ts           #   nexusflow logs
-│   │   └── ui.ts             #   nexusflow ui
+│   │   ├── create.ts         #   ctxspace create
+│   │   ├── init.ts           #   ctxspace init
+│   │   ├── list.ts           #   ctxspace list
+│   │   ├── open.ts           #   ctxspace open
+│   │   ├── start.ts          #   ctxspace start
+│   │   ├── stop.ts           #   ctxspace stop
+│   │   ├── status.ts         #   ctxspace status
+│   │   ├── logs.ts           #   ctxspace logs
+│   │   └── ui.ts             #   ctxspace ui
 │   ├── core/                 # Core workspace logic
-│   │   ├── config.ts         #   Config management (~/.nexusflow/)
+│   │   ├── constants.ts      #   Brand, manifest & lockfile constants
+│   │   ├── config.ts         #   Config management (~/.contextspace/)
 │   │   ├── scanner.ts        #   Git repo scanner
 │   │   ├── worktree.ts       #   Git worktree operations
 │   │   └── workspace.ts      #   Workspace CRUD
@@ -505,11 +505,11 @@ NexusFlow/
 │   │   ├── antigravity.ts    #   Antigravity AGENTS.md generator
 │   │   ├── codex.ts          #   Codex AGENTS.md generator
 │   │   ├── copilot.ts        #   copilot-instructions.md generator
-│   │   ├── cursor.ts         #   nexusflow.mdc generator
+│   │   ├── cursor.ts         #   contextspace.mdc generator
 │   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude, .cursor, .codex)
 │   ├── orchestration/        # Service start/stop/log management
 │   └── utils/                # Helper utilities
-│       ├── skills-catalog.ts #   Skills & Categories catalog manager (~/.nexusflow/)
+│       ├── skills-catalog.ts #   Skills & Categories catalog manager (~/.contextspace/)
 │       ├── git.ts            #   Git operations
 │       ├── detect-ai.ts      #   AI assistant detection
 │       ├── detect-editors.ts #   Editor detection
@@ -535,8 +535,8 @@ Contributions are welcome! Here's how to get set up:
 
 ```bash
 # Clone the repo
-git clone https://github.com/antan87/NexusFlow.git
-cd NexusFlow
+git clone https://github.com/antan87/ContextSpace.git
+cd ContextSpace
 
 # Install all source dependencies
 npm install

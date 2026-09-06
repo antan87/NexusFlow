@@ -11,6 +11,7 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getServiceStatus, loadRunningState } from '../orchestration/index.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
 import { checkGenerationLock } from '../core/generation-lock.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
  * Shows status of running services for a workspace.
@@ -31,7 +32,7 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
     return;
   }
 
-  console.log(chalk.bold.cyan('\n📊 NexusFlow — Live Workspace Status\n'));
+  console.log(chalk.bold.cyan(`\n📊 ${BRAND_NAME} — Live Workspace Status\n`));
   const repositories = await getWorkspaceStatusReport(workspacePath);
   console.log(chalk.bold('Repositories:'));
   for (const repo of repositories.repos) {

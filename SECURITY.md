@@ -10,15 +10,15 @@
 
 ## Reporting a Vulnerability
 
-The NexusFlow team takes the security of our application and its users seriously. If you believe you have found a security vulnerability in NexusFlow, please report it to us responsibly.
+The ContextSpace team takes the security of our application and its users seriously. If you believe you have found a security vulnerability in ContextSpace, please report it to us responsibly.
 
 ### How to Report
 
 Please **do not** report security vulnerabilities through public GitHub issues.
 
 Instead, please report security issues through one of the following methods:
-1. **GitHub Security Advisory:** Submit a private vulnerability report via the [NexusFlow Security Advisories](https://github.com/antan87/NexusFlow/security/advisories/new) page.
-2. **Email:** Send details to the project maintainers at `patronant@gmail.com` with the subject line `[SECURITY] NexusFlow Vulnerability Report`.
+1. **GitHub Security Advisory:** Submit a private vulnerability report via the [ContextSpace Security Advisories](https://github.com/antan87/ContextSpace/security/advisories/new) page.
+2. **Email:** Send details to the project maintainers at `patronant@gmail.com` with the subject line `[SECURITY] ContextSpace Vulnerability Report`.
 
 Please include:
 - A description of the issue and its potential impact.
@@ -33,7 +33,7 @@ Please include:
 
 ## Security Architecture & Threat Model
 
-NexusFlow implements multiple layers of defense-in-depth:
+ContextSpace implements multiple layers of defense-in-depth:
 - **Localhost Containment:** Background HTTP/WebSocket daemon explicitly binds to `127.0.0.1` and enforces strict `Host` header and `Origin` validation to protect against DNS-rebinding attacks.
 - **Workroom Isolation:** Optional Workrooms run on a separate HTTPS listener bound to one user-selected LAN/VPN address. One-use invitations, password hashing, certificate fingerprint pinning, host approval, revocable hashed human/agent credentials, bounded admission, role authorization, rate limiting, and no-store responses protect the remote surface; remote browser origins are rejected. Persisted human host authority is password-encrypted, guest human credentials stay in memory, and localhost Workroom reads and mutations require an exact-dashboard bootstrap; active-room data and ordinary mutations additionally require a generation-bound HttpOnly human session. Losing that session requires the room password for host recovery, while a guest must leave and rejoin. The host agent token is deliberately stored in plaintext inside the mode-`0600` host credential file: it is a reusable remote credential, but its server permissions are limited to read-and-propose operations. Collaborator-authored MCP context is labeled untrusted and is exposed only on read-only/review tool surfaces.
 - **Resource Supply Chain:** Shared skill, agent, and workflow versions are immutable and SHA-256 verified. Package paths, sizes, Windows portability, collisions, exact definition-to-file mapping, declared platform/version compatibility, and aggregate catalog limits are validated before quarantine caching and compatibility is rechecked at apply. Installation shows the exact applied definition and every file, then requires approval bound to both the incoming package digest and the reviewed local resource revision. Catalog writes recheck that revision under the shared write lock after staging the complete replacement and immediately before the atomic swap. Hosts may release exhausted quota only through an audited quarantine-then-purge flow; this cannot revoke review-cache copies already downloaded onto another developer's computer.

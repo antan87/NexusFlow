@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, deleteWorkspace } from '../core/workspace.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
  * Executes the remove command.
@@ -18,7 +19,7 @@ import { listWorkspaces, deleteWorkspace } from '../core/workspace.js';
  * @param workspaceArg - Optional workspace path or branch name from CLI.
  */
 export async function removeCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.red('\n🗑️ NexusFlow — Deleting Workspace\n'));
+  console.log(chalk.bold.red(`\n🗑️ ${BRAND_NAME} — Deleting Workspace\n`));
 
   const config = await loadConfig();
   let workspacePath: string | null = null;

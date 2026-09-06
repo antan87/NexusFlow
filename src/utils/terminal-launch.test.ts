@@ -8,6 +8,7 @@ import {
   SUPPORTED_ASSISTANTS,
 } from './terminal-launch.js';
 import { execa, execaSync } from 'execa';
+import { TERMINAL_TITLE_PREFIX } from '../core/constants.js';
 
 vi.mock('execa');
 
@@ -32,7 +33,7 @@ describe('terminal-launch utility', () => {
         assistant: 'antigravity',
         sessionId: '3a14e9f7-628b-4d51-87b4-1065a7df4921',
       });
-      expect(title).toBe('NexusFlow: my-feature [antigravity] (3a14e9f7)');
+      expect(title).toBe(`${TERMINAL_TITLE_PREFIX} my-feature [antigravity] (3a14e9f7)`);
     });
 
     it('respects and sanitizes custom title when provided', () => {
@@ -44,7 +45,7 @@ describe('terminal-launch utility', () => {
 
     it('handles root workspace path gracefully', () => {
       const title = formatTerminalTitle('/', { assistant: 'claude' });
-      expect(title).toBe('NexusFlow: Workspace [claude]');
+      expect(title).toBe(`${TERMINAL_TITLE_PREFIX} Workspace [claude]`);
     });
   });
 
@@ -102,7 +103,7 @@ describe('terminal-launch utility', () => {
           '-w', '0',
           'nt',
           '-d', "C:\\workspaces\\bob's-app",
-          '--title', "NexusFlow: bobs-app [antigravity] (3a14e9f7)",
+          '--title', `${TERMINAL_TITLE_PREFIX} bobs-app [antigravity] (3a14e9f7)`,
           'pwsh.exe', '-NoExit', '-EncodedCommand', expect.any(String),
         ],
         expect.objectContaining({ detached: true, stdio: 'ignore' }),
@@ -197,7 +198,7 @@ describe('terminal-launch utility', () => {
       expect(res.command).toBe('claude');
       expect(execa).toHaveBeenCalledWith(
         'xfce4-terminal',
-        ['--tab', '--working-directory', '/home/user/workspace', '--title', 'NexusFlow: workspace [claude]', '-e', expect.stringContaining('claude; exec bash')],
+        ['--tab', '--working-directory', '/home/user/workspace', '--title', `${TERMINAL_TITLE_PREFIX} workspace [claude]`, '-e', expect.stringContaining('claude; exec bash')],
         expect.objectContaining({ detached: true, stdio: 'ignore' }),
       );
       expect(mockUnref).toHaveBeenCalled();
@@ -223,7 +224,7 @@ describe('terminal-launch utility', () => {
         [
           '--tab',
           '--working-directory', '/home/user/workspace',
-          '-T', 'NexusFlow: workspace [antigravity] (3a14e9f7)',
+          '-T', `${TERMINAL_TITLE_PREFIX} workspace [antigravity] (3a14e9f7)`,
           '--', 'bash', '-c',
           expect.stringContaining('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921; exec bash'),
         ],

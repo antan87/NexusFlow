@@ -39,21 +39,22 @@ import { getAllSkills, saveWorkspaceSkillsConfig } from '../utils/skills-catalog
 import type { Feature, Project, RepoSelection, WorkspaceContext, WorkspaceMode } from '../types.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
 import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 /**
  * Executes the full "create workspace" flow:
  * 1. Pick a registered project (or ad-hoc repos)
- * 2. Choose the work mode: in-place (no git ceremony) or isolated worktrees
- * 3. Prompt for branch name (worktree) or workspace name (in-place)
- * 4. Prompt for feature description; select repos when ad hoc
- * 5. Detect AI assistants and let user pick
+ * 2. Pick a work mode (isolated worktree vs in-place)
+ * 3. Branch / workspace name
+ * 4. Feature description
+ * 5. Assistant selection
  * 6. Create the workspace (worktrees only in worktree mode)
  * 7. Generate AI context files
  * 8. Optionally open in editor
  */
 export async function createCommand(): Promise<void> {
   console.log(
-    chalk.bold.cyan('\n🚀 NexusFlow — Start Work\n'),
+    chalk.bold.cyan(`\n🚀 ${BRAND_NAME} — Start Work\n`),
   );
 
   const config = await loadConfig();
@@ -122,7 +123,7 @@ export async function createCommand(): Promise<void> {
       projectSpinner.succeed(`Repos from ${project.name}: ${selectedRepos.map((r) => r.name).join(', ')}`);
     } catch (error) {
       projectSpinner.fail(
-        `A repository of project "${project.name}" is missing or not a git repo — fix it with "nexusflow project add/remove".`,
+        `A repository of project "${project.name}" is missing or not a git repo — fix it with "${CLI_NAME} project add/remove".`,
       );
       throw error;
     }
@@ -299,7 +300,7 @@ export async function createCommand(): Promise<void> {
     console.log(
       chalk.yellow(
         `\n⚠️  Workspace was created and is usable, but context generation failed (${message}).\n` +
-          `   Run "nexusflow refresh" inside the workspace to retry.`,
+          `   Run "${CLI_NAME} refresh" inside the workspace to retry.`,
       ),
     );
   }

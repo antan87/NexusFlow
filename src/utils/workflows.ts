@@ -7,6 +7,12 @@ import { resolveResourcePath } from './resources.js';
 import { slugify } from './slug.js';
 import { acquireLock, createMutationQueue } from '../core/locks.js';
 import { atomicWriteFile } from '../resources/fs-safety.js';
+import {
+  resolveBrandHomeDir,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_CATALOG_LOCK_FILE,
+  RESOURCE_WORKFLOWS_DIR,
+} from '../core/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,7 +20,7 @@ const runCatalogMutation = createMutationQueue();
 
 async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
   return runCatalogMutation(async () => {
-    const release = await acquireLock(path.join(os.homedir(), '.nexusflow', '.locks', 'resource-catalog.lock'), {
+    const release = await acquireLock(path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_CATALOG_LOCK_FILE), {
       staleMs: 60_000,
       timeoutMs: 10_000,
       timeoutMessage: 'Timed out waiting for the resource catalog lock.',
@@ -25,6 +31,10 @@ async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
       await release();
     }
   });
+}
+
+function getUserWorkflowsDir(): string {
+  return path.join(resolveBrandHomeDir(), RESOURCE_WORKFLOWS_DIR);
 }
 
 export interface WorkflowTemplate {
@@ -115,7 +125,7 @@ export async function getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   // this module differs between a built run and a source-tree run; a single
   // hard-coded relative path silently finds nothing in one of them.
   const builtInDir = await resolveResourcePath(__dirname, 'workflows');
-  const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
+  const userDir = getUserWorkflowsDir();
 
   // Ensure user custom workflows directory exists so they can find it easily
   try {
@@ -146,7 +156,7 @@ export async function saveWorkflowTemplate(
   originalId?: string,
   options: { readonly beforeCommit?: () => Promise<void>; readonly expectedId?: string } = {},
 ): Promise<WorkflowTemplate> {
-  const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
+  const userDir = getUserWorkflowsDir();
   await fs.mkdir(userDir, { recursive: true });
 
   // Extract name from the first H1 header (# Name) in content if present
@@ -197,7 +207,7 @@ export async function saveWorkflowTemplate(
 
 export async function deleteWorkflowTemplate(id: string): Promise<void> {
   if (!id || slugify(id) !== id || path.basename(id) !== id) throw new Error('Invalid workflow template ID.');
-  const userDir = path.join(os.homedir(), '.nexusflow', 'workflows');
+  const userDir = getUserWorkflowsDir();
   const filePath = path.join(userDir, `${id}.md`);
 
   await withCatalogLock(async () => {

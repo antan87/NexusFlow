@@ -6,6 +6,7 @@ import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import { getLocalMcpServerConfig } from './mcp-config.js';
+import { MCP_ADAPTER_SERVER_NAME, LEGACY_MCP_ADAPTER_SERVER_NAME } from '../core/constants.js';
 
 export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
   private readonly adapter: HarnessAdapter;
@@ -47,7 +48,8 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
           permissionMode,
           model: this.session?.model || process.env.OPENAI_MODEL || process.env.CODEX_MODEL || undefined,
           mcpServers: {
-            nexusflow: getLocalMcpServerConfig(this.cwd, role),
+            [MCP_ADAPTER_SERVER_NAME]: getLocalMcpServerConfig(this.cwd, role),
+            [LEGACY_MCP_ADAPTER_SERVER_NAME]: getLocalMcpServerConfig(this.cwd, role),
           },
         };
 

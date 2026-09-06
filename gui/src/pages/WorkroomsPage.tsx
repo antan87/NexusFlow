@@ -34,6 +34,14 @@ import { Textarea } from '../components/ui/textarea.js';
 import { HandoffStream, type WorkroomTool } from '../features/workrooms/HandoffStream.js';
 import { apiFetch, ApiError } from '../lib/api/client.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
+import {
+  BRAND_NAME,
+  LEGACY_BRAND_NAME,
+  CLI_NAME,
+  WORKROOM_ROOM_EXTENSION,
+  WORKROOM_LEGACY_ROOM_EXTENSION,
+  WORKROOM_INVITE_PROTOCOL,
+} from '../brand.js';
 import type {
   Feature,
   WorkflowStepProgress,
@@ -459,7 +467,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
       method: 'POST',
       body: JSON.stringify({ approvedDigest: digest, approvedLocalDigest: review.localDigest }),
     });
-  }, 'Resource applied to your local NexusFlow catalog.');
+  }, `Resource applied to your local ${BRAND_NAME} catalog.`);
 
   const quarantineResource = (digest: string) => perform(`quarantine-${digest}`, async () => {
     await apiFetch(`/api/workrooms/resources/${digest}/quarantine`, { method: 'POST' });
@@ -539,13 +547,13 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
     const blob = new Blob([JSON.stringify(result.export, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${snapshot?.roomId ?? 'nexusflow-workroom'}.nexusflow-room.json`;
+    link.download = `${snapshot?.roomId ?? `${CLI_NAME}-workroom`}${WORKROOM_ROOM_EXTENSION}`;
     link.click();
     URL.revokeObjectURL(link.href);
   }, 'Encrypted Workroom export created.');
 
   const importRoom = () => perform('import', async () => {
-    if (!importEnvelope) throw new Error('Choose a .nexusflow-room.json export first.');
+    if (!importEnvelope) throw new Error(`Choose a ${WORKROOM_ROOM_EXTENSION} or ${WORKROOM_LEGACY_ROOM_EXTENSION} export first.`);
     const result = await apiFetch<{ status: WorkroomStatus }>('/api/workrooms/import', {
       method: 'POST',
       body: JSON.stringify({
@@ -581,14 +589,14 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
             <Badge variant="info">Experimental</Badge>
           </div>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Share only the project context and reusable agent resources you explicitly review over a private LAN or VPN. NexusFlow never adds code, diffs, credentials, terminals, or AI sessions automatically.
+            Share only the project context and reusable agent resources you explicitly review over a private LAN or VPN. {BRAND_NAME} never adds code, diffs, credentials, terminals, or AI sessions automatically.
           </p>
         </header>
 
         <Alert variant="info">
           <ShieldCheck />
           <AlertTitle>No listener runs by default</AlertTitle>
-          <AlertDescription>A Workroom binds only to the network address you select and stops with NexusFlow.</AlertDescription>
+          <AlertDescription>A Workroom binds only to the network address you select and stops with {BRAND_NAME}.</AlertDescription>
         </Alert>
 
         {pausedRooms.length > 0 && <Card><CardHeader><CardTitle>Paused Workrooms</CardTitle><CardDescription>Enter the room password in the host form below, then resume on the same saved address and port. The password unlocks human authority; agent credentials remain read-and-propose-only.</CardDescription></CardHeader><CardContent className="grid gap-2 sm:grid-cols-2">{pausedRooms.map((room) => <div key={room.roomId} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{room.name}</p><p className="truncate font-mono text-[10px] text-muted-foreground">{room.address}:{room.port} · {room.workspaceId}</p></div><Button size="sm" variant="outline" onClick={() => resumeRoom(room.roomId)} disabled={busy !== null || password.length < 12}>{busy === `resume-${room.roomId}` ? <Spinner /> : <Play />} Resume</Button></div>)}</CardContent></Card>}
@@ -651,7 +659,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
                 <CardDescription>Paste the invitation and enter the separately shared password. The host must approve this device.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-1.5"><Label>Invitation</Label><Textarea className="min-h-24 font-mono text-xs" value={joinInvite} onChange={(event) => setJoinInvite(event.target.value)} placeholder="nexusflow://workroom/join?..." /></div>
+                <div className="space-y-1.5"><Label>Invitation</Label><Textarea className="min-h-24 font-mono text-xs" value={joinInvite} onChange={(event) => setJoinInvite(event.target.value)} placeholder={`${WORKROOM_INVITE_PROTOCOL}//workroom/join?...`} /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5"><Label>Password</Label><Input type="password" value={joinPassword} onChange={(event) => setJoinPassword(event.target.value)} /></div>
                   <div className="space-y-1.5"><Label>Your display name</Label><Input value={joinName} onChange={(event) => setJoinName(event.target.value)} /></div>
@@ -664,7 +672,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><Upload size={15} /> Import an encrypted room</CardTitle><CardDescription>Creates a new room identity, certificate, password, and membership set.</CardDescription></CardHeader>
               <CardContent className="space-y-3">
-                <Input type="file" accept=".json,.nexusflow-room.json" onChange={(event) => {
+                <Input type="file" accept={`.json,${WORKROOM_ROOM_EXTENSION},${WORKROOM_LEGACY_ROOM_EXTENSION}`} onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (!file) return;
                   if (file.size > 150 * 1024 * 1024) {
@@ -761,7 +769,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
             <Card><CardHeader><CardDescription>Repository identities</CardDescription><CardTitle className="text-2xl">{snapshot.bundle.repos.length}</CardTitle></CardHeader></Card>
           </div>
           <Card><CardHeader><CardTitle>{snapshot.bundle.feature.goal}</CardTitle><CardDescription>{snapshot.bundle.project.name} · portable feature {snapshot.bundle.feature.id}</CardDescription></CardHeader><CardContent className="space-y-2">{snapshot.bundle.repos.map((repo) => <div key={repo.id} className="rounded-md border border-border p-3"><div className="flex justify-between gap-3"><span className="text-sm font-medium">{repo.name}</span><Badge variant="secondary">{repo.defaultBranch}</Badge></div><p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{repo.remoteUrl}</p>{repo.handoff && <p className="mt-1 text-xs text-muted-foreground">{repo.handoff.branch} @ {repo.handoff.commit.slice(0, 12)} · {repo.handoff.dirty ? 'dirty' : 'clean'} · ↑{repo.handoff.ahead} ↓{repo.handoff.behind}</p>}</div>)}</CardContent></Card>
-          <Alert variant="info"><ShieldCheck /><AlertTitle>Never collected automatically</AlertTitle><AlertDescription>NexusFlow does not add source archives, filenames, diffs, local paths, credentials, terminals, editor state, or AI transcripts. A developer can still include sensitive text in a reviewed shared document.</AlertDescription></Alert>
+          <Alert variant="info"><ShieldCheck /><AlertTitle>Never collected automatically</AlertTitle><AlertDescription>{BRAND_NAME} does not add source archives, filenames, diffs, local paths, credentials, terminals, editor state, or AI transcripts. A developer can still include sensitive text in a reviewed shared document.</AlertDescription></Alert>
         </TabsPanel>
 
         <TabsPanel value="context" className="space-y-4">
@@ -775,7 +783,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
               const review = downloaded[resource.digest];
               const compatibility = [
                 resource.compatibility?.platforms?.length ? `platforms: ${resource.compatibility.platforms.join(', ')}` : undefined,
-                resource.compatibility?.nexusflow ? `NexusFlow ${resource.compatibility.nexusflow}` : undefined,
+                (resource.compatibility as any)?.contextspace ? `${BRAND_NAME} ${(resource.compatibility as any).contextspace}` : resource.compatibility?.nexusflow ? `${LEGACY_BRAND_NAME} ${resource.compatibility.nexusflow}` : undefined,
               ].filter(Boolean).join(' · ');
               return <Card key={resource.digest} className={resource.quarantinedAt ? 'opacity-60' : ''}><CardContent className="space-y-3 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-2"><Badge variant="secondary">{resource.kind}</Badge><span className="text-sm font-semibold">{resource.id}@{resource.version}</span>{resource.quarantinedAt && <Badge variant="error">Quarantined</Badge>}</div><p className="mt-1 font-mono text-[10px] text-muted-foreground">SHA-256 {resource.digest}</p>{compatibility && <p className="mt-1 text-[10px] text-muted-foreground">Compatibility · {compatibility}</p>}</div>{!resource.quarantinedAt ? <div className="flex flex-wrap gap-2">{review ? <Button onClick={() => applyResource(resource.digest)} disabled={busy !== null}><PackageCheck /> Approve exact digest &amp; apply</Button> : <Button variant="outline" onClick={() => downloadResource(resource.digest)} disabled={busy !== null}><Download /> Download for review</Button>}{isHost && <Button variant="ghost" onClick={() => quarantineResource(resource.digest)} disabled={busy !== null}>Quarantine</Button>}</div> : isHost && <Button variant="destructive-outline" onClick={() => purgeResource(resource.digest)} disabled={busy !== null}>{busy === `purge-${resource.digest}` ? <Spinner /> : <Trash2 />} Purge permanently</Button>}</div>{review && <div className="space-y-3 rounded border border-border bg-muted/30 p-3"><div><p className="text-xs font-semibold">Exact package review · {review.action === 'update' ? 'updates an existing local resource' : 'creates a new local resource'}</p><p className="text-[10px] text-muted-foreground">Applying installs the incoming definition shown below and is bound to SHA-256 {resource.digest}.</p></div>{review.existingDefinition && <details><summary className="cursor-pointer text-xs font-semibold">Current local definition</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[10px]">{review.existingDefinition}</pre></details>}<details open><summary className="cursor-pointer text-xs font-semibold">Incoming applied definition</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[10px]">{review.incomingDefinition}</pre></details><div className="space-y-2">{review.files.map((file) => <details key={file.path}><summary className="cursor-pointer font-mono text-[10px]">{file.path} · {file.bytes.toLocaleString()} bytes · {file.encoding}{file.executable ? ' · executable' : ''}</summary><pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[10px]">{file.content}</pre></details>)}</div></div>}</CardContent></Card>;
             })}

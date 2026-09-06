@@ -263,7 +263,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await page.goto('/');
 
-    await expect(page.locator('h1')).toContainText('Welcome to NexusFlow');
+    await expect(page.locator('h1')).toContainText('Welcome to ContextSpace');
     await expect(page.locator('h2')).toContainText('Initialize Config');
 
     await page.getByPlaceholder('e.g. C:\\Users\\username\\dev', { exact: true }).fill('C:\\mock-dev');

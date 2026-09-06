@@ -16,9 +16,10 @@ import { ensureConfigDir, getConfigDir } from './config.js';
 import { detectDefaultBranch, isGitRepo } from '../utils/git.js';
 import { slugify } from '../utils/slug.js';
 import { debugLog } from '../utils/debug.js';
+import { STORE_PROJECTS_FILE } from './constants.js';
 
-/** Name of the registry file inside ~/.nexusflow. */
-const PROJECTS_FILE_NAME = 'projects.json';
+/** Name of the registry file inside global config dir. */
+const PROJECTS_FILE_NAME = STORE_PROJECTS_FILE;
 
 /** On-disk shape of the registry file. */
 interface ProjectsFile {
@@ -40,6 +41,9 @@ export function slugifyProjectName(name: string): string {
   return slugify(name);
 }
 
+import * as os from 'node:os';
+import { LEGACY_CONFIG_DIR_NAME } from './constants.js';
+
 /**
  * Loads all registered projects. A missing registry file means no projects
  * yet; a corrupted one is surfaced (silently losing the registry would be a
@@ -50,7 +54,12 @@ export async function loadProjects(options: { quiet?: boolean } = {}): Promise<P
   try {
     raw = await fs.readFile(getProjectsFilePath(), 'utf-8');
   } catch {
-    return [];
+    try {
+      const legacyPath = path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, PROJECTS_FILE_NAME);
+      raw = await fs.readFile(legacyPath, 'utf-8');
+    } catch {
+      return [];
+    }
   }
 
   try {
@@ -58,7 +67,7 @@ export async function loadProjects(options: { quiet?: boolean } = {}): Promise<P
     return Array.isArray(parsed.projects) ? parsed.projects : [];
   } catch (error) {
     if (!options.quiet) {
-      console.warn(chalk.yellow('⚠ ~/.nexusflow/projects.json is invalid JSON — treating the registry as empty for this run.'));
+      console.warn(chalk.yellow('⚠ ~/.contextspace/projects.json is invalid JSON — treating the registry as empty for this run.'));
     }
     debugLog('projects', 'parse projects.json', error);
     return [];

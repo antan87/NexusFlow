@@ -56,26 +56,26 @@ describe('Storage Adapters', () => {
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
 
-      await adapter.writeBaseFile('/ws/path', 'RepoName', 'nexusflow-knowledge.md', 'base');
+      await adapter.writeBaseFile('/ws/path', 'RepoName', 'contextspace-knowledge.md', 'base');
 
       expect(fs.writeFile).toHaveBeenCalledWith(
-        path.normalize('/ws/path/.nexusflow/base/RepoName/nexusflow-knowledge.md'),
+        path.normalize('/ws/path/.contextspace/base/RepoName/contextspace-knowledge.md'),
         'base',
         'utf8'
       );
     });
 
     it('should not collide base and workspace files that share a filename (A1.2)', () => {
-      const wsUrl = adapter.resolveWorkspaceFileUrl('/ws/path', 'feature-1', 'nexusflow-knowledge.md');
-      const baseUrl = adapter.resolveBaseFileUrl('/ws/path', 'RepoName', 'nexusflow-knowledge.md');
+      const wsUrl = adapter.resolveWorkspaceFileUrl('/ws/path', 'feature-1', 'contextspace-knowledge.md');
+      const baseUrl = adapter.resolveBaseFileUrl('/ws/path', 'RepoName', 'contextspace-knowledge.md');
       expect(wsUrl).not.toBe(baseUrl);
-      expect(wsUrl).toContain('/ws/path/nexusflow-knowledge.md');
-      expect(baseUrl).toContain('/ws/path/.nexusflow/base/RepoName/nexusflow-knowledge.md');
+      expect(wsUrl).toContain('/ws/path/contextspace-knowledge.md');
+      expect(baseUrl).toContain('/ws/path/.contextspace/base/RepoName/contextspace-knowledge.md');
     });
 
     it('should isolate per-repo base files from each other', () => {
-      const a = adapter.resolveBaseFileUrl('/ws/path', 'RepoA', 'nexusflow-knowledge.md');
-      const b = adapter.resolveBaseFileUrl('/ws/path', 'RepoB', 'nexusflow-knowledge.md');
+      const a = adapter.resolveBaseFileUrl('/ws/path', 'RepoA', 'contextspace-knowledge.md');
+      const b = adapter.resolveBaseFileUrl('/ws/path', 'RepoB', 'contextspace-knowledge.md');
       expect(a).not.toBe(b);
     });
   });

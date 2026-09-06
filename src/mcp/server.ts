@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import { loadConfig } from '../core/config.js';
 import type { NexusFlowConfig } from '../types.js';
 import { enabledTools, isAgentRole, type AgentRole, type ToolContext } from './tools.js';
+import { MCP_SERVER_NAME } from '../core/constants.js';
 
 export interface McpServerOptions {
   workspacePath?: string;
@@ -70,7 +71,7 @@ export async function startMcpServer(optionsOrWorkspacePath?: string | McpServer
 
   const server = new Server(
     {
-      name: 'nexusflow-mcp',
+      name: MCP_SERVER_NAME,
       version: '0.2.0',
     },
     {

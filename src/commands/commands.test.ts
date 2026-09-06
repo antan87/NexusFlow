@@ -9,6 +9,7 @@ import * as multiGit from '../utils/multi-git.js';
 import * as analyzers from '../analyzers/index.js';
 import * as generators from '../generators/index.js';
 import * as locks from '../core/locks.js';
+import { PRIMARY_HANDOFF_FILE, BRAND_NAME } from '../core/constants.js';
 
 vi.mock('node:fs/promises');
 vi.mock('execa');
@@ -77,12 +78,12 @@ describe('NexusFlow CLI New Commands unit tests', () => {
       // Run handoff command
       await handoffCommand(mockWorkspacePath);
 
-      const expectedHandoffPath = path.resolve(path.join(mockWorkspacePath, 'nexusflow-handoff.md'));
+      const expectedHandoffPath = path.resolve(path.join(mockWorkspacePath, PRIMARY_HANDOFF_FILE));
       expect(fs.writeFile).toHaveBeenCalled();
       expect(writtenFiles[expectedHandoffPath]).toBeDefined();
 
       const content = writtenFiles[expectedHandoffPath]!;
-      expect(content).toContain('# NexusFlow Handoff Bundle — test-feature-branch');
+      expect(content).toMatch(new RegExp(`# (${BRAND_NAME}|NexusFlow) Handoff Bundle — test-feature-branch`));
       expect(content).toContain('repo-1');
       expect(content).toContain('1 file changed');
       expect(content).toContain('src/file1.ts');

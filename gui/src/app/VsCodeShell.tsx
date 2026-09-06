@@ -49,7 +49,7 @@ export function VsCodeShell({
       {/* Terminal Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-card border-b border-border shrink-0 text-[10px]">
         <div className="flex items-center gap-2">
-          <span className="font-bold text-primary">NEXUSFLOW_SHELL</span>
+          <span className="font-bold text-primary">CONTEXTSPACE_SHELL</span>
           <span className="text-muted-foreground">|</span>
           <span className="text-muted-foreground">ws: {activeWsId || 'none'}</span>
         </div>
@@ -176,7 +176,7 @@ export function VsCodeShell({
                 Terminal Commands (Click to Run)
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                {['nexusflow sync', 'nexusflow diff', 'nexusflow handoff', 'nexusflow status'].map((cmd) => (
+                {['ctxspace sync', 'ctxspace diff', 'ctxspace handoff', 'ctxspace status'].map((cmd) => (
                   <button
                     key={cmd}
                     onClick={() => executeTerminal(cmd)}

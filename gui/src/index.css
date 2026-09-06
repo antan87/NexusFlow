@@ -8,68 +8,70 @@
 /* ─── Semantic tokens ─────────────────────────────────────────────────────────
    shadcn-style semantic palette: light values at :root, dark overrides in the
    @variant dark block. Utilities (bg-background, text-muted-foreground, …) are
-   generated from the @theme inline mapping below. The single brand hue is the
-   restrained NexusFlow blue (#4f7cff ≈ oklch 0.6 0.19 264). */
+   generated from the @theme inline mapping below.
+   The brand theme reflects the ContextSpace Open Context identity in the default Sunset palette:
+   Solar Gold (#FDE047), Coral Orange (#FB923C / #F97316), Hibiscus Rose (#F43F5E),
+   Pacific Indigo (#6366F1), on Deep Obsidian Twilight (#0A0812). */
 :root {
   color-scheme: light;
   --radius: 0.375rem;
-  --background: #f8fafc;
+  --background: #faf8f6;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
   --popover: #ffffff;
   --popover-foreground: #0f172a;
-  --primary: #2563eb;
+  --primary: #ea580c;
   --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
+  --secondary: #f4efe9;
   --secondary-foreground: #0f172a;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #f1f5f9;
-  --accent-foreground: #0f172a;
-  --destructive: #ef4444;
-  --destructive-foreground: #b91c1c;
-  --border: rgba(0, 0, 0, 0.08);
-  --input: rgba(0, 0, 0, 0.10);
-  --ring: #2563eb;
-  --info: #3b82f6;
-  --info-foreground: #1d4ed8;
+  --muted: #f4efe9;
+  --muted-foreground: #78716c;
+  --accent: #fff7ed;
+  --accent-foreground: #9a3412;
+  --destructive: #f43f5e;
+  --destructive-foreground: #be123c;
+  --border: rgba(234, 88, 12, 0.10);
+  --input: rgba(234, 88, 12, 0.14);
+  --ring: #ea580c;
+  --info: #6366f1;
+  --info-foreground: #4338ca;
   --success: #10b981;
   --success-foreground: #047857;
   --warning: #f59e0b;
   --warning-foreground: #b45309;
-  --running: #06b6d4;
-  --running-foreground: #0e7490;
+  --running: #f97316;
+  --running-foreground: #c2410c;
 
   @variant dark {
     color-scheme: dark;
-    --background: #090a0f;
-    --foreground: #ededed;
-    --card: #111318;
-    --card-foreground: #ededed;
-    --popover: #16181f;
-    --popover-foreground: #ededed;
-    --primary: #3b82f6;
+    --background: #0a0812;
+    --foreground: #f8fafc;
+    --card: #140f22;
+    --card-foreground: #f8fafc;
+    --popover: #181228;
+    --popover-foreground: #f8fafc;
+    --primary: #f97316;
     --primary-foreground: #ffffff;
-    --secondary: #1a1d24;
-    --secondary-foreground: #ededed;
-    --muted: #181a20;
-    --muted-foreground: #8a8f98;
-    --accent: #1e222b;
-    --accent-foreground: #ededed;
-    --destructive: #f87171;
-    --destructive-foreground: #fca5a5;
-    --border: rgba(255, 255, 255, 0.08);
-    --input: rgba(255, 255, 255, 0.10);
-    --ring: #3b82f6;
-    --info: #3b82f6;
-    --info-foreground: #60a5fa;
+    --secondary: #1d172e;
+    --secondary-foreground: #f8fafc;
+    --muted: #181324;
+    --muted-foreground: #9b94a8;
+    --accent: #221a36;
+    --accent-foreground: #fed7aa;
+    --destructive: #f43f5e;
+    --destructive-foreground: #fecdd3;
+    --border: rgba(251, 146, 60, 0.14);
+    --input: rgba(251, 146, 60, 0.18);
+    --ring: #f97316;
+    --info: #818cf8;
+    --info-foreground: #c7d2fe;
     --success: #34d399;
     --success-foreground: #6ee7b7;
-    --warning: #fbbf24;
-    --warning-foreground: #fde68a;
-    --running: #22d3ee;
-    --running-foreground: #67e8f9;
+    --warning: #fde047;
+    --warning-foreground: #fef08a;
+    --running: #fb923c;
+    --running-foreground: #fed7aa;
   }
 }
 
@@ -105,6 +107,11 @@
   --color-running: var(--running);
   --color-running-foreground: var(--running-foreground);
 
+  --color-sunset-gold: var(--brand-first);
+  --color-sunset-coral: var(--brand-middle);
+  --color-sunset-hibiscus: var(--brand-last);
+  --color-sunset-indigo: var(--brand-depth);
+
   --radius-sm: 0.25rem;
   --radius-md: 0.3125rem;
   --radius-lg: var(--radius);
@@ -119,6 +126,15 @@
   }
 }
 
+@utility bg-sunset-gradient {
+  background-image: linear-gradient(135deg, var(--brand-first), var(--brand-middle) 35%, var(--brand-last) 70%, var(--brand-depth));
+}
+@utility text-sunset-gradient {
+  background-image: linear-gradient(135deg, var(--brand-first), var(--brand-middle) 45%, var(--brand-last) 80%, var(--brand-depth));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 /* ─── Base ─────────────────────────────────────────────────────────────────── */
 @layer base {
   * {
@@ -129,7 +145,17 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    min-height: 100vh;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -12%, color-mix(in srgb, var(--brand-middle) 9%, transparent), transparent 65%),
+      radial-gradient(circle 600px at 100% 35%, color-mix(in srgb, var(--brand-last) 5%, transparent), transparent 60%),
+      radial-gradient(circle 700px at 10% 90%, color-mix(in srgb, var(--brand-depth) 6%, transparent), transparent 65%),
+      radial-gradient(color-mix(in srgb, var(--brand-middle) 6%, transparent) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
+    background-attachment: fixed;
   }
+
   code,
   pre,
   kbd,
@@ -242,3 +268,101 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+
+/* ContextSpace home: sunset identity, calm surfaces, deliberate movement. */
+.context-hero {
+  background: radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 65%), var(--card);
+}
+.context-hero-accent { color: var(--primary); }
+.dark .context-hero-accent {
+  background: linear-gradient(100deg, #fde047, #fb923c 45%, #fb7185);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.context-metric { background: color-mix(in srgb, var(--card) 88%, transparent); }
+.context-switch::backdrop { background: #080610a6; backdrop-filter: blur(6px); }
+.context-home { animation: context-arrive 380ms ease-out both; }
+@keyframes context-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 760px) {
+  .context-sidebar { width: 190px; }
+  .context-sidebar kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-home { animation: none; }
+  .context-workspace, .context-workspace * { transition: none; }
+}
+
+/* Color identity is independent of light/dark appearance. */
+:root {
+  --brand-first: #fde047;
+  --brand-middle: #fb923c;
+  --brand-last: #f43f5e;
+  --brand-depth: #6366f1;
+}
+:root[data-color-theme="aurora"] {
+  --brand-first: #5eead4;
+  --brand-middle: #22d3ee;
+  --brand-last: #818cf8;
+  --brand-depth: #6366f1;
+  --background: #f4f9fc;
+  --foreground: #112738;
+  --card: #ffffff;
+  --card-foreground: #112738;
+  --popover: #ffffff;
+  --popover-foreground: #112738;
+  --primary: #087e8b;
+  --primary-foreground: #ffffff;
+  --secondary: #e6f0f5;
+  --secondary-foreground: #112738;
+  --muted: #e6f0f5;
+  --muted-foreground: #526b7a;
+  --accent: #d9f2f3;
+  --accent-foreground: #065964;
+  --border: #bfd4df;
+  --input: #a9c7d6;
+  --ring: #087e8b;
+  --running: #0891b2;
+  --running-foreground: #0e7490;
+}
+:root.dark[data-color-theme="aurora"] {
+  --background: #070f1b;
+  --foreground: #edf7fb;
+  --card: #0e1c2c;
+  --card-foreground: #edf7fb;
+  --popover: #122337;
+  --popover-foreground: #edf7fb;
+  --primary: #5eead4;
+  --primary-foreground: #052e35;
+  --secondary: #14293b;
+  --secondary-foreground: #edf7fb;
+  --muted: #112335;
+  --muted-foreground: #9cb5c7;
+  --accent: #173647;
+  --accent-foreground: #99f6e4;
+  --border: #284359;
+  --input: #36556c;
+  --ring: #5eead4;
+  --running: #22d3ee;
+  --running-foreground: #67e8f9;
+}
+.dark .context-hero-accent {
+  background-image: linear-gradient(100deg, var(--brand-first), var(--brand-middle) 45%, var(--brand-last));
+}
+.context-logo-stop-first { stop-color: var(--brand-first, #fde047); }
+.context-logo-stop-middle { stop-color: var(--brand-middle, #fb923c); }
+.context-logo-stop-last { stop-color: var(--brand-last, #f43f5e); }
+.context-logo-mark { transform-origin: 100px 100px; }
+@media (prefers-reduced-motion: no-preference) {
+  a:hover .context-logo-mark,
+  a:focus-visible .context-logo-mark,
+  button:hover .context-logo-mark,
+  button:focus-visible .context-logo-mark {
+    animation: context-logo-greet 700ms ease-in-out both;
+  }
+  .context-logo stop { transition: stop-color 350ms ease; }
+}
+@keyframes context-logo-greet {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  40% { transform: rotate(-5deg) scale(0.96); }
+  70% { transform: rotate(2deg) scale(1); }
+}

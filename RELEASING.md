@@ -1,13 +1,12 @@
-# Releasing NexusFlow
+# Releasing ContextSpace
 
-NexusFlow ships three artifacts from this one repository, all in **lockstep** on a
+ContextSpace ships three artifacts from this one repository, all in **lockstep** on a
 single version:
 
 | Channel | Artifact | Published to |
-|---|---|---|
-| npm | `@mrpatronz/nexusflow` (CLI + server + bundled GUI) | npm registry |
-| VS Code extension | `nexusflow.nexusflow-vscode` | VS Code Marketplace |
-| Desktop | `NexusFlowSetup.exe` (Windows NSIS), `NexusFlow-<version>.AppImage` (Linux), plus `latest.yml`/`latest-linux.yml` and `.sha256` sidecars | GitHub Releases |
+| npm | `@mrpatronz/contextspace` (CLI + server + bundled GUI) | npm registry |
+| VS Code extension | `contextspace.contextspace-vscode` | VS Code Marketplace |
+| Desktop | `ContextSpaceSetup.exe` (Windows NSIS), `ContextSpace-<version>.AppImage` (Linux), plus `latest.yml`/`latest-linux.yml` and `.sha256` sidecars | GitHub Releases |
 
 ## The one rule: version lives in the root `package.json`
 
@@ -111,5 +110,5 @@ After the package and desktop release are published, bootstrap the matching nati
 desktop release from the installed CLI:
 
 ```bash
-nexusflow desktop install
+ctxspace desktop install
 ```
