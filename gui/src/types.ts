@@ -351,3 +351,41 @@ export type WorkroomStatus =
   | { mode: 'host'; roomId: string; name: string; url: string; localWorkspaceId: string; certificateFingerprint: string; snapshot: WorkroomSnapshot }
   | { mode: 'guest'; roomId: string; name?: string; url: string; status: 'pending' | 'accepted' | 'rejected'; connection?: 'connected' | 'disconnected' | 'revoked'; memberId?: string; localWorkspaceId?: string; snapshot?: WorkroomSnapshot };
 
+export interface WorkspaceStreamMessage {
+  id?: string;
+  timestamp?: string;
+  harness?: string;
+  author?: string;
+  message?: string;
+  content?: string;
+  stepId?: string;
+  evidence?: string;
+  type?: string;
+  artifacts?: Array<{ title: string; path: string; summary?: string }>;
+  targetHarness?: string;
+  [key: string]: any;
+}
+
+export interface WorkspaceStreamResponse {
+  workspaceId: string;
+  messages: WorkspaceStreamMessage[];
+  workflowProgress?: {
+    workflowId?: string;
+    version?: string;
+    revision?: number;
+    steps: Array<{
+      stepId: string;
+      status: string;
+      evidence?: string;
+      revision: number;
+      updatedAt?: string;
+    }>;
+  } | null;
+  isRemoteActive: boolean;
+  remoteStatus: {
+    roomId: string;
+    url?: string;
+    name?: string;
+  } | null;
+}
+

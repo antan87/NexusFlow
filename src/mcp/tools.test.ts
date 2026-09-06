@@ -47,6 +47,8 @@ describe('MCP tools', () => {
     expect(readonlyNames).not.toContain('commit_workspace');
     expect(readonlyNames).not.toContain('finish_workspace');
     expect(readonlyNames).toContain('read_workroom');
+    expect(readonlyNames).toContain('search_knowledge');
+    expect(readonlyNames).toContain('read_workroom_stream');
 
     for (const role of ['developer', 'interactive', 'full', 'ci'] as const) {
       expect(enabledTools(mockConfig, role).map((tool) => tool.name)).not.toContain('read_workroom');
@@ -284,5 +286,105 @@ describe('MCP tools', () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.content[0]!.text).toContain('line1\nline2\nline3');
+  });
+
+  it('executes search_knowledge tool handler successfully', async () => {
+    const tool = findTool('search_knowledge');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+      id: 'feat-test',
+      repos: [],
+    } as any);
+
+    const result = await tool!.handler(
+      { query: 'test query' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(Array.isArray(content)).toBe(true);
+  });
+
+  it('executes read_workroom_stream tool handler with workroom client', async () => {
+    const tool = findTool('read_workroom_stream');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(workroomManager.loadPinnedWorkroomClientForWorkspace).mockResolvedValue({
+      snapshot: vi.fn().mockResolvedValue({
+        roomId: 'room-123',
+        bundle: { feature: { id: 'feat-test', goal: 'Build search' } },
+        documents: { handoff: { content: 'Step 1 complete' } },
+        workflowProgress: {
+          steps: [
+            { stepId: 'step-1', status: 'completed', updatedAt: '2026-09-05T00:00:00Z' },
+            { stepId: 'step-2', status: 'in_progress', updatedAt: '2026-09-05T01:00:00Z' },
+          ],
+        },
+        activity: [
+          { sequence: 1, type: 'document.updated', actorId: 'user-1', summary: 'Updated plan', createdAt: '2026-09-05T00:00:00Z' },
+        ],
+      }),
+    } as any);
+
+    const result = await tool!.handler(
+      { limit: 5 },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content.status).toBe('connected');
+    expect(content.mode).toBe('workroom');
+    expect(content.activeStep?.stepId).toBe('step-2');
+    expect(content.latestHandoff).toBe('Step 1 complete');
+    expect(content.recentActivity).toHaveLength(1);
+  });
+
+  it('executes read_workroom_stream fallback when no workroom connected', async () => {
+    const tool = findTool('read_workroom_stream');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(workroomManager.loadPinnedWorkroomClientForWorkspace).mockRejectedValue(new Error('No workroom'));
+    vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+
+    const result = await tool!.handler(
+      {},
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content.status).toBe('local-fallback');
+    expect(content.mode).toBe('offline');
+  });
+
+  it('executes post_workroom_handoff handler and appends to local chat', async () => {
+    const tool = findTool('post_workroom_handoff');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+    vi.mocked(fs.appendFile).mockResolvedValue(undefined as any);
+    vi.mocked(workroomManager.loadPinnedWorkroomClientForWorkspace).mockRejectedValue(new Error('No workroom'));
+
+    const result = await tool!.handler(
+      { message: 'Completed research and plan.', harness: 'antigravity' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content.status).toBe('posted');
+    expect(content.localChatPersisted).toBe(true);
+    expect(content.harness).toBe('antigravity');
+    expect(fs.appendFile).toHaveBeenCalledWith(
+      expect.stringContaining('chat.jsonl'),
+      expect.stringContaining('Completed research and plan.'),
+      'utf8',
+    );
   });
 });

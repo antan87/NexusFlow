@@ -167,10 +167,8 @@ function AppInner() {
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
 
-  // Active workspace / detail sub-tab. Service state lives in the Services tab
-  // (ServiceConsole) via react-query — App no longer owns it.
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills' | 'services'>('overview');
+  const [subTab, setSubTab] = useState<'overview' | 'workroom' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills' | 'services'>('overview');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -694,7 +692,7 @@ function AppInner() {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       const tab = parts[2];
-      const valid = ['overview', 'sessions', 'changes', 'knowledge', 'plan', 'skills', 'services'];
+      const valid = ['overview', 'workroom', 'sessions', 'changes', 'knowledge', 'plan', 'skills', 'services'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
     } else {
       setActiveWsId(null);

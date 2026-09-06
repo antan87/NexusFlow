@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
@@ -136,7 +137,8 @@ import {
   workflowStepSchema,
 } from './workrooms/contracts.js';
 import { listWorkroomNetworkInterfaces } from './workrooms/host.js';
-import { workroomManager } from './workrooms/manager.js';
+import * as workroomManagerModule from './workrooms/manager.js';
+const { workroomManager } = workroomManagerModule;
 import { buildPortableWorkroomPreview, digestPortableWorkroomContext } from './workrooms/portable.js';
 import { randomToken, tokenDigest } from './workrooms/crypto.js';
 
@@ -2342,6 +2344,159 @@ app.post('/api/workspace/:id/migrate', async (c) => {
     const { migrateWorkspace } = await import('./core/migrate.js');
     const report = await migrateWorkspace(workspacePath, { dryRun: false, refresh: true });
     return c.json(report);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-4. Get workspace collaboration stream (.nexusflow/chat.jsonl or .contextspace/chat.jsonl)
+app.get('/api/workspace/:id/stream', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+
+    const primaryChat = path.join(workspacePath, '.contextspace', 'chat.jsonl');
+    const legacyChat = path.join(workspacePath, '.nexusflow', 'chat.jsonl');
+    let chatFile = legacyChat;
+    try {
+      await fs.access(primaryChat);
+      chatFile = primaryChat;
+    } catch {
+      // fallback to legacyChat
+    }
+
+    let messages: any[] = [];
+    try {
+      const raw = await fs.readFile(chatFile, 'utf-8');
+      messages = raw
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+    } catch {
+      // No chat.jsonl yet
+    }
+
+    let isRemoteActive = false;
+    let remoteStatus: any = null;
+    let workflowProgress: any = null;
+
+    try {
+      const client = await workroomManagerModule.loadPinnedWorkroomClientForWorkspace(id);
+      const snapshot = await client.snapshot();
+      isRemoteActive = true;
+      workflowProgress = snapshot.workflowProgress ?? null;
+      remoteStatus = {
+        roomId: snapshot.roomId,
+        name: snapshot.name,
+      };
+    } catch {
+      // Fallback to in-process workroomManager
+      try {
+        if (workroomManagerModule.workroomManager.hasActiveRoom()) {
+          const status = await workroomManagerModule.workroomManager.status();
+          if ((status.mode === 'host' || status.mode === 'guest') && status.localWorkspaceId === id) {
+            isRemoteActive = true;
+            workflowProgress = status.snapshot?.workflowProgress ?? null;
+            remoteStatus = {
+              roomId: status.roomId,
+              url: status.url,
+              name: (status as any).name,
+            };
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Reconcile messages with live authoritative workflow progress by stepId
+    const stepMap = new Map<string, any>();
+    if (workflowProgress?.steps) {
+      for (const step of workflowProgress.steps) {
+        stepMap.set(step.stepId, step);
+      }
+    }
+
+    const reconciledMessages = messages.map((msg) => {
+      if (!msg.stepId) return msg;
+      const liveStep = stepMap.get(msg.stepId);
+      if (!liveStep) return msg;
+      return {
+        ...msg,
+        stepProposal: liveStep,
+      };
+    });
+
+    return c.json({
+      workspaceId: id,
+      messages: reconciledMessages,
+      workflowProgress,
+      isRemoteActive,
+      remoteStatus,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-5. Post a message to workspace collaboration stream
+app.post('/api/workspace/:id/stream', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as {
+      message: string;
+      harness?: string;
+      author?: string;
+      status?: string;
+      stepId?: string;
+      evidence?: string;
+    };
+    const message = String(body.message ?? '').trim();
+    if (!message) {
+      return c.json({ error: 'Message cannot be empty.' }, 400);
+    }
+
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+
+    let chatDir = path.join(workspacePath, '.nexusflow');
+    try {
+      await fs.access(path.join(workspacePath, '.contextspace'));
+      chatDir = path.join(workspacePath, '.contextspace');
+    } catch {
+      // keep .nexusflow
+    }
+    await fs.mkdir(chatDir, { recursive: true });
+    const chatFile = path.join(chatDir, 'chat.jsonl');
+
+    const isHuman = body.author === 'human' || body.harness === 'developer' || body.harness === 'human';
+    const status = body.status ? String(body.status).trim() : (body.stepId ? 'proposed' : undefined);
+    const effectiveStatus = (!isHuman && status === 'completed') ? 'proposed' : status;
+
+    const entry = {
+      id: createHash('sha256').update(Date.now() + message).digest('hex').slice(0, 12),
+      timestamp: new Date().toISOString(),
+      harness: body.harness || (isHuman ? 'developer' : 'agent'),
+      author: isHuman ? 'human' : 'agent',
+      status: effectiveStatus,
+      message,
+      ...(body.stepId ? { stepId: body.stepId } : {}),
+      ...(body.evidence ? { evidence: body.evidence } : {}),
+      ...(isHuman && effectiveStatus === 'completed' ? { confirmedBy: 'human', confirmedAt: new Date().toISOString() } : {}),
+    };
+
+    await fs.appendFile(chatFile, JSON.stringify(entry) + '\n', 'utf-8');
+
+    return c.json({ success: true, entry });
   } catch (error) {
     return errorResponse(c, error);
   }
