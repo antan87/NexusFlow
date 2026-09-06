@@ -6,6 +6,7 @@ import { Readable, Writable } from 'node:stream';
 import { killTree } from './CliAdapterBase.js';
 import type { AgentHarness } from './ProviderRegistry.js';
 import type { AgentSession } from './session.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 export interface AcpConnection {
   initialize(params: acp.InitializeRequest): Promise<acp.InitializeResponse>;
@@ -45,7 +46,7 @@ class FluentAcpConnection implements AcpConnection {
   public readonly closed: Promise<void>;
 
   constructor(client: acp.Client, stream: acp.Stream) {
-    const app = acp.client({ name: 'NexusFlow' })
+    const app = acp.client({ name: BRAND_NAME })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => (
         client.requestPermission(params)
       ))
@@ -233,7 +234,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
     const initialized = await withTimeout(transport.connection.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {},
-      clientInfo: { name: 'NexusFlow', version: '2.0.0' },
+      clientInfo: { name: BRAND_NAME, version: '2.0.0' },
     }), 10_000, `${this.options.label} ACP initialization`);
     if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
       throw new Error(

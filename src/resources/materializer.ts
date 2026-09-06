@@ -22,7 +22,7 @@ import {
   assertPathWithin,
   atomicWriteJson,
 } from './fs-safety.js';
-import { BRAND_NAME, PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME, resolveWorkspaceConfigDir } from '../core/constants.js';
+import { BRAND_NAME, RESOURCE_OWNERSHIP_NAME, PRIMARY_CONFIG_DIR_NAME, LEGACY_CONFIG_DIR_NAME, resolveWorkspaceConfigDir } from '../core/constants.js';
 
 const PRIMARY_LOCK_FILE = path.join(PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
 const LEGACY_LOCK_FILE = path.join(LEGACY_CONFIG_DIR_NAME, 'resources.lock.json');
@@ -368,13 +368,13 @@ async function preflight(
     for (const existingFile of existingTree.files) {
       const relativePath = normalizeManagedPath(path.relative(workspacePath, existingFile));
       if (!oldOutputs.has(relativePath)) {
-        conflicts.push(`${relativePath} exists inside a NexusFlow-managed resource but is not owned by NexusFlow`);
+        conflicts.push(`${relativePath} exists inside a ${RESOURCE_OWNERSHIP_NAME}-managed resource but is not owned by ${RESOURCE_OWNERSHIP_NAME}`);
       }
     }
     for (const existingDirectory of existingTree.directories) {
       const relativePath = normalizeManagedPath(path.relative(workspacePath, existingDirectory));
       if (!oldOwnedDirectories.has(relativePath)) {
-        conflicts.push(`${relativePath} exists inside a NexusFlow-managed resource but is not owned by NexusFlow`);
+        conflicts.push(`${relativePath} exists inside a ${RESOURCE_OWNERSHIP_NAME}-managed resource but is not owned by ${RESOURCE_OWNERSHIP_NAME}`);
       }
     }
   }
@@ -383,7 +383,7 @@ async function preflight(
     const absoluteRoot = assertPathWithin(workspacePath, path.join(workspacePath, root));
     await assertNoLinkedPathComponents(workspacePath, absoluteRoot);
     if ((await fse.pathExists(absoluteRoot)) && !oldOutputOwnsRoot(oldOutputs, root)) {
-      conflicts.push(`${root} already exists and is not owned by NexusFlow`);
+      conflicts.push(`${root} already exists and is not owned by ${RESOURCE_OWNERSHIP_NAME}`);
     }
   }
 
@@ -393,11 +393,11 @@ async function preflight(
     if (!(await fse.pathExists(absolute))) continue;
     const old = oldOutputs.get(desired.path);
     if (!old) {
-      conflicts.push(`${desired.path} already exists and is not owned by NexusFlow`);
+      conflicts.push(`${desired.path} already exists and is not owned by ${RESOURCE_OWNERSHIP_NAME}`);
       continue;
     }
     if (!(await fileMatchesOutput(absolute, old))) {
-      conflicts.push(`${desired.path} was modified after NexusFlow installed it`);
+      conflicts.push(`${desired.path} was modified after ${RESOURCE_OWNERSHIP_NAME} installed it`);
     }
   }
 

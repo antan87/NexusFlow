@@ -10,7 +10,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
 
 /**
  * Runs the handoff command.
@@ -94,7 +94,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   
   // Format handoff bundle
   const md: string[] = [];
-  md.push(`# NexusFlow Handoff Bundle — ${feature.branchName}`);
+  md.push(`# ${BRAND_NAME} Handoff Bundle — ${feature.branchName}`);
   md.push('');
   md.push(`> **Workspace Path:** \`${workspacePath}\``);
   md.push(`> **Current Branch:** \`${feature.branchName}\``);
@@ -125,7 +125,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   md.push(depGraphDescription);
   md.push('');
 
-  md.push('## 📝 Active Session Context (from nexusflow-knowledge.md)');
+  md.push(`## 📝 Active Session Context (from ${PRIMARY_KNOWLEDGE_FILE})`);
   md.push('');
   md.push('### Open Gotchas & Blockers');
   md.push(extractedGotchas);
@@ -137,10 +137,11 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   md.push(extractedQuestions);
   md.push('');
 
-  const handoffFilePath = path.join(workspacePath, 'nexusflow-handoff.md');
+  const { path: handoffFilePath } = await resolveWorkspaceFilePath(workspacePath, 'handoff');
+  const handoffFileName = path.basename(handoffFilePath);
   await fs.writeFile(handoffFilePath, md.join('\n'), 'utf-8');
 
-  console.log(chalk.green(`\n✅ Generated handoff bundle: ${chalk.bold('nexusflow-handoff.md')}`));
+  console.log(chalk.green(`\n✅ Generated handoff bundle: ${chalk.bold(handoffFileName)}`));
   console.log(chalk.dim(`  Path: ${handoffFilePath}\n`));
 }
 

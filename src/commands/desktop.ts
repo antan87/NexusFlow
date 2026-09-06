@@ -14,11 +14,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
-import { BRAND_NAME } from '../core/constants.js';
+import {
+  BRAND_NAME,
+  LEGACY_BRAND_NAME,
+  CLI_NAME,
+  GITHUB_RELEASE_API_URL,
+  GITHUB_RELEASE_PAGE_URL,
+  DESKTOP_INSTALLER_USER_AGENT,
+} from '../core/constants.js';
 
-export const GITHUB_RELEASE_API_URL = 'https://api.github.com/repos/antan87/NexusFlow/releases/latest';
-const GITHUB_RELEASE_PAGE_URL = 'https://github.com/antan87/NexusFlow/releases/latest';
-const INSTALLER_DIR_NAME = 'nexusflow';
+export { GITHUB_RELEASE_API_URL };
 
 interface ReleaseAsset {
   name: string;
@@ -224,7 +229,7 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiResponse = await fetchRequired(
-    fetchImpl(releaseApiUrl, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer', Accept: 'application/vnd.github+json' })),
+    fetchImpl(releaseApiUrl, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT, Accept: 'application/vnd.github+json' })),
     'GitHub release',
     isSafeReleaseApiUrl,
   );
@@ -247,18 +252,18 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     throw new Error('Refusing to download a checksum sidecar from an untrusted host.');
   }
 
-  const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), 'nexusflow-desktop-'));
+  const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), `${CLI_NAME}-desktop-`));
   const downloadedPath = path.join(tempRoot, assetName);
   let stagedPath: string | undefined;
   try {
     const sidecarResponse = await fetchRequired(
-      fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer' })),
+      fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT })),
       'SHA-256 sidecar',
       isAllowedDesktopReleaseUrl,
     );
     const expectedHash = checksumFromSidecar(await sidecarResponse.text());
     const assetResponse = await fetchRequired(
-      fetchImpl(asset.browser_download_url, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer' }, DESKTOP_ASSET_TIMEOUT_MS)),
+      fetchImpl(asset.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT }, DESKTOP_ASSET_TIMEOUT_MS)),
       'Desktop asset',
       isAllowedDesktopReleaseUrl,
     );
@@ -273,7 +278,9 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     }
 
     const homeDir = options.homeDir ?? os.homedir();
-    const appName = assetName.toLowerCase().startsWith('contextspace') ? 'ContextSpace' : 'NexusFlow';
+    const appName = assetName.toLowerCase().startsWith(CLI_NAME) || assetName.toLowerCase().startsWith(BRAND_NAME.toLowerCase())
+      ? BRAND_NAME
+      : LEGACY_BRAND_NAME;
     const installDirName = appName.toLowerCase();
     const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');

@@ -5,7 +5,12 @@ import fse from 'fs-extra';
 
 import type { CodexAgentItem } from '../types.js';
 import { acquireLock, createMutationQueue } from '../core/locks.js';
-import { getNexusFlowHome } from '../utils/skills-catalog.js';
+import {
+  resolveBrandHomeDir,
+  RESOURCE_AGENTS_DIR,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_CATALOG_LOCK_FILE,
+} from '../core/constants.js';
 import { parseCodexAgentToml, serializeCodexAgentToml, validateCodexAgentInput } from './codex-agent.js';
 import { codexAgentNameSchema, resourceIdSchema, formatValidationError } from './contracts.js';
 import { assertNoLinkedPathComponents, assertPathIsNotLink, assertPathWithin, atomicWriteJson } from './fs-safety.js';
@@ -18,12 +23,12 @@ interface AgentMetadataFile {
 }
 
 export function getUserAgentsDir(): string {
-  return path.join(getNexusFlowHome(), 'agents');
+  return path.join(resolveBrandHomeDir(), RESOURCE_AGENTS_DIR);
 }
 
 async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
   return runCatalogMutation(async () => {
-    const release = await acquireLock(path.join(getNexusFlowHome(), '.locks', 'resource-catalog.lock'), {
+    const release = await acquireLock(path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_CATALOG_LOCK_FILE), {
       staleMs: 60_000,
       timeoutMs: 10_000,
       timeoutMessage: 'Timed out waiting for the resource catalog lock.',

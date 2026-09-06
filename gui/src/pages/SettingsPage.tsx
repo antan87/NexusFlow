@@ -10,9 +10,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../
 import { Separator } from '../components/ui/separator.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
-import type { DetectedEditor, NexusFlowConfig, StorageAdapterMeta } from '../types.js';
-
-
+import type { DetectedEditor, ContextSpaceConfig, StorageAdapterMeta } from '../types.js';
 
 interface ToolStatus {
   id: string;
@@ -25,12 +23,12 @@ interface ToolStatus {
 }
 
 interface SettingsPageProps {
-  config: NexusFlowConfig | null;
-  setConfig: (config: NexusFlowConfig) => void;
+  config: ContextSpaceConfig | null;
+  setConfig: (config: ContextSpaceConfig) => void;
   saveStatus: 'success' | 'error' | null;
   editors: DetectedEditor[];
   adapters: StorageAdapterMeta[];
-  saveAppConfig: (config: NexusFlowConfig) => void;
+  saveAppConfig: (config: ContextSpaceConfig) => void;
   isSettingsFormValid: boolean;
 
   toolsStatus: ToolStatus[];

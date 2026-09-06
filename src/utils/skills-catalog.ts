@@ -19,6 +19,10 @@ import {
   resolveWorkspaceConfigDir,
   PRIMARY_CONFIG_DIR_NAME,
   LEGACY_CONFIG_DIR_NAME,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_CATALOG_LOCK_FILE,
+  RESOURCE_METADATA_KEY,
+  LEGACY_RESOURCE_METADATA_KEY,
 } from '../core/constants.js';
 import {
   formatValidationError,
@@ -122,7 +126,7 @@ export class WorkspaceResourceRevisionError extends Error {
 
 async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
   return runCatalogMutation(async () => {
-    const release = await acquireLock(path.join(getNexusFlowHome(), '.locks', 'resource-catalog.lock'), {
+    const release = await acquireLock(path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_CATALOG_LOCK_FILE), {
       staleMs: 60_000,
       timeoutMs: 10_000,
       timeoutMessage: 'Timed out waiting for the resource catalog lock.',
@@ -653,28 +657,33 @@ async function loadSkillFromDir(
     throw new Error(`Skill name "${id}" must match directory identity "${directoryId}".`);
   }
   const name = id;
-  const nexusflowMetadata =
-    parsedMetadata.data.metadata &&
-    typeof parsedMetadata.data.metadata.nexusflow === 'object' &&
-    parsedMetadata.data.metadata.nexusflow !== null
-      ? (parsedMetadata.data.metadata.nexusflow as Record<string, unknown>)
-      : {};
+  const metadataObj = parsedMetadata.data.metadata as Record<string, unknown> | undefined;
+  const brandMetadata =
+    metadataObj &&
+    typeof metadataObj[RESOURCE_METADATA_KEY] === 'object' &&
+    metadataObj[RESOURCE_METADATA_KEY] !== null
+      ? (metadataObj[RESOURCE_METADATA_KEY] as Record<string, unknown>)
+      : metadataObj &&
+        typeof metadataObj[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
+        metadataObj[LEGACY_RESOURCE_METADATA_KEY] !== null
+        ? (metadataObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
+        : {};
   const title =
     parsedMetadata.data.title ||
-    (typeof nexusflowMetadata.title === 'string' ? nexusflowMetadata.title : undefined) ||
+    (typeof brandMetadata.title === 'string' ? brandMetadata.title : undefined) ||
     name
       .split('-')
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
   const category =
     parsedMetadata.data.category ||
-    (typeof nexusflowMetadata.category === 'string' ? nexusflowMetadata.category : undefined) ||
+    (typeof brandMetadata.category === 'string' ? brandMetadata.category : undefined) ||
     'general';
   const description = parsedMetadata.data.description;
   const tags =
     parsedMetadata.data.tags ||
-    (Array.isArray(nexusflowMetadata.tags)
-      ? nexusflowMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
+    (Array.isArray(brandMetadata.tags)
+      ? brandMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
       : []);
   const rawAllowedTools = parsedMetadata.data['allowed-tools'];
   const allowedTools = Array.isArray(rawAllowedTools)
@@ -852,12 +861,23 @@ export async function saveSkill(
         if (parsedCurrentFrontmatter.success) existingFrontmatter = parsedCurrentFrontmatter.data;
       }
 
-      const existingNexusFlowMetadata =
-        existingFrontmatter?.metadata &&
-        typeof existingFrontmatter.metadata.nexusflow === 'object' &&
-        existingFrontmatter.metadata.nexusflow !== null
-          ? existingFrontmatter.metadata.nexusflow as Record<string, unknown>
-          : {};
+      const existingMetaObj = existingFrontmatter?.metadata;
+      const existingBrandMetadata =
+        existingMetaObj &&
+        typeof existingMetaObj[RESOURCE_METADATA_KEY] === 'object' &&
+        existingMetaObj[RESOURCE_METADATA_KEY] !== null
+          ? existingMetaObj[RESOURCE_METADATA_KEY] as Record<string, unknown>
+          : existingMetaObj &&
+            typeof existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
+            existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] !== null
+            ? existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>
+            : {};
+      const metadataPayload = {
+        ...existingBrandMetadata,
+        title: skill.title || id,
+        category: skill.category || 'general',
+        tags: skill.tags || [],
+      };
       const metadata: Record<string, unknown> = {
         name: id,
         description,
@@ -865,12 +885,8 @@ export async function saveSkill(
         compatibility: existingFrontmatter?.compatibility,
         metadata: {
           ...(existingFrontmatter?.metadata ?? {}),
-          nexusflow: {
-            ...existingNexusFlowMetadata,
-            title: skill.title || id,
-            category: skill.category || 'general',
-            tags: skill.tags || [],
-          },
+          [RESOURCE_METADATA_KEY]: metadataPayload,
+          [LEGACY_RESOURCE_METADATA_KEY]: metadataPayload,
         },
       };
       const allowedTools = skill.allowedTools === undefined

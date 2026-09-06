@@ -7,7 +7,7 @@ export interface StorageAdapterMeta {
   configFields?: any[];
 }
 
-export interface NexusFlowConfig {
+export interface ContextSpaceConfig {
   version: string;
   devDir: string;
   workspacesDir: string;
@@ -18,6 +18,9 @@ export interface NexusFlowConfig {
   adapterConfig?: Record<string, Record<string, any>>;
   plugins?: string[];
 }
+
+export type NexusFlowConfig = ContextSpaceConfig;
+export type AppConfig = ContextSpaceConfig;
 
 export interface DetectedAI {
   name: string;

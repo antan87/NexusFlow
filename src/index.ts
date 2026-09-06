@@ -53,8 +53,7 @@ import {
 } from './commands/schedule.js';
 import { adapterListCommand, adapterUseCommand, adapterInfoCommand, adapterInitCommand } from './commands/adapter.js';
 import { getCurrentVersion, checkForUpdates, printUpdateBanner } from './utils/update-check.js';
-
-import { CLI_NAME, BRAND_NAME } from './core/constants.js';
+import { BRAND_NAME, BRAND_TAGLINE, CLI_NAME, CLI_ALIASES } from './core/constants.js';
 
 const program = new Command();
 
@@ -77,8 +76,8 @@ ${c2('  / __\\___  _ __/ /____ __ __/ /_ / __/___  ___ ________')}
 ${c3(' / /  / _ \\/ _  / __/ // /\\ \\ / __/ \\_ \\/ _ \\/ _ `/ __/ -_)')}
 ${c4(' \\___/\\___/_//_/\\__/\\_,_//_\\_\\\\__/ /___/ .__/\\_,_/\\__/\\__/')}
 ${c4('                                      /_/')}
-  ${chalk.bold('ContextSpace')} ${chalk.dim(`v${getCurrentVersion()}`)} — ${chalk.hex('#FB923C')('Multi-Repo AI Workspace Orchestrator')}
-  Aliases: ${chalk.dim('ctxspace, contextspace, cs, nexusflow')}
+  ${chalk.bold(BRAND_NAME)} ${chalk.dim(`v${getCurrentVersion()}`)} — ${chalk.hex('#FB923C')(BRAND_TAGLINE)}
+  Aliases: ${chalk.dim(CLI_ALIASES.join(', '))}
 `;
   });
 

@@ -35,7 +35,7 @@ import { commitExactWorkspaceArtifacts } from './workspace-git.js';
 import * as fs from 'node:fs/promises';
 import { getActiveStorageProvider } from './adapters/registry.js';
 import { acquireLock } from './locks.js';
-import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE, BRAND_NAME, resolveWorkspaceConfigDir } from './constants.js';
+import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE, BRAND_NAME, CLI_NAME, resolveWorkspaceConfigDir } from './constants.js';
 
 async function getWorkspaceKnowledgeFilename(workspacePath: string, featureId: string): Promise<string> {
   if (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE)) {
@@ -446,7 +446,7 @@ function normaliseMessage(message: string): string {
 
 function validateNewEntry(entry: KnowledgeEntry): KnowledgeEntry {
   if (entry.type === 'progress') {
-    throw new Error('Progress is derived from live git state and cannot be authored as knowledge. Use `nexusflow progress`.');
+    throw new Error(`Progress is derived from live git state and cannot be authored as knowledge. Use \`${CLI_NAME} progress\`.`);
   }
   return {
     ...entry,

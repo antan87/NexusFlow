@@ -289,3 +289,26 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+
+/* ContextSpace home: sunset identity, calm surfaces, deliberate movement. */
+.context-hero {
+  background: radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 65%), var(--card);
+}
+.context-hero-accent { color: var(--primary); }
+.dark .context-hero-accent {
+  background: linear-gradient(100deg, #fde047, #fb923c 45%, #fb7185);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.context-metric { background: color-mix(in srgb, var(--card) 88%, transparent); }
+.context-switch::backdrop { background: #080610a6; backdrop-filter: blur(6px); }
+.context-home { animation: context-arrive 380ms ease-out both; }
+@keyframes context-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 760px) {
+  .context-sidebar { width: 190px; }
+  .context-sidebar kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-home { animation: none; }
+  .context-workspace, .context-workspace * { transition: none; }
+}

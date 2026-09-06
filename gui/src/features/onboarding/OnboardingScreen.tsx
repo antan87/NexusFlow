@@ -2,13 +2,14 @@ import { ArrowRight, Settings as SettingsIcon } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Select, SelectTrigger, SelectValue, SelectPopup, SelectItem } from '../../components/ui/select.js';
-import type { NexusFlowConfig, StorageAdapterMeta } from '../../types.js';
+import type { ContextSpaceConfig, StorageAdapterMeta } from '../../types.js';
+import { BRAND_NAME, OVERVIEW_FILE } from '../../brand.js';
 interface OnboardingScreenProps {
-  config: NexusFlowConfig;
-  setConfig: (config: NexusFlowConfig) => void;
+  config: ContextSpaceConfig;
+  setConfig: (config: ContextSpaceConfig) => void;
   defaultPaths: { devDir: string; workspacesDir: string } | null;
   adapters: StorageAdapterMeta[];
-  saveAppConfig: (config: NexusFlowConfig) => void | Promise<void>;
+  saveAppConfig: (config: ContextSpaceConfig) => void | Promise<void>;
 }
 
 export function OnboardingScreen({
@@ -32,10 +33,10 @@ export function OnboardingScreen({
               Onboarding Guide
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
-              Welcome to ContextSpace
+              Welcome to {BRAND_NAME}
             </h1>
             <p className="text-sm text-muted-foreground mb-8 max-w-xl leading-relaxed">
-              ContextSpace orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
+              {BRAND_NAME} orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
             </p>
 
             {/* Onboarding Steps */}
@@ -59,7 +60,7 @@ export function OnboardingScreen({
                 <div>
                   <h3 className="text-sm font-semibold text-foreground transition-colors">Build Isolated Branch Workspaces</h3>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    Choose repositories and input your feature branch. NexusFlow runs <code>git worktree</code> to checkout dependencies under a unified folder structure, leaving your primary repository directories clean.
+                    Choose repositories and input your feature branch. {BRAND_NAME} runs <code>git worktree</code> to checkout dependencies under a unified folder structure, leaving your primary repository directories clean.
                   </p>
                 </div>
               </div>
@@ -71,7 +72,7 @@ export function OnboardingScreen({
                 <div>
                   <h3 className="text-sm font-semibold text-foreground transition-colors">Align AI Coding Contexts</h3>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    NexusFlow automatically generates configuration files (<code>CLAUDE.md</code>, <code>.cursorrules</code>, <code>AGENTS.md</code>) that instruct the AI assistant to analyze project inter-dependencies, document its assumptions in <code>nexusflow-overview.md</code>, and highlight clarifying questions.
+                    {BRAND_NAME} automatically generates configuration files (<code>CLAUDE.md</code>, <code>.cursorrules</code>, <code>AGENTS.md</code>) that instruct the AI assistant to analyze project inter-dependencies, document its assumptions in <code>{OVERVIEW_FILE}</code>, and highlight clarifying questions.
                   </p>
                 </div>
               </div>
@@ -93,7 +94,7 @@ export function OnboardingScreen({
           {/* Value Statement */}
           <div className="mt-8 pt-6 border-t border-border">
             <p className="text-sm text-muted-foreground">
-              NexusFlow offers native worktrees and local AI orchestration without the overhead of containers or virtual machines.
+              {BRAND_NAME} offers native worktrees and local AI orchestration without the overhead of containers or virtual machines.
             </p>
           </div>
         </div>

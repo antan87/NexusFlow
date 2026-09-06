@@ -24,6 +24,8 @@ import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
+import { BRAND_NAME } from '../brand.js';
+import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
@@ -126,15 +128,17 @@ export function AppSidebar({
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
+    <aside className="context-sidebar flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
       {/* Header */}
       <div className="flex h-12 items-center justify-between px-3 border-b border-border/60">
         <Link to="/overview" className="flex items-center gap-2.5 group">
           <ContextSpaceIcon size={24} className="rounded-md shadow-xs transition-transform duration-200 group-hover:scale-105" />
-          <span className="text-xs font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">ContextSpace</span>
+          <span className="text-xs font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">{BRAND_NAME}</span>
         </Link>
         <span className="text-[10px] font-mono text-muted-foreground/70">v{appVersion}</span>
       </div>
+
+      <QuickSwitch workspaces={workspaces} />
 
       {/* Top Action & Overview Nav */}
       <div className="p-2.5 pb-1 space-y-1.5">
@@ -143,7 +147,7 @@ export function AppSidebar({
           className={({ isActive }) =>
             cn(
               'flex h-7.5 items-center gap-2 rounded-md px-2.5 text-xs font-medium transition-colors cursor-pointer',
-              isActive || location.pathname === '/'
+              isActive || pathname === '/'
                 ? 'bg-primary/10 text-primary font-semibold'
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
             )
@@ -228,6 +232,7 @@ export function AppSidebar({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Filter sidebar workspaces"
             placeholder="Filter workspaces..."
             className="h-7 w-full rounded-md border border-border/80 bg-background/80 py-1 pl-6 pr-6 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
           />
@@ -329,9 +334,9 @@ export function AppSidebar({
                       <span
                         className={cn(
                           'size-1.5 rounded-full shrink-0',
-                          hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                          !st ? 'bg-muted-foreground/40' : hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
                         )}
-                        title={hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
+                        title={!st ? 'Status pending' : hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
                       />
                     </div>
                   </div>

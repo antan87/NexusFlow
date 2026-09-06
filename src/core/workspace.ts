@@ -18,7 +18,7 @@ import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import { loadConfig } from './config.js';
 import { deleteWorkspaceFiles } from './storage.js';
-import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from './constants.js';
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
 
 /** Name of the per-workspace manifest file. */
 const MANIFEST_FILE = PRIMARY_MANIFEST_FILE;
@@ -202,9 +202,9 @@ async function scaffoldWorkspaceDir(
     await fs.mkdir(cursorDir, { recursive: true });
     const cursorMcp = {
       "mcpServers": {
-        "nexusflow": {
+        [BRAND_CONFIG.mcp.serverName]: {
           "command": "npx",
-          "args": ["-y", "@mrpatronz/nexusflow", "mcp", "run"]
+          "args": ["-y", BRAND_CONFIG.mcp.packageName, "mcp", "run"]
         }
       }
     };
@@ -753,10 +753,15 @@ export async function excludeNexusFlowFiles(workspacePath: string, feature: Feat
     'CLAUDE.md',
     'AGENTS.md',
     'WORKSPACE.md',
-    'nexusflow-knowledge.md',
-    'nexusflow-plan.md',
+    BRAND_CONFIG.files.knowledge.primary,
+    BRAND_CONFIG.files.knowledge.legacy,
+    BRAND_CONFIG.files.plan.primary,
+    BRAND_CONFIG.files.plan.legacy,
+    'contextspace-conventions-*.md',
     'nexusflow-conventions-*.md',
+    'contextspace-map-*.md',
     'nexusflow-map-*.md',
+    'contextspace-diff-context.md',
     'nexusflow-diff-context.md',
     '.cursor/rules/',
     '.vscode/settings.json'

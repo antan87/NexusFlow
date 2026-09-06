@@ -1,9 +1,10 @@
 import { PlusCircle, Settings as SettingsIcon } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
-import type { NexusFlowConfig } from '../../types.js';
+import { BRAND_NAME } from '../../brand.js';
+import type { ContextSpaceConfig } from '../../types.js';
 
 interface GettingStartedPageProps {
-  config: NexusFlowConfig;
+  config: ContextSpaceConfig;
   onCreateWorkspace: () => void;
   onModifySettings: () => void;
 }
@@ -20,17 +21,17 @@ export function GettingStartedPage({
           Getting Started Guide
         </div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
-          Welcome to ContextSpace
+          Welcome to {BRAND_NAME}
         </h1>
         <p className="text-sm text-muted-foreground">
-          ContextSpace orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
+          {BRAND_NAME} orchestrates multi-repository developer environments. It combines isolated Git worktrees, automatic code analyzer sweeps, and background process running into a single dashboard.
         </p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
         {/* Left: Interactive Stepper */}
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-6">
-          <h2 className="text-lg font-semibold text-foreground mb-4">ContextSpace Workflows</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-4">{BRAND_NAME} Workflows</h2>
           
           <div className="flex gap-4">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 border border-primary/20 text-primary font-bold text-sm">
@@ -52,7 +53,7 @@ export function GettingStartedPage({
             <div>
               <h3 className="text-sm font-semibold text-foreground">Build Workspaces</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                Choose repositories and feature branch. NexusFlow checks out dependencies under a unified workspace directory using Git Worktrees, keeping original projects clean.
+                Choose repositories and feature branch. {BRAND_NAME} checks out dependencies under a unified workspace directory using Git Worktrees, keeping original projects clean.
               </p>
             </div>
           </div>
@@ -64,7 +65,7 @@ export function GettingStartedPage({
             <div>
               <h3 className="text-sm font-semibold text-foreground">Align AI Context</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                NexusFlow writes files like <code>CLAUDE.md</code>, <code>.cursorrules</code>, <code>AGENTS.md</code> prompting the LLM to inspect project relations and list key assumptions and questions before coding.
+                {BRAND_NAME} writes files like <code>CLAUDE.md</code>, <code>.cursorrules</code>, <code>AGENTS.md</code> prompting the LLM to inspect project relations and list key assumptions and questions before coding.
               </p>
             </div>
           </div>

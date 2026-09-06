@@ -77,6 +77,55 @@ export interface BrandConfigSchema {
     readonly freshnessStart: readonly string[];
     readonly freshnessEnd: readonly string[];
   };
+  readonly resources: {
+    readonly skillsDir: string;
+    readonly agentsDir: string;
+    readonly locksDir: string;
+    readonly catalogLockFile: string;
+    readonly adminLockFile: string;
+    readonly managedOwnershipName: string;
+    readonly legacyOwnershipName: string;
+    readonly metadataKey: string;
+    readonly legacyMetadataKey: string;
+  };
+  readonly github: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly legacyRepo: string;
+    readonly repoUrl: string;
+    readonly releaseApiUrl: string;
+    readonly releasePageUrl: string;
+    readonly userAgent: string;
+    readonly legacyUserAgent: string;
+    readonly desktopInstallerUserAgent: string;
+  };
+  readonly engine: {
+    readonly id: string;
+    readonly legacyId: string;
+    readonly name: string;
+    readonly command: string;
+    readonly legacyCommand: string;
+    readonly npmPackage: string;
+    readonly legacyNpmPackage: string;
+  };
+  readonly terminal: {
+    readonly titlePrefix: string;
+    readonly legacyTitlePrefix: string;
+    readonly defaultTitle: string;
+    readonly legacyDefaultTitle: string;
+    readonly runnerTitle: string;
+    readonly legacyRunnerTitle: string;
+  };
+  readonly workrooms: {
+    readonly bootstrapHeaders: readonly string[];
+    readonly bootstrapCookies: readonly string[];
+    readonly defaultBootstrapHeader: string;
+    readonly defaultBootstrapCookie: string;
+    readonly inviteProtocols: readonly string[];
+    readonly defaultInviteProtocol: string;
+    readonly roomExportExtension: string;
+    readonly legacyRoomExportExtension: string;
+  };
   readonly theme: {
     readonly primary: string;
     readonly sunset: {
@@ -194,6 +243,55 @@ export const BRAND_CONFIG: BrandConfigSchema = {
   sentinels: {
     freshnessStart: ['CONTEXTSPACE:FRESHNESS:START', 'NEXUSFLOW:FRESHNESS:START'],
     freshnessEnd: ['CONTEXTSPACE:FRESHNESS:END', 'NEXUSFLOW:FRESHNESS:END'],
+  },
+  resources: {
+    skillsDir: 'skills',
+    agentsDir: 'agents',
+    locksDir: '.locks',
+    catalogLockFile: 'resource-catalog.lock',
+    adminLockFile: 'resource-administration.lock',
+    managedOwnershipName: 'ContextSpace',
+    legacyOwnershipName: 'NexusFlow',
+    metadataKey: 'contextspace',
+    legacyMetadataKey: 'nexusflow',
+  },
+  github: {
+    owner: 'antan87',
+    repo: 'NexusFlow',
+    legacyRepo: 'NexusFlow',
+    repoUrl: 'https://github.com/antan87/NexusFlow',
+    releaseApiUrl: 'https://api.github.com/repos/antan87/NexusFlow/releases/latest',
+    releasePageUrl: 'https://github.com/antan87/NexusFlow/releases/latest',
+    userAgent: 'ContextSpace-Updater',
+    legacyUserAgent: 'NexusFlow-Updater',
+    desktopInstallerUserAgent: 'ContextSpace-Desktop-Installer',
+  },
+  engine: {
+    id: 'contextspace',
+    legacyId: 'nexusflow',
+    name: 'ContextSpace Engine',
+    command: 'ctxspace',
+    legacyCommand: 'nexusflow',
+    npmPackage: '@mrpatronz/contextspace',
+    legacyNpmPackage: '@mrpatronz/nexusflow',
+  },
+  terminal: {
+    titlePrefix: 'ContextSpace:',
+    legacyTitlePrefix: 'NexusFlow:',
+    defaultTitle: 'ContextSpace Terminal',
+    legacyDefaultTitle: 'NexusFlow Terminal',
+    runnerTitle: 'ContextSpace Runner',
+    legacyRunnerTitle: 'NexusFlow Runner',
+  },
+  workrooms: {
+    bootstrapHeaders: ['x-contextspace-workroom-bootstrap', 'x-nexusflow-workroom-bootstrap'],
+    bootstrapCookies: ['contextspace_workroom_bootstrap', 'nexusflow_workroom_bootstrap'],
+    defaultBootstrapHeader: 'X-ContextSpace-Workroom-Bootstrap',
+    defaultBootstrapCookie: 'contextspace_workroom_bootstrap',
+    inviteProtocols: ['contextspace:', 'nexusflow:'],
+    defaultInviteProtocol: 'contextspace:',
+    roomExportExtension: '.contextspace-room.json',
+    legacyRoomExportExtension: '.nexusflow-room.json',
   },
   theme: {
     primary: '#F97316',

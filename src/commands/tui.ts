@@ -13,6 +13,7 @@ import { execa } from 'execa';
 import { loadConfig } from '../core/config.js';
 import { loadFeatureConfig, listWorkspaces } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, type WorkspaceRepo, type RepoStatus } from '../utils/multi-git.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 const COMMANDS = ['sync', 'doctor', 'refresh', 'status', 'start', 'stop', 'logs', 'list', 'create', 'open', 'remove', 'add-repo', 'help'];
 
@@ -68,7 +69,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     repos,
     repoStatuses: {},
     consoleLogs: [
-      'NexusFlow TUI Command Center v2.0 - Initialized Successfully.',
+      `${BRAND_NAME} TUI Command Center v2.0 - Initialized Successfully.`,
       'Connecting workspace streams...',
       `Active Workspace Path: ${workspacePath}`,
       'Ready. Press [/] to type commands, or [s] to sync, [d] to run diagnostics.',
@@ -118,7 +119,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
     process.stdout.write('\x1B[H');
 
     // Row 0: Top Header Banner
-    const bannerTitle = ` ⚡ NexusFlow Workspace Console [🌿 ${state.branchName}] `;
+    const bannerTitle = ` ⚡ ${BRAND_NAME} Workspace Console [🌿 ${state.branchName}] `;
     const statusText = ` SYSTEM: ONLINE (Port 3000) `;
     const headerFill = cols - bannerTitle.length - statusText.length - 2;
     process.stdout.write(
@@ -336,7 +337,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
               }
 
               if (!workspaceExists) {
-                console.log(chalk.bold.cyan('\n👋 Workspace deleted. Exiting NexusFlow TUI Dashboard.\n'));
+                console.log(chalk.bold.cyan(`\n👋 Workspace deleted. Exiting ${BRAND_NAME} TUI Dashboard.\n`));
                 process.exit(0);
               }
 
@@ -421,7 +422,7 @@ export async function tuiCommand(options: { workspace?: string }): Promise<void>
       // --- Handle single key shortcuts mode ---
       if (key.name === 'q') {
         cleanup();
-        console.log(chalk.bold.cyan('\n👋 Exited NexusFlow TUI Dashboard.\n'));
+        console.log(chalk.bold.cyan(`\n👋 Exited ${BRAND_NAME} TUI Dashboard.\n`));
         process.exit(0);
       } else if (str === '/') {
         state.inputMode = true;

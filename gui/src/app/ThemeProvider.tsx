@@ -1,9 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { THEME_STORAGE_KEY as STORAGE_KEY, LEGACY_THEME_STORAGE_KEY as LEGACY_STORAGE_KEY } from '../brand.js';
 
 export type Theme = 'light' | 'dark';
-
-const STORAGE_KEY = 'contextspace-theme';
-const LEGACY_STORAGE_KEY = 'nexusflow-theme';
 
 interface ThemeContextValue {
   theme: Theme;

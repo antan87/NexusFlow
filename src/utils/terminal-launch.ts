@@ -7,6 +7,7 @@ import { execa, execaSync } from 'execa';
 import * as path from 'node:path';
 
 import { isValidSessionUuid } from '../agent/session.js';
+import { TERMINAL_TITLE_PREFIX, TERMINAL_DEFAULT_TITLE } from '../core/constants.js';
 
 export interface TerminalLaunchOptions {
   command?: string;
@@ -102,7 +103,7 @@ export function formatTerminalTitle(
 
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const wsName = pathApi.basename(workspacePath) || 'Workspace';
-  const parts: string[] = ['NexusFlow:', wsName];
+  const parts: string[] = [TERMINAL_TITLE_PREFIX, wsName];
 
   if (options.assistant) {
     parts.push(`[${options.assistant}]`);
@@ -112,7 +113,7 @@ export function formatTerminalTitle(
   }
 
   const rawTitle = parts.join(' ');
-  return rawTitle.replace(/[^a-zA-Z0-9 _\-:()[\]]/g, '').trim() || 'NexusFlow Terminal';
+  return rawTitle.replace(/[^a-zA-Z0-9 _\-:()[\]]/g, '').trim() || TERMINAL_DEFAULT_TITLE;
 }
 
 /**

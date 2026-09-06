@@ -25,6 +25,7 @@ import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import type { Feature, WorkspaceStatus, RepoInfo } from '../types.js';
 import { API_BASE } from '../lib/apiBase.js';
+import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 
 const renderEditorIcon = (id: string, name: string) => {
   const lower = `${id} ${name}`.toLowerCase();
@@ -166,7 +167,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         method: 'POST',
       });
       if (!res.ok) throw new Error('Migration failed');
-      showToast?.('Workspace successfully upgraded to native ContextSpace!', 'success');
+      showToast?.(`Workspace successfully upgraded to native ${BRAND_NAME}!`, 'success');
       setIsLegacy(false);
       props.fetchWorkspaces?.();
     } catch (e: any) {
@@ -387,7 +388,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               <div className="flex items-center gap-2.5 text-xs text-amber-200">
                 <Sparkles size={16} className="text-amber-400 shrink-0 animate-pulse" />
                 <span>
-                  <strong className="font-semibold text-amber-300">Legacy NexusFlow Workspace:</strong> Upgrade to native ContextSpace manifest and synchronized artifacts.
+                  <strong className="font-semibold text-amber-300">Legacy {LEGACY_BRAND_NAME} Workspace:</strong> Upgrade to native {BRAND_NAME} manifest and synchronized artifacts.
                 </span>
               </div>
               <button
@@ -397,7 +398,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 <ArrowUpCircle size={14} className={migrating ? 'animate-spin' : ''} />
-                {migrating ? 'Upgrading...' : 'Migrate to ContextSpace'}
+                {migrating ? 'Upgrading...' : `Migrate to ${BRAND_NAME}`}
               </button>
             </div>
           )}

@@ -122,7 +122,7 @@ describe('workspace resource materializer', () => {
     await fs.writeFile(extra, 'echo unmanaged', 'utf-8');
 
     await expect(reconcileWorkspaceResources(workspace, ['codex'], [skill], [])).rejects.toMatchObject({
-      conflicts: expect.arrayContaining([expect.stringContaining('is not owned by NexusFlow')]),
+      conflicts: expect.arrayContaining([expect.stringMatching(/is not owned by (ContextSpace|NexusFlow)/)]),
     });
     expect(await fs.readFile(extra, 'utf-8')).toBe('echo unmanaged');
   });

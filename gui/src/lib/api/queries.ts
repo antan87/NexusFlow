@@ -12,7 +12,7 @@ import type {
   DetectedAI,
   DetectedEditor,
   Feature,
-  NexusFlowConfig,
+  ContextSpaceConfig,
   OrchestrationDetection,
   Project,
   RepoInfo,
@@ -33,7 +33,7 @@ import type {
 /** Shape of GET /api/config — the config is wrapped, not top-level. */
 export interface ConfigResponse {
   exists: boolean;
-  config: NexusFlowConfig;
+  config: ContextSpaceConfig;
 }
 
 export function useConfig() {

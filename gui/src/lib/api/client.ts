@@ -1,4 +1,5 @@
 import { API_BASE } from '../apiBase.js';
+import { WORKROOM_BOOTSTRAP_HEADER, LEGACY_WORKROOM_BOOTSTRAP_HEADER } from '../../brand.js';
 
 let workroomBootstrap: Promise<string> | undefined;
 let workroomBootstrapToken: string | undefined;
@@ -61,7 +62,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       ...init,
       headers: {
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(bootstrapToken ? { 'X-NexusFlow-Workroom-Bootstrap': bootstrapToken } : {}),
+        ...(bootstrapToken ? {
+          [WORKROOM_BOOTSTRAP_HEADER]: bootstrapToken,
+          [LEGACY_WORKROOM_BOOTSTRAP_HEADER]: bootstrapToken,
+        } : {}),
         ...init?.headers,
       },
     });

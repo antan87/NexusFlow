@@ -6,6 +6,7 @@ import { execa } from 'execa';
 
 import { readGenerationLock } from './generation-lock.js';
 import { acquireLock } from './locks.js';
+import { BRAND_NAME, CLI_NAME } from './constants.js';
 
 const CORE_ARTIFACTS = [
   '.gitignore',
@@ -44,11 +45,11 @@ export async function ensureWorkspaceGitRepository(workspacePath: string): Promi
   }
   const name = await execa('git', ['config', '--local', 'user.name'], { cwd: workspacePath, reject: false });
   if (name.exitCode !== 0 || !name.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.name', 'ContextSpace'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.name', BRAND_NAME], { cwd: workspacePath });
   }
   const email = await execa('git', ['config', '--local', 'user.email'], { cwd: workspacePath, reject: false });
   if (email.exitCode !== 0 || !email.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.email', 'contextspace@local'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.email', `${CLI_NAME}@local`], { cwd: workspacePath });
   }
 }
 

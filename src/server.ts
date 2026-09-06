@@ -19,7 +19,16 @@ import * as os from 'node:os';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
-import { PRIMARY_LOGS_DIR, LEGACY_LOGS_DIR } from './core/constants.js';
+import {
+  PRIMARY_LOGS_DIR,
+  LEGACY_LOGS_DIR,
+  WORKROOM_BOOTSTRAP_HEADERS,
+  WORKROOM_BOOTSTRAP_COOKIES,
+  ENGINE_ID,
+  LEGACY_ENGINE_ID,
+  ENGINE_NPM_PACKAGE,
+  LEGACY_ENGINE_NPM_PACKAGE,
+} from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
@@ -2605,7 +2614,8 @@ app.post('/api/updates/install', async (c) => {
   try {
     const { toolId } = await c.req.json() as { toolId: string };
     const tools = [
-      { id: 'nexusflow', cmd: 'npm', args: ['install', '-g', '@mrpatronz/nexusflow'] },
+      { id: ENGINE_ID, cmd: 'npm', args: ['install', '-g', ENGINE_NPM_PACKAGE] },
+      { id: LEGACY_ENGINE_ID, cmd: 'npm', args: ['install', '-g', LEGACY_ENGINE_NPM_PACKAGE] },
       { id: 'antigravity', cmd: 'agy', args: ['update'] },
       { id: 'claude', cmd: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
     ];
@@ -2950,33 +2960,54 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
 
 // ─── Workrooms: opt-in LAN/VPN collaboration ─────────────────────────────
 
-const WORKROOM_HUMAN_SESSION_COOKIE = 'nexusflow_workroom_human';
-const WORKROOM_BOOTSTRAP_COOKIE = 'nexusflow_workroom_bootstrap';
-const WORKROOM_BOOTSTRAP_HEADER = 'x-nexusflow-workroom-bootstrap';
+const WORKROOM_HUMAN_SESSION_COOKIES = [
+  'contextspace_workroom_human',
+  'nexusflow_workroom_human',
+] as const;
 const WORKROOM_BOOTSTRAP_TOKEN = randomToken();
 
 function establishWorkroomBootstrap(c: Parameters<typeof setCookie>[0]): void {
-  setCookie(c, WORKROOM_BOOTSTRAP_COOKIE, WORKROOM_BOOTSTRAP_TOKEN, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    path: '/api/workrooms',
-  });
+  for (const cookieName of WORKROOM_BOOTSTRAP_COOKIES) {
+    setCookie(c, cookieName, WORKROOM_BOOTSTRAP_TOKEN, {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/api/workrooms',
+    });
+  }
 }
 
 function hasValidWorkroomBootstrap(c: Parameters<typeof getCookie>[0]): boolean {
-  const cookieToken = getCookie(c, WORKROOM_BOOTSTRAP_COOKIE);
-  const headerToken = c.req.header(WORKROOM_BOOTSTRAP_HEADER);
+  const cookieToken = WORKROOM_BOOTSTRAP_COOKIES
+    .map((name) => getCookie(c, name))
+    .find((val) => typeof val === 'string' && val);
+  const headerToken = WORKROOM_BOOTSTRAP_HEADERS
+    .map((header) => c.req.header(header))
+    .find((val) => typeof val === 'string' && val);
   return Boolean(cookieToken && headerToken
     && tokenDigest(cookieToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN)
     && tokenDigest(headerToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN));
 }
 
 function establishWorkroomHumanSession(c: Parameters<typeof setCookie>[0], token = workroomManager.beginHumanSession()): void {
-  setCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    path: '/api/workrooms',
-  });
+  for (const cookieName of WORKROOM_HUMAN_SESSION_COOKIES) {
+    setCookie(c, cookieName, token, {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/api/workrooms',
+    });
+  }
+}
+
+function getWorkroomHumanSessionToken(c: Parameters<typeof getCookie>[0]): string | undefined {
+  return WORKROOM_HUMAN_SESSION_COOKIES
+    .map((name) => getCookie(c, name))
+    .find((val) => typeof val === 'string' && val);
+}
+
+function clearWorkroomHumanSession(c: Parameters<typeof setCookie>[0]): void {
+  for (const cookieName of WORKROOM_HUMAN_SESSION_COOKIES) {
+    deleteCookie(c, cookieName, { path: '/api/workrooms' });
+  }
 }
 
 function hasExactDashboardOrigin(origin: string | undefined, requestUrl: string): boolean {
@@ -2984,9 +3015,8 @@ function hasExactDashboardOrigin(origin: string | undefined, requestUrl: string)
   try {
     const normalizedOrigin = new URL(origin).origin;
     const requestOrigin = new URL(requestUrl).origin;
-    const configuredDevelopmentOrigin = process.env.NEXUSFLOW_DASHBOARD_ORIGIN
-      ? new URL(process.env.NEXUSFLOW_DASHBOARD_ORIGIN).origin
-      : undefined;
+    const devOrigin = process.env.CONTEXTSPACE_DASHBOARD_ORIGIN || process.env.NEXUSFLOW_DASHBOARD_ORIGIN;
+    const configuredDevelopmentOrigin = devOrigin ? new URL(devOrigin).origin : undefined;
     return normalizedOrigin === requestOrigin || normalizedOrigin === configuredDevelopmentOrigin;
   } catch {
     return false;
@@ -3027,7 +3057,7 @@ app.use('/api/workrooms/*', async (c, next) => {
     || /^\/api\/workrooms\/room-[a-f0-9]{32}\/resume$/.test(pathname);
   if (needsHumanReadSession || (isMutation && !doesNotRequireExistingHumanSession)) {
     try {
-      const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+      const authority = workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
       if (pathname === '/api/workrooms/stop') return next();
       await workroomManager.runWithHumanAuthority(authority, () => next());
       return;
@@ -3049,7 +3079,7 @@ app.get('/api/workrooms/session', (c) => {
   const roomType = workroomManager.activeRoomType();
   if (!roomType) return c.json({ active: false, locked: false });
   try {
-    workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     return c.json({ active: true, locked: false, roomType });
   } catch {
     return c.json({ active: true, locked: true, roomType });
@@ -3073,7 +3103,7 @@ app.post('/api/workrooms/session/abandon', async (c) => {
     const body = await c.req.json();
     if (body.confirm !== true) return c.json({ error: 'Confirm leaving this locked guest connection.' }, 400);
     await workroomManager.abandonLockedGuest();
-    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    clearWorkroomHumanSession(c);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
@@ -3088,7 +3118,7 @@ app.get('/api/workrooms/status', async (c) => {
   try {
     const status = await workroomManager.status();
     if (status.mode !== 'idle') {
-      workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+      workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     }
     return c.json({ status });
   } catch (error) {
@@ -3188,9 +3218,9 @@ app.post('/api/workrooms/start', async (c) => {
 
 app.post('/api/workrooms/stop', async (c) => {
   try {
-    const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    const authority = workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     await workroomManager.stopOrLeave(authority);
-    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    clearWorkroomHumanSession(c);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
