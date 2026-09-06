@@ -123,22 +123,28 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
 
   const messages: WorkspaceStreamMessage[] = useMemo(() => data?.messages ?? [], [data?.messages]);
 
-  // Aggregate milestone progress from messages using the validated status contract
+  const liveStepsMap = useMemo(
+    () => new Map(data?.workflowProgress?.steps?.map((s) => [s.stepId, s]) ?? []),
+    [data?.workflowProgress?.steps]
+  );
+
+  // Aggregate milestone progress from messages using the validated status contract joined with live workflow progress
   const milestones = useMemo(() => {
     const map = new Map<string, { stepId: string; status: MilestoneStatus; lastMessage: string; harness: string }>();
     for (const msg of messages) {
       if (msg.stepId) {
+        const liveStep = liveStepsMap.get(msg.stepId) ?? msg.stepProposal;
         const computedStatus = evaluateMilestoneStatus({
           status: msg.status,
           author: msg.author,
           harness: msg.harness,
           confirmedBy: msg.confirmedBy,
           confirmedAt: msg.confirmedAt,
-          stepProposal: msg.stepProposal,
+          stepProposal: liveStep,
           syncError: msg.syncError,
           message: msg.message,
           content: msg.content,
-          evidence: msg.evidence,
+          evidence: liveStep?.evidence || msg.evidence,
         });
         map.set(msg.stepId, {
           stepId: msg.stepId,
@@ -149,7 +155,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
       }
     }
     return Array.from(map.values());
-  }, [messages]);
+  }, [messages, liveStepsMap]);
 
   const handleSubmit = async (e?: FormEvent) => {
     if (e) e.preventDefault();
@@ -302,8 +308,13 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             {messages.map((entry, idx) => {
               const bodyText = entry.message || entry.content || '';
               const authorLabel = entry.author || entry.harness || 'Assistant';
-              const stepStatus = evaluateMilestoneStatus(entry);
-              const negativeEvidence = isNegativeEvidence(entry.evidence);
+              const liveStep = (entry.stepId ? liveStepsMap.get(entry.stepId) : undefined) ?? entry.stepProposal;
+              const stepStatus = evaluateMilestoneStatus({
+                ...entry,
+                stepProposal: liveStep,
+              });
+              const displayEvidence = liveStep?.evidence || entry.evidence;
+              const negativeEvidence = isNegativeEvidence(displayEvidence);
               return (
                 <div key={entry.id || idx} className="p-4 transition-colors hover:bg-muted/10">
                   <div className="flex items-start gap-3">
@@ -338,7 +349,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                       </div>
 
                       {/* Evidence block with verified vs proposal vs failure distinction */}
-                      {entry.evidence && (
+                      {displayEvidence && (
                         negativeEvidence || stepStatus === 'failed' ? (
                           <div className="mt-2.5 p-2.5 rounded-md border border-destructive/40 bg-destructive/10">
                             <div className="flex items-center gap-1.5 text-xs font-semibold text-destructive mb-1">
@@ -346,7 +357,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                               <span>Test Failure / Negative Evidence</span>
                             </div>
                             <pre className="font-mono text-[11px] text-destructive whitespace-pre-wrap break-all">
-                              {entry.evidence}
+                              {displayEvidence}
                             </pre>
                           </div>
                         ) : stepStatus === 'completed' ? (
@@ -356,7 +367,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                               <span>Verified Evidence (Confirmed)</span>
                             </div>
                             <pre className="font-mono text-[11px] text-emerald-300/90 whitespace-pre-wrap break-all">
-                              {entry.evidence}
+                              {displayEvidence}
                             </pre>
                           </div>
                         ) : (
@@ -366,7 +377,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                               <span>Proposal Evidence (Review Requested)</span>
                             </div>
                             <pre className="font-mono text-[11px] text-amber-300/90 whitespace-pre-wrap break-all">
-                              {entry.evidence}
+                              {displayEvidence}
                             </pre>
                           </div>
                         )

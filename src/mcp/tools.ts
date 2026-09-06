@@ -773,6 +773,23 @@ export const tools: NexusFlowTool[] = [
         }
 
         if (remoteSnapshot) {
+          const stepMap = new Map<string, any>();
+          if (remoteSnapshot.workflowProgress?.steps) {
+            for (const step of remoteSnapshot.workflowProgress.steps) {
+              stepMap.set(step.stepId, step);
+            }
+          }
+
+          const reconciledMessages = localMessages.map((msg: any) => {
+            if (!msg.stepId) return msg;
+            const liveStep = stepMap.get(msg.stepId);
+            if (!liveStep) return msg;
+            return {
+              ...msg,
+              stepProposal: liveStep,
+            };
+          });
+
           const activeStep =
             remoteSnapshot.workflowProgress?.steps.find(
               (s: any) => s.status === 'in_progress' || s.status === 'completion_proposed',
@@ -788,7 +805,7 @@ export const tools: NexusFlowTool[] = [
               id: remoteSnapshot.bundle.feature.id,
               goal: remoteSnapshot.bundle.feature.goal,
             },
-            recentMessages: localMessages,
+            recentMessages: reconciledMessages,
             activeStep: activeStep
               ? {
                   stepId: activeStep.stepId,

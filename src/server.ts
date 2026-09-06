@@ -126,7 +126,8 @@ import {
   workflowStepSchema,
 } from './workrooms/contracts.js';
 import { listWorkroomNetworkInterfaces } from './workrooms/host.js';
-import { workroomManager } from './workrooms/manager.js';
+import * as workroomManagerModule from './workrooms/manager.js';
+const { workroomManager } = workroomManagerModule;
 import { buildPortableWorkroomPreview, digestPortableWorkroomContext } from './workrooms/portable.js';
 import { randomToken, tokenDigest } from './workrooms/crypto.js';
 
@@ -2314,25 +2315,59 @@ app.get('/api/workspace/:id/stream', async (c) => {
 
     let isRemoteActive = false;
     let remoteStatus: any = null;
+    let workflowProgress: any = null;
+
     try {
-      if (workroomManager.hasActiveRoom()) {
-        const status = await workroomManager.status();
-        if (status.mode === 'host' && status.localWorkspaceId === id) {
-          isRemoteActive = true;
-          remoteStatus = {
-            roomId: status.roomId,
-            url: status.url,
-            name: status.name,
-          };
-        }
-      }
+      const client = await workroomManagerModule.loadPinnedWorkroomClientForWorkspace(id);
+      const snapshot = await client.snapshot();
+      isRemoteActive = true;
+      workflowProgress = snapshot.workflowProgress ?? null;
+      remoteStatus = {
+        roomId: snapshot.roomId,
+        name: snapshot.name,
+      };
     } catch {
-      // ignore
+      // Fallback to in-process workroomManager
+      try {
+        if (workroomManagerModule.workroomManager.hasActiveRoom()) {
+          const status = await workroomManagerModule.workroomManager.status();
+          if ((status.mode === 'host' || status.mode === 'guest') && status.localWorkspaceId === id) {
+            isRemoteActive = true;
+            workflowProgress = status.snapshot?.workflowProgress ?? null;
+            remoteStatus = {
+              roomId: status.roomId,
+              url: status.url,
+              name: (status as any).name,
+            };
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
+
+    // Reconcile messages with live authoritative workflow progress by stepId
+    const stepMap = new Map<string, any>();
+    if (workflowProgress?.steps) {
+      for (const step of workflowProgress.steps) {
+        stepMap.set(step.stepId, step);
+      }
+    }
+
+    const reconciledMessages = messages.map((msg) => {
+      if (!msg.stepId) return msg;
+      const liveStep = stepMap.get(msg.stepId);
+      if (!liveStep) return msg;
+      return {
+        ...msg,
+        stepProposal: liveStep,
+      };
+    });
 
     return c.json({
       workspaceId: id,
-      messages,
+      messages: reconciledMessages,
+      workflowProgress,
       isRemoteActive,
       remoteStatus,
     });

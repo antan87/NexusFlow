@@ -1051,6 +1051,105 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('GET /api/workspace/:id/stream', () => {
+    it('returns messages joined with live authoritative workflow progress', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+      } as any);
+
+      const fakeChat = JSON.stringify({
+        id: 'msg-stream-1',
+        message: 'Completed verification',
+        author: 'agent',
+        harness: 'codex',
+        stepId: 'step-verify',
+        evidence: '14 tests passed',
+        status: 'proposed',
+        stepProposal: {
+          stepId: 'step-verify',
+          status: 'completion_proposed',
+          evidence: '14 tests passed',
+        },
+        timestamp: new Date().toISOString(),
+      });
+      const readSpy = vi.spyOn(fs, 'readFile').mockResolvedValue(fakeChat);
+
+      const mockSnapshot = {
+        roomId: 'room-123',
+        name: 'Stream Room',
+        workflowProgress: {
+          schemaVersion: 1,
+          revision: 2,
+          steps: [
+            {
+              stepId: 'step-verify',
+              status: 'completed',
+              evidence: 'Human confirmed with 14 tests passing',
+              revision: 2,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        },
+      };
+
+      const mockClient = {
+        snapshot: vi.fn().mockResolvedValue(mockSnapshot),
+      };
+
+      const managerModule = await import('./workrooms/manager.js');
+      const loadClientSpy = vi.spyOn(managerModule, 'loadPinnedWorkroomClientForWorkspace').mockResolvedValue(mockClient as any);
+
+      try {
+        const response = await app.request('/api/workspace/test-ws/stream');
+        expect(response.status).toBe(200);
+        const data = (await response.json()) as any;
+        expect(data.workspaceId).toBe('test-ws');
+        expect(data.isRemoteActive).toBe(true);
+        expect(data.workflowProgress).toBeDefined();
+        expect(data.messages).toHaveLength(1);
+        expect(data.messages[0].stepProposal.status).toBe('completed');
+        expect(data.messages[0].stepProposal.evidence).toBe('Human confirmed with 14 tests passing');
+      } finally {
+        loadClientSpy.mockRestore();
+        readSpy.mockRestore();
+      }
+    });
+
+    it('falls back gracefully to unjoined messages when no workroom is connected', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+      } as any);
+
+      const fakeChat = JSON.stringify({
+        id: 'msg-stream-2',
+        message: 'Initial proposal',
+        author: 'agent',
+        stepId: 'step-plan',
+        status: 'proposed',
+        timestamp: new Date().toISOString(),
+      });
+      const readSpy = vi.spyOn(fs, 'readFile').mockResolvedValue(fakeChat);
+
+      const managerModule = await import('./workrooms/manager.js');
+      const loadClientSpy = vi.spyOn(managerModule, 'loadPinnedWorkroomClientForWorkspace').mockRejectedValue(new Error('No pinned workroom'));
+      const hasActiveSpy = vi.spyOn(workroomManager, 'hasActiveRoom').mockReturnValue(false);
+
+      try {
+        const response = await app.request('/api/workspace/test-ws/stream');
+        expect(response.status).toBe(200);
+        const data = (await response.json()) as any;
+        expect(data.isRemoteActive).toBe(false);
+        expect(data.workflowProgress).toBeNull();
+        expect(data.messages).toHaveLength(1);
+        expect(data.messages[0].stepId).toBe('step-plan');
+      } finally {
+        loadClientSpy.mockRestore();
+        hasActiveSpy.mockRestore();
+        readSpy.mockRestore();
+      }
+    });
+  });
+
   describe('POST /api/updates/install', () => {
     it('should fail if tool not found', async () => {
       const response = await app.request('/api/updates/install', {

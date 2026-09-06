@@ -366,11 +366,23 @@ export interface WorkspaceStreamMessage {
 export interface WorkspaceStreamResponse {
   workspaceId: string;
   messages: WorkspaceStreamMessage[];
+  workflowProgress?: {
+    workflowId?: string;
+    version?: string;
+    revision?: number;
+    steps: Array<{
+      stepId: string;
+      status: string;
+      evidence?: string;
+      revision: number;
+      updatedAt?: string;
+    }>;
+  } | null;
   isRemoteActive: boolean;
   remoteStatus: {
     roomId: string;
-    url: string;
-    name: string;
+    url?: string;
+    name?: string;
   } | null;
 }
 

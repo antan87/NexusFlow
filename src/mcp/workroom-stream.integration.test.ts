@@ -9,6 +9,8 @@ import { startHostedWorkroom, type HostedWorkroom } from '../workrooms/host.js';
 import { PinnedWorkroomClient } from '../workrooms/client.js';
 import { WorkroomAuthorizationError, WORKROOM_SCHEMA_VERSION } from '../workrooms/contracts.js';
 import { evaluateMilestoneStatus } from '../workrooms/milestones.js';
+import { app } from '../server.js';
+import * as configModule from '../core/config.js';
 import * as workroomManager from '../workrooms/manager.js';
 import * as workspace from '../core/workspace.js';
 import type { NexusFlowConfig } from '../types.js';
@@ -64,8 +66,13 @@ describe('Connected Workroom Stream Integration', () => {
     cleanupPaths.push(root);
 
     const workspaceId = 'feat-stream-test';
-    const workspaceDir = path.join(root, 'workspace');
+    const workspaceDir = path.join(root, workspaceId);
     await fs.mkdir(workspaceDir, { recursive: true });
+
+    vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
+      ...mockConfig,
+      workspacesDir: root,
+    } as any);
 
     // 1. Spin up a real hosted Workroom server over HTTPS with SQLite store
     const port = await freePort();
@@ -208,12 +215,54 @@ describe('Connected Workroom Stream Integration', () => {
     const remoteStep = confirmedPayload.workflowProgress.steps.find((s: any) => s.stepId === 'step-verify');
     expect(remoteStep.status).toBe('completed');
 
-    // Milestone evaluation with authoritative remote completed state evaluates to completed
-    const evaluatedConfirmed = evaluateMilestoneStatus({
-      ...readPayload.recentMessages[0],
-      stepProposal: remoteStep,
-    });
+    // Milestone evaluation directly on confirmedPayload.recentMessages[0] evaluates to completed
+    // WITHOUT manually injecting stepProposal - stream reader dynamically reconciles live state!
+    const evaluatedConfirmed = evaluateMilestoneStatus(confirmedPayload.recentMessages[0]);
     expect(evaluatedConfirmed).toBe('completed');
+    expect(confirmedPayload.recentMessages[0].stepProposal.status).toBe('completed');
+
+    // GUI / API stream endpoint also returns dynamically reconciled messages and live workflowProgress
+    const guiStreamRes = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(guiStreamRes.status).toBe(200);
+    const guiStreamPayload = (await guiStreamRes.json()) as any;
+    expect(guiStreamPayload.isRemoteActive).toBe(true);
+    expect(guiStreamPayload.workflowProgress.steps.find((s: any) => s.stepId === 'step-verify').status).toBe('completed');
+    expect(guiStreamPayload.messages[0].stepProposal.status).toBe('completed');
+    expect(evaluateMilestoneStatus(guiStreamPayload.messages[0])).toBe('completed');
+
+    // -------------------------------------------------------------------------
+    // TEST 3b: Subsequent Authoritative Transitions
+    //         Human host re-transitions step back to in_progress (reopening it)
+    //         Verify read_workroom_stream immediately reconciles to in_progress
+    // -------------------------------------------------------------------------
+    const updatedRevision = remoteStep.revision;
+    await host.service.transitionWorkflowStep(
+      host.hostToken,
+      'step-verify',
+      'in_progress',
+      updatedRevision,
+    );
+
+    const readAfterReopen = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    const reopenPayload = JSON.parse(readAfterReopen.content[0]!.text);
+    const reopenedStep = reopenPayload.workflowProgress.steps.find((s: any) => s.stepId === 'step-verify');
+    expect(reopenedStep.status).toBe('in_progress');
+    expect(reopenPayload.recentMessages[0].stepProposal.status).toBe('in_progress');
+
+    // Evaluator directly on stream message now reflects in_progress status
+    const evaluatedReopen = evaluateMilestoneStatus(reopenPayload.recentMessages[0]);
+    expect(evaluatedReopen).toBe('in_progress');
+
+    // GUI / API stream endpoint immediately reflects subsequent transition to in_progress
+    const guiStreamRes2 = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(guiStreamRes2.status).toBe(200);
+    const guiStreamPayload2 = (await guiStreamRes2.json()) as any;
+    expect(guiStreamPayload2.workflowProgress.steps.find((s: any) => s.stepId === 'step-verify').status).toBe('in_progress');
+    expect(guiStreamPayload2.messages[0].stepProposal.status).toBe('in_progress');
+    expect(evaluateMilestoneStatus(guiStreamPayload2.messages[0])).toBe('in_progress');
 
     // -------------------------------------------------------------------------
     // TEST 4: Authority Boundaries & Actionable Error Handling
