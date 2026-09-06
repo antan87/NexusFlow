@@ -15,6 +15,7 @@ import { loadChatStore, saveChatStore, clearChatStore, fetchRemoteChatStore, typ
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
+import { CHAT_LAUNCH_CONSUMED_KEY, LEGACY_CHAT_LAUNCH_CONSUMED_KEY } from '../../brand.js';
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
@@ -1402,8 +1403,9 @@ export function AgentChat({ ws }: AgentChatProps) {
     let previouslyConsumed = consumedIntentRef.current === launchIntent.nonce;
     try {
       previouslyConsumed = previouslyConsumed
-        || sessionStorage.getItem('nexusflow.chatLaunch.consumed') === launchIntent.nonce;
-      sessionStorage.setItem('nexusflow.chatLaunch.consumed', launchIntent.nonce);
+        || sessionStorage.getItem(CHAT_LAUNCH_CONSUMED_KEY) === launchIntent.nonce
+        || sessionStorage.getItem(LEGACY_CHAT_LAUNCH_CONSUMED_KEY) === launchIntent.nonce;
+      sessionStorage.setItem(CHAT_LAUNCH_CONSUMED_KEY, launchIntent.nonce);
     } catch {
       // sessionStorage can be disabled; the component-local guard still
       // prevents repeats during this mount.

@@ -25,6 +25,7 @@ import {
   setScheduleEnabled,
   type ScheduleTask,
 } from '../core/scheduler.js';
+import { BRAND_NAME, CLI_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 import { findActiveServerPort } from './ui.js';
 
 /**
@@ -37,7 +38,7 @@ export async function scheduleAddCommand(
   workspaceArg: string | undefined,
   options: { task?: string; every?: string },
 ): Promise<void> {
-  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Schedule a Recurring Job\n'));
+  console.log(chalk.bold.cyan(`\n🕐 ${BRAND_NAME} — Schedule a Recurring Job\n`));
 
   const task = (options.task || 'sync') as ScheduleTask;
   if (task !== 'sync' && task !== 'refresh') {
@@ -58,7 +59,7 @@ export async function scheduleAddCommand(
 
   console.log(chalk.green(`✅ Scheduled ${chalk.bold(task)} every ${chalk.bold(formatInterval(intervalMinutes))} for ${chalk.bold(path.basename(workspacePath))}`));
   console.log(chalk.dim(`  Job id: ${job.id}`));
-  console.log(chalk.dim('  Jobs run while a NexusFlow server is active — start one with "nexusflow ui" (e.g. --daemon --server-only).'));
+  console.log(chalk.dim(`  Jobs run while a ${BRAND_NAME} server is active — start one with "${CLI_NAME} ui" (e.g. --daemon --server-only).`));
   console.log(chalk.dim('  Scheduled runs are token-efficient: only repos whose content changed are re-analyzed.\n'));
 }
 
@@ -74,18 +75,18 @@ export async function scheduleListCommand(options?: { json?: boolean }): Promise
     return;
   }
 
-  console.log(chalk.bold.cyan('\n🕐 NexusFlow — Scheduled Jobs\n'));
+  console.log(chalk.bold.cyan(`\n🕐 ${BRAND_NAME} — Scheduled Jobs\n`));
 
   if (!activePort) {
-    console.log(chalk.yellow('⚠️  Notice: The NexusFlow background server is not currently active.'));
-    console.log(chalk.dim('   Jobs are dormant until started with: nexusflow ui --daemon\n'));
+    console.log(chalk.yellow(`⚠️  Notice: The ${BRAND_NAME} background server is not currently active.`));
+    console.log(chalk.dim(`   Jobs are dormant until started with: ${CLI_NAME} ui --daemon\n`));
   } else {
-    console.log(chalk.green(`✔ NexusFlow background server is active (port ${activePort}).\n`));
+    console.log(chalk.green(`✔ ${BRAND_NAME} background server is active (port ${activePort}).\n`));
   }
 
   if (store.jobs.length === 0) {
     console.log(chalk.yellow('No scheduled jobs. Add one with:'));
-    console.log(chalk.dim('  nexusflow schedule add [workspace] --task sync --every 2h\n'));
+    console.log(chalk.dim(`  ${CLI_NAME} schedule add [workspace] --task sync --every 2h\n`));
     return;
   }
 
@@ -110,7 +111,7 @@ export async function scheduleListCommand(options?: { json?: boolean }): Promise
     console.log();
   }
 
-  console.log(chalk.dim('Jobs run while a NexusFlow server is active ("nexusflow ui"). Use "nexusflow schedule run <id>" to run one immediately.\n'));
+  console.log(chalk.dim(`Jobs run while a ${BRAND_NAME} server is active ("${CLI_NAME} ui"). Use "${CLI_NAME} schedule run <id>" to run one immediately.\n`));
 }
 
 /**
@@ -121,7 +122,7 @@ export async function scheduleRemoveCommand(id: string): Promise<void> {
   if (removed) {
     console.log(chalk.green(`✅ Removed schedule ${chalk.bold(id)}\n`));
   } else {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
   }
 }
 
@@ -133,7 +134,7 @@ export async function scheduleToggleCommand(id: string, enabled: boolean): Promi
   if (job) {
     console.log(chalk.green(`✅ ${enabled ? 'Enabled' : 'Disabled'} schedule ${chalk.bold(id)}\n`));
   } else {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
   }
 }
 
@@ -144,7 +145,7 @@ export async function scheduleRunCommand(id: string): Promise<void> {
   const store = await loadSchedules();
   const job = store.jobs.find((j) => j.id === id);
   if (!job) {
-    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "nexusflow schedule list" to see ids.\n`));
+    console.error(chalk.red(`✖ No schedule found with id "${id}". Run "${CLI_NAME} schedule list" to see ids.\n`));
     return;
   }
 
@@ -164,13 +165,12 @@ export async function scheduleRunCommand(id: string): Promise<void> {
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

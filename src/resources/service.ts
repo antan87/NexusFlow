@@ -1,7 +1,12 @@
 import * as path from 'node:path';
 
 import { acquireLock, createMutationQueue } from '../core/locks.js';
-import { getAllSkills, getNexusFlowHome } from '../utils/skills-catalog.js';
+import {
+  resolveBrandHomeDir,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_ADMIN_LOCK_FILE,
+} from '../core/constants.js';
+import { getAllSkills } from '../utils/skills-catalog.js';
 import { getAllAgents } from './agents-catalog.js';
 
 const runResourceAdministration = createMutationQueue();
@@ -25,7 +30,7 @@ export class ResourceSelectionError extends Error {
 export async function withResourceAdministrationLock<T>(operation: () => Promise<T>): Promise<T> {
   return runResourceAdministration(async () => {
     const release = await acquireLock(
-      path.join(getNexusFlowHome(), '.locks', 'resource-administration.lock'),
+      path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_ADMIN_LOCK_FILE),
       {
         staleMs: 60_000,
         timeoutMs: 15_000,

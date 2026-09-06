@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { FLOATING_CHAT_STORAGE_KEY, LEGACY_FLOATING_CHAT_STORAGE_KEY } from '../../brand';
 
 export interface FloatingChatState {
   isOpen: boolean;
@@ -9,8 +10,6 @@ export interface FloatingChatState {
   position: { x: number; y: number } | null;
   size: { width: number; height: number };
 }
-
-const STORAGE_KEY = 'nexusflow_floating_chat_state_v1';
 
 const DEFAULT_STATE: FloatingChatState = {
   isOpen: false,
@@ -24,7 +23,7 @@ const DEFAULT_STATE: FloatingChatState = {
 
 function loadState(): FloatingChatState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(FLOATING_CHAT_STORAGE_KEY) ?? localStorage.getItem(LEGACY_FLOATING_CHAT_STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw);
     return {
@@ -53,7 +52,7 @@ const listeners = new Set<() => void>();
 
 function notify() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentState));
+    localStorage.setItem(FLOATING_CHAT_STORAGE_KEY, JSON.stringify(currentState));
   } catch {
     // Non-fatal if localStorage is unavailable
   }

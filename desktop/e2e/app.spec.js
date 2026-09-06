@@ -7,17 +7,17 @@ import { fileURLToPath } from 'node:url';
 
 const desktopDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-// When NEXUSFLOW_PACKAGED_EXE is set (CI, after electron-builder), drive the
+// When CONTEXTSPACE_PACKAGED_EXE is set (CI, after electron-builder), drive the
 // real packaged binary — exercising the app.isPackaged path in main.js that
 // runs the bundled backend via ELECTRON_RUN_AS_NODE. Otherwise run the dev
 // build (`electron .`).
-const packagedExe = process.env.NEXUSFLOW_PACKAGED_EXE
-  ? path.resolve(desktopDir, process.env.NEXUSFLOW_PACKAGED_EXE)
+const packagedExe = (process.env.CONTEXTSPACE_PACKAGED_EXE || process.env.NEXUSFLOW_PACKAGED_EXE)
+  ? path.resolve(desktopDir, process.env.CONTEXTSPACE_PACKAGED_EXE || process.env.NEXUSFLOW_PACKAGED_EXE)
   : null;
 
 // main.js mirrors its startup + backend output here so a boot failure is
 // diagnosable even when Playwright doesn't surface the main-process console.
-const logPath = path.join(os.tmpdir(), `nexusflow-desktop-e2e-${process.pid}.log`);
+const logPath = path.join(os.tmpdir(), `contextspace-desktop-e2e-${process.pid}.log`);
 
 function dumpBackendLog(label) {
   try {
@@ -34,7 +34,11 @@ test.describe('desktop app', () => {
   let window;
 
   test.beforeAll(async () => {
-    const launchEnv = { ...process.env, NEXUSFLOW_DESKTOP_LOG: logPath };
+    const launchEnv = {
+      ...process.env,
+      CONTEXTSPACE_DESKTOP_LOG: logPath,
+      NEXUSFLOW_DESKTOP_LOG: logPath,
+    };
     app = packagedExe
       ? await electron.launch({ executablePath: packagedExe, env: launchEnv })
       : await electron.launch({ args: ['.'], cwd: desktopDir, env: launchEnv });
@@ -78,15 +82,15 @@ test.describe('desktop app', () => {
   // Electron-on-Windows cold-start timing makes nav clicks flaky.
   test('boots the backend and loads the dashboard shell', async () => {
     // The dashboard sidebar renders the brand; an error/blank page would not.
-    await expect(window.getByText('NexusFlow', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(window.getByText('ContextSpace', { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
     // The preload bridge reports the backend port the window actually loaded.
-    const port = await window.evaluate(() => window.nexusBridge.getServerPort());
+    const port = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.getServerPort());
     expect(port).toBeGreaterThan(0);
   });
 
   test('exposes a guarded updater IPC status', async () => {
-    const state = await window.evaluate(() => window.nexusBridge?.updates?.getStatus());
+    const state = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.updates?.getStatus());
     expect(state).toBeTruthy();
     // Dev Electron and browser-like shells can inspect the API but cannot
     // invoke native installation. Linux is supported only when an absolute,

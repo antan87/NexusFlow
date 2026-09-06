@@ -6,6 +6,12 @@ import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import { getLocalMcpServerConfig } from './mcp-config.js';
+import {
+  MCP_SERVER_NAME,
+  LEGACY_MCP_SERVER_NAME,
+  MCP_ADAPTER_SERVER_NAME,
+  LEGACY_MCP_ADAPTER_SERVER_NAME,
+} from '../core/constants.js';
 
 const CORE_ALLOWED_TOOLS = new Set([
   'Edit', 'Write', 'MultiEdit', 'NotebookEdit',
@@ -72,7 +78,8 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
             CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '.', '.claude'),
           },
           mcpServers: {
-            nexusflow: getLocalMcpServerConfig(this.cwd, role),
+            [MCP_ADAPTER_SERVER_NAME]: getLocalMcpServerConfig(this.cwd, role),
+            [LEGACY_MCP_ADAPTER_SERVER_NAME]: getLocalMcpServerConfig(this.cwd, role),
           },
         };
 
@@ -152,7 +159,8 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               break;
 
             case 'approval_required': {
-              const toolName = event.tool.replace(/^(mcp__nexusflow__|nexusflow__)/, '');
+              const toolPrefixPattern = new RegExp(`^(?:mcp__)?(?:${MCP_ADAPTER_SERVER_NAME}|${LEGACY_MCP_ADAPTER_SERVER_NAME}|${MCP_SERVER_NAME}|${LEGACY_MCP_SERVER_NAME})__`);
+              const toolName = event.tool.replace(toolPrefixPattern, '');
 
               if (this.currentExecutionProfile === 'workspace-write' && (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName))) {
                 handle.respondToApproval(event.requestId, { behavior: 'allow' });

@@ -6,6 +6,7 @@ import { execa } from 'execa';
 import { createWorkspace, deleteWorkspace, addRepoToWorkspace } from './workspace.js';
 import * as worktree from './worktree.js';
 import type { Feature, RepoInfo, RepoSelection } from '../types.js';
+import { PRIMARY_MANIFEST_FILE } from './constants.js';
 
 vi.mock('execa');
 vi.mock('./worktree.js');
@@ -61,7 +62,7 @@ describe('createWorkspace rollback', () => {
 
     expect(worktree.createWorktree).toHaveBeenCalledTimes(2);
     expect(worktree.removeWorktree).not.toHaveBeenCalled();
-    const manifest = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    const manifest = await fs.readFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), 'utf-8');
     expect(JSON.parse(manifest).branchName).toBe('feat-branch');
   });
 
@@ -160,7 +161,7 @@ describe('createWorkspace rollback', () => {
     expect(gitignore).not.toContain('/api/');
 
     // The manifest records the mode and the source repo paths.
-    const manifest = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8'));
+    const manifest = JSON.parse(await fs.readFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), 'utf-8'));
     expect(manifest.mode).toBe('in-place');
     expect(manifest.repos).toEqual([path.join('/src', 'api'), path.join('/src', 'web')]);
 
@@ -216,7 +217,7 @@ describe('deleteWorkspace (in-place)', () => {
         workspacePath,
         createdAt: '2026-07-04T00:00:00.000Z',
       };
-      await fs.writeFile(path.join(workspacePath, 'nexusflow.json'), JSON.stringify(manifest), 'utf-8');
+      await fs.writeFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), JSON.stringify(manifest), 'utf-8');
 
       await deleteWorkspace(workspacePath);
 
@@ -260,7 +261,7 @@ describe('addRepoToWorkspace rollback', () => {
       workspacePath,
       createdAt: '2026-07-04T00:00:00.000Z',
     };
-    await fs.writeFile(path.join(workspacePath, 'nexusflow.json'), JSON.stringify(initialManifest), 'utf-8');
+    await fs.writeFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), JSON.stringify(initialManifest), 'utf-8');
 
     // createWorktree succeeds and creates a branch
     vi.mocked(worktree.createWorktree).mockResolvedValue({ createdBranch: true });
@@ -275,7 +276,7 @@ describe('addRepoToWorkspace rollback', () => {
     expect(await fs.access(workspacePath).then(() => true).catch(() => false)).toBe(true);
 
     // Verify manifest was reverted on disk to its original state (B2)
-    const manifestContent = await fs.readFile(path.join(workspacePath, 'nexusflow.json'), 'utf-8');
+    const manifestContent = await fs.readFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), 'utf-8');
     const restoredManifest = JSON.parse(manifestContent);
     expect(restoredManifest.repos).toEqual([path.join(workspacePath, 'api')]);
     expect(restoredManifest.originalRepos).toEqual(['/src/api']);

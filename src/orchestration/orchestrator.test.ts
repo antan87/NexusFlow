@@ -29,7 +29,7 @@ function tilt(): OrchestrationDetection {
     tool: 'tilt',
     configPath: '/ws/feature-a/Tiltfile',
     startCommand: 'tilt up',
-    stopCommand: 'Stopped via NexusFlow',
+    stopCommand: 'Stopped via ContextSpace',
     run: { command: 'tilt', args: ['up', '--file', '/ws/feature-a/Tiltfile'], cwd: '/ws/feature-a' },
     stopRun: { command: 'tilt', args: ['down', '--file', '/ws/feature-a/Tiltfile'], cwd: '/ws/feature-a' },
     mode: 'pm2',
@@ -70,7 +70,7 @@ describe('orchestrator runner', () => {
     // Name/log are keyed on the detection id (not the tool) so same-tool tools
     // in different sub-repos never collide.
     expect(running.pm2Name).toBe(orchestratorPm2Name(WS, detection));
-    expect(running.pm2Name).toMatch(/^nexusflow-feature-a-[0-9a-f]{8}-orch-tilt-tiltfile$/);
+    expect(running.pm2Name).toMatch(/^ctxspace-feature-a-[0-9a-f]{8}-orch-tilt-tiltfile$/);
     expect(running.logName).toBe('orch-tilt-tiltfile');
     // pm2 delete (idempotent) then pm2 start with the orch app name.
     const startCall = vi.mocked(execa).mock.calls.find((c) => (c[1] as string[] | undefined)?.includes('start'));

@@ -4,6 +4,7 @@
 
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import { API_BASE } from '../../lib/apiBase.js';
+import { CHAT_STORAGE_PREFIX, LEGACY_CHAT_STORAGE_PREFIX } from '../../brand.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -35,7 +36,8 @@ export interface ChatStore {
   messages: ChatMessage[];
 }
 
-export const chatStorageKey = (branchName: string) => `nexusflow_chat_${branchName}`;
+export const chatStorageKey = (branchName: string) => `${CHAT_STORAGE_PREFIX}${branchName}`;
+export const legacyChatStorageKey = (branchName: string) => `${LEGACY_CHAT_STORAGE_PREFIX}${branchName}`;
 
 const emptyStore = (): ChatStore => ({
   v: 4,
@@ -53,7 +55,7 @@ const emptyStore = (): ChatStore => ({
  */
 export function loadChatStore(branchName: string): ChatStore {
   try {
-    const raw = localStorage.getItem(chatStorageKey(branchName));
+    const raw = localStorage.getItem(chatStorageKey(branchName)) || localStorage.getItem(legacyChatStorageKey(branchName));
     if (!raw) return emptyStore();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -190,6 +192,7 @@ export function clearChatStore(branchName: string): void {
   try {
     localStorage.removeItem(chatStorageKey(branchName));
     void clearRemoteChatStore(branchName);
+    localStorage.removeItem(legacyChatStorageKey(branchName));
   } catch {
     // ignore
   }

@@ -51,15 +51,22 @@ import type {
   DetectedAI,
   DetectedEditor,
   Feature,
-  NexusFlowConfig,
+  ContextSpaceConfig,
   RepoInfo,
   StorageAdapterMeta,
   TranscriptMessage,
   WorkspaceStatus,
 } from './types.js';
+import {
+  BRAND_NAME,
+  CLI_NAME,
+  GITHUB_RELEASE_URL,
+  KNOWLEDGE_FILE,
+  PLAN_FILE,
+} from './brand.js';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-const nativeUpdateBridge = typeof window !== 'undefined' ? window.nexusBridge?.updates : undefined;
+const nativeUpdateBridge = typeof window !== 'undefined' ? (window.contextspaceBridge?.updates || window.nexusBridge?.updates) : undefined;
 let toastIdCounter = 0;
 
 type UiUpdateStatus = {
@@ -69,7 +76,7 @@ type UiUpdateStatus = {
   downloadUrl?: string | null;
   releaseUrl?: string | null;
   releaseNotes?: string | null;
-  nativeStatus?: NexusFlowDesktopUpdateState['status'];
+  nativeStatus?: ContextSpaceDesktopUpdateState['status'];
   progress?: number;
   error?: string | null;
 };
@@ -89,7 +96,7 @@ function AppInner() {
   };
   
   // App Config
-  const [config, setConfig] = useState<NexusFlowConfig | null>(null);
+  const [config, setConfig] = useState<ContextSpaceConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
@@ -149,7 +156,7 @@ function AppInner() {
   // so a created or deleted workspace shows up here without manual syncing.
   // Status polling is expensive server-side (git status across every repo of
   // every workspace), so it only runs on the routes that display statuses.
-  const onStatusRoute = location.pathname === '/' || location.pathname.startsWith('/workspaces');
+  const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
   const statusesQuery = useWorkspacesStatus({
@@ -163,7 +170,7 @@ function AppInner() {
   // Active workspace / detail sub-tab. Service state lives in the Services tab
   // (ServiceConsole) via react-query — App no longer owns it.
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'services' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<'overview' | 'changes' | 'sessions' | 'knowledge' | 'plan' | 'skills' | 'services'>('overview');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -203,7 +210,7 @@ function AppInner() {
 
   // ─── API Fetches ────────────────────────────────────────────────────────
 
-  const applyNativeUpdateState = (state: NexusFlowDesktopUpdateState) => {
+  const applyNativeUpdateState = (state: ContextSpaceDesktopUpdateState) => {
     const isAvailable = ['available', 'downloading', 'downloaded', 'error'].includes(state.status)
       && Boolean(state.version);
     setUpdateStatus({
@@ -214,11 +221,11 @@ function AppInner() {
       nativeStatus: state.status,
       progress: state.progress,
       error: state.error,
-      releaseUrl: 'https://github.com/antan87/NexusFlow/releases/latest',
+      releaseUrl: GITHUB_RELEASE_URL,
     });
     setAppVersion(state.currentVersion);
     if (state.status === 'error') {
-      setUpdateCheckError(state.error || 'NexusFlow could not check or download the update.');
+      setUpdateCheckError(state.error || `${BRAND_NAME} could not check or download the update.`);
     } else if (state.status !== 'checking') {
       setUpdateCheckError(null);
     }
@@ -254,7 +261,7 @@ function AppInner() {
         throw new Error(`Update check failed with HTTP ${res.status}.`);
       }
     } catch (e) {
-      setUpdateCheckError(e instanceof Error ? e.message : 'NexusFlow could not check for updates.');
+      setUpdateCheckError(e instanceof Error ? e.message : `${BRAND_NAME} could not check for updates.`);
       console.error('Failed to fetch update status:', e);
     }
   };
@@ -270,7 +277,7 @@ function AppInner() {
 
   const handleAutoUpdate = async () => {
     if (!nativeUpdateBridge) {
-      showToast('Native installation is available in the NexusFlow desktop app. Open the release page to install it.', 'info');
+      showToast(`Native installation is available in the ${BRAND_NAME} desktop app. Open the release page to install it.`, 'info');
       return;
     }
 
@@ -281,7 +288,7 @@ function AppInner() {
       const nextState = await nativeUpdateBridge.download();
       applyNativeUpdateState(nextState);
       if (nextState.status === 'downloaded') {
-        showToast('Update downloaded. Restart NexusFlow when you are ready to install it.', 'success');
+        showToast(`Update downloaded. Restart ${BRAND_NAME} when you are ready to install it.`, 'success');
       } else {
         showToast(`Update failed: ${nextState.error || 'The download did not complete.'}`, 'error');
       }
@@ -353,7 +360,7 @@ function AppInner() {
     }
   };
 
-  const saveAppConfig = async (newConfig: NexusFlowConfig) => {
+  const saveAppConfig = async (newConfig: ContextSpaceConfig) => {
     try {
       const res = await fetch(`${API_BASE}/api/config`, {
         method: 'POST',
@@ -687,7 +694,7 @@ function AppInner() {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       const tab = parts[2];
-      const valid = ['overview', 'sessions', 'services', 'changes', 'knowledge', 'plan', 'skills'];
+      const valid = ['overview', 'sessions', 'changes', 'knowledge', 'plan', 'skills', 'services'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
     } else {
       setActiveWsId(null);
@@ -787,7 +794,7 @@ Workspace Metadata:
 
 Core Instructions:
 1. Read "AGENTS.md" at the workspace root first — it names the repos, how they depend on each other, which to change first, and how to verify each.
-2. Search "nexusflow-knowledge.md" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`nexusflow knowledge add\`. "nexusflow-plan.md" carries the phase order when a change spans repos.
+2. Search "${KNOWLEDGE_FILE}" for decisions and gotchas from earlier sessions rather than reading it whole, and record new ones with \`${CLI_NAME} knowledge add\`. "${PLAN_FILE}" carries the phase order when a change spans repos.
 3. Follow all project-specific rules in "CLAUDE.md", ".cursorrules", or "AGENTS.md" inside sub-repositories.
 `;
     const copied = await safeCopyToClipboard(prompt);
@@ -961,7 +968,7 @@ Core Instructions:
   const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-transparent text-foreground">
       <AppSidebar
         appVersion={appVersion}
         workspaces={workspaces}
@@ -1012,13 +1019,13 @@ Core Instructions:
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-amber-300">
-                      {updateStep === 'error' ? 'NexusFlow update needs attention' : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : 'A new version of NexusFlow is available!'}
+                      {updateStep === 'error' ? `${BRAND_NAME} update needs attention` : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : `A new version of ${BRAND_NAME} is available!`}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {updateStep === 'error'
                         ? (updateStatus.error || 'The update could not be completed. You can retry or use the release page.')
                         : updateStep === 'downloaded'
-                          ? 'Restart NexusFlow when convenient to install it.'
+                          ? `Restart ${BRAND_NAME} when convenient to install it.`
                           : updateStep === 'downloading'
                             ? `Downloading from GitHub Releases… ${Math.round(updateStatus.progress || 0)}%`
                             : `Upgrade from v${updateStatus.currentVersion} to v${updateStatus.latestVersion} to get the latest features and bug fixes.`}
@@ -1055,7 +1062,7 @@ Core Instructions:
                     </button>
                   )}
                   <a
-                    href={updateStatus.releaseUrl || 'https://github.com/antan87/NexusFlow/releases/latest'}
+                    href={updateStatus.releaseUrl || GITHUB_RELEASE_URL}
                     target="_blank"
                     rel="noreferrer"
                     className="px-3 py-2 border border-amber-500/30 text-amber-200 hover:bg-amber-500/10 font-semibold text-xs rounded-lg transition-colors"
@@ -1082,7 +1089,7 @@ Core Instructions:
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>
                   <p className="text-sm text-muted-foreground mb-6">
-                    The NexusFlow GUI could not connect to the local server. Make sure you started the GUI correctly via <code>nexusflow ui</code> or that the backend is running.
+                    The {BRAND_NAME} GUI could not connect to the local server. Make sure you started the GUI correctly via <code>{CLI_NAME} ui</code> or that the backend is running.
                   </p>
                   <button
                     onClick={() => {

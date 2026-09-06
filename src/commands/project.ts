@@ -18,6 +18,7 @@ import { loadConfig } from '../core/config.js';
 import { scanForRepos } from '../core/scanner.js';
 import { promptSelectRepos } from '../utils/prompts.js';
 import type { Project } from '../types.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 function printProject(project: Project): void {
   console.log(`    ${chalk.green('●')} ${chalk.bold(project.name)} ${chalk.dim(`(${project.id})`)}`);
@@ -25,7 +26,7 @@ function printProject(project: Project): void {
     console.log(`      ${chalk.dim(project.description)}`);
   }
   for (const repo of project.repos) {
-    console.log(`      ${chalk.dim('└')} ${repo.path} ${chalk.dim(`[${repo.defaultBranch}]`)}`);
+    console.log(`      ${chalk.dim('→')} ${repo}`);
   }
 }
 
@@ -33,12 +34,12 @@ function printProject(project: Project): void {
  * Lists all registered projects.
  */
 export async function projectListCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n📁 NexusFlow — Projects\n'));
+  console.log(chalk.bold.cyan(`\n📁 ${BRAND_NAME} — Projects\n`));
 
   const projects = await loadProjects();
   if (projects.length === 0) {
     console.log(chalk.yellow('  No projects registered yet.'));
-    console.log(chalk.dim('  Register one with: nexusflow project add\n'));
+    console.log(chalk.dim(`  Register one with: ${CLI_NAME} project add\n`));
     return;
   }
 
@@ -58,7 +59,7 @@ export async function projectAddCommand(options: {
   repos?: string[];
   description?: string;
 }): Promise<void> {
-  console.log(chalk.bold.cyan('\n📁 NexusFlow — Register Project\n'));
+  console.log(chalk.bold.cyan(`\n📁 ${BRAND_NAME} — Register Project\n`));
 
   const name = options.name || await input({
     message: 'Project name:',
@@ -117,7 +118,7 @@ async function resolveProjectId(id: string | undefined, action: string): Promise
  * Shows the details of a single project.
  */
 export async function projectShowCommand(id?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n📁 NexusFlow — Project\n'));
+  console.log(chalk.bold.cyan(`\n📁 ${BRAND_NAME} — Project\n`));
   const project = await resolveProjectId(id, 'show');
   if (!project) return;
 
@@ -130,7 +131,7 @@ export async function projectShowCommand(id?: string): Promise<void> {
  * Removes a project from the registry (never touches anything on disk).
  */
 export async function projectRemoveCommand(id: string | undefined, options: { yes?: boolean }): Promise<void> {
-  console.log(chalk.bold.cyan('\n📁 NexusFlow — Remove Project\n'));
+  console.log(chalk.bold.cyan(`\n📁 ${BRAND_NAME} — Remove Project\n`));
   const project = await resolveProjectId(id, 'remove');
   if (!project) return;
 

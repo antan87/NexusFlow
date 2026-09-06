@@ -10,9 +10,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../
 import { Separator } from '../components/ui/separator.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
-import type { DetectedEditor, NexusFlowConfig, StorageAdapterMeta } from '../types.js';
-
-
+import type { DetectedEditor, ContextSpaceConfig, StorageAdapterMeta } from '../types.js';
 
 interface ToolStatus {
   id: string;
@@ -25,12 +23,12 @@ interface ToolStatus {
 }
 
 interface SettingsPageProps {
-  config: NexusFlowConfig | null;
-  setConfig: (config: NexusFlowConfig) => void;
+  config: ContextSpaceConfig | null;
+  setConfig: (config: ContextSpaceConfig) => void;
   saveStatus: 'success' | 'error' | null;
   editors: DetectedEditor[];
   adapters: StorageAdapterMeta[];
-  saveAppConfig: (config: NexusFlowConfig) => void;
+  saveAppConfig: (config: ContextSpaceConfig) => void;
   isSettingsFormValid: boolean;
 
   toolsStatus: ToolStatus[];
@@ -63,10 +61,10 @@ export function SettingsPage({
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-in">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold text-foreground">Global Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Configure your local directories, search parameters, and editor defaults.
+      <header className="mb-6 border-b border-border/70 pb-4">
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Global Settings</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Configure your local development directories, AI search parameters, storage adapters, and editor defaults.
         </p>
       </header>
 
@@ -81,7 +79,7 @@ export function SettingsPage({
         </Alert>
       )}
 
-      <Card className="mb-6 rounded-xl p-6 shadow-sm">
+      <Card className="mb-6 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-6 shadow-xs">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm">Development Directory</Label>
@@ -300,7 +298,7 @@ export function SettingsPage({
       </Card>
 
 
-      <Card className="mt-6 rounded-xl p-6 shadow-sm">
+      <Card className="mt-6 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-6 shadow-xs">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-foreground">AI Toolchain Updates</h3>

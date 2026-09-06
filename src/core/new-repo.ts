@@ -76,7 +76,7 @@ export async function createNewRepo(devDir: string, name: string): Promise<RepoI
       // one-off identity so scaffolding still succeeds.
       await execa(
         'git',
-        ['-c', 'user.name=NexusFlow', '-c', 'user.email=nexusflow@localhost', 'commit', '-m', 'Initial commit'],
+        ['-c', 'user.name=ContextSpace', '-c', 'user.email=contextspace@localhost', 'commit', '-m', 'Initial commit'],
         { cwd: repoPath },
       );
     }

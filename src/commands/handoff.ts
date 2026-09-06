@@ -10,6 +10,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
+import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, PRIMARY_MANIFEST_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
 
 /**
  * Runs the handoff command.
@@ -18,14 +19,14 @@ import { buildDependencyGraph } from '../generators/plan-generator.js';
  * @param workspaceArg - Optional workspace path from CLI.
  */
 export async function handoffCommand(workspaceArg?: string): Promise<void> {
-  console.log(chalk.bold.cyan('\n🤝 NexusFlow — Handoff Bundle\n'));
+  console.log(chalk.bold.cyan(`\n🤝 ${BRAND_NAME} — Handoff Bundle\n`));
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
-    console.error(chalk.red('✖ Failed to load workspace configuration. Ensure nexusflow.json exists.'));
+    console.error(chalk.red(`✖ Failed to load workspace configuration. Ensure contextspace.json exists.`));
     return;
   }
 
@@ -93,7 +94,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   
   // Format handoff bundle
   const md: string[] = [];
-  md.push(`# NexusFlow Handoff Bundle — ${feature.branchName}`);
+  md.push(`# ${BRAND_NAME} Handoff Bundle — ${feature.branchName}`);
   md.push('');
   md.push(`> **Workspace Path:** \`${workspacePath}\``);
   md.push(`> **Current Branch:** \`${feature.branchName}\``);
@@ -124,7 +125,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   md.push(depGraphDescription);
   md.push('');
 
-  md.push('## 📝 Active Session Context (from nexusflow-knowledge.md)');
+  md.push(`## 📝 Active Session Context (from ${PRIMARY_KNOWLEDGE_FILE})`);
   md.push('');
   md.push('### Open Gotchas & Blockers');
   md.push(extractedGotchas);
@@ -136,10 +137,11 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   md.push(extractedQuestions);
   md.push('');
 
-  const handoffFilePath = path.join(workspacePath, 'nexusflow-handoff.md');
+  const { path: handoffFilePath } = await resolveWorkspaceFilePath(workspacePath, 'handoff');
+  const handoffFileName = path.basename(handoffFilePath);
   await fs.writeFile(handoffFilePath, md.join('\n'), 'utf-8');
 
-  console.log(chalk.green(`\n✅ Generated handoff bundle: ${chalk.bold('nexusflow-handoff.md')}`));
+  console.log(chalk.green(`\n✅ Generated handoff bundle: ${chalk.bold(handoffFileName)}`));
   console.log(chalk.dim(`  Path: ${handoffFilePath}\n`));
 }
 
@@ -236,13 +238,12 @@ function extractSection(content: string, header: string | string[]): string {
 async function resolveWorkspace(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
     const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, 'nexusflow.json'));
+    const feature = await loadFeatureConfig(absolutePath);
+    if (feature) {
       return absolutePath;
-    } catch {
-      console.error(chalk.red(`✖ Invalid workspace: No nexusflow.json found at ${absolutePath}`));
-      return null;
     }
+    console.error(chalk.red(`✖ Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`));
+    return null;
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

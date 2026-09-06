@@ -15,6 +15,8 @@ import {
 import { getStorageProvider, setActiveStorageProvider } from './adapters/registry.js';
 import type { StoragePort } from './ports/storage.js';
 
+import { PRIMARY_MANIFEST_FILE, PRIMARY_LOCK_FILE, BRAND_NAME } from './constants.js';
+
 describe('generation lock', () => {
   let workspacePath: string;
   let repoPath: string;
@@ -25,12 +27,12 @@ describe('generation lock', () => {
     repoPath = path.join(workspacePath, 'repo');
     await fs.mkdir(repoPath);
     await execa('git', ['init'], { cwd: repoPath });
-    await execa('git', ['config', 'user.name', 'NexusFlow Test'], { cwd: repoPath });
-    await execa('git', ['config', 'user.email', 'nexusflow-test@local'], { cwd: repoPath });
+    await execa('git', ['config', 'user.name', 'ContextSpace Test'], { cwd: repoPath });
+    await execa('git', ['config', 'user.email', 'contextspace-test@local'], { cwd: repoPath });
     await fs.writeFile(path.join(repoPath, 'README.md'), '# repo\n');
     await execa('git', ['add', 'README.md'], { cwd: repoPath });
     await execa('git', ['commit', '-m', 'fixture'], { cwd: repoPath });
-    await fs.writeFile(path.join(workspacePath, 'nexusflow.json'), JSON.stringify({
+    await fs.writeFile(path.join(workspacePath, PRIMARY_MANIFEST_FILE), JSON.stringify({
       id: 'lock-test', mode: 'in-place', branchName: 'lock-test', description: 'test',
       repos: [repoPath], assistants: [], workspacePath, createdAt: new Date().toISOString(),
     }));
@@ -55,11 +57,11 @@ describe('generation lock', () => {
 
   it('retains generatedAt when refresh reproduces the identical snapshot and outputs', async () => {
     await createLock();
-    const before = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.lock'), 'utf-8')) as { generatedAt: string };
+    const before = JSON.parse(await fs.readFile(path.join(workspacePath, PRIMARY_LOCK_FILE), 'utf-8')) as { generatedAt: string };
     const snapshot = await captureGenerationSnapshot([{ name: 'repo', path: repoPath, defaultBranch: 'main' }]);
     snapshot.generatedAt = '2099-01-01T00:00:00.000Z';
     await writeGenerationLock(workspacePath, snapshot, [{ path: 'AGENTS.md', source: 'test' }]);
-    const after = JSON.parse(await fs.readFile(path.join(workspacePath, 'nexusflow.lock'), 'utf-8')) as { generatedAt: string };
+    const after = JSON.parse(await fs.readFile(path.join(workspacePath, PRIMARY_LOCK_FILE), 'utf-8')) as { generatedAt: string };
 
     expect(after.generatedAt).toBe(before.generatedAt);
   });
@@ -70,7 +72,7 @@ describe('generation lock', () => {
     const result = await checkGenerationLock(workspacePath, { markDocuments: true });
     expect(result.fresh).toBe(false);
     expect(result.drift).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'repo', name: 'repo' })]));
-    expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain('STALE NEXUSFLOW CONTEXT');
+    expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain(`STALE ${BRAND_NAME.toUpperCase()} CONTEXT`);
   });
 
   it('keeps generation usable when dirty files cannot be safely fingerprinted', async () => {
@@ -97,7 +99,7 @@ describe('generation lock', () => {
 
   it('marks context stale when the generator version changes', async () => {
     await createLock();
-    const lockPath = path.join(workspacePath, 'nexusflow.lock');
+    const lockPath = path.join(workspacePath, PRIMARY_LOCK_FILE);
     const lock = JSON.parse(await fs.readFile(lockPath, 'utf-8')) as { toolVersion: string };
     lock.toolVersion = '0.0.0-old';
     await fs.writeFile(lockPath, JSON.stringify(lock, null, 2) + '\n');
@@ -105,7 +107,7 @@ describe('generation lock', () => {
     const result = await checkGenerationLock(workspacePath, { markDocuments: true });
 
     expect(result.drift).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'tool' })]));
-    expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain('Generated with NexusFlow 0.0.0-old');
+    expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain(`Generated with ${BRAND_NAME} 0.0.0-old`);
   });
 
   it('hashes local binary resource bytes without UTF-8 replacement collisions', async () => {

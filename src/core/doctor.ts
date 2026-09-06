@@ -276,9 +276,17 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     // tell an assistant nothing.
     { name: 'AGENTS.md', exists: () => workspaceFileExists(workspacePath, featureId, 'AGENTS.md') },
     { name: 'WORKSPACE.md', exists: () => workspaceFileExists(workspacePath, featureId, 'WORKSPACE.md') },
-    { name: 'nexusflow-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-knowledge.md') },
-    { name: 'nexusflow-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'nexusflow-plan.md') },
-    { name: 'nexusflow.lock', exists: async () => fs.access(path.join(workspacePath, 'nexusflow.lock')).then(() => true).catch(() => false) },
+    { name: 'contextspace-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'contextspace-knowledge.md') },
+    { name: 'contextspace-plan.md', exists: () => workspaceFileExists(workspacePath, featureId, 'contextspace-plan.md') },
+    {
+      name: 'contextspace.lock',
+      exists: async () => {
+        const primary = path.join(workspacePath, 'contextspace.lock');
+        const legacy = path.join(workspacePath, 'nexusflow.lock');
+        return (await fs.access(primary).then(() => true).catch(() => false))
+          || (await fs.access(legacy).then(() => true).catch(() => false));
+      },
+    },
   ];
   // Per-repo architecture maps are no longer generated — everything they held
   // came from the repo's package.json — so their absence is not a fault.

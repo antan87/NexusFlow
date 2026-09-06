@@ -18,8 +18,12 @@ const metadataPath = path.join(outputDir, metadataName);
 if (!existsSync(metadataPath)) throw new Error(`Missing required updater metadata: ${metadataPath}`);
 
 const unpackedBinary = platform === 'windows'
-  ? path.join(outputDir, 'win-unpacked', 'NexusFlow.exe')
-  : path.join(outputDir, 'linux-unpacked', 'nexusflow-desktop');
+  ? (existsSync(path.join(outputDir, 'win-unpacked', 'ContextSpace.exe'))
+      ? path.join(outputDir, 'win-unpacked', 'ContextSpace.exe')
+      : path.join(outputDir, 'win-unpacked', 'NexusFlow.exe'))
+  : (existsSync(path.join(outputDir, 'linux-unpacked', 'contextspace-desktop'))
+      ? path.join(outputDir, 'linux-unpacked', 'contextspace-desktop')
+      : path.join(outputDir, 'linux-unpacked', 'nexusflow-desktop'));
 if (!existsSync(unpackedBinary)) {
   throw new Error(`Missing required unpacked ${platform} binary: ${unpackedBinary}`);
 }
@@ -28,8 +32,8 @@ const assetNames = readdirSync(outputDir, { withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => entry.name)
   .filter((name) => platform === 'windows'
-    ? name === 'NexusFlowSetup.exe'
-    : /^NexusFlow-[^/]+\.AppImage$/.test(name));
+    ? (name === 'ContextSpaceSetup.exe' || name === 'NexusFlowSetup.exe')
+    : /^(ContextSpace|NexusFlow)-[^/]+\.AppImage$/.test(name));
 
 if (assetNames.length !== 1) {
   throw new Error(`Expected exactly one ${platform} desktop artifact in ${outputDir}; found ${assetNames.join(', ') || '(none)'}`);

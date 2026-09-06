@@ -13,15 +13,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import type { RepoSyncState, SyncStatus, WorkspaceState } from '../types.js';
-
-/** Name of the per-repo state file, written at the workspace root. */
-const STATE_FILE = '.nexusflow-state.json';
+import { resolveWorkspaceFilePath, resolveWorkspaceFilePathSync } from './constants.js';
 
 /**
- * Returns the path to the workspace state file.
+ * Returns the path to the workspace state file (primary or legacy fallback).
  */
-function getStatePath(workspacePath: string): string {
-  return path.join(workspacePath, STATE_FILE);
+export function getStatePath(workspacePath: string): string {
+  return resolveWorkspaceFilePathSync(workspacePath, 'state').path;
 }
 
 /**
@@ -34,7 +32,8 @@ export async function loadWorkspaceState(
   workspacePath: string,
 ): Promise<WorkspaceState> {
   try {
-    const raw = await fs.readFile(getStatePath(workspacePath), 'utf-8');
+    const resolved = await resolveWorkspaceFilePath(workspacePath, 'state');
+    const raw = await fs.readFile(resolved.path, 'utf-8');
     const state = JSON.parse(raw) as WorkspaceState;
     // Defend against a malformed/legacy file lacking the repos map.
     if (!state.repos || typeof state.repos !== 'object') {
@@ -57,9 +56,10 @@ export async function loadWorkspaceState(
  * @param state - The state to persist. Its `updatedAt` is refreshed on write.
  */
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
+  const resolved = await resolveWorkspaceFilePath(state.workspacePath, 'state');
   const toWrite: WorkspaceState = { ...state, updatedAt: new Date().toISOString() };
   const data = JSON.stringify(toWrite, null, 2) + '\n';
-  await fs.writeFile(getStatePath(state.workspacePath), data, 'utf-8');
+  await fs.writeFile(resolved.path, data, 'utf-8');
 }
 
 /**

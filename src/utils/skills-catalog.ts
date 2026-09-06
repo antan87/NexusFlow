@@ -14,6 +14,19 @@ import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 import { slugify } from './slug.js';
 import { acquireLock, createMutationQueue } from '../core/locks.js';
 import {
+  resolveBrandHomeDir,
+  resolveGlobalDurablePath,
+  resolveWorkspaceConfigDir,
+  PRIMARY_CONFIG_DIR_NAME,
+  LEGACY_CONFIG_DIR_NAME,
+  RESOURCE_LOCKS_DIR,
+  RESOURCE_CATALOG_LOCK_FILE,
+  RESOURCE_METADATA_KEY,
+  LEGACY_RESOURCE_METADATA_KEY,
+  STORE_CATEGORIES_FILE,
+  RESOURCE_SKILLS_DIR,
+} from '../core/constants.js';
+import {
   formatValidationError,
   resourceIdSchema,
   skillCategorySchema,
@@ -115,7 +128,7 @@ export class WorkspaceResourceRevisionError extends Error {
 
 async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
   return runCatalogMutation(async () => {
-    const release = await acquireLock(path.join(getNexusFlowHome(), '.locks', 'resource-catalog.lock'), {
+    const release = await acquireLock(path.join(resolveBrandHomeDir(), RESOURCE_LOCKS_DIR, RESOURCE_CATALOG_LOCK_FILE), {
       staleMs: 60_000,
       timeoutMs: 10_000,
       timeoutMessage: 'Timed out waiting for the resource catalog lock.',
@@ -449,20 +462,19 @@ Instructions for conducting deep application security audits.
 
 // ─── Categories Management ────────────────────────────────────────────────
 
-export function getNexusFlowHome(): string {
-  if (process.env.NEXUSFLOW_HOME && process.env.NEXUSFLOW_HOME !== 'undefined') {
-    return process.env.NEXUSFLOW_HOME;
-  }
-  return path.join(os.homedir(), '.nexusflow');
+export function getContextSpaceHome(): string {
+  return resolveBrandHomeDir();
 }
+
+export const getNexusFlowHome = getContextSpaceHome;
 
 
 export function getUserCategoriesPath(): string {
-  return path.join(getNexusFlowHome(), 'categories.json');
+  return resolveGlobalDurablePath(STORE_CATEGORIES_FILE);
 }
 
 export function getUserSkillsDir(): string {
-  return path.join(getNexusFlowHome(), 'skills');
+  return resolveGlobalDurablePath(RESOURCE_SKILLS_DIR);
 }
 
 const PORTABLE_SKILL_SUPPORT_DIRECTORIES = new Set(['scripts', 'references', 'assets', 'agents']);
@@ -519,21 +531,31 @@ export async function getSkillCategories(): Promise<SkillCategory[]> {
     categoryMap.set(cat.id, { ...cat });
   }
 
-  // 2. Load user categories from ~/.nexusflow/categories.json if present
-  try {
-    const userPath = getUserCategoriesPath();
-    if (await fse.pathExists(userPath)) {
-      const data = await readUserSkillCategories(userPath);
-      for (const item of data) {
-        categoryMap.set(item.id, {
-          ...item,
-          custom: item.custom !== undefined ? item.custom : true,
-          isTemplate: item.isTemplate !== undefined ? item.isTemplate : false,
-        });
+  // 2. Load user categories (legacy fallback then primary)
+  const candidateFiles: string[] = [
+    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'categories.json'),
+    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'categories.json'),
+  ];
+  const userPath = getUserCategoriesPath();
+  if (!candidateFiles.includes(userPath)) {
+    candidateFiles.push(userPath);
+  }
+
+  for (const filePath of candidateFiles) {
+    try {
+      if (await fse.pathExists(filePath)) {
+        const data = await readUserSkillCategories(filePath);
+        for (const item of data) {
+          categoryMap.set(item.id, {
+            ...item,
+            custom: item.custom !== undefined ? item.custom : true,
+            isTemplate: item.isTemplate !== undefined ? item.isTemplate : false,
+          });
+        }
       }
+    } catch (err) {
+      console.error('Failed to read user categories from', filePath, err);
     }
-  } catch (err) {
-    console.error('Failed to read user categories:', err);
   }
 
   return Array.from(categoryMap.values());
@@ -637,28 +659,33 @@ async function loadSkillFromDir(
     throw new Error(`Skill name "${id}" must match directory identity "${directoryId}".`);
   }
   const name = id;
-  const nexusflowMetadata =
-    parsedMetadata.data.metadata &&
-    typeof parsedMetadata.data.metadata.nexusflow === 'object' &&
-    parsedMetadata.data.metadata.nexusflow !== null
-      ? (parsedMetadata.data.metadata.nexusflow as Record<string, unknown>)
-      : {};
+  const metadataObj = parsedMetadata.data.metadata as Record<string, unknown> | undefined;
+  const brandMetadata =
+    metadataObj &&
+    typeof metadataObj[RESOURCE_METADATA_KEY] === 'object' &&
+    metadataObj[RESOURCE_METADATA_KEY] !== null
+      ? (metadataObj[RESOURCE_METADATA_KEY] as Record<string, unknown>)
+      : metadataObj &&
+        typeof metadataObj[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
+        metadataObj[LEGACY_RESOURCE_METADATA_KEY] !== null
+        ? (metadataObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
+        : {};
   const title =
     parsedMetadata.data.title ||
-    (typeof nexusflowMetadata.title === 'string' ? nexusflowMetadata.title : undefined) ||
+    (typeof brandMetadata.title === 'string' ? brandMetadata.title : undefined) ||
     name
       .split('-')
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
   const category =
     parsedMetadata.data.category ||
-    (typeof nexusflowMetadata.category === 'string' ? nexusflowMetadata.category : undefined) ||
+    (typeof brandMetadata.category === 'string' ? brandMetadata.category : undefined) ||
     'general';
   const description = parsedMetadata.data.description;
   const tags =
     parsedMetadata.data.tags ||
-    (Array.isArray(nexusflowMetadata.tags)
-      ? nexusflowMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
+    (Array.isArray(brandMetadata.tags)
+      ? brandMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
       : []);
   const rawAllowedTools = parsedMetadata.data['allowed-tools'];
   const allowedTools = Array.isArray(rawAllowedTools)
@@ -731,34 +758,45 @@ export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]
     skillMap.set(s.id, { ...s });
   }
 
-  // 2. User directory (~/.nexusflow/skills/)
-  const userSkillsDir = getUserSkillsDir();
-  if (await fse.pathExists(userSkillsDir)) {
-    try {
-      await assertPathIsNotLink(userSkillsDir);
-      const entries = await fs.readdir(userSkillsDir, { withFileTypes: true });
-      if (Array.isArray(entries)) {
-        for (const entry of entries) {
-          const isDir = typeof entry === 'string' ? true : entry.isDirectory ? entry.isDirectory() : true;
-          const entryName = typeof entry === 'string' ? entry : entry.name;
-          if (isDir) {
-            try {
-              const loaded = await loadSkillFromDir(path.join(userSkillsDir, entryName), true, userSkillsDir);
-              if (loaded) {
-                if (skillMap.has(loaded.id)) {
-                  throw new Error(`A resource named "${loaded.id}" already exists in the built-in catalog.`);
+  // 2. User directory (~/.nexusflow/skills/ and ~/.contextspace/skills/)
+  const candidateDirs: string[] = [
+    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
+    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
+  ];
+  const activeSkillsDir = getUserSkillsDir();
+  if (!candidateDirs.includes(activeSkillsDir)) {
+    candidateDirs.push(activeSkillsDir);
+  }
+
+  for (const userSkillsDir of candidateDirs) {
+    if (await fse.pathExists(userSkillsDir)) {
+      try {
+        await assertPathIsNotLink(userSkillsDir);
+        const entries = await fs.readdir(userSkillsDir, { withFileTypes: true });
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            const isDir = typeof entry === 'string' ? true : entry.isDirectory ? entry.isDirectory() : true;
+            const entryName = typeof entry === 'string' ? entry : entry.name;
+            if (isDir) {
+              try {
+                const loaded = await loadSkillFromDir(path.join(userSkillsDir, entryName), true, userSkillsDir);
+                if (loaded) {
+                  const isBuiltIn = DEFAULT_SKILLS.some((s) => s.id === loaded.id);
+                  if (isBuiltIn) {
+                    throw new Error(`A resource named "${loaded.id}" already exists in the built-in catalog.`);
+                  }
+                  skillMap.set(loaded.id, loaded);
                 }
-                skillMap.set(loaded.id, loaded);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.warn(`Skipping invalid skill "${entryName}": ${message}`);
               }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              console.warn(`Skipping invalid skill "${entryName}": ${message}`);
             }
           }
         }
+      } catch (err) {
+        console.error('Failed to load user skills from', userSkillsDir, err);
       }
-    } catch (err) {
-      console.error('Failed to load user skills:', err);
     }
   }
 
@@ -825,12 +863,23 @@ export async function saveSkill(
         if (parsedCurrentFrontmatter.success) existingFrontmatter = parsedCurrentFrontmatter.data;
       }
 
-      const existingNexusFlowMetadata =
-        existingFrontmatter?.metadata &&
-        typeof existingFrontmatter.metadata.nexusflow === 'object' &&
-        existingFrontmatter.metadata.nexusflow !== null
-          ? existingFrontmatter.metadata.nexusflow as Record<string, unknown>
-          : {};
+      const existingMetaObj = existingFrontmatter?.metadata;
+      const existingBrandMetadata =
+        existingMetaObj &&
+        typeof existingMetaObj[RESOURCE_METADATA_KEY] === 'object' &&
+        existingMetaObj[RESOURCE_METADATA_KEY] !== null
+          ? existingMetaObj[RESOURCE_METADATA_KEY] as Record<string, unknown>
+          : existingMetaObj &&
+            typeof existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
+            existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] !== null
+            ? existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>
+            : {};
+      const metadataPayload = {
+        ...existingBrandMetadata,
+        title: skill.title || id,
+        category: skill.category || 'general',
+        tags: skill.tags || [],
+      };
       const metadata: Record<string, unknown> = {
         name: id,
         description,
@@ -838,12 +887,8 @@ export async function saveSkill(
         compatibility: existingFrontmatter?.compatibility,
         metadata: {
           ...(existingFrontmatter?.metadata ?? {}),
-          nexusflow: {
-            ...existingNexusFlowMetadata,
-            title: skill.title || id,
-            category: skill.category || 'general',
-            tags: skill.tags || [],
-          },
+          [RESOURCE_METADATA_KEY]: metadataPayload,
+          [LEGACY_RESOURCE_METADATA_KEY]: metadataPayload,
         },
       };
       const allowedTools = skill.allowedTools === undefined
@@ -933,7 +978,13 @@ export async function deleteSkill(id: string): Promise<void> {
  */
 export async function getWorkspaceSkillsConfig(workspacePath: string): Promise<WorkspaceSkillsConfig> {
   const canonicalWorkspace = await fs.realpath(workspacePath);
-  const configFile = path.join(canonicalWorkspace, '.nexusflow', 'skills.json');
+  const primaryConfigFile = path.join(canonicalWorkspace, PRIMARY_CONFIG_DIR_NAME, 'skills.json');
+  const legacyConfigFile = path.join(canonicalWorkspace, LEGACY_CONFIG_DIR_NAME, 'skills.json');
+  const configFile = (await fse.pathExists(primaryConfigFile))
+    ? primaryConfigFile
+    : (await fse.pathExists(legacyConfigFile))
+      ? legacyConfigFile
+      : primaryConfigFile;
   if (await fse.pathExists(configFile)) {
     await assertNoLinkedPathComponents(canonicalWorkspace, configFile);
     const rawData = await fse.readJson(configFile) as unknown;
@@ -967,7 +1018,8 @@ export async function saveWorkspaceSkillsConfig(
 ): Promise<WorkspaceSkillsConfig> {
   return runWorkspaceConfigMutation(async () => {
     const canonicalWorkspace = await fs.realpath(workspacePath);
-    const configDir = path.join(canonicalWorkspace, '.nexusflow');
+    const configDirInfo = resolveWorkspaceConfigDir(canonicalWorkspace);
+    const configDir = configDirInfo.path;
     await fse.ensureDir(configDir);
     await assertNoLinkedPathComponents(canonicalWorkspace, configDir);
     await assertPathIsNotLink(configDir);

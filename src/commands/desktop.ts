@@ -14,10 +14,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
+import {
+  BRAND_NAME,
+  LEGACY_BRAND_NAME,
+  CLI_NAME,
+  GITHUB_RELEASE_API_URL,
+  GITHUB_RELEASE_PAGE_URL,
+  DESKTOP_INSTALLER_USER_AGENT,
+} from '../core/constants.js';
 
-export const GITHUB_RELEASE_API_URL = 'https://api.github.com/repos/antan87/NexusFlow/releases/latest';
-const GITHUB_RELEASE_PAGE_URL = 'https://github.com/antan87/NexusFlow/releases/latest';
-const INSTALLER_DIR_NAME = 'nexusflow';
+export { GITHUB_RELEASE_API_URL };
 
 interface ReleaseAsset {
   name: string;
@@ -69,7 +75,7 @@ function isSafeReleaseApiUrl(candidate: string): boolean {
     return url.protocol === 'https:'
       && url.hostname.toLowerCase() === 'api.github.com'
       && !url.port
-      && url.pathname === '/repos/antan87/NexusFlow/releases/latest'
+      && (url.pathname === '/repos/antan87/NexusFlow/releases/latest' || url.pathname === '/repos/antan87/ContextSpace/releases/latest')
       && !url.username
       && !url.password;
   } catch {
@@ -88,7 +94,7 @@ export function isAllowedDesktopReleaseUrl(candidate: string): boolean {
     if (url.protocol !== 'https:' || url.port || url.username || url.password) return false;
     const host = url.hostname.toLowerCase();
     if (host === 'github.com') {
-      return /^\/antan87\/NexusFlow\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname);
+      return /^\/antan87\/(NexusFlow|ContextSpace)\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname);
     }
     return host === 'objects.githubusercontent.com'
       || host === 'github-releases.githubusercontent.com'
@@ -186,16 +192,16 @@ async function launchWindowsInstaller(
   });
 }
 
-async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string): Promise<void> {
+async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string, appName: string = BRAND_NAME): Promise<void> {
   const contents = [
     '[Desktop Entry]',
     'Type=Application',
-    'Name=NexusFlow',
+    `Name=${appName}`,
     'Comment=Multi-repo workspace manager for AI-assisted development',
     `Exec=${quoteDesktopExecArg(appImagePath)}`,
     'Terminal=false',
     'Categories=Development;Utility;',
-    'StartupWMClass=NexusFlow',
+    `StartupWMClass=${appName}`,
     '',
   ].join('\n');
   await writeFile(entryPath, contents, { encoding: 'utf8', mode: 0o644 });
@@ -223,7 +229,7 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiResponse = await fetchRequired(
-    fetchImpl(releaseApiUrl, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer', Accept: 'application/vnd.github+json' })),
+    fetchImpl(releaseApiUrl, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT, Accept: 'application/vnd.github+json' })),
     'GitHub release',
     isSafeReleaseApiUrl,
   );
@@ -246,18 +252,18 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     throw new Error('Refusing to download a checksum sidecar from an untrusted host.');
   }
 
-  const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), 'nexusflow-desktop-'));
+  const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), `${CLI_NAME}-desktop-`));
   const downloadedPath = path.join(tempRoot, assetName);
   let stagedPath: string | undefined;
   try {
     const sidecarResponse = await fetchRequired(
-      fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer' })),
+      fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT })),
       'SHA-256 sidecar',
       isAllowedDesktopReleaseUrl,
     );
     const expectedHash = checksumFromSidecar(await sidecarResponse.text());
     const assetResponse = await fetchRequired(
-      fetchImpl(asset.browser_download_url, requestOptions({ 'User-Agent': 'NexusFlow-Desktop-Installer' }, DESKTOP_ASSET_TIMEOUT_MS)),
+      fetchImpl(asset.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT }, DESKTOP_ASSET_TIMEOUT_MS)),
       'Desktop asset',
       isAllowedDesktopReleaseUrl,
     );
@@ -272,20 +278,24 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     }
 
     const homeDir = options.homeDir ?? os.homedir();
-    const installDir = path.join(homeDir, '.local', 'share', INSTALLER_DIR_NAME);
+    const appName = assetName.toLowerCase().startsWith(CLI_NAME) || assetName.toLowerCase().startsWith(BRAND_NAME.toLowerCase())
+      ? BRAND_NAME
+      : LEGACY_BRAND_NAME;
+    const installDirName = appName.toLowerCase();
+    const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');
     // Keep the launcher target stable across releases. A versioned filename
     // would leave an old desktop entry behind and make updates appear to
     // succeed while launching the previous AppImage.
-    const installedPath = path.join(installDir, 'NexusFlow.AppImage');
-    const desktopEntryPath = path.join(desktopDir, 'nexusflow.desktop');
+    const installedPath = path.join(installDir, `${appName}.AppImage`);
+    const desktopEntryPath = path.join(desktopDir, `${appName.toLowerCase()}.desktop`);
     stagedPath = `${installedPath}.tmp-${process.pid}-${Date.now()}`;
     await mkdir(installDir, { recursive: true, mode: 0o755 });
     await mkdir(desktopDir, { recursive: true, mode: 0o755 });
     await copyFile(downloadedPath, stagedPath);
     await chmod(stagedPath, 0o755);
     await rename(stagedPath, installedPath);
-    await writeLinuxDesktopEntry(desktopEntryPath, installedPath);
+    await writeLinuxDesktopEntry(desktopEntryPath, installedPath, appName);
     await rm(tempRoot, { recursive: true, force: true });
     return { platform, assetName, sha256: actualHash, installedPath, desktopEntryPath };
   } catch (error) {
@@ -302,11 +312,11 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
  *
  * The Electron `desktop/` project lives inside this repo:
  *
- *   NexusFlow/            ← repo root
+ *   ContextSpace/            ← repo root
  *     dist/commands/desktop.js   ← this file at runtime
  *     desktop/                   ← Electron desktop app (main.js)
  *
- * This file compiles to `NexusFlow/dist/commands/desktop.js`, so the repo
+ * This file compiles to `ContextSpace/dist/commands/desktop.js`, so the repo
  * root is two levels up (and `desktop/` sits beside `dist/`).
  */
 function resolveRepoRoot(): string {
@@ -319,11 +329,11 @@ function getDesktopDir(): string {
 }
 
 /**
- * Launches the NexusFlow Electron desktop app via `npm start` in the desktop
+ * Launches the ContextSpace Electron desktop app via `npm start` in the desktop
  * project. Spawns detached so the CLI returns while the app keeps running.
  */
 export async function desktopCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Desktop App\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Desktop App\n`));
 
   const desktopDir = getDesktopDir();
 
@@ -366,7 +376,7 @@ export async function desktopCommand(): Promise<void> {
 
 /** Explicit, user-initiated desktop installer command. */
 export async function desktopInstallCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🖥️  NexusFlow — Desktop Installer\n'));
+  console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Desktop Installer\n`));
   const result = await installDesktop();
   if (result.platform === 'win32') {
     console.log(chalk.green(`Downloaded and verified ${result.assetName}. Launching the Windows installer…`));

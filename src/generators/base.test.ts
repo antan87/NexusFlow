@@ -177,8 +177,8 @@ describe('buildContextContent', () => {
     it('points at the other files rather than inlining them', async () => {
       const content = await buildContextContent(ctxFor({}));
 
-      expect(content).toContain('nexusflow-knowledge.md');
-      expect(content).toContain('nexusflow-plan.md');
+      expect(content).toContain('contextspace-knowledge.md');
+      expect(content).toContain('contextspace-plan.md');
     });
 
     it('does not send the agent to read derived facts it could grep', async () => {

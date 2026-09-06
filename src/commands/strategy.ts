@@ -14,12 +14,13 @@ import {
   deleteWorkflowTemplate,
   type WorkflowTemplate,
 } from '../utils/workflows.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 /**
  * Lists all available strategy templates (built-in and custom).
  */
 export async function strategyListCommand(): Promise<void> {
-  console.log(chalk.bold.cyan('\n📋 NexusFlow — Strategy Templates\n'));
+  console.log(chalk.bold.cyan(`\n📋 ${BRAND_NAME} — Strategy Templates\n`));
 
   const templates = await getWorkflowTemplates();
 
@@ -56,7 +57,7 @@ export async function strategyListCommand(): Promise<void> {
  * Creates a new custom strategy template.
  */
 export async function strategyCreateCommand(options: { name?: string; file?: string }): Promise<void> {
-  console.log(chalk.bold.cyan('\n✏️  NexusFlow — Create Strategy Template\n'));
+  console.log(chalk.bold.cyan(`\n✏️  ${BRAND_NAME} — Create Strategy Template\n`));
 
   const name = options.name || await input({
     message: 'Strategy Name:',
@@ -103,14 +104,14 @@ export async function strategyCreateCommand(options: { name?: string; file?: str
  * Edits an existing custom strategy template.
  */
 export async function strategyEditCommand(options: { id?: string }): Promise<void> {
-  console.log(chalk.bold.cyan('\n✏️  NexusFlow — Edit Strategy Template\n'));
+  console.log(chalk.bold.cyan(`\n✏️  ${BRAND_NAME} — Edit Strategy Template\n`));
 
   const templates = await getWorkflowTemplates();
   const customTemplates = templates.filter((t) => t.custom);
 
   if (customTemplates.length === 0) {
     console.log(chalk.yellow('  No custom strategy templates to edit.'));
-    console.log(chalk.dim('  Built-in templates cannot be edited. Use "nexusflow strategy create" to make a custom override.\n'));
+    console.log(chalk.dim(`  Built-in templates cannot be edited. Use "${CLI_NAME} strategy create" to make a custom override.\n`));
     return;
   }
 
@@ -156,7 +157,7 @@ export async function strategyEditCommand(options: { id?: string }): Promise<voi
  * Deletes a custom strategy template.
  */
 export async function strategyDeleteCommand(options: { id?: string; yes?: boolean }): Promise<void> {
-  console.log(chalk.bold.cyan('\n🗑️  NexusFlow — Delete Strategy Template\n'));
+  console.log(chalk.bold.cyan(`\n🗑️  ${BRAND_NAME} — Delete Strategy Template\n`));
 
   const templates = await getWorkflowTemplates();
   const customTemplates = templates.filter((t) => t.custom);

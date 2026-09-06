@@ -11,6 +11,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
@@ -18,6 +19,16 @@ import * as os from 'node:os';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
+import {
+  PRIMARY_LOGS_DIR,
+  LEGACY_LOGS_DIR,
+  WORKROOM_BOOTSTRAP_HEADERS,
+  WORKROOM_BOOTSTRAP_COOKIES,
+  ENGINE_ID,
+  LEGACY_ENGINE_ID,
+  ENGINE_NPM_PACKAGE,
+  LEGACY_ENGINE_NPM_PACKAGE,
+} from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
@@ -527,9 +538,17 @@ app.use('*', async (c, next) => {
 // cross-site request forgery and browser form posts from untrusted web pages.
 app.use('/api/*', async (c, next) => {
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(c.req.method)) {
+    const secFetchSite = c.req.header('sec-fetch-site');
+    if (secFetchSite === 'cross-site') {
+      return c.json({ error: 'Forbidden cross-site request.' }, 403);
+    }
     const origin = c.req.header('origin');
     if (origin && !hasTrustedLocalOrigin(origin)) {
       return c.json({ error: 'Forbidden cross-origin request.' }, 403);
+    }
+    const referer = c.req.header('referer');
+    if (referer && !hasTrustedLocalOrigin(referer)) {
+      return c.json({ error: 'Forbidden cross-origin referer.' }, 403);
     }
   }
   await next();
@@ -1631,6 +1650,14 @@ app.get('/api/workspace/:id/services', async (c) => {
   }
 });
 
+function getWorkspaceLogDir(workspacePath: string): string {
+  const primary = path.join(workspacePath, PRIMARY_LOGS_DIR);
+  const legacy = path.join(workspacePath, LEGACY_LOGS_DIR);
+  if (existsSync(primary)) return primary;
+  if (existsSync(legacy)) return legacy;
+  return primary;
+}
+
 // 10. Start services in workspace. Configs are re-detected server-side —
 // the client only says "start", never what to execute.
 app.post('/api/workspace/:id/services/start', async (c) => {
@@ -1638,7 +1665,7 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     const services = await detectAllServices(workspacePath);
     await startServices(services, workspacePath, logDir);
@@ -1671,7 +1698,7 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
     const action = c.req.param('action') as 'start' | 'stop' | 'restart';
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     if (action === 'stop') {
       const stopped = await stopService(workspacePath, serviceName);
@@ -1694,7 +1721,7 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
 
 /** Resolve + contain a service log path; names may contain '/' (repo/sub). */
 function resolveServiceLogFile(workspacePath: string, serviceName: string): string {
-  const logDir = path.join(workspacePath, '.nexusflow-logs');
+  const logDir = getWorkspaceLogDir(workspacePath);
   return assertWithin(logDir, path.join(logDir, `${serviceName}.log`));
 }
 
@@ -1796,7 +1823,7 @@ app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
     }
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const logDir = path.join(workspacePath, '.nexusflow-logs');
+    const logDir = getWorkspaceLogDir(workspacePath);
 
     const tools = await detectOrchestrationTools(workspacePath);
     const detection = tools.find((t) => t.id === body.id);
@@ -2213,7 +2240,14 @@ app.put('/api/workspace/:id/knowledge', async (c) => {
 
     const feature = await loadFeatureConfig(workspacePath);
     const featureId = feature?.id ?? path.basename(workspacePath);
-    await writeWorkspaceFile(workspacePath, featureId, 'nexusflow-knowledge.md', content);
+    const { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE } = await import('./core/constants.js');
+    const { workspaceFileExists } = await import('./core/storage.js');
+    const filename = (await workspaceFileExists(workspacePath, featureId, PRIMARY_KNOWLEDGE_FILE))
+      ? PRIMARY_KNOWLEDGE_FILE
+      : (await workspaceFileExists(workspacePath, featureId, LEGACY_KNOWLEDGE_FILE))
+        ? LEGACY_KNOWLEDGE_FILE
+        : PRIMARY_KNOWLEDGE_FILE;
+    await writeWorkspaceFile(workspacePath, featureId, filename, content);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
@@ -2263,22 +2297,51 @@ app.post('/api/workspace/:id/knowledge/entry', async (c) => {
   }
 });
 
-// 13c. Get workspace plan (nexusflow-plan.md)
+// 13c. Get workspace plan (contextspace-plan.md / nexusflow-plan.md)
 app.get('/api/workspace/:id/plan', async (c) => {
   try {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const planFile = path.join(workspacePath, 'nexusflow-plan.md');
+    const { resolveWorkspaceFilePath } = await import('./core/brand-config.js');
+    const resolved = await resolveWorkspaceFilePath(workspacePath, 'plan');
 
     let content = '';
     try {
-      content = await fs.readFile(planFile, 'utf-8');
+      content = await fs.readFile(resolved.path, 'utf-8');
     } catch {
       content = '# Workspace Plan\n\nNo implementation plan file yet.';
     }
 
     return c.json({ content });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2. Check workspace migration status (legacy NexusFlow files detected)
+app.get('/api/workspace/:id/migration-status', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { isLegacyWorkspace } = await import('./core/migrate.js');
+    const isLegacy = await isLegacyWorkspace(workspacePath);
+    return c.json({ isLegacy });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-3. Migrate legacy workspace to native ContextSpace
+app.post('/api/workspace/:id/migrate', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { migrateWorkspace } = await import('./core/migrate.js');
+    const report = await migrateWorkspace(workspacePath, { dryRun: false, refresh: true });
+    return c.json(report);
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2551,7 +2614,8 @@ app.post('/api/updates/install', async (c) => {
   try {
     const { toolId } = await c.req.json() as { toolId: string };
     const tools = [
-      { id: 'nexusflow', cmd: 'npm', args: ['install', '-g', '@mrpatronz/nexusflow'] },
+      { id: ENGINE_ID, cmd: 'npm', args: ['install', '-g', ENGINE_NPM_PACKAGE] },
+      { id: LEGACY_ENGINE_ID, cmd: 'npm', args: ['install', '-g', LEGACY_ENGINE_NPM_PACKAGE] },
       { id: 'antigravity', cmd: 'agy', args: ['update'] },
       { id: 'claude', cmd: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
     ];
@@ -2896,33 +2960,54 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
 
 // ─── Workrooms: opt-in LAN/VPN collaboration ─────────────────────────────
 
-const WORKROOM_HUMAN_SESSION_COOKIE = 'nexusflow_workroom_human';
-const WORKROOM_BOOTSTRAP_COOKIE = 'nexusflow_workroom_bootstrap';
-const WORKROOM_BOOTSTRAP_HEADER = 'x-nexusflow-workroom-bootstrap';
+const WORKROOM_HUMAN_SESSION_COOKIES = [
+  'contextspace_workroom_human',
+  'nexusflow_workroom_human',
+] as const;
 const WORKROOM_BOOTSTRAP_TOKEN = randomToken();
 
 function establishWorkroomBootstrap(c: Parameters<typeof setCookie>[0]): void {
-  setCookie(c, WORKROOM_BOOTSTRAP_COOKIE, WORKROOM_BOOTSTRAP_TOKEN, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    path: '/api/workrooms',
-  });
+  for (const cookieName of WORKROOM_BOOTSTRAP_COOKIES) {
+    setCookie(c, cookieName, WORKROOM_BOOTSTRAP_TOKEN, {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/api/workrooms',
+    });
+  }
 }
 
 function hasValidWorkroomBootstrap(c: Parameters<typeof getCookie>[0]): boolean {
-  const cookieToken = getCookie(c, WORKROOM_BOOTSTRAP_COOKIE);
-  const headerToken = c.req.header(WORKROOM_BOOTSTRAP_HEADER);
+  const cookieToken = WORKROOM_BOOTSTRAP_COOKIES
+    .map((name) => getCookie(c, name))
+    .find((val) => typeof val === 'string' && val);
+  const headerToken = WORKROOM_BOOTSTRAP_HEADERS
+    .map((header) => c.req.header(header))
+    .find((val) => typeof val === 'string' && val);
   return Boolean(cookieToken && headerToken
     && tokenDigest(cookieToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN)
     && tokenDigest(headerToken) === tokenDigest(WORKROOM_BOOTSTRAP_TOKEN));
 }
 
 function establishWorkroomHumanSession(c: Parameters<typeof setCookie>[0], token = workroomManager.beginHumanSession()): void {
-  setCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'Strict',
-    path: '/api/workrooms',
-  });
+  for (const cookieName of WORKROOM_HUMAN_SESSION_COOKIES) {
+    setCookie(c, cookieName, token, {
+      httpOnly: true,
+      sameSite: 'Strict',
+      path: '/api/workrooms',
+    });
+  }
+}
+
+function getWorkroomHumanSessionToken(c: Parameters<typeof getCookie>[0]): string | undefined {
+  return WORKROOM_HUMAN_SESSION_COOKIES
+    .map((name) => getCookie(c, name))
+    .find((val) => typeof val === 'string' && val);
+}
+
+function clearWorkroomHumanSession(c: Parameters<typeof setCookie>[0]): void {
+  for (const cookieName of WORKROOM_HUMAN_SESSION_COOKIES) {
+    deleteCookie(c, cookieName, { path: '/api/workrooms' });
+  }
 }
 
 function hasExactDashboardOrigin(origin: string | undefined, requestUrl: string): boolean {
@@ -2930,9 +3015,8 @@ function hasExactDashboardOrigin(origin: string | undefined, requestUrl: string)
   try {
     const normalizedOrigin = new URL(origin).origin;
     const requestOrigin = new URL(requestUrl).origin;
-    const configuredDevelopmentOrigin = process.env.NEXUSFLOW_DASHBOARD_ORIGIN
-      ? new URL(process.env.NEXUSFLOW_DASHBOARD_ORIGIN).origin
-      : undefined;
+    const devOrigin = process.env.CONTEXTSPACE_DASHBOARD_ORIGIN || process.env.NEXUSFLOW_DASHBOARD_ORIGIN;
+    const configuredDevelopmentOrigin = devOrigin ? new URL(devOrigin).origin : undefined;
     return normalizedOrigin === requestOrigin || normalizedOrigin === configuredDevelopmentOrigin;
   } catch {
     return false;
@@ -2973,7 +3057,7 @@ app.use('/api/workrooms/*', async (c, next) => {
     || /^\/api\/workrooms\/room-[a-f0-9]{32}\/resume$/.test(pathname);
   if (needsHumanReadSession || (isMutation && !doesNotRequireExistingHumanSession)) {
     try {
-      const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+      const authority = workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
       if (pathname === '/api/workrooms/stop') return next();
       await workroomManager.runWithHumanAuthority(authority, () => next());
       return;
@@ -2995,7 +3079,7 @@ app.get('/api/workrooms/session', (c) => {
   const roomType = workroomManager.activeRoomType();
   if (!roomType) return c.json({ active: false, locked: false });
   try {
-    workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     return c.json({ active: true, locked: false, roomType });
   } catch {
     return c.json({ active: true, locked: true, roomType });
@@ -3019,7 +3103,7 @@ app.post('/api/workrooms/session/abandon', async (c) => {
     const body = await c.req.json();
     if (body.confirm !== true) return c.json({ error: 'Confirm leaving this locked guest connection.' }, 400);
     await workroomManager.abandonLockedGuest();
-    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    clearWorkroomHumanSession(c);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);
@@ -3034,7 +3118,7 @@ app.get('/api/workrooms/status', async (c) => {
   try {
     const status = await workroomManager.status();
     if (status.mode !== 'idle') {
-      workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+      workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     }
     return c.json({ status });
   } catch (error) {
@@ -3134,9 +3218,9 @@ app.post('/api/workrooms/start', async (c) => {
 
 app.post('/api/workrooms/stop', async (c) => {
   try {
-    const authority = workroomManager.assertHumanSession(getCookie(c, WORKROOM_HUMAN_SESSION_COOKIE));
+    const authority = workroomManager.assertHumanSession(getWorkroomHumanSessionToken(c));
     await workroomManager.stopOrLeave(authority);
-    deleteCookie(c, WORKROOM_HUMAN_SESSION_COOKIE, { path: '/api/workrooms' });
+    clearWorkroomHumanSession(c);
     return c.json({ success: true });
   } catch (error) {
     return errorResponse(c, error);

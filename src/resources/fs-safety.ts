@@ -109,6 +109,7 @@ export async function atomicWriteFile(
   data: string | Uint8Array,
   beforeCommit?: () => Promise<void>,
 ): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   try {
     await fs.writeFile(tempPath, data);

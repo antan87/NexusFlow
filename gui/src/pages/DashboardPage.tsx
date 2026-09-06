@@ -2,12 +2,13 @@ import { useState, useMemo, type ReactNode } from 'react';
 import {
   FolderGit2,
   GitBranch,
-  Play,
   Plus,
   ArrowRight,
   Terminal,
   Boxes,
   Sparkles,
+  Search,
+  Layers3,
   ExternalLink,
   Code2,
 } from 'lucide-react';
@@ -23,7 +24,8 @@ import { Spinner } from '../components/ui/spinner.js';
 import { useAiDetect, useWorkspaceLaunchTargets, useLaunchTerminal } from '../lib/api/queries.js';
 import { apiFetch } from '../lib/api/client.js';
 import { repoName, syncMeta } from '../lib/status.js';
-import { cn } from '../lib/utils.js';
+import { BRAND_NAME } from '../brand.js';
+import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 
 export interface HarnessOption {
   id: string;
@@ -49,7 +51,7 @@ export interface HarnessConfig {
   }) => HarnessOption[];
 }
 
-export const HARNESS_REGISTRY: HarnessConfig[] = [
+const HARNESS_REGISTRY: HarnessConfig[] = [
   {
     id: 'antigravity',
     name: 'Google Antigravity',
@@ -63,7 +65,7 @@ export const HARNESS_REGISTRY: HarnessConfig[] = [
         shortLabel: 'CLI',
         type: 'cli',
         command: 'agy',
-        isAvailable: aiDetected['antigravity'] ?? true,
+        isAvailable: aiDetected['antigravity'] ?? false,
         unavailableReason: 'CLI "agy" not found on PATH',
         icon: <Terminal size={12} />,
       },
@@ -162,7 +164,7 @@ export const HARNESS_REGISTRY: HarnessConfig[] = [
         shortLabel: 'CLI',
         type: 'cli',
         command: 'copilot',
-        isAvailable: aiDetected['copilot'] ?? true,
+        isAvailable: aiDetected['copilot'] ?? false,
         icon: <Terminal size={12} />,
       },
       {
@@ -200,14 +202,20 @@ export function DashboardPage({
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
 
+  const [search, setSearch] = useState('');
+  const [changesOnly, setChangesOnly] = useState(false);
+  const [launchWorkspace, setLaunchWorkspace] = useState('');
+  const targetWorkspace = workspaces.find((w) => w.branchName === launchWorkspace) ?? workspaces[0];
+  const visibleWorkspaces = workspaces.filter((w) =>
+    `${w.branchName} ${w.description ?? ''} ${w.repos.join(' ')}`.toLowerCase().includes(search.trim().toLowerCase())
+    && (!changesOnly || (workspaceStatuses[w.branchName]?.changedFiles ?? 0) > 0));
+
   const [launchingKey, setLaunchingKey] = useState<string | null>(null);
 
   // Compute Telemetry Metrics
-  const statuses = Object.values(workspaceStatuses);
+  const statuses = workspaces.flatMap((w) => workspaceStatuses[w.branchName] ? [workspaceStatuses[w.branchName]] : []);
   const totalChangedFiles = statuses.reduce((sum, s) => sum + (s.changedFiles || 0), 0);
   const workspacesWithChanges = statuses.filter((s) => s.changedFiles > 0).length;
-  const runningServicesCount = statuses.reduce((sum, s) => sum + (s.runningServices || 0), 0);
-  const workspacesWithServices = statuses.filter((s) => s.runningServices > 0).length;
   const worktreeCount = workspaces.filter((w) => (w.mode ?? 'worktree') === 'worktree').length;
   const inPlaceCount = workspaces.filter((w) => w.mode === 'in-place').length;
 
@@ -217,11 +225,11 @@ export function DashboardPage({
     workspaces.forEach((w) => {
       (w.repos || []).forEach((r) => {
         const name = repoName(r);
-        const existing = repoMap.get(name);
+        const existing = repoMap.get(r);
         if (existing) {
           existing.count += 1;
         } else {
-          repoMap.set(name, { name, path: r, count: 1 });
+          repoMap.set(r, { name, path: r, count: 1 });
         }
       });
     });
@@ -275,7 +283,7 @@ export function DashboardPage({
 
   const handleExecuteHarnessOption = async (harness: HarnessConfig, option: HarnessOption) => {
     if (launchingKey) return;
-    const targetWs = workspaces[0];
+    const targetWs = targetWorkspace;
     if (!targetWs) {
       showToast?.('No active workspace available to launch harness in.', 'error');
       return;
@@ -306,384 +314,62 @@ export function DashboardPage({
   };
 
   return (
-    <div className="mx-auto max-w-6xl animate-fade-in space-y-5 pb-10">
-      {/* Top Header & Environment Pulse */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
-              Environment Overview
-            </h1>
-            <StatusBadge tone="running" dot>
-              Live Telemetry
-            </StatusBadge>
+    <div className="context-home mx-auto max-w-7xl space-y-7 pb-10">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground"><Layers3 size={15} /><span>{BRAND_NAME}</span><span className="opacity-40">/</span><span className="text-foreground">Overview</span></div>
+        <span className="text-xs text-muted-foreground">Your next idea starts here.</span>
+      </header>
+
+      <section className="context-hero relative overflow-hidden rounded-2xl border border-border p-6 sm:p-9 lg:p-11">
+        <div className="relative z-10 max-w-2xl">
+          <div className="mb-5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-primary"><ContextSpaceIcon size={23} /> A space for what’s next</div>
+          <h1 className="text-4xl font-semibold leading-[1.08] tracking-[-0.055em] sm:text-5xl lg:text-6xl">Many repositories.<br /><span className="context-hero-accent">One clear direction.</span></h1>
+          <p className="mt-5 max-w-md text-sm leading-relaxed text-muted-foreground">Bring your code, context, and AI assistants together. Pick up a workspace, follow an idea, and make your next move.</p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Button onClick={onNewWorkspace} className="h-10 rounded-lg px-5"><Plus size={16} /> Start work <ArrowRight size={15} /></Button>
+            {targetWorkspace && <Button variant="outline" className="h-10 max-w-full rounded-lg" onClick={() => onOpenWorkspace(targetWorkspace.branchName)}><span className="truncate">Open {targetWorkspace.branchName}</span><ArrowRight size={14} /></Button>}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Multi-repo health, background services, and AI coding activity across your workspaces.
-          </p>
         </div>
+        <div className="context-hero-signature pointer-events-none absolute right-10 top-1/2 hidden -translate-y-1/2 opacity-20 xl:block" aria-hidden="true"><ContextSpaceIcon size={220} /></div>
+        <div className="relative mt-9 flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground"><span>Isolated workspaces</span><span>Shared knowledge</span><span>Your choice of AI</span></div>
+      </section>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="default" onClick={onNewWorkspace}>
-            <Plus size={14} /> Start work
-          </Button>
-        </div>
-      </div>
-
-      {/* Hero Metrics KPI Grid */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {/* Metric 1: Workspaces */}
-        <Card className="p-4 surface-card flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Workspaces
-            </span>
-            <span className="grid size-7 place-items-center rounded bg-primary/10 text-primary">
-              <FolderGit2 size={15} />
-            </span>
-          </div>
-          <div className="mt-2">
-            <div className="font-mono text-2xl font-bold text-foreground">
-              {workspaces.length}
-            </div>
-            <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-              <span>{worktreeCount} worktrees</span>
-              <span>•</span>
-              <span>{inPlaceCount} in-place</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Metric 2: Git Changes */}
-        <Card className="p-4 surface-card flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Git Activity
-            </span>
-            <span className={cn('grid size-7 place-items-center rounded', totalChangedFiles > 0 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400')}>
-              <GitBranch size={15} />
-            </span>
-          </div>
-          <div className="mt-2">
-            <div className={cn('font-mono text-2xl font-bold', totalChangedFiles > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400')}>
-              {totalChangedFiles} <span className="text-xs font-normal text-muted-foreground">files</span>
-            </div>
-            <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-              {workspacesWithChanges > 0
-                ? `${workspacesWithChanges} workspace${workspacesWithChanges === 1 ? '' : 's'} with changes`
-                : 'All workspaces clean'}
-            </div>
-          </div>
-        </Card>
-
-        {/* Metric 3: Running Services */}
-        <Card className="p-4 surface-card flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Live Services
-            </span>
-            <span className={cn('grid size-7 place-items-center rounded', runningServicesCount > 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-muted/60 text-muted-foreground')}>
-              <Play size={15} />
-            </span>
-          </div>
-          <div className="mt-2">
-            <div className={cn('font-mono text-2xl font-bold', runningServicesCount > 0 ? 'text-emerald-400' : 'text-muted-foreground')}>
-              {runningServicesCount} <span className="text-xs font-normal text-muted-foreground">active</span>
-            </div>
-            <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-              {workspacesWithServices > 0
-                ? `In ${workspacesWithServices} workspace${workspacesWithServices === 1 ? '' : 's'}`
-                : 'No services running'}
-            </div>
-          </div>
-        </Card>
-
-        {/* Metric 4: AI Coding Harnesses */}
-        <Card className="p-4 surface-card flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              AI Harnesses
-            </span>
-            <span className="grid size-7 place-items-center rounded bg-primary/10 text-primary">
-              <Sparkles size={15} />
-            </span>
-          </div>
-          <div className="mt-2">
-            <div className="font-mono text-2xl font-bold text-foreground">
-              {evaluatedHarnesses.filter((h) => h.isAnyAvailable).length} / {evaluatedHarnesses.length}
-            </div>
-            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground font-mono">
-              <span>Antigravity</span>
-              <span>•</span>
-              <span>Claude</span>
-              <span>•</span>
-              <span>Codex</span>
-            </div>
-          </div>
-        </Card>
+        {[
+          { label: 'Workspaces', value: workspacesLoading ? '—' : workspaces.length, detail: `${worktreeCount} worktrees · ${inPlaceCount} in-place`, icon: Layers3 },
+          { label: 'Connected repositories', value: workspacesLoading ? '—' : repoStats.length, detail: 'Across your workspaces', icon: FolderGit2 },
+          { label: 'Changed files', value: statuses.length ? totalChangedFiles : '—', detail: `${workspacesWithChanges} workspaces with changes`, icon: GitBranch },
+          { label: 'Available assistants', value: aiDetect.isLoading || launchTargets.isLoading ? '—' : evaluatedHarnesses.filter((h) => h.isAnyAvailable).length, detail: 'Choose how you work', icon: Sparkles },
+        ].map(({ label, value, detail, icon: Icon }) => <Card key={label} className="context-metric gap-0 rounded-xl p-4 sm:p-5"><div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>{label}</span><Icon size={15} className="text-primary" /></div><div className="my-3 text-3xl font-semibold tracking-tight tabular-nums">{value}</div><p className="text-[11px] text-muted-foreground">{detail}</p></Card>)}
       </div>
 
-      {/* AI Assistants Launchpad & Ecosystem Status */}
-      <div>
-        <div className="mb-2.5 flex items-center justify-between">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            AI Coding Assistant Hub
-          </h2>
-          <span className="text-[11px] text-muted-foreground font-mono">
-            Direct CLI & Desktop launcher with dynamic environment detection
-          </span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {evaluatedHarnesses.map(({ harness, availableOptions, isAnyAvailable, statusTone }) => {
-            const isBusy = Boolean(launchingKey && launchingKey.startsWith(`${harness.id}:`));
-
-            return (
-              <Card key={harness.id} className="p-4 surface-card flex flex-col justify-between gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    {harness.icon}
-                    <div className="min-w-0">
-                      <span className="text-sm font-bold text-foreground block">
-                        {harness.name}
-                      </span>
-                      <span className="font-mono text-[10.5px] text-muted-foreground">
-                        CLI command: {harness.cliCommand}
-                      </span>
-                    </div>
-                  </div>
-                  <StatusBadge tone={statusTone} dot={isAnyAvailable}>
-                    {isAnyAvailable ? 'Ready' : 'Not installed'}
-                  </StatusBadge>
-                </div>
-
-                {/* Direct Action Buttons for each detected harness mode */}
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
-                  {!isAnyAvailable ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled
-                      className="opacity-50 text-muted-foreground cursor-not-allowed"
-                    >
-                      Not Installed
-                    </Button>
-                  ) : (
-                    availableOptions.map((opt) => {
-                      const optBusy = launchingKey === `${harness.id}:${opt.id}`;
-                      return (
-                        <Button
-                          key={opt.id}
-                          size="xs"
-                          variant="outline"
-                          disabled={isBusy}
-                          onClick={() => void handleExecuteHarnessOption(harness, opt)}
-                          className="gap-1.5 font-medium"
-                          title={`Launch ${harness.name} (${opt.label}) in active workspace`}
-                        >
-                          {optBusy ? <Spinner className="size-3" /> : opt.icon}
-                          <span>{opt.label}</span>
-                        </Button>
-                      );
-                    })
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Workspace Health & Divergence Matrix Table */}
-      <div>
-        <div className="mb-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Workspace Divergence & Health Matrix
-            </h2>
-            <span className="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] text-foreground">
-              {workspaces.length}
-            </span>
+      <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_310px]">
+        <section className="min-w-0" aria-labelledby="workspaces-heading">
+          <div className="mb-4 flex items-center justify-between gap-3"><div><h2 id="workspaces-heading" className="text-lg font-semibold tracking-tight">Your workspaces</h2><p className="mt-1 text-xs text-muted-foreground">A little context. A lot of possibility.</p></div><Button variant="ghost" size="sm" onClick={onNewWorkspace}><Plus size={14} /> New</Button></div>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-card px-3"><Search size={15} className="shrink-0 text-muted-foreground" /><input aria-label="Search workspaces" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a workspace or repository…" className="h-10 w-full min-w-0 bg-transparent text-xs outline-none" /></label>
+            <Button variant={changesOnly ? 'secondary' : 'outline'} className="h-10 rounded-lg" aria-pressed={changesOnly} onClick={() => setChangesOnly(!changesOnly)}><GitBranch size={14} /> With changes</Button>
           </div>
-        </div>
+          {workspacesLoading ? <Card className="p-10"><Spinner aria-label="Loading workspaces" className="mx-auto size-5" /></Card> : !workspaces.length ? <Card className="rounded-xl border-dashed"><Empty><EmptyHeader><EmptyMedia variant="icon"><FolderGit2 /></EmptyMedia><EmptyTitle>Make room for your next idea</EmptyTitle><EmptyDescription>Create a workspace to bring repositories and assistant context together.</EmptyDescription></EmptyHeader><Button onClick={onNewWorkspace}><Plus size={15} /> Create your first workspace</Button></Empty></Card> : !visibleWorkspaces.length ? <Card className="rounded-xl p-8 text-center"><p className="text-sm">No workspaces match this view.</p><Button variant="ghost" className="mt-3" onClick={() => { setSearch(''); setChangesOnly(false); }}>Clear filters</Button></Card> : <div className="space-y-3">{visibleWorkspaces.map((ws) => {
+            const status = workspaceStatuses[ws.branchName];
+            const sync = ws.mode === 'in-place' || !status ? null : syncMeta(status.syncStatus);
+            return <button key={ws.id} type="button" onClick={() => onOpenWorkspace(ws.branchName)} className="context-workspace group w-full rounded-xl border border-border bg-card p-5 text-left transition duration-200 hover:border-primary/50 hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-primary/5 text-primary"><FolderGit2 size={19} /></span><div className="min-w-0"><h3 className="truncate text-sm font-semibold">{ws.branchName}</h3><span className="text-[10px] text-muted-foreground">{ws.mode === 'in-place' ? 'In-place workspace' : 'Isolated worktree'}</span></div></div><ArrowRight size={17} className="mt-2 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-primary" /></div>
+              {ws.description && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{ws.description}</p>}
+              <div className="mt-4 flex flex-wrap items-center gap-2">{ws.repos.map((r) => <span key={r} className="rounded-md bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">{repoName(r)}</span>)}</div>
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/60 pt-3 text-[11px] text-muted-foreground"><span className={status?.changedFiles ? 'text-warning-foreground' : ''}>{!status ? 'Status pending' : status.changedFiles ? `${status.changedFiles} changed files` : 'Working tree clean'}</span>{sync && <span>{sync.label}</span>}{!!status?.runningServices && <span className="text-success-foreground">{status.runningServices} services running</span>}<span className="ml-auto">Open workspace</span></div>
+            </button>;
+          })}</div>}
+        </section>
 
-        {workspacesLoading ? (
-          <Card className="p-8 surface-card flex items-center justify-center">
-            <Spinner className="size-5 text-primary" />
-          </Card>
-        ) : workspaces.length === 0 ? (
-          <Card className="border-dashed surface-card">
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <FolderGit2 />
-                </EmptyMedia>
-                <EmptyTitle>No active workspaces</EmptyTitle>
-                <EmptyDescription>
-                  Start your first multi-repo workspace to automatically branch worktrees and prepare AI contexts.
-                </EmptyDescription>
-              </EmptyHeader>
-              <Button onClick={onNewWorkspace}>
-                <Plus size={15} /> Start work
-              </Button>
-            </Empty>
-          </Card>
-        ) : (
-          <Card className="divide-y divide-border/60 overflow-hidden surface-card">
-            {/* Table Header */}
-            <div className="hidden sm:grid grid-cols-12 gap-3 px-4 py-2 bg-muted/30 text-[10px] font-bold uppercase tracking-wider text-muted-foreground font-mono">
-              <span className="col-span-4">Workspace / Branch</span>
-              <span className="col-span-2">AI Harness</span>
-              <span className="col-span-2">Git Status</span>
-              <span className="col-span-2">Services</span>
-              <span className="col-span-2 text-right">Action</span>
-            </div>
-
-            {/* Table Rows */}
-            {workspaces.map((ws) => {
-              const st = workspaceStatuses[ws.branchName];
-              const hasChanges = Boolean(st && st.changedFiles > 0);
-              const hasServices = Boolean(st && st.runningServices > 0);
-              const sync = (ws.mode ?? 'worktree') === 'in-place' ? null : (st ? syncMeta(st.syncStatus) : null);
-
-              return (
-                <div
-                  key={ws.id}
-                  onClick={() => onOpenWorkspace(ws.branchName)}
-                  className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 px-4 py-3 items-center hover:bg-accent/40 transition-colors cursor-pointer text-xs"
-                >
-                  {/* Branch & Mode */}
-                  <div className="sm:col-span-4 min-w-0 flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'size-2 rounded-full shrink-0',
-                        hasChanges ? 'bg-amber-400' : 'bg-emerald-500'
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="truncate font-mono font-bold text-foreground" title={ws.branchName}>
-                          {ws.branchName}
-                        </span>
-                        <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground bg-muted px-1 rounded shrink-0">
-                          {ws.mode === 'in-place' ? 'In-place' : 'Worktree'}
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
-                        {ws.repos.length} {ws.repos.length === 1 ? 'repo' : 'repos'} • {new Date(ws.createdAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Configured AI Assistants */}
-                  <div className="sm:col-span-2 flex items-center gap-1.5 min-w-0">
-                    {ws.assistants && ws.assistants.length > 0 ? (
-                      ws.assistants.map((ast) => (
-                        <span key={ast} className="inline-flex items-center" title={`Configured AI: ${ast}`}>
-                          {ast === 'antigravity' ? (
-                            <AntigravityIcon className="size-3.5" />
-                          ) : ast === 'claude' ? (
-                            <span className="grid size-3.5 place-items-center rounded bg-[#D97757] text-white shadow-2xs">
-                              <SiClaude className="size-2" />
-                            </span>
-                          ) : ast === 'codex' ? (
-                            <span className="grid size-3.5 place-items-center rounded bg-foreground text-background shadow-2xs">
-                              <BsOpenai className="size-2" />
-                            </span>
-                          ) : (
-                            <span className="grid size-3.5 place-items-center rounded bg-blue-600 text-white shadow-2xs">
-                              <SiGithubcopilot className="size-2" />
-                            </span>
-                          )}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground font-mono">—</span>
-                    )}
-                  </div>
-
-                  {/* Git Health */}
-                  <div className="sm:col-span-2 font-mono text-[11px]">
-                    {hasChanges ? (
-                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
-                        <span className="size-1.5 rounded-full bg-amber-500" />
-                        {st!.changedFiles} modified
-                        {sync && sync.tone !== 'idle' && (
-                          <span className="text-[10px] text-muted-foreground ml-0.5 font-normal">({sync.label})</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                        <span className="size-1.5 rounded-full bg-emerald-500" />
-                        Clean
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Services & Sync */}
-                  <div className="sm:col-span-2 font-mono text-[11px]">
-                    {hasServices ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        {st!.runningServices} active
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground/70">Offline</span>
-                    )}
-                  </div>
-
-                  {/* Fast Action */}
-                  <div className="sm:col-span-2 flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => onOpenWorkspace(ws.branchName)}
-                      className="gap-1 text-primary hover:text-primary"
-                    >
-                      <span>Inspect</span>
-                      <ArrowRight size={12} />
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </Card>
-        )}
+        <aside className="rounded-xl border border-border bg-card p-5" aria-labelledby="assistants-heading">
+          <div className="mb-5"><div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary"><Sparkles size={14} /> Ready when you are</div><h2 id="assistants-heading" className="text-lg font-semibold tracking-tight">Your AI, your way.</h2><p className="mt-2 text-xs leading-relaxed text-muted-foreground">Launch an assistant with the right workspace already in place.</p></div>
+          <label className="block text-[11px] font-medium text-muted-foreground" htmlFor="launch-workspace">Launch into</label>
+          <select id="launch-workspace" value={targetWorkspace?.branchName ?? ''} onChange={(e) => setLaunchWorkspace(e.target.value)} disabled={!workspaces.length || !!launchingKey} className="mt-2 mb-5 h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-ring">{!workspaces.length && <option value="">Create a workspace first</option>}{workspaces.map((w) => <option key={w.id} value={w.branchName}>{w.branchName}</option>)}</select>
+          <div className="divide-y divide-border">{evaluatedHarnesses.map(({ harness, availableOptions, isAnyAvailable, statusTone }) => <div key={harness.id} className="py-4 first:pt-0 last:pb-0"><div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2.5">{harness.icon}<h3 className="text-xs font-semibold">{harness.shortName}</h3></div><StatusBadge tone={statusTone}>{aiDetect.isLoading || launchTargets.isLoading ? 'Checking' : aiDetect.isError || launchTargets.isError ? 'Check failed' : isAnyAvailable ? 'Available' : 'Not detected'}</StatusBadge></div><div className="mt-3 flex flex-wrap gap-2">{availableOptions.map((option) => <Button key={option.id} variant="outline" size="xs" disabled={!!launchingKey || !targetWorkspace} onClick={() => void handleExecuteHarnessOption(harness, option)} title={`Open ${harness.name} in ${targetWorkspace?.branchName ?? 'a workspace'}`}>{launchingKey === `${harness.id}:${option.id}` ? <Spinner className="size-3" /> : option.icon}{option.shortLabel}<ArrowRight size={11} /></Button>)}</div></div>)}</div>
+        </aside>
       </div>
-
-      {/* Multi-Repo Composition Breakdown */}
-      {repoStats.length > 0 && (
-        <div>
-          <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Repository Worktree Allocations ({repoStats.length})
-            </h2>
-            <span className="text-[11px] text-muted-foreground font-mono">
-              Underlying git repos mapped across features
-            </span>
-          </div>
-
-          <Card className="divide-y divide-border/60 overflow-hidden surface-card">
-            {repoStats.map((repo) => (
-              <div key={repo.name} className="flex items-center justify-between p-3 text-xs">
-                <div className="flex items-center gap-2.5 min-w-0 font-mono">
-                  <span className="grid size-6 place-items-center rounded bg-muted/60 text-muted-foreground">
-                    <Boxes size={13} />
-                  </span>
-                  <div className="min-w-0">
-                    <span className="font-bold text-foreground block truncate">{repo.name}</span>
-                    <span className="text-[10px] text-muted-foreground truncate block">{repo.path}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 font-mono text-[11px] text-muted-foreground">
-                  <span className="rounded bg-muted px-2 py-0.5 text-foreground font-semibold">
-                    {repo.count} {repo.count === 1 ? 'workspace worktree' : 'workspace worktrees'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </Card>
-        </div>
-      )}
+      {repoStats.length > 0 && <section className="border-t border-border pt-5"><div className="mb-3 flex items-center gap-2 text-xs font-medium text-muted-foreground"><Boxes size={14} /> Connected repositories</div><div className="flex flex-wrap gap-2">{repoStats.map((repo) => <button key={repo.path} onClick={() => { setSearch(repo.path); setChangesOnly(false); document.getElementById('workspaces-heading')?.scrollIntoView({ block: 'start' }); }} title={repo.path} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs transition-colors hover:border-primary/50 focus-visible:outline-ring"><FolderGit2 size={13} className="text-primary" />{repo.name}<span className="text-muted-foreground">{repo.count}</span></button>)}</div></section>}
     </div>
   );
 }

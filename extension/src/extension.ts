@@ -23,7 +23,7 @@ function resolveCli(context: vscode.ExtensionContext): { command: string; prefix
     if (fs.existsSync(bundled)) {
         return { command: 'node', prefixArgs: [bundled] };
     }
-    return { command: process.platform === 'win32' ? 'nexusflow.cmd' : 'nexusflow', prefixArgs: [] };
+    return { command: process.platform === 'win32' ? 'ctxspace.cmd' : 'ctxspace', prefixArgs: [] };
 }
 
 function checkServerRunning(): Promise<boolean> {
@@ -77,26 +77,33 @@ async function startHonoServer(context: vscode.ExtensionContext) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('NexusFlow extension is activating...');
+    console.log('ContextSpace extension is activating...');
     
     // Start Hono server in background if not running
     startHonoServer(context);
 
-    // Scope keybindings to workspaces where nexusflow.json exists
+    // Scope keybindings to workspaces where contextspace.json or nexusflow.json exists
+    vscode.commands.executeCommand('setContext', 'contextspace.workspaceActive', true);
     vscode.commands.executeCommand('setContext', 'nexusflow.workspaceActive', true);
 
     // Initialize Status Bar Item
     myStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    myStatusBarItem.command = 'nexusflow.openTui';
+    myStatusBarItem.command = 'contextspace.openTui';
     context.subscriptions.push(myStatusBarItem);
     context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateStatusBarItem));
     updateStatusBarItem();
 
     // Register Webview Provider
-    const provider = new NexusFlowSidebarProvider(context);
+    const provider = new ContextSpaceSidebarProvider(context);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
-            NexusFlowSidebarProvider.viewType,
+            ContextSpaceSidebarProvider.viewType,
+            provider
+        )
+    );
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            'nexusflow.dashboardView',
             provider
         )
     );
@@ -114,7 +121,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                 return [
                     new (vscode as any).McpStdioServerDefinition({
-                        label: 'NexusFlow MCP Server',
+                        label: 'ContextSpace MCP Server',
                         command,
                         args: args
                     })
@@ -122,70 +129,78 @@ export function activate(context: vscode.ExtensionContext) {
             }
         };
         context.subscriptions.push(
+            (vscode as any).lm.registerMcpServerDefinitionProvider('contextspace-mcp', mcpProvider)
+        );
+        context.subscriptions.push(
             (vscode as any).lm.registerMcpServerDefinitionProvider('nexusflow-mcp', mcpProvider)
         );
-        console.log('NexusFlow MCP Server Definition Provider registered successfully.');
+        console.log('ContextSpace MCP Server Definition Provider registered successfully.');
     } else {
         console.log('registerMcpServerDefinitionProvider is not supported on this VS Code version.');
     }
 
     // Register Focus Dashboard Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.openDashboard', () => {
-            vscode.commands.executeCommand('workbench.view.extension.nexusflow-sidebar');
-        })
-    );
+    const openDashboardHandler = () => {
+        vscode.commands.executeCommand('workbench.view.extension.contextspace-sidebar');
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.openDashboard', openDashboardHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.openDashboard', openDashboardHandler));
 
     // Register Open Browser Dashboard Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.openBrowserDashboard', () => {
-            vscode.env.openExternal(vscode.Uri.parse(SERVER_URL));
-        })
-    );
+    const openBrowserHandler = () => {
+        vscode.env.openExternal(vscode.Uri.parse(SERVER_URL));
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.openBrowserDashboard', openBrowserHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.openBrowserDashboard', openBrowserHandler));
 
     // Register Open TUI Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.openTui', () => {
-            runNexusFlowCommand(context, 'tui');
-        })
-    );
+    const openTuiHandler = () => {
+        runContextSpaceCommand(context, 'tui');
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.openTui', openTuiHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.openTui', openTuiHandler));
 
     // Register Create Workspace Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.createWorkspace', () => {
-            runNexusFlowCommand(context, 'create');
-        })
-    );
+    const createWsHandler = () => {
+        runContextSpaceCommand(context, 'create');
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.createWorkspace', createWsHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.createWorkspace', createWsHandler));
 
     // Register Sync Workspace Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.syncWorkspace', () => {
-            runNexusFlowCommand(context, 'sync');
-        })
-    );
+    const syncWsHandler = () => {
+        runContextSpaceCommand(context, 'sync');
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.syncWorkspace', syncWsHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.syncWorkspace', syncWsHandler));
 
     // Register Run Doctor Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.runDoctor', () => {
-            runNexusFlowCommand(context, 'doctor');
-        })
-    );
+    const doctorHandler = () => {
+        runContextSpaceCommand(context, 'doctor');
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.runDoctor', doctorHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.runDoctor', doctorHandler));
 
-    // Register Commit Workspace Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('nexusflow.commitWorkspace', async () => {
-            const message = await vscode.window.showInputBox({
-                prompt: 'Enter commit message for all changed repositories in the workspace:',
-                placeHolder: 'e.g., feat: implement new UI components'
-            });
-            if (message) {
-                runNexusFlowCommand(context, `commit "${message.replace(/"/g, '\\"')}"`);
-            }
-        })
-    );
+function escapeShellDoubleQuotes(str: string): string {
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
 }
 
-function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) {
+    // Register Commit Workspace Command
+    const commitHandler = async () => {
+        const message = await vscode.window.showInputBox({
+            prompt: 'Enter commit message for all changed repositories in the workspace:',
+            placeHolder: 'e.g., feat: implement new UI components'
+        });
+        if (message) {
+            const escaped = escapeShellDoubleQuotes(message);
+            runContextSpaceCommand(context, `commit "${escaped}"`);
+        }
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('contextspace.commitWorkspace', commitHandler));
+    context.subscriptions.push(vscode.commands.registerCommand('nexusflow.commitWorkspace', commitHandler));
+}
+
+function runContextSpaceCommand(context: vscode.ExtensionContext, command: string) {
     const folders = vscode.workspace.workspaceFolders;
     const isCreate = command.startsWith('create');
     
@@ -197,10 +212,10 @@ function runNexusFlowCommand(context: vscode.ExtensionContext, command: string) 
     const cwd = (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
     const { command: cliCommand, prefixArgs } = resolveCli(context);
 
-    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
+    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "ContextSpace Runner" || t.name === "NexusFlow Runner");
     if (!terminal) {
         terminal = vscode.window.createTerminal({
-            name: "NexusFlow Runner",
+            name: "ContextSpace Runner",
             cwd: cwd
         });
     } else {
@@ -227,7 +242,10 @@ function getWorkspaceDetails(): any {
         return { hasWorkspace: false };
     }
     const rootPath = folders[0].uri.fsPath;
-    const manifestPath = path.join(rootPath, 'nexusflow.json');
+    let manifestPath = path.join(rootPath, 'contextspace.json');
+    if (!fs.existsSync(manifestPath)) {
+        manifestPath = path.join(rootPath, 'nexusflow.json');
+    }
     if (!fs.existsSync(manifestPath)) {
         return { hasWorkspace: false };
     }
@@ -250,8 +268,8 @@ function getWorkspaceDetails(): any {
     }
 }
 
-class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'nexusflow.dashboardView';
+class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'contextspace.dashboardView';
     private _view?: vscode.WebviewView;
 
     constructor(
@@ -294,7 +312,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'runCommand': {
-                    runNexusFlowCommand(this._context, data.command);
+                    runContextSpaceCommand(this._context, data.command);
                     break;
                 }
                 case 'triggerCommand': {
@@ -302,10 +320,10 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'executeTerminalCommand': {
-                    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "NexusFlow Runner");
+                    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "ContextSpace Runner" || t.name === "NexusFlow Runner");
                     if (!terminal) {
                         terminal = vscode.window.createTerminal({
-                            name: "NexusFlow Runner",
+                            name: "ContextSpace Runner",
                             cwd: data.cwd
                         });
                     } else {
@@ -336,7 +354,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                  font-src ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${codiconsUri}" rel="stylesheet" />
-    <title>NexusFlow Sidebar Console</title>
+    <title>ContextSpace Sidebar Console</title>
     <style>
         :root {
             --bg-base: var(--vscode-sideBar-background, #080a13);
@@ -348,37 +366,33 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
             --border-color: rgba(0, 240, 255, 0.15);
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
         body {
-            font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
             background-color: var(--bg-base);
             color: var(--text-primary);
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
             padding: 12px;
-            font-size: 13px;
-            overflow-y: auto;
-            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
         }
 
-        /* Header block */
         .header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 8px;
-            margin-bottom: 15px;
+            margin-bottom: 4px;
         }
 
         .header h3 {
-            font-size: 14px;
-            font-weight: bold;
-            color: var(--text-primary);
-            letter-spacing: 0.5px;
+            margin: 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--accent-cyan);
             display: flex;
             align-items: center;
             gap: 6px;
@@ -388,71 +402,71 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
             display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 11px;
-            color: var(--accent-cyan);
-            font-family: monospace;
+            font-size: 10px;
+            color: var(--accent-green);
+            background: rgba(57, 255, 20, 0.1);
+            padding: 2px 6px;
+            border-radius: 10px;
+            border: 1px solid rgba(57, 255, 20, 0.3);
         }
 
         .status-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
+            width: 6px;
+            height: 6px;
             background-color: var(--accent-green);
+            border-radius: 50%;
             box-shadow: 0 0 6px var(--accent-green);
         }
 
-        /* Card Container */
         .card {
             background-color: var(--bg-surface);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .card h4 {
-            font-size: 12px;
-            color: var(--accent-cyan);
+            margin: 0;
+            font-size: 11px;
             text-transform: uppercase;
+            color: var(--text-secondary);
             letter-spacing: 0.5px;
-            margin-bottom: 6px;
         }
 
         .branch-badge {
-            font-family: monospace;
-            background: rgba(0, 240, 255, 0.08);
-            border: 1px solid rgba(0, 240, 255, 0.2);
+            font-family: var(--vscode-editor-font-family, monospace);
             color: var(--accent-cyan);
+            font-weight: bold;
+            font-size: 12px;
+            background: rgba(0, 240, 255, 0.1);
             padding: 4px 8px;
             border-radius: 4px;
-            display: inline-block;
-            margin-bottom: 8px;
-            font-weight: bold;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            word-break: break-all;
         }
 
         .desc-text {
+            font-size: 11px;
             color: var(--text-secondary);
-            font-size: 12px;
             line-height: 1.4;
         }
 
-        /* Action Buttons Grid */
         .btn-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 15px;
+            gap: 6px;
         }
 
         .btn {
-            background: rgba(0, 240, 255, 0.06);
-            border: 1px solid rgba(0, 240, 255, 0.2);
-            color: var(--accent-cyan);
+            background-color: var(--vscode-button-secondaryBackground, #2b3040);
+            color: var(--vscode-button-secondaryForeground, #ffffff);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
-            padding: 8px 12px;
-            font-size: 12px;
-            font-weight: 600;
+            padding: 6px 10px;
+            font-size: 11px;
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -462,66 +476,69 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         .btn:hover {
-            background: var(--accent-cyan);
-            color: black;
-            box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+            background-color: var(--vscode-button-secondaryHoverBackground, #3c4257);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
         }
 
         .btn-primary {
-            grid-column: span 2;
-            background: var(--accent-cyan);
-            color: black;
-            font-weight: bold;
+            background-color: var(--vscode-button-background, #007acc);
+            color: var(--vscode-button-foreground, #ffffff);
+            border: none;
         }
 
         .btn-primary:hover {
-            background: #00d0de;
+            background-color: var(--vscode-button-hoverBackground, #0062a3);
+            color: #ffffff;
         }
 
-        /* File Links List */
         .file-list {
             list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
         .file-row {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 6px 8px;
+            gap: 6px;
+            padding: 4px 6px;
             border-radius: 4px;
+            font-size: 11px;
+            font-family: var(--vscode-editor-font-family, monospace);
             cursor: pointer;
-            color: var(--text-secondary);
-            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid transparent;
         }
 
         .file-row:hover {
-            background: rgba(255, 255, 255, 0.03);
-            color: var(--text-primary);
+            background: rgba(0, 240, 255, 0.08);
+            border-color: rgba(0, 240, 255, 0.3);
+            color: var(--accent-cyan);
         }
 
         .file-icon {
             color: var(--accent-cyan);
-            font-size: 14px;
+            font-size: 12px;
         }
 
-        /* Loading / Wizard view */
-        .loading-view, .wizard-view {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 30px 15px;
+        .wizard-view {
             text-align: center;
+            padding: 24px 12px;
         }
 
         .wizard-icon {
             font-size: 32px;
+            color: var(--accent-cyan);
             margin-bottom: 12px;
-            animation: pulse 2s infinite;
         }
 
         .wizard-text {
             color: var(--text-secondary);
+            font-size: 12px;
             margin-bottom: 20px;
             line-height: 1.5;
         }
@@ -530,7 +547,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
 <body>
 
     <div class="header">
-        <h3><i class="codicon codicon-extensions"></i> NexusFlow</h3>
+        <h3><i class="codicon codicon-extensions"></i> ContextSpace</h3>
         <div class="status-indicator">
             <div class="status-dot"></div>
             <span>ACTIVE</span>
@@ -541,7 +558,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
     <div id="workspace-view" style="display: none;">
         <div class="card">
             <h4>Active Feature</h4>
-            <div class="branch-badge" id="branch-badge">🌿 improve_nexusflow</div>
+            <div class="branch-badge" id="branch-badge">🌿 workspace</div>
             <div class="desc-text" id="workspace-desc">Loading workspace description...</div>
         </div>
 
@@ -549,7 +566,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
             <button class="btn" onclick="runCommand('tui')"><i class="codicon codicon-terminal"></i> Open TUI</button>
             <button class="btn" onclick="runCommand('sync')"><i class="codicon codicon-sync"></i> Rebase Sync</button>
             <button class="btn" onclick="runCommand('doctor')"><i class="codicon codicon-pulse"></i> Run Doctor</button>
-            <button class="btn" onclick="triggerCommand('nexusflow.commitWorkspace')"><i class="codicon codicon-git-commit"></i> Commit</button>
+            <button class="btn" onclick="triggerCommand('contextspace.commitWorkspace')"><i class="codicon codicon-git-commit"></i> Commit</button>
         </div>
 
         <div class="card">
@@ -571,12 +588,12 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
     <div id="wizard-view" style="display: none;" class="wizard-view">
         <div class="wizard-icon"><i class="codicon codicon-rocket"></i></div>
         <h4 style="margin-bottom: 8px; font-size: 14px; color: var(--text-primary);">No Workspace Detected</h4>
-        <p class="wizard-text">NexusFlow coordinates multi-repo workspaces with Git worktrees and auto-generated AI contexts.</p>
+        <p class="wizard-text">ContextSpace coordinates multi-repo workspaces with Git worktrees and auto-generated AI contexts.</p>
         
-        <button class="btn btn-primary" onclick="triggerCommand('nexusflow.createWorkspace')" style="width: 100%; margin-bottom: 10px;">
+        <button class="btn btn-primary" onclick="triggerCommand('contextspace.createWorkspace')" style="width: 100%; margin-bottom: 10px;">
             Initialize Workspace Setup
         </button>
-        <button class="btn" onclick="triggerCommand('nexusflow.openTui')" style="width: 100%;">
+        <button class="btn" onclick="triggerCommand('contextspace.openTui')" style="width: 100%;">
             Open TUI Dashboard
         </button>
     </div>
@@ -634,7 +651,7 @@ class NexusFlowSidebarProvider implements vscode.WebviewViewProvider {
                 // Render Core Context Files list
                 const contextFiles = document.getElementById('context-files');
                 const root = details.rootPath.replace(/\\\\/g, '/');
-                const files = ['WORKSPACE.md', 'nexusflow-knowledge.md', 'nexusflow-plan.md'];
+                const files = ['WORKSPACE.md', 'contextspace-knowledge.md', 'contextspace-plan.md'];
                 contextFiles.innerHTML = files.map(file => \`
                     <li class="file-row" onclick="openFile('\${root}/\${file}')">
                         <i class="codicon codicon-file-text file-icon"></i>
@@ -669,11 +686,10 @@ function updateStatusBarItem() {
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 0) {
         const branchName = path.basename(folders[0].uri.fsPath);
-        myStatusBarItem.text = `$(git-branch) NexusFlow: ${branchName}`;
-        myStatusBarItem.tooltip = 'Click to open NexusFlow Terminal Console (TUI)';
+        myStatusBarItem.text = `$(git-branch) ContextSpace: ${branchName}`;
+        myStatusBarItem.tooltip = 'Click to open ContextSpace Terminal Console (TUI)';
         myStatusBarItem.show();
     } else {
         myStatusBarItem.hide();
     }
 }
-

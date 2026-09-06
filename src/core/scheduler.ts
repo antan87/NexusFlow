@@ -17,9 +17,10 @@ import { getConfigDir, ensureConfigDir } from './config.js';
 import { acquireLock, createMutationQueue } from './locks.js';
 import { syncWorkspace } from './sync.js';
 import { refreshWorkspace } from './refresh.js';
+import { resolveGlobalDurablePath, STORE_SCHEDULES_FILE } from './constants.js';
 
-/** Name of the schedules file inside ~/.nexusflow. */
-const SCHEDULES_FILE = 'schedules.json';
+/** Name of the schedules file inside global config dir. */
+const SCHEDULES_FILE = STORE_SCHEDULES_FILE;
 const SCHEDULES_LOCK_FILE = `${SCHEDULES_FILE}.lock`;
 const RUN_LOCK_DIR = 'schedule-runs';
 const STORE_LOCK_TIMEOUT_MS = 10_000;
@@ -69,16 +70,16 @@ const enqueueScheduleStoreMutation = createMutationQueue();
  * Returns the path to the schedules file (~/.nexusflow/schedules.json).
  */
 export function getSchedulesPath(): string {
-  return path.join(getConfigDir(), SCHEDULES_FILE);
+  return resolveGlobalDurablePath(SCHEDULES_FILE);
 }
 
 function getSchedulesLockPath(): string {
-  return path.join(getConfigDir(), SCHEDULES_LOCK_FILE);
+  return `${getSchedulesPath()}.lock`;
 }
 
 function getRunLockPath(jobId: string): string {
   const safeId = jobId.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return path.join(getConfigDir(), RUN_LOCK_DIR, `${safeId}.lock`);
+  return path.join(path.dirname(getSchedulesPath()), RUN_LOCK_DIR, `${safeId}.lock`);
 }
 
 async function mutateSchedules<T>(
@@ -121,12 +122,14 @@ export async function loadSchedules(): Promise<ScheduleStore> {
 }
 
 /**
- * Persists the schedule store to ~/.nexusflow/schedules.json.
+ * Persists the schedule store to ~/.nexusflow/schedules.json (or ~/.contextspace/schedules.json).
  */
 export async function saveSchedules(store: ScheduleStore): Promise<void> {
   await ensureConfigDir();
+  const targetPath = getSchedulesPath();
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
   const data = JSON.stringify(store, null, 2) + '\n';
-  await fs.writeFile(getSchedulesPath(), data, 'utf-8');
+  await fs.writeFile(targetPath, data, 'utf-8');
 }
 
 /**

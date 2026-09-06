@@ -38,6 +38,7 @@ import {
   useAssignWorkspaceSkills,
   useRefreshWorkspace,
 } from '../../lib/api/queries.js';
+import { CONFIG_DIR } from '../../brand.js';
 import type { Feature, SkillItem } from '../../types.js';
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -219,7 +220,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
       <Empty className="py-12 border border-dashed rounded-xl">
         <EmptyHeader>
           <EmptyTitle>Could not load workspace skills config</EmptyTitle>
-          <EmptyDescription>Unable to read .nexusflow/skills.json for this workspace.</EmptyDescription>
+          <EmptyDescription>Unable to read .contextspace/skills.json for this workspace.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -228,7 +229,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
   return (
     <div className="flex flex-col gap-4">
       {/* Top Banner / Actions Bar */}
-      <Card className="p-4 bg-card/70 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <Card className="p-5 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-primary/10 text-primary">
             <Boxes className="h-5 w-5" />
@@ -503,7 +504,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Saving & deploying will write to <code className="font-mono text-xs text-foreground">.nexusflow/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, <code className="font-mono text-xs text-foreground">.codex/skills/</code>, <code className="font-mono text-xs text-foreground">.github/skills/</code>, <code className="font-mono text-xs text-foreground">.cursor/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
+        Saving & deploying will write to <code className="font-mono text-xs text-foreground">{CONFIG_DIR}/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, <code className="font-mono text-xs text-foreground">.codex/skills/</code>, <code className="font-mono text-xs text-foreground">.github/skills/</code>, <code className="font-mono text-xs text-foreground">.cursor/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
       </p>
     </div>
   );

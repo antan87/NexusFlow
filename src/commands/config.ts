@@ -9,13 +9,14 @@
  */
 
 import { loadConfig, saveConfig } from '../core/config.js';
+import { BRAND_NAME } from '../core/constants.js';
 
 /**
  * Displays the current NexusFlow configuration.
  */
 export async function configShowCommand(): Promise<void> {
   const config = await loadConfig();
-  console.log('\n⚙️  NexusFlow Configuration\n');
+  console.log(`\n⚙️  ${BRAND_NAME} Configuration\n`);
   console.log(JSON.stringify(config, null, 2));
   console.log();
 }

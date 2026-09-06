@@ -6,6 +6,7 @@ import fse from 'fs-extra';
 
 import type { CodexAgentItem, SkillItem } from '../types.js';
 import { reconcileWorkspaceResources, ResourceConflictError } from './materializer.js';
+import { PRIMARY_CONFIG_DIR_NAME } from '../core/constants.js';
 
 const skill: SkillItem = {
   id: 'portable-skill',
@@ -91,7 +92,7 @@ describe('workspace resource materializer', () => {
   it('restores the old target and lock when installing a staged replacement fails', async () => {
     await reconcileWorkspaceResources(workspace, ['antigravity'], [skill], []);
     const target = path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md');
-    const lockPath = path.join(workspace, '.nexusflow', 'resources.lock.json');
+    const lockPath = path.join(workspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
     const beforeTarget = await fs.readFile(target, 'utf-8');
     const beforeLock = await fs.readFile(lockPath, 'utf-8');
     let renameCall = 0;
@@ -121,7 +122,7 @@ describe('workspace resource materializer', () => {
     await fs.writeFile(extra, 'echo unmanaged', 'utf-8');
 
     await expect(reconcileWorkspaceResources(workspace, ['codex'], [skill], [])).rejects.toMatchObject({
-      conflicts: expect.arrayContaining([expect.stringContaining('is not owned by NexusFlow')]),
+      conflicts: expect.arrayContaining([expect.stringMatching(/is not owned by (ContextSpace|NexusFlow)/)]),
     });
     expect(await fs.readFile(extra, 'utf-8')).toBe('echo unmanaged');
   });
@@ -134,7 +135,7 @@ describe('workspace resource materializer', () => {
     await expect(reconcileWorkspaceResources(workspace, ['codex'], [skill], [])).rejects.toBeInstanceOf(ResourceConflictError);
     expect(await fs.readFile(path.join(target, 'README.md'), 'utf-8')).toBe('user owned');
     expect(await fse.pathExists(path.join(target, 'SKILL.md'))).toBe(false);
-    expect(await fse.pathExists(path.join(workspace, '.nexusflow', 'resources.lock.json'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json'))).toBe(false);
   });
 
   it('rejects invalid identities before writing targets', async () => {
@@ -198,7 +199,7 @@ describe('workspace resource materializer', () => {
     await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
     const victim = path.join(workspace, 'victim.txt');
     await fs.writeFile(victim, 'keep me', 'utf-8');
-    const lockPath = path.join(workspace, '.nexusflow', 'resources.lock.json');
+    const lockPath = path.join(workspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
     const lock = JSON.parse(await fs.readFile(lockPath, 'utf-8')) as {
       outputs: Array<{ path: string; hash: string }>;
     };

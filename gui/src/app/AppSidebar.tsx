@@ -20,9 +20,12 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot, SiCursor } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
+import { BRAND_NAME } from '../brand.js';
+import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
@@ -67,7 +70,7 @@ export function AppSidebar({
   onSelectWorkspace,
 }: AppSidebarProps) {
   const { pathname } = useLocation();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { open: openFloatingChat } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
@@ -125,17 +128,17 @@ export function AppSidebar({
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
+    <aside className="context-sidebar flex w-64 shrink-0 flex-col border-r border-border bg-card/60 select-none h-screen overflow-hidden">
       {/* Header */}
       <div className="flex h-12 items-center justify-between px-3 border-b border-border/60">
-        <Link to="/overview" className="flex items-center gap-2">
-          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-[11px] font-bold text-primary-foreground shadow-xs">
-            NF
-          </div>
-          <span className="text-xs font-bold tracking-tight text-foreground">NexusFlow</span>
+        <Link to="/overview" className="flex items-center gap-2.5 group">
+          <ContextSpaceIcon size={24} className="rounded-md shadow-xs transition-transform duration-200 group-hover:scale-105" />
+          <span className="text-xs font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">{BRAND_NAME}</span>
         </Link>
         <span className="text-[10px] font-mono text-muted-foreground/70">v{appVersion}</span>
       </div>
+
+      <QuickSwitch workspaces={workspaces} />
 
       {/* Top Action & Overview Nav */}
       <div className="p-2.5 pb-1 space-y-1.5">
@@ -144,7 +147,7 @@ export function AppSidebar({
           className={({ isActive }) =>
             cn(
               'flex h-7.5 items-center gap-2 rounded-md px-2.5 text-xs font-medium transition-colors cursor-pointer',
-              isActive || location.pathname === '/'
+              isActive || pathname === '/'
                 ? 'bg-primary/10 text-primary font-semibold'
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
             )
@@ -229,6 +232,7 @@ export function AppSidebar({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Filter sidebar workspaces"
             placeholder="Filter workspaces..."
             className="h-7 w-full rounded-md border border-border/80 bg-background/80 py-1 pl-6 pr-6 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
           />
@@ -330,9 +334,9 @@ export function AppSidebar({
                       <span
                         className={cn(
                           'size-1.5 rounded-full shrink-0',
-                          hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                          !st ? 'bg-muted-foreground/40' : hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
                         )}
-                        title={hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
+                        title={!st ? 'Status pending' : hasChanges ? `${st!.changedFiles} uncommitted changes` : 'Clean working directory'}
                       />
                     </div>
                   </div>
@@ -398,6 +402,24 @@ export function AppSidebar({
               <BookOpen size={13} />
               <span>Getting Started</span>
             </NavLink>
+
+            <fieldset className="mx-1 my-2 rounded-lg border border-border p-2">
+              <legend className="px-1 text-[10px] font-medium text-muted-foreground">Color theme</legend>
+              <div className="grid grid-cols-2 gap-1">
+                {(['sunset', 'aurora'] as const).map((palette) => (
+                  <button
+                    key={palette}
+                    type="button"
+                    aria-pressed={colorTheme === palette}
+                    onClick={() => setColorTheme(palette)}
+                    className={cn('flex items-center justify-center gap-1.5 rounded-md px-1.5 py-2 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring', colorTheme === palette ? 'bg-accent text-accent-foreground ring-1 ring-primary/40' : 'text-muted-foreground hover:bg-accent')}
+                  >
+                    <span aria-hidden="true" className={cn('size-3 rounded-full', palette === 'sunset' ? 'bg-gradient-to-br from-amber-300 via-orange-400 to-rose-500' : 'bg-gradient-to-br from-teal-300 via-cyan-400 to-indigo-500')} />
+                    {palette === 'sunset' ? 'Sunset' : 'Aurora'}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
 
             {/* Theme toggle */}
             <button

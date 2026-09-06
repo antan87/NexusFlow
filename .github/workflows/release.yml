@@ -171,7 +171,7 @@ jobs:
         env:
           VERSION: ${{ needs.guard.outputs.version }}
         run: |
-          PUBLISHED=$(npx vsce show nexusflow.nexusflow-vscode --json 2>/dev/null \
+          PUBLISHED=$(npx vsce show contextspace.contextspace-vscode --json 2>/dev/null \
             | node -e "
                 const d=require('fs').readFileSync(0,'utf8');
                 try { process.exit(JSON.parse(d).versions?.['$VERSION'] ? 0 : 1); }
@@ -223,7 +223,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release-assets | Out-Null
-          Copy-Item desktop/dist/NexusFlowSetup.exe release-assets/NexusFlowSetup.exe
+          if (Test-Path desktop/dist/ContextSpaceSetup.exe) {
+            Copy-Item desktop/dist/ContextSpaceSetup.exe release-assets/ContextSpaceSetup.exe
+          } else {
+            Copy-Item desktop/dist/NexusFlowSetup.exe release-assets/NexusFlowSetup.exe
+          }
           Copy-Item desktop/dist/latest.yml release-assets/latest.yml
           Get-ChildItem desktop/dist -File -Filter '*.blockmap' -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName release-assets }
 
@@ -257,7 +261,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nexusflow-desktop-${{ matrix.platform }}
+          name: contextspace-desktop-${{ matrix.platform }}
           path: |
             release-assets/*
           if-no-files-found: error
@@ -274,7 +278,7 @@ jobs:
       - name: Download desktop artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: nexusflow-desktop-*
+          pattern: contextspace-desktop-*
           merge-multiple: true
           path: dist
 

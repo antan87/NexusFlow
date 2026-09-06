@@ -135,15 +135,15 @@ export function ProjectsPage() {
 
   return (
     <div className="mx-auto max-w-4xl animate-fade-in">
-      <header className="mb-6 flex items-center justify-between gap-4">
+      <header className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/70 pb-4">
         <div>
-          <h1 className="text-xl font-semibold">Projects</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Named groups of repositories you start work from. Registered once, reused for every feature.
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Projects</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Named groups of repositories you start work from. Registered once, reused for every feature workspace.
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus /> New project
+        <Button onClick={openCreate} className="gap-1.5 shadow-sm">
+          <Plus size={15} /> New project
         </Button>
       </header>
 
@@ -171,7 +171,7 @@ export function ProjectsPage() {
           {(projects.data ?? []).map((project) => (
             <li
               key={project.id}
-              className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/15"
+              className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-xs"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">

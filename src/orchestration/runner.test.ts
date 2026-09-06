@@ -116,16 +116,16 @@ describe('orchestration runner PM2 state handling', () => {
       workspacePath,
       services: [],
       orchestrators: [
-        { id: 'tilt:a/Tiltfile', tool: 'tilt', configPath: 'a/Tiltfile', mode: 'pm2', pm2Name: 'nexusflow-feature-c-orch-tilt-a-tiltfile', logName: 'orch-tilt-a-tiltfile', startedAt: 'x' },
-        { id: 'makefile:b/Makefile', tool: 'makefile', configPath: 'b/Makefile', mode: 'pm2', pm2Name: 'nexusflow-feature-c-orch-makefile-b-makefile', logName: 'orch-makefile-b-makefile', startedAt: 'x' },
+        { id: 'tilt:a/Tiltfile', tool: 'tilt', configPath: 'a/Tiltfile', mode: 'pm2', pm2Name: 'contextspace-feature-c-orch-tilt-a-tiltfile', logName: 'orch-tilt-a-tiltfile', startedAt: 'x' },
+        { id: 'makefile:b/Makefile', tool: 'makefile', configPath: 'b/Makefile', mode: 'pm2', pm2Name: 'contextspace-feature-c-orch-makefile-b-makefile', logName: 'orch-makefile-b-makefile', startedAt: 'x' },
       ],
       updatedAt: 'x',
     };
     vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
 
     const running = await loadRunningState(workspacePath, [
-      { name: 'nexusflow-feature-c-orch-tilt-a-tiltfile', pm2_env: { status: 'online' } },
-      { name: 'nexusflow-feature-c-orch-makefile-b-makefile', pm2_env: { status: 'errored' } },
+      { name: 'contextspace-feature-c-orch-tilt-a-tiltfile', pm2_env: { status: 'online' } },
+      { name: 'contextspace-feature-c-orch-makefile-b-makefile', pm2_env: { status: 'errored' } },
     ]);
 
     // The errored makefile orchestrator is dropped; the online tilt one stays.
@@ -135,7 +135,7 @@ describe('orchestration runner PM2 state handling', () => {
   describe('per-service lifecycle', () => {
     it('pm2AppName and serviceLogFile derive workspace-scoped names', () => {
       const ws = path.join(process.cwd(), 'my-ws');
-      expect(pm2AppName(ws, 'api')).toMatch(/^nexusflow-my-ws-[0-9a-f]{8}-api$/);
+      expect(pm2AppName(ws, 'api')).toMatch(/^ctxspace-my-ws-[0-9a-f]{8}-api$/);
       expect(serviceLogFile('/logs', 'api')).toBe(path.join('/logs', 'api.log'));
     });
 

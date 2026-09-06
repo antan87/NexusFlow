@@ -6,12 +6,19 @@ import { execa } from 'execa';
 
 import { readGenerationLock } from './generation-lock.js';
 import { acquireLock } from './locks.js';
+import { BRAND_NAME, CLI_NAME } from './constants.js';
 
 const CORE_ARTIFACTS = [
   '.gitignore',
   'AGENTS.md',
   'CLAUDE.md',
   'WORKSPACE.md',
+  'contextspace.json',
+  'contextspace.lock',
+  'contextspace-knowledge.md',
+  'contextspace-plan.md',
+  '.contextspace/resources.json',
+  '.contextspace/resources.lock.json',
   'nexusflow.json',
   'nexusflow.lock',
   'nexusflow-knowledge.md',
@@ -38,11 +45,11 @@ export async function ensureWorkspaceGitRepository(workspacePath: string): Promi
   }
   const name = await execa('git', ['config', '--local', 'user.name'], { cwd: workspacePath, reject: false });
   if (name.exitCode !== 0 || !name.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.name', 'NexusFlow'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.name', BRAND_NAME], { cwd: workspacePath });
   }
   const email = await execa('git', ['config', '--local', 'user.email'], { cwd: workspacePath, reject: false });
   if (email.exitCode !== 0 || !email.stdout.trim()) {
-    await execa('git', ['config', '--local', 'user.email', 'nexusflow@local'], { cwd: workspacePath });
+    await execa('git', ['config', '--local', 'user.email', `${CLI_NAME}@local`], { cwd: workspacePath });
   }
 }
 
@@ -63,19 +70,39 @@ export async function commitWorkspaceArtifacts(
   message: string,
   extra: string[] = [],
 ): Promise<{ committed: boolean; sha?: string }> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'workspace-git.lock'), {
+  await fs.mkdir(path.join(workspacePath, '.contextspace'), { recursive: true });
+  const release = await acquireLock(path.join(workspacePath, '.contextspace', 'workspace-git.lock'), {
     staleMs: 60_000, timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating the workspace artifact repository.',
+    timeoutMessage: 'Another ContextSpace operation is updating the workspace artifact repository.',
   });
   try {
     await ensureWorkspaceGitRepository(workspacePath);
     const artifacts = await managedWorkspaceArtifacts(workspacePath, extra);
-    if (!artifacts.length) return { committed: false };
-    await execa('git', ['add', '--', ...artifacts], { cwd: workspacePath });
-    const diff = await execa('git', ['diff', '--cached', '--quiet', '--', ...artifacts], { cwd: workspacePath, reject: false });
+
+    // Also discover any tracked candidate artifacts that were deleted on disk (e.g. legacy files after migration)
+    const lock = await readGenerationLock(workspacePath);
+    const workspaceFile = `${path.basename(workspacePath)}.code-workspace`;
+    const candidates = new Set([...CORE_ARTIFACTS, workspaceFile, ...Object.keys(lock?.outputs ?? {}), ...extra]);
+    const deletedProbe = await execa('git', ['ls-files', '--deleted'], { cwd: workspacePath, reject: false });
+    const deletedTracked = deletedProbe.exitCode === 0
+      ? deletedProbe.stdout.split('\n').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean)
+      : [];
+    const deletedCandidates = deletedTracked.filter((item) => candidates.has(item));
+
+    const allTargets = [...artifacts, ...deletedCandidates];
+    if (!allTargets.length) return { committed: false };
+
+    if (artifacts.length) {
+      await execa('git', ['add', '--', ...artifacts], { cwd: workspacePath });
+    }
+    if (deletedCandidates.length) {
+      await execa('git', ['add', '-A', '--', ...deletedCandidates], { cwd: workspacePath });
+    }
+
+    const diff = await execa('git', ['diff', '--cached', '--quiet', '--', ...allTargets], { cwd: workspacePath, reject: false });
     if (diff.exitCode === 0) return { committed: false };
     if (diff.exitCode !== 1) throw new Error('Could not inspect staged workspace artifacts.');
-    await execa('git', ['commit', '-m', message, '--', ...artifacts], { cwd: workspacePath });
+    await execa('git', ['commit', '-m', message, '--', ...allTargets], { cwd: workspacePath });
     const { stdout } = await execa('git', ['rev-parse', 'HEAD'], { cwd: workspacePath });
     return { committed: true, sha: stdout.trim() };
   } finally {
@@ -88,9 +115,10 @@ export async function commitExactWorkspaceArtifacts(
   message: string,
   relativePaths: string[],
 ): Promise<{ committed: boolean; sha?: string }> {
-  const release = await acquireLock(path.join(workspacePath, '.nexusflow', 'workspace-git.lock'), {
+  await fs.mkdir(path.join(workspacePath, '.contextspace'), { recursive: true });
+  const release = await acquireLock(path.join(workspacePath, '.contextspace', 'workspace-git.lock'), {
     staleMs: 60_000, timeoutMs: 30_000,
-    timeoutMessage: 'Another NexusFlow operation is updating the workspace artifact repository.',
+    timeoutMessage: 'Another ContextSpace operation is updating the workspace artifact repository.',
   });
   try {
     await ensureWorkspaceGitRepository(workspacePath);

@@ -17,12 +17,16 @@ import {
   type PortableRepoV1,
 } from './contracts.js';
 import { normalizeFingerprint } from './crypto.js';
+import {
+  WORKROOM_DEFAULT_INVITE_PROTOCOL,
+  WORKROOM_INVITE_PROTOCOLS,
+} from '../core/constants.js';
 
 const MAX_RESPONSE_BYTES = 40 * 1024 * 1024;
 
 export function formatWorkroomInvite(invite: WorkroomInviteV1): string {
   const parsed = workroomInviteSchema.parse(invite);
-  const url = new URL('nexusflow://workroom/join');
+  const url = new URL(`${WORKROOM_DEFAULT_INVITE_PROTOCOL}//workroom/join`);
   url.searchParams.set('v', String(parsed.schemaVersion));
   url.searchParams.set('url', parsed.url);
   url.searchParams.set('room', parsed.roomId);
@@ -36,10 +40,10 @@ export function parseWorkroomInvite(value: string): WorkroomInviteV1 {
   try {
     parsed = new URL(value.trim());
   } catch {
-    throw new WorkroomValidationError('Paste a valid NexusFlow Workroom invitation.');
+    throw new WorkroomValidationError('Paste a valid Workroom invitation.');
   }
-  if (parsed.protocol !== 'nexusflow:' || parsed.hostname !== 'workroom' || parsed.pathname !== '/join') {
-    throw new WorkroomValidationError('Paste a valid NexusFlow Workroom invitation.');
+  if (!WORKROOM_INVITE_PROTOCOLS.includes(parsed.protocol) || parsed.hostname !== 'workroom' || parsed.pathname !== '/join') {
+    throw new WorkroomValidationError('Paste a valid Workroom invitation.');
   }
   return workroomInviteSchema.parse({
     schemaVersion: Number(parsed.searchParams.get('v')),

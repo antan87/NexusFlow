@@ -13,6 +13,8 @@ export interface LocalMcpServerConfig {
  * This avoids supply-chain risks from unpinned `npx` downloads and ensures
  * harness sessions run against the exact local package version.
  */
+import { BRAND_NAME } from '../core/constants.js';
+
 export function getLocalCliEntry(distIndexOverride?: string): string {
   const currentFile = fileURLToPath(import.meta.url);
   const baseDir = path.dirname(currentFile);
@@ -21,7 +23,7 @@ export function getLocalCliEntry(distIndexOverride?: string): string {
 
   if (!fs.existsSync(distIndex)) {
     throw new Error(
-      `NexusFlow CLI entrypoint not found at ${distIndex}. Run "npm run build" to compile before starting SDK sessions.`,
+      `${BRAND_NAME} CLI entrypoint not found at ${distIndex}. Run "npm run build" to compile before starting SDK sessions.`,
     );
   }
 

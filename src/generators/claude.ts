@@ -18,6 +18,7 @@
 import type { WorkspaceContext } from '../types.js';
 import { writeWorkspaceFile } from '../core/storage.js';
 import { GENERATED_VIEW_HEADER } from '../core/generation-lock.js';
+import { CLI_NAME } from '../core/constants.js';
 
 /**
  * Writes a `CLAUDE.md` that imports `AGENTS.md`, plus anything Claude-specific.
@@ -47,7 +48,7 @@ export async function generateClaudeConfig(
 ## Claude Code
 
 - Prefer \`/plan\` before a change that spans more than one repository in this workspace.
-- Record durable findings with \`nexusflow knowledge add\` rather than in chat, so the next session inherits them.
+- Record durable findings with \`${CLI_NAME} knowledge add\` rather than in chat, so the next session inherits them.
 `;
 
   try {
