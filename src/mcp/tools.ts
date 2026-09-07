@@ -41,6 +41,8 @@ import {
   CLI_NAME,
   PRIMARY_LOCK_FILE,
   resolveWorkspaceFilePathSync,
+  resolveWorkspaceChatLedger,
+  readWorkspaceChatMessages,
 } from '../core/constants.js';
 
 /** Context passed to every tool handler. `workspacePath` is already resolved and validated. */
@@ -745,26 +747,7 @@ export const tools: NexusFlowTool[] = [
 
         // Check if there is an active pinned workroom connection
         // 1. Always load local workspace chat / handoff ledger for consistent local history
-        const chatPath = path.join(ctx.workspacePath, '.nexusflow', 'chat.jsonl');
-        let localMessages: any[] = [];
-        try {
-          const raw = await fs.readFile(chatPath, 'utf8');
-          localMessages = raw
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .map((line) => {
-              try {
-                return JSON.parse(line);
-              } catch {
-                return null;
-              }
-            })
-            .filter(Boolean)
-            .slice(-limit);
-        } catch {
-          // chat.jsonl doesn't exist yet
-        }
+        const { messages: localMessages, ledgerInfo } = await readWorkspaceChatMessages(ctx.workspacePath, limit);
 
         // 2. Check if a pinned remote Workroom is connected
         let remoteSnapshot: any = null;
@@ -840,6 +823,7 @@ export const tools: NexusFlowTool[] = [
           });
         }
 
+        const relLedgerPath = ledgerInfo.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl';
         return json({
           status: 'local-fallback',
           mode: 'offline',
@@ -848,7 +832,7 @@ export const tools: NexusFlowTool[] = [
           note:
             localMessages.length === 0
               ? 'No remote Workroom connected and no local chat history recorded yet. Use post_workroom_handoff to record a handoff.'
-              : 'Operating in local workspace ledger mode (.nexusflow/chat.jsonl).',
+              : `Operating in local workspace ledger mode (${relLedgerPath}).`,
           recentMessages: localMessages,
         });
       } catch (error: any) {
@@ -859,7 +843,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'post_workroom_handoff',
     description:
-      'Post a progress update, plan notice, or handoff note to the local workspace chat ledger (.nexusflow/chat.jsonl) and optionally propose workflow step completion to a connected Workroom.',
+      'Post a progress update, plan notice, or handoff note to the local workspace chat ledger and optionally propose workflow step completion to a connected Workroom.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -935,10 +919,9 @@ export const tools: NexusFlowTool[] = [
           }
         }
 
-        // 2. Always append to local .nexusflow/chat.jsonl for durable offline record
-        const chatDir = path.join(ctx.workspacePath, '.nexusflow');
-        await fs.mkdir(chatDir, { recursive: true });
-        const chatPath = path.join(chatDir, 'chat.jsonl');
+        // 2. Always append to local workspace chat ledger for durable offline record
+        const ledger = await resolveWorkspaceChatLedger(ctx.workspacePath);
+        await fs.mkdir(ledger.chatDir, { recursive: true });
         const entry = {
           id: randomUUID(),
           timestamp: new Date().toISOString(),
@@ -951,8 +934,9 @@ export const tools: NexusFlowTool[] = [
           ...(stepResult ? { stepProposal: stepResult } : {}),
           ...(syncError ? { syncError } : {}),
         };
-        await fs.appendFile(chatPath, JSON.stringify(entry) + '\n', 'utf8');
+        await fs.appendFile(ledger.chatPath, JSON.stringify(entry) + '\n', 'utf8');
 
+        const relLedgerPath = ledger.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl';
         return json({
           status: syncError ? 'warning' : 'posted',
           effectiveMilestoneStatus: effectiveStatus,
@@ -964,10 +948,10 @@ export const tools: NexusFlowTool[] = [
           ...(syncError ? { syncError } : {}),
           ...(stepResult ? { stepProposal: stepResult } : {}),
           message: syncError
-            ? `Handoff recorded locally in .nexusflow/chat.jsonl, but remote Workroom sync failed: ${syncError}`
+            ? `Handoff recorded locally in ${relLedgerPath}, but remote Workroom sync failed: ${syncError}`
             : workroomSynced
             ? 'Handoff recorded locally and milestone proposal submitted to live Workroom.'
-            : 'Handoff recorded in local workspace chat ledger (.nexusflow/chat.jsonl).',
+            : `Handoff recorded in local workspace chat ledger (${relLedgerPath}).`,
         });
       } catch (error: any) {
         return errorResult(`Error posting workroom handoff: ${error.message}`);

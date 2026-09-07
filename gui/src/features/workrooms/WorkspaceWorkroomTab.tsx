@@ -206,7 +206,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
               )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Direct peer coordination ledger located at <code className="font-mono text-[11px] text-foreground/80">.nexusflow/chat.jsonl</code>.
+              Direct peer coordination ledger located at <code className="font-mono text-[11px] text-foreground/80">{data?.ledgerPath || (data?.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl')}</code>.
               Harnesses record progress, exchange state, and verify milestones with zero network overhead.
             </p>
           </div>
@@ -536,7 +536,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             </div>
             <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
               <span>Press <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[9px] font-mono">Ctrl</kbd> + <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[9px] font-mono">Enter</kbd> to send</span>
-              <span>Logged to <code className="font-mono">.nexusflow/chat.jsonl</code></span>
+              <span>Logged to <code className="font-mono">{data?.ledgerPath || (data?.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl')}</code></span>
             </div>
           </div>
         </form>

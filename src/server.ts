@@ -29,6 +29,8 @@ import {
   LEGACY_ENGINE_ID,
   ENGINE_NPM_PACKAGE,
   LEGACY_ENGINE_NPM_PACKAGE,
+  resolveWorkspaceChatLedger,
+  readWorkspaceChatMessages,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
@@ -2356,34 +2358,7 @@ app.get('/api/workspace/:id/stream', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
-    const primaryChat = path.join(workspacePath, '.contextspace', 'chat.jsonl');
-    const legacyChat = path.join(workspacePath, '.nexusflow', 'chat.jsonl');
-    let chatFile = legacyChat;
-    try {
-      await fs.access(primaryChat);
-      chatFile = primaryChat;
-    } catch {
-      // fallback to legacyChat
-    }
-
-    let messages: any[] = [];
-    try {
-      const raw = await fs.readFile(chatFile, 'utf-8');
-      messages = raw
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((l) => {
-          try {
-            return JSON.parse(l);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-    } catch {
-      // No chat.jsonl yet
-    }
+    const { messages, ledgerInfo } = await readWorkspaceChatMessages(workspacePath);
 
     let isRemoteActive = false;
     let remoteStatus: any = null;
@@ -2436,12 +2411,15 @@ app.get('/api/workspace/:id/stream', async (c) => {
       };
     });
 
+    const relLedgerPath = ledgerInfo.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl';
     return c.json({
       workspaceId: id,
       messages: reconciledMessages,
       workflowProgress,
       isRemoteActive,
       remoteStatus,
+      isLegacy: ledgerInfo.isLegacy,
+      ledgerPath: relLedgerPath,
     });
   } catch (error) {
     return errorResponse(c, error);
@@ -2468,15 +2446,9 @@ app.post('/api/workspace/:id/stream', async (c) => {
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
-    let chatDir = path.join(workspacePath, '.nexusflow');
-    try {
-      await fs.access(path.join(workspacePath, '.contextspace'));
-      chatDir = path.join(workspacePath, '.contextspace');
-    } catch {
-      // keep .nexusflow
-    }
-    await fs.mkdir(chatDir, { recursive: true });
-    const chatFile = path.join(chatDir, 'chat.jsonl');
+    const ledger = await resolveWorkspaceChatLedger(workspacePath);
+    await fs.mkdir(ledger.chatDir, { recursive: true });
+    const chatFile = ledger.chatPath;
 
     const isHuman = body.author === 'human' || body.harness === 'developer' || body.harness === 'human';
     const status = body.status ? String(body.status).trim() : (body.stepId ? 'proposed' : undefined);

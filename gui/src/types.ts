@@ -387,5 +387,7 @@ export interface WorkspaceStreamResponse {
     url?: string;
     name?: string;
   } | null;
+  isLegacy?: boolean;
+  ledgerPath?: string;
 }
 

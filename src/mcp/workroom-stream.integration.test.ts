@@ -13,6 +13,7 @@ import { app } from '../server.js';
 import * as configModule from '../core/config.js';
 import * as workroomManager from '../workrooms/manager.js';
 import * as workspace from '../core/workspace.js';
+import { resolveWorkspaceChatLedger } from '../core/constants.js';
 import type { NexusFlowConfig } from '../types.js';
 
 const cleanupPaths: string[] = [];
@@ -159,7 +160,8 @@ describe('Connected Workroom Stream Integration', () => {
     });
 
     // Verify local chat ledger was written to disk with capped status and author: agent
-    const chatLines = (await fs.readFile(path.join(workspaceDir, '.nexusflow', 'chat.jsonl'), 'utf8'))
+    const ledger = await resolveWorkspaceChatLedger(workspaceDir);
+    const chatLines = (await fs.readFile(ledger.chatPath, 'utf8'))
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -298,4 +300,323 @@ describe('Connected Workroom Stream Integration', () => {
     // Evaluating the failed proposal entry returns failed
     expect(evaluateMilestoneStatus(invalidPayload)).toBe('failed');
   }, 30_000);
+});
+
+describe('Shared Brand-Aware Ledger Integration (API ↔ MCP)', () => {
+  it('shares ledger bidirectionally (API → MCP, MCP → API) in native ContextSpace workspaces (.contextspace)', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-ledger-native-'));
+    cleanupPaths.push(root);
+
+    const workspaceId = 'native-ws';
+    const workspaceDir = path.join(root, workspaceId);
+    await fs.mkdir(path.join(workspaceDir, '.contextspace'), { recursive: true });
+
+    vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
+      ...mockConfig,
+      workspacesDir: root,
+    } as any);
+
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: workspaceId,
+      branchName: workspaceId,
+      description: 'Native workspace',
+      mode: 'worktree',
+      repos: [],
+      assistants: ['antigravity', 'claude', 'codex'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    });
+
+    const postTool = findTool('post_workroom_handoff')!;
+    const readTool = findTool('read_workroom_stream')!;
+
+    // 1. API POST -> MCP read
+    const apiPostRes = await app.request(`/api/workspace/${workspaceId}/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'GUI handoff in native workspace',
+        harness: 'developer',
+        author: 'human',
+      }),
+    });
+    expect(apiPostRes.status).toBe(200);
+
+    const mcpReadRes = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpReadRes.isError).toBeFalsy();
+    const mcpPayload = JSON.parse(mcpReadRes.content[0]!.text);
+    expect(mcpPayload.recentMessages).toHaveLength(1);
+    expect(mcpPayload.recentMessages[0].message).toBe('GUI handoff in native workspace');
+    expect(mcpPayload.recentMessages[0].author).toBe('human');
+
+    // 2. MCP POST -> API GET
+    const mcpPostRes = await postTool.handler(
+      {
+        message: 'MCP handoff in native workspace',
+        harness: 'antigravity',
+      },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpPostRes.isError).toBeFalsy();
+
+    const apiGetRes = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(apiGetRes.status).toBe(200);
+    const apiPayload = (await apiGetRes.json()) as any;
+    expect(apiPayload.messages).toHaveLength(2);
+    expect(apiPayload.messages[0].message).toBe('GUI handoff in native workspace');
+    expect(apiPayload.messages[1].message).toBe('MCP handoff in native workspace');
+    expect(apiPayload.ledgerPath).toBe('.contextspace/chat.jsonl');
+    expect(apiPayload.isLegacy).toBe(false);
+
+    // Verify storage location on disk
+    const primaryExists = await fs.access(path.join(workspaceDir, '.contextspace', 'chat.jsonl')).then(() => true).catch(() => false);
+    const legacyExists = await fs.access(path.join(workspaceDir, '.nexusflow', 'chat.jsonl')).then(() => true).catch(() => false);
+    expect(primaryExists).toBe(true);
+    expect(legacyExists).toBe(false);
+  });
+
+  it('shares ledger bidirectionally (API → MCP, MCP → API) in legacy NexusFlow workspaces (.nexusflow)', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nf-ledger-legacy-'));
+    cleanupPaths.push(root);
+
+    const workspaceId = 'legacy-ws';
+    const workspaceDir = path.join(root, workspaceId);
+    await fs.mkdir(path.join(workspaceDir, '.nexusflow'), { recursive: true });
+
+    vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
+      ...mockConfig,
+      workspacesDir: root,
+    } as any);
+
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: workspaceId,
+      branchName: workspaceId,
+      description: 'Legacy workspace',
+      mode: 'worktree',
+      repos: [],
+      assistants: ['antigravity', 'claude', 'codex'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    });
+
+    const postTool = findTool('post_workroom_handoff')!;
+    const readTool = findTool('read_workroom_stream')!;
+
+    // 1. API POST -> MCP read
+    const apiPostRes = await app.request(`/api/workspace/${workspaceId}/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'GUI handoff in legacy workspace',
+        harness: 'developer',
+        author: 'human',
+      }),
+    });
+    expect(apiPostRes.status).toBe(200);
+
+    const mcpReadRes = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpReadRes.isError).toBeFalsy();
+    const mcpPayload = JSON.parse(mcpReadRes.content[0]!.text);
+    expect(mcpPayload.recentMessages).toHaveLength(1);
+    expect(mcpPayload.recentMessages[0].message).toBe('GUI handoff in legacy workspace');
+
+    // 2. MCP POST -> API GET
+    const mcpPostRes = await postTool.handler(
+      {
+        message: 'MCP handoff in legacy workspace',
+        harness: 'claude',
+      },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpPostRes.isError).toBeFalsy();
+
+    const apiGetRes = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(apiGetRes.status).toBe(200);
+    const apiPayload = (await apiGetRes.json()) as any;
+    expect(apiPayload.messages).toHaveLength(2);
+    expect(apiPayload.messages[0].message).toBe('GUI handoff in legacy workspace');
+    expect(apiPayload.messages[1].message).toBe('MCP handoff in legacy workspace');
+    expect(apiPayload.ledgerPath).toBe('.nexusflow/chat.jsonl');
+    expect(apiPayload.isLegacy).toBe(true);
+
+    // Verify storage location on disk
+    const legacyExists = await fs.access(path.join(workspaceDir, '.nexusflow', 'chat.jsonl')).then(() => true).catch(() => false);
+    const primaryExists = await fs.access(path.join(workspaceDir, '.contextspace', 'chat.jsonl')).then(() => true).catch(() => false);
+    expect(legacyExists).toBe(true);
+    expect(primaryExists).toBe(false);
+  });
+
+  it('preserves existing history and shares bidirectionally in mixed-directory workspaces with legacy ledger', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mixed-ledger-legacy-'));
+    cleanupPaths.push(root);
+
+    const workspaceId = 'mixed-ws';
+    const workspaceDir = path.join(root, workspaceId);
+    // Both directories exist!
+    await fs.mkdir(path.join(workspaceDir, '.nexusflow'), { recursive: true });
+    await fs.mkdir(path.join(workspaceDir, '.contextspace'), { recursive: true });
+
+    // Pre-existing history in .nexusflow/chat.jsonl
+    const initialEntry = {
+      id: 'pre-rebrand-entry',
+      timestamp: '2026-09-01T10:00:00.000Z',
+      harness: 'codex',
+      author: 'agent',
+      status: 'proposed',
+      message: 'Initial pre-rebrand handoff note',
+    };
+    await fs.writeFile(
+      path.join(workspaceDir, '.nexusflow', 'chat.jsonl'),
+      JSON.stringify(initialEntry) + '\n',
+      'utf8',
+    );
+
+    vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
+      ...mockConfig,
+      workspacesDir: root,
+    } as any);
+
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: workspaceId,
+      branchName: workspaceId,
+      description: 'Mixed workspace',
+      mode: 'worktree',
+      repos: [],
+      assistants: ['antigravity', 'claude', 'codex'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    });
+
+    const postTool = findTool('post_workroom_handoff')!;
+    const readTool = findTool('read_workroom_stream')!;
+
+    // Initial readers must see historical entry
+    const initialMcpRead = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    const initialMcpPayload = JSON.parse(initialMcpRead.content[0]!.text);
+    expect(initialMcpPayload.recentMessages).toHaveLength(1);
+    expect(initialMcpPayload.recentMessages[0].id).toBe('pre-rebrand-entry');
+
+    const initialApiGet = await app.request(`/api/workspace/${workspaceId}/stream`);
+    const initialApiPayload = (await initialApiGet.json()) as any;
+    expect(initialApiPayload.messages).toHaveLength(1);
+    expect(initialApiPayload.messages[0].id).toBe('pre-rebrand-entry');
+
+    // 1. API POST -> MCP read
+    const apiPostRes = await app.request(`/api/workspace/${workspaceId}/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'GUI handoff in mixed workspace',
+        harness: 'developer',
+        author: 'human',
+      }),
+    });
+    expect(apiPostRes.status).toBe(200);
+
+    const mcpReadRes = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    const mcpPayload = JSON.parse(mcpReadRes.content[0]!.text);
+    expect(mcpPayload.recentMessages).toHaveLength(2);
+    expect(mcpPayload.recentMessages[0].id).toBe('pre-rebrand-entry');
+    expect(mcpPayload.recentMessages[1].message).toBe('GUI handoff in mixed workspace');
+
+    // 2. MCP POST -> API GET
+    const mcpPostRes = await postTool.handler(
+      {
+        message: 'MCP handoff in mixed workspace',
+        harness: 'antigravity',
+      },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpPostRes.isError).toBeFalsy();
+
+    const apiGetRes = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(apiGetRes.status).toBe(200);
+    const apiPayload = (await apiGetRes.json()) as any;
+    expect(apiPayload.messages).toHaveLength(3);
+    expect(apiPayload.messages[0].id).toBe('pre-rebrand-entry');
+    expect(apiPayload.messages[1].message).toBe('GUI handoff in mixed workspace');
+    expect(apiPayload.messages[2].message).toBe('MCP handoff in mixed workspace');
+
+    // Ledger path reflects preserved legacy file where history lives
+    expect(apiPayload.ledgerPath).toBe('.nexusflow/chat.jsonl');
+  });
+
+  it('shares ledger bidirectionally in mixed-directory workspaces without pre-existing ledger files', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mixed-fresh-'));
+    cleanupPaths.push(root);
+
+    const workspaceId = 'fresh-mixed-ws';
+    const workspaceDir = path.join(root, workspaceId);
+    await fs.mkdir(path.join(workspaceDir, '.nexusflow'), { recursive: true });
+    await fs.mkdir(path.join(workspaceDir, '.contextspace'), { recursive: true });
+
+    vi.spyOn(configModule, 'loadConfig').mockResolvedValue({
+      ...mockConfig,
+      workspacesDir: root,
+    } as any);
+
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: workspaceId,
+      branchName: workspaceId,
+      description: 'Fresh mixed workspace',
+      mode: 'worktree',
+      repos: [],
+      assistants: ['antigravity', 'claude', 'codex'],
+      workspacePath: workspaceDir,
+      createdAt: new Date().toISOString(),
+    });
+
+    const postTool = findTool('post_workroom_handoff')!;
+    const readTool = findTool('read_workroom_stream')!;
+
+    // 1. API POST -> MCP read
+    const apiPostRes = await app.request(`/api/workspace/${workspaceId}/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'GUI handoff in fresh mixed',
+        harness: 'developer',
+        author: 'human',
+      }),
+    });
+    expect(apiPostRes.status).toBe(200);
+
+    const mcpReadRes = await readTool.handler(
+      { limit: 10 },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    const mcpPayload = JSON.parse(mcpReadRes.content[0]!.text);
+    expect(mcpPayload.recentMessages).toHaveLength(1);
+    expect(mcpPayload.recentMessages[0].message).toBe('GUI handoff in fresh mixed');
+
+    // 2. MCP POST -> API GET
+    const mcpPostRes = await postTool.handler(
+      {
+        message: 'MCP handoff in fresh mixed',
+        harness: 'claude',
+      },
+      { config: mockConfig, workspacePath: workspaceDir },
+    );
+    expect(mcpPostRes.isError).toBeFalsy();
+
+    const apiGetRes = await app.request(`/api/workspace/${workspaceId}/stream`);
+    expect(apiGetRes.status).toBe(200);
+    const apiPayload = (await apiGetRes.json()) as any;
+    expect(apiPayload.messages).toHaveLength(2);
+    expect(apiPayload.messages[0].message).toBe('GUI handoff in fresh mixed');
+    expect(apiPayload.messages[1].message).toBe('MCP handoff in fresh mixed');
+    expect(apiPayload.ledgerPath).toBe('.contextspace/chat.jsonl');
+  });
 });
