@@ -48,12 +48,9 @@ describe('isValidProjectName', () => {
 
 describe.skipIf(!hasGit)('createNewRepo (real git)', () => {
   let devDir = '';
-  let counter = 0;
 
   beforeEach(async () => {
-    counter += 1;
-    devDir = path.join(os.tmpdir(), `nexusflow-newrepo-test-${process.pid}-${counter}`);
-    await fs.mkdir(devDir, { recursive: true });
+    devDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-newrepo-test-'));
   });
 
   afterEach(async () => {

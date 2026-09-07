@@ -6,7 +6,6 @@ import {
   getAheadBehind,
   getRemoteUrl,
   pushRepo,
-  getRepoStatus,
   commitAndPush,
   parsePorcelainZ,
   isSensitiveFile,

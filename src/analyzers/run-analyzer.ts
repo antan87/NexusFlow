@@ -5,7 +5,6 @@
  * infrastructure or committed secrets.
  */
 
-import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { globby } from 'globby';

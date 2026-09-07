@@ -1,17 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import * as os from 'node:os';
-import fse from 'fs-extra';
 
 import { execa } from 'execa';
 import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
-import * as systemScanner from './utils/system-scanner.js';
-
-import * as updateCheck from './utils/update-check.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';

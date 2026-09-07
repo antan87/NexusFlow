@@ -161,7 +161,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
       const resolved = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));
       const allRepos = await resolveRepoInfos(resolved);
 
-      const { analysis, analyzed } = await analyzeAllReposCached(allRepos, workspacePath);
+      const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);
       const ctx: WorkspaceContext = { feature, repos: allRepos, analysis };
       await generateContextFiles(ctx, feature.assistants, workspacePath);
       contextRefreshed = true;

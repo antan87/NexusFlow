@@ -43,9 +43,9 @@ export function tailLogFile(
     if (polling || stopped) return;
     polling = true;
     try {
-      let size: number;
+      let handle: fs.FileHandle;
       try {
-        size = (await fs.stat(filePath)).size;
+        handle = await fs.open(filePath, 'r');
       } catch (err) {
         // ENOENT: the file isn't created yet or was removed — when it
         // (re)appears, stream it from the top and drop any half-decoded
@@ -62,23 +62,23 @@ export function tailLogFile(
         return;
       }
 
-      if (offset === -1) {
-        // First tick: stream only future output unless a startOffset was given.
-        offset = size;
-        return;
-      }
-
-      if (size < offset) {
-        // Truncated or rotated — restart from the top of the new content, and
-        // drop any half-decoded multibyte bytes carried from the old file.
-        offset = 0;
-        decoder = new TextDecoder('utf-8');
-      }
-      if (size === offset) return;
-
-      const length = size - offset;
-      const handle = await fs.open(filePath, 'r');
       try {
+        const { size } = await handle.stat();
+        if (offset === -1) {
+          // First tick: stream only future output unless a startOffset was given.
+          offset = size;
+          return;
+        }
+
+        if (size < offset) {
+          // Truncated or rotated — restart from the top of the new content, and
+          // drop any half-decoded multibyte bytes carried from the old file.
+          offset = 0;
+          decoder = new TextDecoder('utf-8');
+        }
+        if (size === offset) return;
+
+        const length = size - offset;
         const buffer = Buffer.alloc(length);
         const { bytesRead } = await handle.read(buffer, 0, length, offset);
         offset += bytesRead;

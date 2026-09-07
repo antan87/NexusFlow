@@ -4,7 +4,7 @@
  */
 
 import chalk from 'chalk';
-import { input, confirm, select } from '@inquirer/prompts';
+import { input } from '@inquirer/prompts';
 import path from 'node:path';
 import os from 'node:os';
 

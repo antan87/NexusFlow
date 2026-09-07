@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
 import * as path from 'node:path';
-import { getAdapter } from '../harness/index.js';
 import type { HarnessAdapter, SessionHandle } from '../harness/interface.js';
 import type { NormalizedUsage } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';

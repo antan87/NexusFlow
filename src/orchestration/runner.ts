@@ -385,7 +385,6 @@ export async function stopServices(workspacePath: string): Promise<void> {
  * @param workspacePath - Workspace root path.
  */
 export async function getServiceStatus(workspacePath: string): Promise<void> {
-  const workspaceId = path.basename(workspacePath);
   const prefix = pm2Prefix(workspacePath);
 
   try {

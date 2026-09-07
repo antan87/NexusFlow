@@ -11,52 +11,6 @@ const feature = {
   createdAt: '2026-08-10T00:00:00.000Z',
 };
 
-const provider = (assistant: 'claude' | 'codex' | 'antigravity' | 'copilot', isConfigured = true) => {
-  const recoveryCommand = {
-    claude: 'claude auth login',
-    codex: 'codex login',
-    antigravity: 'agy',
-    copilot: 'copilot',
-  }[assistant];
-  const supportsExecutionProfiles = assistant !== 'copilot';
-  const displayName = {
-    claude: 'Claude Code',
-    codex: 'Codex',
-    antigravity: 'Antigravity',
-    copilot: 'GitHub Copilot',
-  }[assistant];
-  return {
-    id: `${assistant}-cli`,
-    name: `${displayName} (Local CLI)`,
-    isConfigured,
-    message: isConfigured ? undefined : `${displayName} is not signed in. No API key is required.`,
-    setupIssue: isConfigured ? undefined : 'signed-out',
-    recoveryCommand: isConfigured ? undefined : recoveryCommand,
-    recoveryLabel: isConfigured ? undefined : 'Copy sign-in command',
-    executionProfiles: supportsExecutionProfiles ? [
-      { id: 'review', label: 'Review only', description: 'Reads and plans; no source edits.' },
-      {
-        id: 'workspace-write',
-        label: 'Edit workspace',
-        description: assistant === 'claude'
-          ? 'Auto-accepts in-workspace file edits and common filesystem actions; other approval-requiring commands are unavailable in embedded chat.'
-          : 'Workspace-write sandbox; command network and escalation outside the sandbox are denied.',
-      },
-    ] : undefined,
-    defaultExecutionProfile: supportsExecutionProfiles ? 'review' : undefined,
-    capabilities: {
-      transport: assistant === 'copilot' ? 'acp' : 'cli-print',
-      sessionIdentity: assistant === 'claude' ? 'client-assigned' : 'provider-assigned',
-      workspaceAccess: assistant === 'copilot'
-        ? 'read-only'
-        : assistant === 'codex'
-          ? 'workspace-write'
-          : 'harness-managed',
-      sessionIdFormat: 'uuid',
-    },
-  };
-};
-
 async function mockProviderStatus(page: Page, providers: unknown[]) {
   await page.route('**/api/adapters/status', async (route) => {
     await route.fulfill({
