@@ -22,12 +22,13 @@ const CORE_ALLOWED_TOOLS = new Set([
 const READONLY_MCP_TOOLS = new Set([
   'search_workspace', 'workspace_status', 'get_workspace_diff',
   'run_doctor', 'get_service_logs', 'list_workspaces', 'list_repos',
-  'add_knowledge', 'promote_knowledge', 'refresh_context',
+  'add_knowledge', 'promote_knowledge', 'search_knowledge',
+  'read_workroom_stream', 'refresh_context',
 ]);
 
 const MUTATING_LIFECYCLE_TOOLS = new Set([
   'create_workspace', 'commit_workspace', 'finish_workspace',
-  'isolate_repo', 'sync_workspace',
+  'isolate_repo', 'sync_workspace', 'post_workroom_handoff',
 ]);
 
 export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {

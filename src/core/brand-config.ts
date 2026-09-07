@@ -41,6 +41,7 @@ export interface BrandConfigSchema {
     readonly handoff: FileNamingPair;
     readonly cursorRule: FileNamingPair;
     readonly configDir: FileNamingPair;
+    readonly chatLedger: FileNamingPair;
     readonly state: FileNamingPair;
     readonly runningState: FileNamingPair;
     readonly analysisCache: FileNamingPair;
@@ -206,6 +207,10 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     configDir: {
       primary: '.contextspace',
       legacy: '.nexusflow',
+    },
+    chatLedger: {
+      primary: '.contextspace/chat.jsonl',
+      legacy: '.nexusflow/chat.jsonl',
     },
     state: {
       primary: '.contextspace-state.json',
@@ -433,6 +438,198 @@ export function resolveWorkspaceConfigDir(
   workspaceDir: string,
 ): { path: string; isLegacy: boolean; exists: boolean } {
   return resolveWorkspaceFilePathSync(workspaceDir, 'configDir');
+}
+
+export interface WorkspaceChatLedgerInfo {
+  /** The authoritative file path for reading/writing the workspace chat ledger. */
+  chatPath: string;
+  /** Directory containing the authoritative chat ledger. */
+  chatDir: string;
+  /** True if resolving to legacy path (.nexusflow/chat.jsonl). */
+  isLegacy: boolean;
+  /** True if the chatPath file exists on disk. */
+  exists: boolean;
+  /** All existing ledger files in the workspace (legacy first, then primary), for complete history. */
+  readPaths: string[];
+}
+
+/**
+ * Synchronously resolves the workspace chat ledger path and directory.
+ * Preserves existing legacy history when present, and supports mixed or native workspaces.
+ */
+export function resolveWorkspaceChatLedgerSync(
+  workspaceDir: string,
+): WorkspaceChatLedgerInfo {
+  const primaryDir = path.join(workspaceDir, BRAND_CONFIG.files.configDir.primary);
+  const legacyDir = path.join(workspaceDir, BRAND_CONFIG.files.configDir.legacy);
+
+  const primaryChat = path.join(workspaceDir, BRAND_CONFIG.files.chatLedger.primary);
+  const legacyChat = path.join(workspaceDir, BRAND_CONFIG.files.chatLedger.legacy);
+
+  const primaryExists = existsSync(primaryChat);
+  const legacyExists = existsSync(legacyChat);
+  const primaryDirExists = existsSync(primaryDir);
+  const legacyDirExists = existsSync(legacyDir);
+
+  const readPaths: string[] = [];
+  if (legacyExists) readPaths.push(legacyChat);
+  if (primaryExists && !readPaths.includes(primaryChat)) readPaths.push(primaryChat);
+
+  // 1. If primary chat file exists, use it as the authoritative ledger.
+  if (primaryExists) {
+    return {
+      chatPath: primaryChat,
+      chatDir: primaryDir,
+      isLegacy: false,
+      exists: true,
+      readPaths,
+    };
+  }
+
+  // 2. If legacy chat file exists, preserve existing history and use it.
+  if (legacyExists) {
+    return {
+      chatPath: legacyChat,
+      chatDir: legacyDir,
+      isLegacy: true,
+      exists: true,
+      readPaths,
+    };
+  }
+
+  // 3. Neither file exists yet.
+  // If only legacy directory exists, place in legacy directory.
+  if (legacyDirExists && !primaryDirExists) {
+    return {
+      chatPath: legacyChat,
+      chatDir: legacyDir,
+      isLegacy: true,
+      exists: false,
+      readPaths,
+    };
+  }
+
+  // 4. In native, mixed, or fresh workspaces without an existing ledger, default to primary (.contextspace).
+  return {
+    chatPath: primaryChat,
+    chatDir: primaryDir,
+    isLegacy: false,
+    exists: false,
+    readPaths,
+  };
+}
+
+/**
+ * Asynchronously resolves the workspace chat ledger path and directory.
+ * Preserves existing legacy history when present, and supports mixed or native workspaces.
+ */
+export async function resolveWorkspaceChatLedger(
+  workspaceDir: string,
+): Promise<WorkspaceChatLedgerInfo> {
+  const primaryDir = path.join(workspaceDir, BRAND_CONFIG.files.configDir.primary);
+  const legacyDir = path.join(workspaceDir, BRAND_CONFIG.files.configDir.legacy);
+
+  const primaryChat = path.join(workspaceDir, BRAND_CONFIG.files.chatLedger.primary);
+  const legacyChat = path.join(workspaceDir, BRAND_CONFIG.files.chatLedger.legacy);
+
+  const [primaryExists, legacyExists, primaryDirExists, legacyDirExists] = await Promise.all([
+    fs.access(primaryChat).then(() => true).catch(() => false),
+    fs.access(legacyChat).then(() => true).catch(() => false),
+    fs.access(primaryDir).then(() => true).catch(() => false),
+    fs.access(legacyDir).then(() => true).catch(() => false),
+  ]);
+
+  const readPaths: string[] = [];
+  if (legacyExists) readPaths.push(legacyChat);
+  if (primaryExists && !readPaths.includes(primaryChat)) readPaths.push(primaryChat);
+
+  if (primaryExists) {
+    return {
+      chatPath: primaryChat,
+      chatDir: primaryDir,
+      isLegacy: false,
+      exists: true,
+      readPaths,
+    };
+  }
+
+  if (legacyExists) {
+    return {
+      chatPath: legacyChat,
+      chatDir: legacyDir,
+      isLegacy: true,
+      exists: true,
+      readPaths,
+    };
+  }
+
+  if (legacyDirExists && !primaryDirExists) {
+    return {
+      chatPath: legacyChat,
+      chatDir: legacyDir,
+      isLegacy: true,
+      exists: false,
+      readPaths,
+    };
+  }
+
+  return {
+    chatPath: primaryChat,
+    chatDir: primaryDir,
+    isLegacy: false,
+    exists: false,
+    readPaths,
+  };
+}
+
+/**
+ * Reads all messages from the workspace chat ledger, combining historical legacy messages
+ * and primary messages if both exist, deduplicating by ID, and sorting chronologically.
+ */
+export async function readWorkspaceChatMessages(
+  workspaceDir: string,
+  limit?: number,
+): Promise<{ messages: any[]; ledgerInfo: WorkspaceChatLedgerInfo }> {
+  const ledgerInfo = await resolveWorkspaceChatLedger(workspaceDir);
+  const pathsToRead = ledgerInfo.readPaths.length > 0 ? ledgerInfo.readPaths : (ledgerInfo.exists ? [ledgerInfo.chatPath] : []);
+
+  const allMessages: any[] = [];
+  const seenIds = new Set<string>();
+
+  for (const filePath of pathsToRead) {
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const lines = raw.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object') {
+            const id = parsed.id || `${parsed.timestamp || ''}-${parsed.message || ''}`;
+            if (!seenIds.has(id)) {
+              seenIds.add(id);
+              allMessages.push(parsed);
+            }
+          }
+        } catch {
+          // ignore malformed lines
+        }
+      }
+    } catch {
+      // ignore unreadable file
+    }
+  }
+
+  allMessages.sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    if (ta !== tb) return ta - tb;
+    return 0;
+  });
+
+  const messages = typeof limit === 'number' && limit > 0 ? allMessages.slice(-limit) : allMessages;
+  return { messages, ledgerInfo };
 }
 
 /**

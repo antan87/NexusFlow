@@ -76,6 +76,7 @@ export const workspaceResourcesConfigSchema = z
     schemaVersion: z.literal(1).default(1),
     revision: z.number().int().nonnegative().default(0),
     enabledSkills: z.array(resourceIdSchema).max(1000).default([]),
+    disabledSkills: z.array(resourceIdSchema).max(1000).default([]),
     enabledAgents: z.array(codexAgentNameSchema).max(1000).default([]),
     enabledCategories: z.array(resourceIdSchema).max(1000).default([]),
   })

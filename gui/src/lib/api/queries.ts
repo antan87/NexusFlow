@@ -26,6 +26,8 @@ import type {
   WorkspaceMode,
   WorkspaceLaunchTarget,
   WorkspaceStatus,
+  WorkspaceStreamMessage,
+  WorkspaceStreamResponse,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -474,6 +476,39 @@ export function useRefreshWorkspace() {
       queryClient.invalidateQueries({ queryKey: ['workspace-skills', variables.workspaceId] });
       queryClient.invalidateQueries({ queryKey: ['skills', variables.workspaceId] });
       queryClient.invalidateQueries({ queryKey: ['workspaces-status'] });
+    },
+  });
+}
+
+export function useWorkspaceStream(workspaceId: string | null, options: { refetchInterval?: number } = {}) {
+  return useQuery({
+    queryKey: ['workspace-stream', workspaceId],
+    queryFn: () => apiFetch<WorkspaceStreamResponse>(`/api/workspace/${encodeURIComponent(workspaceId!)}/stream`),
+    enabled: Boolean(workspaceId),
+    refetchInterval: options.refetchInterval ?? 3000,
+  });
+}
+
+export function usePostWorkspaceStream(workspaceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      message: string;
+      harness?: string;
+      author?: string;
+      status?: string;
+      stepId?: string;
+      evidence?: string;
+    }) =>
+      apiFetch<{ success: boolean; entry: WorkspaceStreamMessage }>(
+        `/api/workspace/${encodeURIComponent(workspaceId)}/stream`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-stream', workspaceId] });
     },
   });
 }

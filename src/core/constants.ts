@@ -49,6 +49,10 @@ export const LEGACY_CURSOR_RULE_FILE = BRAND_CONFIG.files.cursorRule.legacy;
 export const PRIMARY_CONFIG_DIR_NAME = BRAND_CONFIG.files.configDir.primary;
 export const LEGACY_CONFIG_DIR_NAME = BRAND_CONFIG.files.configDir.legacy;
 
+// Collaboration Chat Ledger
+export const PRIMARY_CHAT_LEDGER_FILE = BRAND_CONFIG.files.chatLedger.primary;
+export const LEGACY_CHAT_LEDGER_FILE = BRAND_CONFIG.files.chatLedger.legacy;
+
 // Internal Workspace State
 export const PRIMARY_STATE_FILE = BRAND_CONFIG.files.state.primary;
 export const LEGACY_STATE_FILE = BRAND_CONFIG.files.state.legacy;

@@ -13,6 +13,9 @@ import {
   getDesktopReadyPortRegex,
   getFreshnessSentinelRegex,
   createFreshnessMarker,
+  resolveWorkspaceChatLedger,
+  resolveWorkspaceChatLedgerSync,
+  readWorkspaceChatMessages,
 } from './brand-config.js';
 
 describe('Brand Configuration System', () => {
@@ -140,5 +143,103 @@ describe('Brand Configuration System', () => {
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
+  });
+
+  describe('resolveWorkspaceChatLedger & readWorkspaceChatMessages', () => {
+    it('resolves native workspace chat ledger (.contextspace)', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-chat-native-'));
+      try {
+        await fs.mkdir(path.join(tempDir, '.contextspace'), { recursive: true });
+
+        // Without existing file
+        const emptyRes = resolveWorkspaceChatLedgerSync(tempDir);
+        expect(emptyRes.chatPath).toBe(path.join(tempDir, '.contextspace', 'chat.jsonl'));
+        expect(emptyRes.isLegacy).toBe(false);
+        expect(emptyRes.exists).toBe(false);
+
+        // With existing file
+        await fs.writeFile(path.join(tempDir, '.contextspace', 'chat.jsonl'), '{"msg": "hi"}\n');
+        const asyncRes = await resolveWorkspaceChatLedger(tempDir);
+        expect(asyncRes.chatPath).toBe(path.join(tempDir, '.contextspace', 'chat.jsonl'));
+        expect(asyncRes.isLegacy).toBe(false);
+        expect(asyncRes.exists).toBe(true);
+        expect(asyncRes.readPaths).toEqual([path.join(tempDir, '.contextspace', 'chat.jsonl')]);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('resolves legacy workspace chat ledger (.nexusflow)', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-chat-legacy-'));
+      try {
+        await fs.mkdir(path.join(tempDir, '.nexusflow'), { recursive: true });
+
+        // Without existing file
+        const emptyRes = resolveWorkspaceChatLedgerSync(tempDir);
+        expect(emptyRes.chatPath).toBe(path.join(tempDir, '.nexusflow', 'chat.jsonl'));
+        expect(emptyRes.isLegacy).toBe(true);
+        expect(emptyRes.exists).toBe(false);
+
+        // With existing file
+        await fs.writeFile(path.join(tempDir, '.nexusflow', 'chat.jsonl'), '{"msg": "hi legacy"}\n');
+        const asyncRes = await resolveWorkspaceChatLedger(tempDir);
+        expect(asyncRes.chatPath).toBe(path.join(tempDir, '.nexusflow', 'chat.jsonl'));
+        expect(asyncRes.isLegacy).toBe(true);
+        expect(asyncRes.exists).toBe(true);
+        expect(asyncRes.readPaths).toEqual([path.join(tempDir, '.nexusflow', 'chat.jsonl')]);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves existing legacy ledger in mixed-directory workspaces', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-chat-mixed-'));
+      try {
+        await fs.mkdir(path.join(tempDir, '.nexusflow'), { recursive: true });
+        await fs.mkdir(path.join(tempDir, '.contextspace'), { recursive: true });
+
+        // When only legacy chat file exists with history
+        await fs.writeFile(path.join(tempDir, '.nexusflow', 'chat.jsonl'), '{"id": "1", "message": "hist"}\n');
+
+        const resolved = resolveWorkspaceChatLedgerSync(tempDir);
+        expect(resolved.chatPath).toBe(path.join(tempDir, '.nexusflow', 'chat.jsonl'));
+        expect(resolved.isLegacy).toBe(true);
+        expect(resolved.exists).toBe(true);
+        expect(resolved.readPaths).toEqual([path.join(tempDir, '.nexusflow', 'chat.jsonl')]);
+
+        const asyncResolved = await resolveWorkspaceChatLedger(tempDir);
+        expect(asyncResolved.chatPath).toBe(path.join(tempDir, '.nexusflow', 'chat.jsonl'));
+        expect(asyncResolved.isLegacy).toBe(true);
+        expect(asyncResolved.exists).toBe(true);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('reads and aggregates messages across both ledgers when both exist in mixed workspaces', async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-chat-both-'));
+      try {
+        await fs.mkdir(path.join(tempDir, '.nexusflow'), { recursive: true });
+        await fs.mkdir(path.join(tempDir, '.contextspace'), { recursive: true });
+
+        const legacyMsg = { id: 'msg-1', timestamp: '2026-09-01T12:00:00.000Z', message: 'Legacy message' };
+        const primaryMsg = { id: 'msg-2', timestamp: '2026-09-02T12:00:00.000Z', message: 'Primary message' };
+
+        await fs.writeFile(path.join(tempDir, '.nexusflow', 'chat.jsonl'), JSON.stringify(legacyMsg) + '\n');
+        await fs.writeFile(path.join(tempDir, '.contextspace', 'chat.jsonl'), JSON.stringify(primaryMsg) + '\n');
+
+        const resolved = resolveWorkspaceChatLedgerSync(tempDir);
+        expect(resolved.chatPath).toBe(path.join(tempDir, '.contextspace', 'chat.jsonl'));
+        expect(resolved.readPaths).toHaveLength(2);
+
+        const { messages, ledgerInfo } = await readWorkspaceChatMessages(tempDir);
+        expect(ledgerInfo.readPaths).toHaveLength(2);
+        expect(messages).toHaveLength(2);
+        expect(messages[0].id).toBe('msg-1');
+        expect(messages[1].id).toBe('msg-2');
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

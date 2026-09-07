@@ -18,6 +18,7 @@ import {
   ListTodo,
   GitBranch,
   Zap,
+  Radio,
   ArrowRight,
   type LucideIcon,
 } from 'lucide-react';
@@ -69,12 +70,13 @@ import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
+import { WorkspaceWorkroomTab } from '../features/workrooms/WorkspaceWorkroomTab.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
-type SubTab = 'overview' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills' | 'services';
+type SubTab = 'overview' | 'workroom' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills' | 'services';
 
 interface TabDef {
   value: SubTab;
@@ -84,7 +86,9 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { value: 'workroom', label: 'Workroom', icon: Radio },
   { value: 'changes', label: 'Changes', icon: GitCompare },
+  { value: 'services', label: 'Services', icon: Zap },
   { value: 'sessions', label: 'AI & Sessions', icon: Bot },
   { value: 'knowledge', label: 'Knowledge', icon: Brain },
   { value: 'plan', label: 'Plan', icon: ListTodo },
@@ -737,6 +741,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
+              {subTab === 'workroom' && <WorkspaceWorkroomTab ws={selected} showToast={showToast} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'plan' && <ImplementationPlan {...planProps} />}

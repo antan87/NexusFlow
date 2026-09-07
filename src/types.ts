@@ -701,6 +701,8 @@ export interface WorkspaceSkillsConfig {
   revision?: number;
   /** Active enabled skill IDs. */
   enabledSkills: string[];
+  /** Explicitly disabled skill IDs (persisted opt-out). */
+  disabledSkills?: string[];
   /** Active Codex custom-agent IDs. */
   enabledAgents?: string[];
   /** Active enabled category IDs. */
