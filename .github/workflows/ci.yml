@@ -119,6 +119,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
+      - name: Verify installed Windows upgrade from 2.9.0
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./desktop/scripts/verify-windows-upgrade.ps1
+
       - name: Run packaged-app E2E (Windows)
         if: runner.os == 'Windows'
         working-directory: desktop

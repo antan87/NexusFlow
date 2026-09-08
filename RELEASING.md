@@ -126,3 +126,10 @@ Keep the published npm identity, legacy CLI alias, and desktop application ID st
 The renamed desktop app reuses an existing NexusFlow profile when no ContextSpace
 profile exists. On Linux, CLI installation updates an existing NexusFlow AppImage
 and desktop entry in place; fresh installs use ContextSpace paths.
+
+The Windows packaging job also downloads and verifies the published 2.9.0 installer,
+installs it on a disposable runner, and upgrades it with the candidate installer.
+It checks the existing install directory/uninstall registration, launches both
+installed versions, and verifies profile, persistent browser data, workspace
+configuration, and knowledge-file continuity. This check runs before the ordinary
+packaged-app test so a fresh ContextSpace profile cannot mask a migration failure.
