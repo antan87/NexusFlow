@@ -20,10 +20,11 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "se.hogia.contextspace",
+    "appId": "se.hogia.nexusflow",
     "productName": "ContextSpace",
     "directories": {
-      "buildResources": "assets"
+      "buildResources": "assets",
+      "output": "dist"
     },
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
@@ -74,9 +75,6 @@
         "releaseType": "release"
       }
     ],
-    "generateUpdatesFilesForAllChannels": true,
-    "directories": {
-      "output": "dist"
-    }
+    "generateUpdatesFilesForAllChannels": true
   }
 }

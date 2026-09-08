@@ -3,7 +3,6 @@
  * Shows aggregated logs from all services in a workspace.
  */
 
-import * as path from 'node:path';
 import chalk from 'chalk';
 import { select } from '@inquirer/prompts';
 

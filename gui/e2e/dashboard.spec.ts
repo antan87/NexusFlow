@@ -46,3 +46,31 @@ test.describe('Redesigned ContextSpace shell', () => {
     await expect(page.getByText('Test feature workspace', { exact: true })).toBeVisible();
   });
 });
+
+test.describe('Narrow-screen navigation', () => {
+  test.use({ viewport: { width: 390, height: 844 }, workspacesData: [feature] });
+
+  test('opens, restores keyboard focus, and closes after selecting a workspace', async ({ page }) => {
+    await page.goto('/');
+    const trigger = page.getByRole('button', { name: 'Open navigation', exact: true });
+    await trigger.click();
+    const navigation = page.getByRole('dialog', { name: 'Navigation', exact: true });
+    await expect(navigation).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(navigation).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await navigation.getByRole('link', { name: /feature-x/ }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x/);
+    await expect(navigation).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
+    const main = await page.getByRole('main').boundingBox();
+    expect(main?.width).toBe(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    // All detail tabs remain reachable by keyboard without growing the page.
+    const skills = page.getByRole('tab', { name: 'Skills', exact: true });
+    await skills.focus();
+    await page.keyboard.press('Enter');
+    await expect(skills).toHaveAttribute('aria-selected', 'true');
+  });
+});

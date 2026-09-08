@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
@@ -281,14 +281,17 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     const appName = assetName.toLowerCase().startsWith(CLI_NAME) || assetName.toLowerCase().startsWith(BRAND_NAME.toLowerCase())
       ? BRAND_NAME
       : LEGACY_BRAND_NAME;
-    const installDirName = appName.toLowerCase();
+    const legacyPath = path.join(homeDir, '.local', 'share', LEGACY_BRAND_NAME.toLowerCase(), `${LEGACY_BRAND_NAME}.AppImage`);
+    const legacyInstalled = appName === BRAND_NAME && await stat(legacyPath).then((info) => info.isFile()).catch(() => false);
+    const installName = legacyInstalled ? LEGACY_BRAND_NAME : appName;
+    const installDirName = installName.toLowerCase();
     const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');
     // Keep the launcher target stable across releases. A versioned filename
     // would leave an old desktop entry behind and make updates appear to
     // succeed while launching the previous AppImage.
-    const installedPath = path.join(installDir, `${appName}.AppImage`);
-    const desktopEntryPath = path.join(desktopDir, `${appName.toLowerCase()}.desktop`);
+    const installedPath = path.join(installDir, `${installName}.AppImage`);
+    const desktopEntryPath = path.join(desktopDir, `${installName.toLowerCase()}.desktop`);
     stagedPath = `${installedPath}.tmp-${process.pid}-${Date.now()}`;
     await mkdir(installDir, { recursive: true, mode: 0o755 });
     await mkdir(desktopDir, { recursive: true, mode: 0o755 });

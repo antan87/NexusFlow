@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
+  Menu as MenuIcon,
   FolderGit2,
   Workflow,
   Boxes,
@@ -25,6 +26,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { BRAND_NAME } from '../brand.js';
+import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
+import { useIsMobile } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
@@ -61,7 +64,7 @@ export interface AppSidebarProps {
   onSelectWorkspace?: (id: string) => void;
 }
 
-export function AppSidebar({
+function SidebarContents({
   appVersion,
   workspaces = [],
   workspaceStatuses = {},
@@ -435,5 +438,28 @@ export function AppSidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+export function AppSidebar(props: AppSidebarProps) {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => { setOpen(false); }, [location.pathname]);
+  if (!isMobile) return <SidebarContents {...props} />;
+  return (
+    <div className="fixed inset-x-0 top-0 z-40 flex h-12 items-center border-b border-border bg-card px-3 md:hidden">
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger className="inline-flex items-center gap-2 rounded-md px-2 py-2 text-sm font-medium" aria-label="Open navigation">
+          <MenuIcon size={20} /> {BRAND_NAME}
+        </SheetTrigger>
+        <SheetPopup side="left" className="w-72" onClick={(event) => {
+          if ((event.target as HTMLElement).closest('a')) setOpen(false);
+        }}>
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SidebarContents {...props} onSelectWorkspace={(id) => { props.onSelectWorkspace?.(id); setOpen(false); }} />
+        </SheetPopup>
+      </Sheet>
+    </div>
   );
 }

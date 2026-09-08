@@ -132,12 +132,12 @@ jobs:
           fi
 
   # ── VS Code Marketplace ───────────────────────────────────────────────────────
-  # Gated behind a repo variable until Azure OIDC (AZURE_CLIENT_ID / AZURE_TENANT_ID)
-  # is configured — until then this job is skipped rather than failing the release.
+  # Stable releases always include a VSIX. Marketplace publishing alone is gated
+  # behind a repo variable until Azure OIDC is configured.
   # To re-enable: set the repo/environment variable VSCODE_PUBLISHING_ENABLED=true.
   vscode:
     needs: guard
-    if: needs.guard.outputs.prerelease == 'false' && vars.VSCODE_PUBLISHING_ENABLED == 'true'
+    if: needs.guard.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # Azure OIDC
@@ -151,7 +151,19 @@ jobs:
 
       - run: npm ci --prefix extension
 
+      - name: Package installable VSIX
+        working-directory: extension
+        run: npx vsce package --no-dependencies --out ../ContextSpace.vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: contextspace-vscode
+          path: ContextSpace.vsix
+          if-no-files-found: error
+
       - name: Azure Login (OIDC — no stored PAT)
+        if: vars.VSCODE_PUBLISHING_ENABLED == 'true'
         id: azure-login
         continue-on-error: true
         uses: azure/login@v3
@@ -161,7 +173,7 @@ jobs:
           allow-no-subscriptions: true
 
       - name: Skip VS Code Marketplace publish when Azure OIDC is unavailable
-        if: steps.azure-login.outcome != 'success'
+        if: vars.VSCODE_PUBLISHING_ENABLED == 'true' && steps.azure-login.outcome != 'success'
         run: |
           echo "::warning::Azure OIDC login failed or is not configured; skipping VS Code Marketplace publish for this release."
 
@@ -280,6 +292,13 @@ jobs:
         with:
           pattern: contextspace-desktop-*
           merge-multiple: true
+          path: dist
+
+      - name: Download VSIX artifact
+        if: needs.vscode.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: contextspace-vscode
           path: dist
 
       - name: Create GitHub Release

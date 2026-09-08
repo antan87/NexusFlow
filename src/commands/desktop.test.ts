@@ -122,6 +122,32 @@ describe('desktop release installer', () => {
     }
   });
 
+  it('upgrades a legacy Linux installation without leaving an obsolete launcher', async () => {
+    const oldBinary = 'old-nexusflow';
+    const newBinary = 'new-contextspace';
+    const oldFetch = vi.fn()
+      .mockResolvedValueOnce(releaseResponse())
+      .mockResolvedValueOnce(new Response(`${digest(oldBinary)}  NexusFlow-9.9.9.AppImage\n`))
+      .mockResolvedValueOnce(new Response(oldBinary));
+    const newUrl = 'https://github.com/antan87/NexusFlow/releases/download/v2.10.0/ContextSpace-2.10.0.AppImage';
+    const newFetch = vi.fn()
+      .mockResolvedValueOnce(releaseResponse('ContextSpace-2.10.0.AppImage', newUrl, `${newUrl}.sha256`))
+      .mockResolvedValueOnce(new Response(`${digest(newBinary)}  ContextSpace-2.10.0.AppImage\n`))
+      .mockResolvedValueOnce(new Response(newBinary));
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'contextspace-upgrade-'));
+    try {
+      const before = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl: oldFetch, tmpDir, homeDir: tmpDir });
+      const after = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl: newFetch, tmpDir, homeDir: tmpDir });
+      expect(after.installedPath).toBe(before.installedPath);
+      expect(after.desktopEntryPath).toBe(before.desktopEntryPath);
+      expect(await readFile(after.installedPath, 'utf8')).toBe(newBinary);
+      expect(await readFile(after.desktopEntryPath!, 'utf8')).toContain('Name=ContextSpace');
+      await expect(stat(path.join(tmpDir, '.local', 'share', 'contextspace'))).rejects.toThrow();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('downloads and verifies when response exposes arrayBuffer without body stream', async () => {
     const binary = 'buffer-only-appimage';
     const fetchImpl = vi.fn()
