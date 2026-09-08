@@ -41,6 +41,7 @@ function Get-ProductRegistrations {
 if (@(Get-ProductRegistrations).Count -ne 0) { throw 'Runner already has a product installation; refusing to replace it.' }
 
 # NSIS requires /D to be the last argument, with its path unquoted even with spaces.
+Write-Output 'Installing the checksum-verified 2.9.0 baseline.'
 Install-Silently $oldInstaller @('/S', "/D=$installRoot")
 $oldExecutable = Join-Path $installRoot 'NexusFlow.exe'
 if (-not (Test-Path $oldExecutable)) { throw '2.9.0 did not install at the requested path.' }
@@ -52,6 +53,7 @@ $oldRegistryKey = $oldRegistrations[0].PSPath
 if ($LASTEXITCODE -ne 0) { throw 'Installed 2.9.0 acceptance failed.' }
 
 # Deliberately omit /D: the candidate must discover and upgrade the old installation.
+Write-Output 'Upgrading the existing installation with the candidate.'
 Install-Silently $candidateInstaller @('/S')
 $newExecutable = Join-Path $installRoot 'ContextSpace.exe'
 if (-not (Test-Path $newExecutable)) { throw 'Upgrade did not retain the existing installation directory.' }
