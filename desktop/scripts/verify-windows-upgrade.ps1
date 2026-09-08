@@ -21,12 +21,20 @@ if ($checksum -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash $oldInstaller -Alg
 }
 
 function Install-Silently([string]$Installer, [string[]]$InstallerArguments) {
+    # These installers include the bundled assistant runtimes. The baseline alone
+    # takes nearly three minutes on hosted runners; upgrading also uninstalls it.
+    $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
     $process = Start-Process -FilePath $Installer -ArgumentList $InstallerArguments -PassThru
-    if (-not $process.WaitForExit(180000)) {
-        Stop-Process -Id $process.Id -Force
+    if (-not $process.WaitForExit(600000)) {
+        Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -like "$fixtureRoot*" -or $_.Name -match 'ContextSpace|NexusFlow|Uninstall' } |
+            Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine |
+            Format-List | Out-String | Write-Output
+        & taskkill /PID $process.Id /T /F
         throw "Installer timed out: $Installer"
     }
     if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode): $Installer" }
+    Write-Output "Installer completed in $([Math]::Round($elapsed.Elapsed.TotalSeconds)) seconds: $Installer"
 }
 
 function Get-ProductRegistrations {

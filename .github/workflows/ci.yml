@@ -133,6 +133,7 @@ jobs:
 
       - name: Verify installed Windows upgrade from 2.9.0
         if: runner.os == 'Windows'
+        timeout-minutes: 25
         shell: pwsh
         run: ./desktop/scripts/verify-windows-upgrade.ps1
 
