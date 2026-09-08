@@ -61,20 +61,23 @@ npx @mrpatronz/nexusflow desktop install
 ```
 
 It launches the Windows installer, or installs a stable Linux AppImage under
-`~/.local/share/nexusflow/` and creates a desktop entry. It never runs from
+`~/.local/share/contextspace/` and creates a desktop entry (existing NexusFlow installs keep their launcher and install directory). It never runs from
 `npm install`/postinstall and does not support macOS or ARM assets yet.
 
 ### Install the secondary npm CLI
 
+ContextSpace continues to use the existing `@mrpatronz/nexusflow` npm package.
+It provides `ctxspace` plus the compatible command aliases.
+
 ```bash
-npm install -g @mrpatronz/contextspace
+npm install -g @mrpatronz/nexusflow
 ```
 
 ### Install from source (CLI, GUI, desktop, and extension development)
 
 ```bash
-git clone https://github.com/antan87/ContextSpace.git
-cd ContextSpace
+git clone https://github.com/antan87/NexusFlow.git
+cd NexusFlow
 
 # Install root dependencies, then GUI/desktop/extension dependencies
 npm install
@@ -99,7 +102,7 @@ app. No Node.js or npm installation is needed. If Node.js is already available,
 the explicit post-release bootstrap is also convenient:
 
 ```bash
-npx @mrpatronz/contextspace desktop install
+npx @mrpatronz/nexusflow desktop install
 ```
 
 ### CLI and browser dashboard
@@ -535,8 +538,8 @@ Contributions are welcome! Here's how to get set up:
 
 ```bash
 # Clone the repo
-git clone https://github.com/antan87/ContextSpace.git
-cd ContextSpace
+git clone https://github.com/antan87/NexusFlow.git
+cd NexusFlow
 
 # Install all source dependencies
 npm install

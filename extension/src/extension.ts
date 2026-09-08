@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as child_process from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildShellCommandLine, executeCli } from './quoting.js';
+import { executeCli } from './quoting.js';
 import { resolveCli } from './cliResolver.js';
 
 let serverProcess: child_process.ChildProcess | null = null;
@@ -46,7 +46,7 @@ async function startHonoServer(context: vscode.ExtensionContext) {
             cwd: path.join(context.extensionPath, '..'),
             env: { ...process.env },
             detached: false,
-            shell: process.platform === 'win32',
+            shell: false,
         }
     );
 
@@ -58,9 +58,22 @@ async function startHonoServer(context: vscode.ExtensionContext) {
         console.error(`[Hono Server Error]: ${data}`);
     });
 
+    let failureReported = false;
+    const reportFailure = (detail: string) => {
+        if (failureReported) return;
+        failureReported = true;
+        void vscode.window.showErrorMessage(
+            `ContextSpace could not start its dashboard: ${detail}. Install or repair the CLI with npm install -g @mrpatronz/nexusflow, then reload this window.`
+        );
+    };
+    serverProcess.on('error', (error) => {
+        serverProcess = null;
+        reportFailure(error.message);
+    });
     serverProcess.on('close', (code) => {
         console.log(`Hono server exited with code ${code}`);
         serverProcess = null;
+        if (code !== null && code !== 0) reportFailure(`CLI exited with code ${code}`);
     });
 }
 
@@ -97,8 +110,8 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Register MCP Server Definition Provider if supported by the VS Code version
-    if (typeof (vscode as any).lm?.registerMcpServerDefinitionProvider === 'function') {
-        const mcpProvider = {
+    if (typeof vscode.lm?.registerMcpServerDefinitionProvider === 'function') {
+        const mcpProvider: vscode.McpServerDefinitionProvider = {
             provideMcpServerDefinitions: async () => {
                 const { command, prefixArgs } = resolveCli(context);
                 const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -108,19 +121,15 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 return [
-                    new (vscode as any).McpStdioServerDefinition({
-                        label: 'ContextSpace MCP Server',
-                        command,
-                        args: args
-                    })
+                    new vscode.McpStdioServerDefinition('ContextSpace MCP Server', command, args)
                 ];
             }
         };
         context.subscriptions.push(
-            (vscode as any).lm.registerMcpServerDefinitionProvider('contextspace-mcp', mcpProvider)
+            vscode.lm.registerMcpServerDefinitionProvider('contextspace-mcp', mcpProvider)
         );
         context.subscriptions.push(
-            (vscode as any).lm.registerMcpServerDefinitionProvider('nexusflow-mcp', mcpProvider)
+            vscode.lm.registerMcpServerDefinitionProvider('nexusflow-mcp', mcpProvider)
         );
         console.log('ContextSpace MCP Server Definition Provider registered successfully.');
     } else {
@@ -278,26 +287,15 @@ function runContextSpaceCommand(context: vscode.ExtensionContext, commandOrArgs:
     const cwd = (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
     const { command: cliCommand, prefixArgs } = resolveCli(context);
 
-    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "ContextSpace Runner" || t.name === "NexusFlow Runner");
-    if (!terminal) {
-        terminal = vscode.window.createTerminal({
-            name: "ContextSpace Runner",
-            cwd: cwd
-        });
-    } else {
-        // send Ctrl+C to cancel any active operations
-        terminal.sendText('\u0003', true);
-    }
+    // Launch the CLI itself in the terminal PTY. Arguments never become shell source.
+    const terminal = vscode.window.createTerminal({
+        name: `ContextSpace: ${args[0] || 'CLI'}`,
+        cwd,
+        shellPath: cliCommand,
+        shellArgs: [...prefixArgs, ...args],
+    });
     terminal.show(true);
-    const fullCommandLine = buildShellCommandLine(
-        cliCommand,
-        [...prefixArgs, ...args],
-        vscode.env.shell
-    );
-    terminal.sendText(fullCommandLine);
 }
-
-const runNexusFlowCommand = runContextSpaceCommand;
 
 export function deactivate() {
     if (serverProcess) {
@@ -330,8 +328,18 @@ function getWorkspaceDetails(): any {
             description: data.description || 'No description',
             repos: (data.repos || []).map((repo: string) => ({
                 name: path.basename(repo),
-                path: repo
-            }))
+                path: data.isolatedRepos?.[path.basename(repo)]?.worktreePath
+                    || (data.mode === 'in-place' ? data.originalRepos?.find((original: string) => path.basename(original) === path.basename(repo)) : undefined)
+                    || path.resolve(rootPath, repo)
+            })),
+            contextFiles: [
+                ['AGENTS.md', 'WORKSPACE.md'],
+                ['contextspace-knowledge.md', 'nexusflow-knowledge.md'],
+                ['contextspace-plan.md', 'nexusflow-plan.md'],
+            ].flatMap((names) => {
+                const name = names.find((candidate) => fs.existsSync(path.join(rootPath, candidate)));
+                return name ? [{ name, path: path.join(rootPath, name) }] : [];
+            }),
         };
     } catch (e) {
         return { hasWorkspace: false };
@@ -382,28 +390,16 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
                 case 'runCommand': {
-                    runContextSpaceCommand(this._context, data.command);
+                    if (['tui', 'sync', 'doctor', 'create'].includes(data.command)) {
+                        runContextSpaceCommand(this._context, [data.command]);
+                    }
                     break;
                 }
                 case 'triggerCommand': {
                     vscode.commands.executeCommand(data.command);
                     break;
                 }
-                case 'executeTerminalCommand': {
-                    let terminal = vscode.window.terminals.find((t: vscode.Terminal) => t.name === "ContextSpace Runner" || t.name === "NexusFlow Runner");
-                    if (!terminal) {
-                        terminal = vscode.window.createTerminal({
-                            name: "ContextSpace Runner",
-                            cwd: data.cwd
-                        });
-                    } else {
-                        // send Ctrl+C to cancel any active operations
-                        terminal.sendText('\u0003', true);
-                    }
-                    terminal.show(true);
-                    terminal.sendText(data.command);
-                    break;
-                }
+
             }
         });
     }
@@ -411,7 +407,7 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
     private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = getNonce();
         const codiconsUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._context.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css')
+            vscode.Uri.joinPath(this._context.extensionUri, 'media', 'codicons', 'codicon.css')
         );
         return `<!DOCTYPE html>
 <html lang="en">
@@ -617,7 +613,7 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
 <body>
 
     <div class="header">
-        <h3><i class="codicon codicon-extensions"></i> ContextSpace</h3>
+        <h3><i aria-hidden="true" class="codicon codicon-extensions"></i> ContextSpace</h3>
         <div class="status-indicator">
             <div class="status-dot"></div>
             <span>ACTIVE</span>
@@ -633,10 +629,10 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
         </div>
 
         <div class="btn-grid">
-            <button class="btn" onclick="runCommand('tui')"><i class="codicon codicon-terminal"></i> Open TUI</button>
-            <button class="btn" onclick="runCommand('sync')"><i class="codicon codicon-sync"></i> Rebase Sync</button>
-            <button class="btn" onclick="runCommand('doctor')"><i class="codicon codicon-pulse"></i> Run Doctor</button>
-            <button class="btn" onclick="triggerCommand('contextspace.commitWorkspace')"><i class="codicon codicon-git-commit"></i> Commit</button>
+            <button class="btn" data-run-command="tui"><i aria-hidden="true" class="codicon codicon-terminal"></i> Open TUI</button>
+            <button class="btn" data-run-command="sync"><i aria-hidden="true" class="codicon codicon-sync"></i> Rebase Sync</button>
+            <button class="btn" data-run-command="doctor"><i aria-hidden="true" class="codicon codicon-pulse"></i> Run Doctor</button>
+            <button class="btn" data-trigger-command="contextspace.commitWorkspace"><i aria-hidden="true" class="codicon codicon-git-commit"></i> Commit</button>
         </div>
 
         <div class="card">
@@ -656,14 +652,14 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
 
     <!-- Empty Wizard Setup View -->
     <div id="wizard-view" style="display: none;" class="wizard-view">
-        <div class="wizard-icon"><i class="codicon codicon-rocket"></i></div>
+        <div class="wizard-icon"><i aria-hidden="true" class="codicon codicon-rocket"></i></div>
         <h4 style="margin-bottom: 8px; font-size: 14px; color: var(--text-primary);">No Workspace Detected</h4>
         <p class="wizard-text">ContextSpace coordinates multi-repo workspaces with Git worktrees and auto-generated AI contexts.</p>
         
-        <button class="btn btn-primary" onclick="triggerCommand('contextspace.createWorkspace')" style="width: 100%; margin-bottom: 10px;">
+        <button class="btn btn-primary" data-trigger-command="contextspace.createWorkspace" style="width: 100%; margin-bottom: 10px;">
             Initialize Workspace Setup
         </button>
-        <button class="btn" onclick="triggerCommand('contextspace.openTui')" style="width: 100%;">
+        <button class="btn" data-trigger-command="contextspace.openTui" style="width: 100%;">
             Open TUI Dashboard
         </button>
     </div>
@@ -687,16 +683,40 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
         // Request workspace status on load
         vscode.postMessage({ type: 'getWorkspaceStatus' });
 
-        function runCommand(cmd) {
-            vscode.postMessage({ type: 'runCommand', command: cmd });
-        }
+        document.addEventListener('click', event => {
+            const button = event.target.closest('button');
+            if (!button) return;
+            if (button.dataset.runCommand) {
+                vscode.postMessage({ type: 'runCommand', command: button.dataset.runCommand });
+            } else if (button.dataset.triggerCommand) {
+                vscode.postMessage({ type: 'triggerCommand', command: button.dataset.triggerCommand });
+            }
+        });
 
-        function triggerCommand(cmd) {
-            vscode.postMessage({ type: 'triggerCommand', command: cmd });
-        }
-
-        function openFile(path) {
-            vscode.postMessage({ type: 'openFile', filePath: path });
+        function renderFiles(list, files, directory) {
+            list.replaceChildren();
+            for (const file of files) {
+                const item = document.createElement('li');
+                const button = document.createElement('button');
+                button.className = 'file-row';
+                button.style.width = '100%';
+                button.style.background = 'transparent';
+                button.style.color = 'inherit';
+                button.style.border = '0';
+                const icon = document.createElement('i');
+                icon.setAttribute('aria-hidden', 'true');
+                icon.className = directory ? 'codicon codicon-folder file-icon' : 'codicon codicon-file-text file-icon';
+                const label = document.createElement('span');
+                label.textContent = file.name;
+                button.append(icon, label);
+                button.addEventListener('click', () => vscode.postMessage({
+                    type: directory ? 'openWorkspaceFolder' : 'openFile',
+                    workspacePath: file.path,
+                    filePath: file.path,
+                }));
+                item.append(button);
+                list.append(item);
+            }
         }
 
         function renderWorkspace(details) {
@@ -709,25 +729,8 @@ class ContextSpaceSidebarProvider implements vscode.WebviewViewProvider {
                 document.getElementById('branch-badge').innerText = '🌿 ' + details.branchName;
                 document.getElementById('workspace-desc').innerText = details.description;
 
-                // Render Repos list
-                const repoList = document.getElementById('repo-list');
-                repoList.innerHTML = details.repos.map(r => \`
-                    <li class="file-row" onclick="openFile('\${r.path.replace(/\\\\/g, '/')}')">
-                        <i class="codicon codicon-folder file-icon"></i>
-                        <span>\${r.name}</span>
-                    </li>
-                \`).join('');
-
-                // Render Core Context Files list
-                const contextFiles = document.getElementById('context-files');
-                const root = details.rootPath.replace(/\\\\/g, '/');
-                const files = ['WORKSPACE.md', 'contextspace-knowledge.md', 'contextspace-plan.md'];
-                contextFiles.innerHTML = files.map(file => \`
-                    <li class="file-row" onclick="openFile('\${root}/\${file}')">
-                        <i class="codicon codicon-file-text file-icon"></i>
-                        <span>\${file}</span>
-                    </li>
-                \`).join('');
+                renderFiles(document.getElementById('repo-list'), details.repos, true);
+                renderFiles(document.getElementById('context-files'), details.contextFiles, false);
 
             } else {
                 document.getElementById('workspace-view').style.display = 'none';

@@ -245,7 +245,7 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     legacyServerName: 'nexusflow-mcp',
     adapterServerName: 'contextspace',
     legacyAdapterServerName: 'nexusflow',
-    packageName: '@mrpatronz/contextspace',
+    packageName: '@mrpatronz/nexusflow',
     legacyPackageName: '@mrpatronz/nexusflow',
   },
   extension: {
@@ -255,7 +255,7 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     legacyCommandPrefix: 'nexusflow',
   },
   desktop: {
-    appId: 'se.hogia.contextspace',
+    appId: 'se.hogia.nexusflow',
     productName: 'ContextSpace',
     legacyProductName: 'NexusFlow',
     installerName: 'ContextSpaceSetup.exe',
@@ -305,7 +305,7 @@ export const BRAND_CONFIG: BrandConfigSchema = {
     name: 'ContextSpace Engine',
     command: 'ctxspace',
     legacyCommand: 'nexusflow',
-    npmPackage: '@mrpatronz/contextspace',
+    npmPackage: '@mrpatronz/nexusflow',
     legacyNpmPackage: '@mrpatronz/nexusflow',
   },
   terminal: {

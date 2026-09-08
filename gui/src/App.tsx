@@ -966,7 +966,7 @@ Core Instructions:
   const isWorkspaceRoute = location.pathname.startsWith('/workspaces');
 
   return (
-    <div className="flex min-h-screen bg-transparent text-foreground">
+    <div className="flex min-h-screen bg-transparent text-foreground max-md:pt-12">
       <AppSidebar
         appVersion={appVersion}
         workspaces={workspaces}
@@ -977,7 +977,7 @@ Core Instructions:
       />
 
       {/* Main Content Area */}
-      <main className={cn('flex-1 min-w-0 h-screen', isWorkspaceRoute ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-3 sm:p-5 lg:p-6')}>
+      <main className={cn('flex-1 min-w-0 h-[calc(100dvh-3rem)] md:h-screen', isWorkspaceRoute ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-3 sm:p-5 lg:p-6')}>
         {configLoading ? (
           <div className="flex flex-col items-center justify-center py-40 gap-4 text-muted-foreground">
             <RefreshCw className="animate-spin text-primary" size={32} />

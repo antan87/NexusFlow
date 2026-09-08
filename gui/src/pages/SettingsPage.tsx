@@ -82,9 +82,10 @@ export function SettingsPage({
       <Card className="mb-6 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-6 shadow-xs">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label className="text-sm">Development Directory</Label>
+            <Label htmlFor="settings-devDir" className="text-sm">Development Directory</Label>
             <Input
               type="text"
+              id="settings-devDir"
               value={config.devDir}
               onChange={(e) => setConfig({ ...config, devDir: e.target.value })}
             />
@@ -92,9 +93,10 @@ export function SettingsPage({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-sm">Workspaces Directory</Label>
+            <Label htmlFor="settings-workspacesDir" className="text-sm">Workspaces Directory</Label>
             <Input
               type="text"
+              id="settings-workspacesDir"
               value={config.workspacesDir}
               onChange={(e) => setConfig({ ...config, workspacesDir: e.target.value })}
             />
@@ -102,11 +104,12 @@ export function SettingsPage({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label className="text-sm">Repo Search Depth</Label>
+            <Label htmlFor="settings-scanDepth" className="text-sm">Repo Search Depth</Label>
             <Input
               type="number"
               min={1}
               max={5}
+              id="settings-scanDepth"
               value={config.scanDepth}
               onChange={(e) => setConfig({ ...config, scanDepth: parseInt(e.target.value, 10) })}
             />

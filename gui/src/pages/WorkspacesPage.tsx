@@ -308,7 +308,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <span>{primaryEditor.name}</span>
                     </button>
                     <Menu>
-                      <MenuTrigger className="inline-flex h-full w-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent border-l border-border transition-colors cursor-pointer rounded-r-lg">
+                      <MenuTrigger aria-label="Choose editor" className="inline-flex h-full w-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent border-l border-border transition-colors cursor-pointer rounded-r-lg">
                         <ChevronDown size={13} />
                       </MenuTrigger>
                       <MenuPopup align="end" className="w-56">
@@ -354,6 +354,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => handleCopyPrompt(selected)}
+                aria-label="Copy Context"
                 title="Copy AI Context prompt for external LLM"
                 className="h-9 gap-1.5 text-xs font-semibold"
               >
@@ -363,7 +364,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
               {/* More Actions Menu */}
               <Menu>
-                <MenuTrigger className="grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer shadow-xs">
+                <MenuTrigger aria-label="Workspace actions" className="grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer shadow-xs">
                   <MoreVertical size={15} />
                 </MenuTrigger>
                 <MenuPopup align="end" className="w-52">
@@ -413,7 +414,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             className="mb-6"
           >
             {/* Rich Luxury Segmented Menu Bar */}
-            <TabsList className="w-full flex-wrap justify-start gap-1.5 p-1.5 rounded-xl border border-border/70 bg-card/60 backdrop-blur-md shadow-xs">
+            <TabsList className="w-full flex-nowrap overflow-x-auto justify-start gap-1.5 p-1.5 rounded-xl border border-border/70 bg-card/60 backdrop-blur-md shadow-xs">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = subTab === tab.value;
@@ -438,7 +439,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     key={tab.value}
                     value={tab.value}
                     className={cn(
-                      'flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer',
+                      'flex shrink-0 items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer',
                       isActive
                         ? 'bg-card text-foreground shadow-xs border border-primary/30 text-primary ring-1 ring-primary/20'
                         : 'text-muted-foreground hover:text-foreground hover:bg-accent/70'

@@ -10,7 +10,6 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 import type { RepoSyncState, SyncStatus, WorkspaceState } from '../types.js';
 import { resolveWorkspaceFilePath, resolveWorkspaceFilePathSync } from './constants.js';

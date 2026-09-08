@@ -54,13 +54,13 @@ jobs:
           node-version: 22
 
       - name: Audit Root Dependencies
-        run: npm audit --audit-level=critical
+        run: npm audit --audit-level=low
 
       - name: Audit GUI Dependencies
-        run: npm audit --prefix gui --audit-level=critical
+        run: npm audit --prefix gui --audit-level=low
 
       - name: Audit Desktop Dependencies
-        run: npm audit --prefix desktop --audit-level=critical
+        run: npm audit --prefix desktop --audit-level=low
 
       - name: Audit Extension Dependencies
-        run: npm audit --prefix extension --audit-level=critical
+        run: npm audit --prefix extension --audit-level=low

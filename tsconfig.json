@@ -15,5 +15,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "gui", "desktop", "extension"]
+  "exclude": ["**/*.test.ts", "node_modules", "dist", "tests", "gui", "desktop", "extension"]
 }

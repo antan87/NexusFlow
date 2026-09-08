@@ -192,11 +192,11 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                 <Radio size={14} className="animate-pulse" />
               </span>
               <h3 className="text-sm font-semibold text-foreground tracking-tight">
-                Workspace Workroom & Handoff Stream
+                Workspace Workroom
               </h3>
               <Badge variant="success" className="gap-1">
                 <span className="size-1.5 rounded-full bg-success" />
-                Live Ledger
+                Live updates
               </Badge>
               {data?.isRemoteActive && data.remoteStatus && (
                 <Badge variant="info" className="gap-1">
@@ -206,8 +206,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
               )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Direct peer coordination ledger located at <code className="font-mono text-[11px] text-foreground/80">{data?.ledgerPath || (data?.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl')}</code>.
-              Harnesses record progress, exchange state, and verify milestones with zero network overhead.
+              Share updates and handoffs with the people and assistants working in this workspace.
             </p>
           </div>
 
@@ -409,10 +408,10 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
         {/* Composer Form */}
         <form onSubmit={handleSubmit} className="p-4 bg-muted/20 border-t border-border/80">
           <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-muted-foreground">Post as:</span>
-                <div className="flex items-center gap-1 bg-card rounded-md border border-border/80 p-0.5 text-xs">
+                <div className="flex flex-wrap items-center gap-1 bg-card rounded-md border border-border/80 p-0.5 text-xs">
                   <button
                     type="button"
                     onClick={() => setSelectedHarness('developer')}
@@ -472,8 +471,9 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             {showAdvanced && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 rounded-md border border-border/70 bg-card/50 text-xs">
                 <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Milestone ID</label>
+                  <label htmlFor="handoff-step" className="text-[10px] font-mono text-muted-foreground uppercase">Milestone ID</label>
                   <Input
+                    id="handoff-step"
                     placeholder="e.g. step-1-api-routes"
                     value={stepId}
                     onChange={(e) => setStepId(e.target.value)}
@@ -481,8 +481,9 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Milestone Status</label>
+                  <label htmlFor="handoff-status" className="text-[10px] font-mono text-muted-foreground uppercase">Milestone Status</label>
                   <select
+                    id="handoff-status"
                     value={milestoneStatus}
                     onChange={(e) => setMilestoneStatus(e.target.value as MilestoneStatus)}
                     className="h-7 w-full text-xs font-mono mt-1 rounded-md border border-border bg-card px-2 text-foreground"
@@ -494,8 +495,9 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase">Evidence / Test Output</label>
+                  <label htmlFor="handoff-evidence" className="text-[10px] font-mono text-muted-foreground uppercase">Evidence / Test Output</label>
                   <Input
+                    id="handoff-evidence"
                     placeholder="e.g. 12/12 unit tests passing"
                     value={evidence}
                     onChange={(e) => setEvidence(e.target.value)}
@@ -507,7 +509,8 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
 
             <div className="relative">
               <Textarea
-                placeholder="Share a decision, milestone result, blocker, or handoff instruction for other harnesses…"
+                aria-label="Handoff message"
+                placeholder="Share a decision, result, blocker, or next step…"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
@@ -536,7 +539,7 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
             </div>
             <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
               <span>Press <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[9px] font-mono">Ctrl</kbd> + <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[9px] font-mono">Enter</kbd> to send</span>
-              <span>Logged to <code className="font-mono">{data?.ledgerPath || (data?.isLegacy ? '.nexusflow/chat.jsonl' : '.contextspace/chat.jsonl')}</code></span>
+              <span>Saved in this workspace</span>
             </div>
           </div>
         </form>

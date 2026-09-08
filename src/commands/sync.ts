@@ -6,7 +6,6 @@
 import chalk from 'chalk';
 import { search } from '@inquirer/prompts';
 import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';

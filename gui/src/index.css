@@ -283,8 +283,9 @@
 .context-switch::backdrop { background: #080610a6; backdrop-filter: blur(6px); }
 .context-home { animation: context-arrive 380ms ease-out both; }
 @keyframes context-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 760px) {
-  .context-sidebar { width: 190px; }
+@media (max-width: 767px) {
+  .context-sidebar { width: 100%; height: 100dvh; }
+  .context-sidebar > div:first-child { padding-right: 3rem; }
   .context-sidebar kbd { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

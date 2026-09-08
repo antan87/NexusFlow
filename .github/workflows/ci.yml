@@ -45,6 +45,11 @@ jobs:
       - name: Compile VS Code Extension
         run: npm run extension:compile
 
+      - name: Verify VS Code release package
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13.0'
+        working-directory: extension
+        run: npx vsce package --no-dependencies --out "${{ runner.temp }}/contextspace-ci.vsix"
+
       - name: Run Tests
         run: npm test
 

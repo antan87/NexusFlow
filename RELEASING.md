@@ -4,9 +4,15 @@ ContextSpace ships three artifacts from this one repository, all in **lockstep**
 single version:
 
 | Channel | Artifact | Published to |
-| npm | `@mrpatronz/contextspace` (CLI + server + bundled GUI) | npm registry |
-| VS Code extension | `contextspace.contextspace-vscode` | VS Code Marketplace |
+| --- | --- | --- |
+| npm | `@mrpatronz/nexusflow` (CLI + server + bundled GUI) | npm registry |
+| VS Code extension | `ContextSpace.vsix` (`contextspace.contextspace-vscode`) | GitHub Releases; optional VS Code Marketplace |
 | Desktop | `ContextSpaceSetup.exe` (Windows NSIS), `ContextSpace-<version>.AppImage` (Linux), plus `latest.yml`/`latest-linux.yml` and `.sha256` sidecars | GitHub Releases |
+
+The npm package identity remains `@mrpatronz/nexusflow` for existing installs and
+trusted publishing. The product and primary CLI command are ContextSpace and `ctxspace`.
+Stable GitHub Releases include an installable VSIX even when Marketplace publishing is disabled.
+The Marketplace channel is optional until its publishing variable and credentials are enabled.
 
 ## The one rule: version lives in the root `package.json`
 
@@ -61,11 +67,12 @@ The [`release.yml`](./.github/workflows/release.yml) workflow then:
    version against `package.json`, runs the sync check, and creates the immutable tag.
 2. **`npm` / `vscode` / `desktop`** run in parallel. npm and Marketplace skip versions
    that are already published; desktop rebuilds its installers and metadata on each
-   run. npm uses trusted OIDC publishing; the Marketplace job is enabled only when
+   run. Stable releases always package the VSIX. npm uses trusted OIDC publishing;
+   Marketplace publishing runs only when
    the repository variable `VSCODE_PUBLISHING_ENABLED=true` and Azure OIDC credentials
    are present.
 3. **`github-release`** — creates **one** GitHub Release for the tag with generated
-   notes and attaches both desktop installers, their checksum sidecars, and the
+   notes and attaches the stable-release VSIX, both desktop installers, their checksum sidecars, and the
    electron-updater metadata (`latest.yml` and `latest-linux.yml`).
 
 ## Version baseline
@@ -112,3 +119,10 @@ desktop release from the installed CLI:
 ```bash
 ctxspace desktop install
 ```
+
+## Upgrade compatibility
+
+Keep the published npm identity, legacy CLI alias, and desktop application ID stable.
+The renamed desktop app reuses an existing NexusFlow profile when no ContextSpace
+profile exists. On Linux, CLI installation updates an existing NexusFlow AppImage
+and desktop entry in place; fresh installs use ContextSpace paths.

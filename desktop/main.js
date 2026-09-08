@@ -6,10 +6,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import updaterPackage from 'electron-updater';
 import { isExactLocalOrigin, isTrustedIpcEvent } from './lib/security.js';
+import { resolveDesktopUserData } from './lib/upgrade.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const { autoUpdater } = updaterPackage;
+
+// Keep cookies, preferences and local storage when upgrading the renamed app.
+app.setPath('userData', resolveDesktopUserData(app.getPath('appData'), app.getPath('userData')));
 
 const UPDATE_EVENT = 'update:event';
 const SUPPORTED_UPDATE_PLATFORMS = new Set(['win32', 'linux']);
