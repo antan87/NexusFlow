@@ -64,4 +64,4 @@ if ($newRegistrations[0].DisplayVersion -ne $expectedVersion) { throw 'Installed
 
 & node (Join-Path $PSScriptRoot 'verify-installed-desktop.mjs') after $newExecutable $fixtureRoot $expectedVersion
 if ($LASTEXITCODE -ne 0) { throw 'Installed candidate acceptance failed.' }
-Write-Output "Verified 2.9.0 -> $expectedVersion: one installation, retained directory/profile/cookie/workspace, and working bundled backend."
+Write-Output "Verified 2.9.0 -> ${expectedVersion}: one installation, retained directory/profile/cookie/workspace, and working bundled backend."
