@@ -10,3 +10,13 @@ export function resolveDesktopUserData(appDataPath, currentPath, exists = exists
   }
   return currentPath;
 }
+
+/** Select the legacy profile before Electron's userData getter creates a new one. */
+export function configureDesktopUserData(app) {
+  // An explicit Chromium profile override belongs to the caller.
+  if (app.commandLine.hasSwitch('user-data-dir')) return;
+  const appDataPath = app.getPath('appData');
+  const defaultPath = path.join(appDataPath, app.getName());
+  const selectedPath = resolveDesktopUserData(appDataPath, defaultPath);
+  if (selectedPath !== defaultPath) app.setPath('userData', selectedPath);
+}
