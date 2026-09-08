@@ -122,6 +122,22 @@ ctxspace desktop install
 
 ## Upgrade compatibility
 
+### Brand icons
+
+The default GUI mark in `gui/public/favicon.svg` is the source for the desktop
+PNG, multi-resolution Windows ICO, and fallback web/brand raster assets. After
+changing that mark, install Playwright Chromium (`npx playwright install chromium`
+from `desktop/`) and run `npm run icons --prefix desktop`. Review the rendered
+assets and commit them with the SVG change. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
+can select an existing Chromium executable for generation.
+
+Windows app, installer, and uninstaller icons explicitly use `desktop/assets/icon.ico`.
+Linux uses `desktop/assets/icon.png`, which is also included in the app archive
+for the desktop window icon. Verify icons from a newly downloaded installer;
+Windows Explorer may cache an older icon for an existing file path.
+
+### Existing installations
+
 Keep the published npm identity, legacy CLI alias, and desktop application ID stable.
 The renamed desktop app reuses an existing NexusFlow profile when no ContextSpace
 profile exists. On Linux, CLI installation updates an existing NexusFlow AppImage

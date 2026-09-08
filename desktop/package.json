@@ -1,9 +1,10 @@
 {
   "name": "contextspace-desktop",
-  "version": "2.10.0",
+  "version": "2.10.1",
   "type": "module",
   "main": "main.js",
   "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
     "start": "electron .",
     "setup": "install-electron",
     "prepare-backend": "node scripts/prepare-backend.mjs",
@@ -29,6 +30,7 @@
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
+      "assets/icon.png",
       "lib/**/*",
       "preload.js",
       "package.json"
@@ -48,15 +50,19 @@
       }
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": "nsis"
     },
     "nsis": {
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
       "artifactName": "ContextSpaceSetup.exe"
     },
     "mac": {
       "target": "dmg"
     },
     "linux": {
+      "icon": "assets/icon.png",
       "target": [
         {
           "target": "AppImage",
