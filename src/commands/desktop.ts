@@ -60,6 +60,8 @@ export interface DesktopInstallOptions {
   spawnImpl?: typeof spawn;
   /** Override process.arch in tests; published assets are x64 only. */
   arch?: NodeJS.Architecture;
+  /** Override the bundled Linux icon path in tests. */
+  iconSourcePath?: string;
 }
 
 // Metadata and checksum requests should fail promptly, but an AppImage can be
@@ -68,6 +70,7 @@ export interface DesktopInstallOptions {
 // is briefly slow.
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 const DESKTOP_ASSET_TIMEOUT_MS = 15 * 60_000;
+const LINUX_ICON_NAME = BRAND_NAME.toLowerCase();
 
 function isSafeReleaseApiUrl(candidate: string): boolean {
   try {
@@ -199,6 +202,7 @@ async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string, a
     `Name=${appName}`,
     'Comment=Multi-repo workspace manager for AI-assisted development',
     `Exec=${quoteDesktopExecArg(appImagePath)}`,
+    `Icon=${LINUX_ICON_NAME}`,
     'Terminal=false',
     'Categories=Development;Utility;',
     `StartupWMClass=${appName}`,
@@ -220,6 +224,16 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   const arch = options.arch ?? process.arch;
   if (arch !== 'x64') {
     throw new Error(`Desktop installer is unsupported on ${platform}/${arch}; published desktop assets are x64 only.`);
+  }
+
+  const iconSourcePath = platform === 'linux'
+    ? options.iconSourcePath ?? getDesktopIconPath()
+    : undefined;
+  if (iconSourcePath) {
+    const iconInfo = await stat(iconSourcePath).catch(() => undefined);
+    if (!iconInfo?.isFile()) {
+      throw new Error(`The bundled ${BRAND_NAME} desktop icon is unavailable at ${iconSourcePath}.`);
+    }
   }
 
   const releaseApiUrl = options.releaseApiUrl ?? GITHUB_RELEASE_API_URL;
@@ -255,6 +269,8 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), `${CLI_NAME}-desktop-`));
   const downloadedPath = path.join(tempRoot, assetName);
   let stagedPath: string | undefined;
+  let stagedIconPath: string | undefined;
+  let stagedDesktopEntryPath: string | undefined;
   try {
     const sidecarResponse = await fetchRequired(
       fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT })),
@@ -287,24 +303,36 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     const installDirName = installName.toLowerCase();
     const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');
+    const iconDir = path.join(homeDir, '.local', 'share', 'icons', 'hicolor', '512x512', 'apps');
+    const iconPath = path.join(iconDir, `${LINUX_ICON_NAME}.png`);
     // Keep the launcher target stable across releases. A versioned filename
     // would leave an old desktop entry behind and make updates appear to
     // succeed while launching the previous AppImage.
     const installedPath = path.join(installDir, `${installName}.AppImage`);
     const desktopEntryPath = path.join(desktopDir, `${installName.toLowerCase()}.desktop`);
-    stagedPath = `${installedPath}.tmp-${process.pid}-${Date.now()}`;
+    const stagingSuffix = `.tmp-${process.pid}-${Date.now()}`;
+    stagedPath = `${installedPath}${stagingSuffix}`;
+    stagedIconPath = `${iconPath}${stagingSuffix}`;
+    stagedDesktopEntryPath = `${desktopEntryPath}${stagingSuffix}`;
     await mkdir(installDir, { recursive: true, mode: 0o755 });
     await mkdir(desktopDir, { recursive: true, mode: 0o755 });
+    await mkdir(iconDir, { recursive: true, mode: 0o755 });
     await copyFile(downloadedPath, stagedPath);
     await chmod(stagedPath, 0o755);
+    await copyFile(iconSourcePath!, stagedIconPath);
+    await chmod(stagedIconPath, 0o644);
+    await writeLinuxDesktopEntry(stagedDesktopEntryPath, installedPath, appName);
     await rename(stagedPath, installedPath);
-    await writeLinuxDesktopEntry(desktopEntryPath, installedPath, appName);
+    await rename(stagedIconPath, iconPath);
+    await rename(stagedDesktopEntryPath, desktopEntryPath);
     await rm(tempRoot, { recursive: true, force: true });
     return { platform, assetName, sha256: actualHash, installedPath, desktopEntryPath };
   } catch (error) {
     // A failed copy/rename must not damage the currently installed AppImage.
     // The temporary sibling is safe to remove independently.
     if (stagedPath) await rm(stagedPath, { force: true }).catch(() => {});
+    if (stagedIconPath) await rm(stagedIconPath, { force: true }).catch(() => {});
+    if (stagedDesktopEntryPath) await rm(stagedDesktopEntryPath, { force: true }).catch(() => {});
     await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
@@ -325,6 +353,10 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
 function resolveRepoRoot(): string {
   const thisDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(thisDir, '..', '..');
+}
+
+function getDesktopIconPath(): string {
+  return path.join(resolveRepoRoot(), 'desktop', 'assets', 'icon.png');
 }
 
 function getDesktopDir(): string {

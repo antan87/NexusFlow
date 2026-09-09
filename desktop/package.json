@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "generate-icons": "electron scripts/generate-icons.mjs",
     "setup": "install-electron",
     "prepare-backend": "node scripts/prepare-backend.mjs",
     "pack": "npm run prepare-backend && electron-builder --dir",
@@ -29,6 +30,7 @@
     "afterPack": "./scripts/verify-backend.mjs",
     "files": [
       "main.js",
+      "assets/icon.png",
       "lib/**/*",
       "preload.js",
       "package.json"

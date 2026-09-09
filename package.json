@@ -16,7 +16,8 @@
   },
   "files": [
     "dist",
-    "resources"
+    "resources",
+    "desktop/assets/icon.png"
   ],
   "publishConfig": {
     "access": "public",
