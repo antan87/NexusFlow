@@ -49,17 +49,23 @@ The desktop app packages as standalone installers via electron-builder:
   (`ELECTRON_RUN_AS_NODE=1`), so **no separate Node runtime has to ship**.
 - `npm run pack` produces an unpacked app (`--dir`); `npm run build` produces
   the installer with publishing disabled for local builds.
-- Windows releases ship `NexusFlowSetup.exe` (NSIS) and `latest.yml`.
-- Linux releases ship `NexusFlow-<version>.AppImage` and `latest-linux.yml`.
+- Windows releases ship `ContextSpaceSetup.exe` (NSIS) and `latest.yml`.
+- Linux releases ship `ContextSpace-<version>.AppImage` and `latest-linux.yml`.
   Both installers have a required `.sha256` sidecar in the GitHub Release.
 - Packaged Windows/Linux builds configure `electron-updater` with the GitHub
   provider. It checks on startup but does not download or install until the
   user chooses **Download update** and **Restart & Install**. `Later` and
   error/retry states are supported; there are no forced updates.
-- The explicit CLI bootstrap, `nexusflow desktop install`, selects the matching
+- The explicit CLI bootstrap, `ctxspace desktop install`, selects the matching
   Windows/Linux release asset, requires and verifies its checksum sidecar, then
   launches the Windows installer or copies the Linux AppImage to
-  `~/.local/share/nexusflow/` and creates `~/.local/share/applications/nexusflow.desktop`.
+  `~/.local/share/contextspace/ContextSpace.AppImage`, installs the standard 512px
+  hicolor icon (`~/.local/share/icons/hicolor/512x512/apps/contextspace.png`), and creates
+  `~/.local/share/applications/contextspace.desktop` (legacy `~/.local/share/nexusflow/`
+  installs retain their location and launcher during upgrade).
+- After install on Ubuntu, users can launch via the Activities application menu
+  (search for "ContextSpace"), run `gtk-launch contextspace` in a terminal, execute
+  the AppImage directly, or run the CLI shortcut `ctxspace desktop`.
 
 Build-host note: `electron-builder` unpacks a code-signing toolchain that
 contains symlinks, so the packaging step must run on a host with symlink

@@ -290,18 +290,24 @@ export async function stopService(workspacePath: string, serviceName: string): P
   const uniqueName = pm2AppName(workspacePath, serviceName);
 
   let existed = false;
+  let deleteSuccess = true;
   const pm2List = await getPm2List();
   if (pm2List.some((app: any) => app.name === uniqueName)) {
     existed = true;
-    await execa('npx', ['pm2', 'delete', uniqueName], { reject: false });
+    const res = await execa('npx', ['pm2', 'delete', uniqueName], { reject: false });
+    if (res.failed || (typeof res.exitCode === 'number' && res.exitCode !== 0)) {
+      deleteSuccess = false;
+    }
   }
 
-  await mutateRunningState(workspacePath, (state) => {
-    if (state.services.some((s) => s.name === serviceName)) existed = true;
-    return { ...state, services: state.services.filter((s) => s.name !== serviceName) };
-  });
+  if (deleteSuccess) {
+    await mutateRunningState(workspacePath, (state) => {
+      if (state.services.some((s) => s.name === serviceName)) existed = true;
+      return { ...state, services: state.services.filter((s) => s.name !== serviceName) };
+    });
+  }
 
-  return existed;
+  return existed && deleteSuccess;
 }
 
 /**
@@ -357,6 +363,7 @@ export async function stopServices(workspacePath: string): Promise<void> {
       .filter((n): n is string => typeof n === 'string'),
   );
 
+  const failedApps = new Set<string>();
   try {
     const pm2List = await getPm2List();
     const targetApps = pm2List.filter(
@@ -368,15 +375,25 @@ export async function stopServices(workspacePath: string): Promise<void> {
     } else {
       for (const app of targetApps) {
         console.log(chalk.dim(`    Stopping PM2 process: ${app.name}`));
-        await execa('npx', ['pm2', 'delete', app.name], { reject: false });
+        const res = await execa('npx', ['pm2', 'delete', app.name], { reject: false });
+        if (res.failed || (typeof res.exitCode === 'number' && res.exitCode !== 0)) {
+          failedApps.add(app.name);
+        }
       }
-      console.log(chalk.green(`  ✔ All services stopped.`));
+      if (failedApps.size > 0) {
+        console.error(chalk.red(`  ✖ Failed to stop some PM2 processes: ${Array.from(failedApps).join(', ')}`));
+      } else {
+        console.log(chalk.green(`  ✔ All services stopped.`));
+      }
     }
   } catch (error: any) {
     console.error(chalk.red(`  ✖ Failed to stop services via PM2: ${error.message}`));
   }
 
-  await mutateRunningState(workspacePath, (state) => ({ ...state, services: [] }));
+  await mutateRunningState(workspacePath, (state) => ({
+    ...state,
+    services: state.services.filter((s) => failedApps.has(pm2AppName(workspacePath, s.name))),
+  }));
 }
 
 /**

@@ -52,42 +52,8 @@ export interface CopilotDetectOptions extends DetectOptions {
   helpStatus?: { exitCode: number | null; output?: string; error?: string };
 }
 
-/**
- * Resolves an executable on PATH the way a shell would, honouring PATHEXT on
- * Windows so `claude.cmd` and `claude.exe` both count.
- */
-export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const pathValue = env.PATH ?? env.Path ?? '';
-  if (!pathValue) return null;
-
-  const separator = path.delimiter;
-  const extensions = process.platform === 'win32'
-    ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : [];
-
-  for (const dir of pathValue.split(separator).filter(Boolean)) {
-    const base = path.join(dir.replace(/^"|"$/g, ''), name);
-    const candidates = [
-      base,
-      ...extensions.map((ext) => base + (ext.startsWith('.') ? ext : `.${ext}`).toLowerCase()),
-    ];
-    for (const candidate of candidates) {
-      try {
-        const stat = fsSync.statSync(candidate);
-        if (stat.isFile()) {
-          if (process.platform !== 'win32') {
-            fsSync.accessSync(candidate, fsSync.constants.X_OK);
-          }
-          return candidate;
-        }
-      } catch {
-        // Not here or not executable; keep looking.
-      }
-    }
-  }
-
-  return null;
-}
+import { findExecutable, getAugmentedPath } from '../utils/user-paths.js';
+export { findExecutable, getAugmentedPath };
 
 /**
  * Whether `claude` can be driven in print mode.
@@ -97,7 +63,7 @@ export function findExecutable(name: string, env: NodeJS.ProcessEnv = process.en
  * account, auth-method, or provider values.
  */
 export function detectClaudeCliStatus(options: ClaudeDetectOptions = {}): CliStatus {
-  const env = options.env ?? process.env;
+  const env = options.env ?? { ...process.env, PATH: getAugmentedPath(process.env) };
   const executable = options.hasBinary === false ? null : findExecutable('claude', env);
   const hasBinary = options.hasBinary ?? executable !== null;
   if (!hasBinary) {
@@ -164,7 +130,7 @@ export function detectClaudeCliStatus(options: ClaudeDetectOptions = {}): CliSta
 
 /** Whether the Antigravity CLI is present. It manages its own auth. */
 export function detectAntigravityCliStatus(options: DetectOptions = {}): CliStatus {
-  const env = options.env ?? process.env;
+  const env = options.env ?? { ...process.env, PATH: getAugmentedPath(process.env) };
   const hasBinary = options.hasBinary ?? findExecutable('agy', env) !== null;
 
   return hasBinary
@@ -185,7 +151,7 @@ export function detectAntigravityCliStatus(options: DetectOptions = {}): CliStat
  * is required.
  */
 export function detectCodexCliStatus(options: CodexDetectOptions = {}): CliStatus {
-  const env = options.env ?? process.env;
+  const env = options.env ?? { ...process.env, PATH: getAugmentedPath(process.env) };
   const executable = options.hasBinary === false ? null : findExecutable('codex', env);
   const hasBinary = options.hasBinary ?? executable !== null;
 
@@ -243,7 +209,7 @@ export function detectCodexCliStatus(options: CodexDetectOptions = {}): CliStatu
  * advertising older installations that cannot speak ACP at all.
  */
 export function detectCopilotCliStatus(options: CopilotDetectOptions = {}): CliStatus {
-  const env = options.env ?? process.env;
+  const env = options.env ?? { ...process.env, PATH: getAugmentedPath(process.env) };
   const executable = options.hasBinary === false ? null : findExecutable('copilot', env);
   const hasBinary = options.hasBinary ?? executable !== null;
 

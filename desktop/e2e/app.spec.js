@@ -89,6 +89,20 @@ test.describe('desktop app', () => {
     expect(port).toBeGreaterThan(0);
   });
 
+  test('ships a readable runtime window icon', async () => {
+    const appPath = await app.evaluate(({ app }) => app.getAppPath());
+    const iconPath = path.join(appPath, 'assets', 'icon.png');
+    const icon = await app.evaluate(({ nativeImage }, runtimeIconPath) => {
+      const image = nativeImage.createFromPath(runtimeIconPath);
+      const size = image.getSize();
+      return { empty: image.isEmpty(), width: size.width, height: size.height };
+    }, iconPath);
+
+    expect(icon.empty).toBe(false);
+    expect(icon.width).toBeGreaterThan(0);
+    expect(icon.height).toBeGreaterThan(0);
+  });
+
   test('exposes a guarded updater IPC status', async () => {
     const state = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.updates?.getStatus());
     expect(state).toBeTruthy();

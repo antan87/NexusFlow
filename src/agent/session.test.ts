@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildClaudeTurnArgs, isValidSessionUuid } from './session.js';
+import { buildClaudeTurnArgs, isValidSessionUuid, isValidSessionId } from './session.js';
 
 const ID = '123e4567-e89b-42d3-a456-426614174000';
 const STREAM_ARGS = [
@@ -83,5 +83,29 @@ describe('isValidSessionUuid', () => {
     expect(isValidSessionUuid(undefined)).toBe(false);
     expect(isValidSessionUuid(42)).toBe(false);
     expect(isValidSessionUuid({ id: ID })).toBe(false);
+  });
+});
+
+describe('isValidSessionId', () => {
+  it('accepts valid UUIDs', () => {
+    expect(isValidSessionId(ID)).toBe(true);
+    expect(isValidSessionId(ID.toUpperCase())).toBe(true);
+  });
+
+  it('accepts safe non-UUID alphanumeric session IDs for Copilot and ACP', () => {
+    expect(isValidSessionId('ses_1234567890abcdef')).toBe(true);
+    expect(isValidSessionId('copilot-session-abc.123')).toBe(true);
+    expect(isValidSessionId('abc_123-def')).toBe(true);
+  });
+
+  it('rejects shell metacharacters, spaces, and injections in session IDs', () => {
+    expect(isValidSessionId('ses_123; rm -rf /')).toBe(false);
+    expect(isValidSessionId('ses_123 && echo pwned')).toBe(false);
+    expect(isValidSessionId('ses_123 | ls')).toBe(false);
+    expect(isValidSessionId('ses_123`id`')).toBe(false);
+    expect(isValidSessionId('ses_123$(id)')).toBe(false);
+    expect(isValidSessionId('ses 123')).toBe(false);
+    expect(isValidSessionId('')).toBe(false);
+    expect(isValidSessionId(null)).toBe(false);
   });
 });

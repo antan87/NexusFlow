@@ -5,6 +5,7 @@
 
 import { execa } from 'execa';
 import { isValidBranchName } from '../utils/git.js';
+import { resolveTrackingBranch, fastForwardBranch } from '../utils/repo-freshness.js';
 
 /** Result of creating a worktree. */
 export interface CreateWorktreeResult {
@@ -24,16 +25,22 @@ export interface CreateWorktreeOptions {
    * existing branch, where silently creating a fresh one would be wrong.
    */
   mustExist?: boolean;
+  /**
+   * Whether to attempt fast-forwarding the base branch to remote tracking before branching.
+   * Defaults to true.
+   */
+  autoUpdateBase?: boolean;
 }
 
 /**
  * Creates a git worktree for a branch, materializing the branch as needed:
  *
- * 1. `git fetch origin` — ensure we have the latest remote refs.
- * 2. If `branchName` exists locally, check it out into the worktree.
- * 3. Else if `origin/<branchName>` exists, create a tracking local branch
+ * 1. Resolves remote tracking branch (origin, upstream, etc.) and fetches remote refs.
+ * 2. Safely fast-forwards the local base branch if clean and autoUpdateBase is not false.
+ * 3. If `branchName` exists locally, check it out into the worktree.
+ * 4. Else if `<remote>/<branchName>` exists, create a tracking local branch
  *    from it in the worktree.
- * 4. Else create a new branch from `origin/<baseBranch>` (or the local
+ * 5. Else create a new branch from `<remote>/<baseBranch>` (or the local
  *    `baseBranch` when there is no remote).
  *
  * @param repoPath   - Absolute path to the main repo checkout.
@@ -57,47 +64,29 @@ export async function createWorktree(
     throw new Error(`Invalid base branch name "${baseBranch}".`);
   }
 
-  let fetched = false;
-  // Fetch latest remote state.
-  try {
-    await execa('git', ['fetch', 'origin'], { cwd: repoPath });
-    fetched = true;
-  } catch {
-    // Silently ignore fetch failures (e.g., offline or no remote origin)
-  }
+  // Resolve tracking branch for baseBranch (checks origin, upstream, etc.)
+  const { trackingBranch, remoteName, hasRemote } = await resolveTrackingBranch(
+    repoPath,
+    baseBranch,
+  );
 
-  // Update local base branch, main, and master to keep them in sync with remote before branching
-  if (fetched) {
+  // If remote exists and autoUpdateBase is enabled, safely fast-forward clean repos
+  if (hasRemote && options.autoUpdateBase !== false) {
     try {
-      const { stdout: currentBranchRaw } = await execa('git', ['branch', '--show-current'], { cwd: repoPath });
-      const currentBranch = currentBranchRaw.trim();
-      
-      const branchesToUpdate = Array.from(new Set([baseBranch, 'main', 'master']));
-      
-      for (const branch of branchesToUpdate) {
-        try {
-          if (currentBranch === branch) {
-            // Safe fast-forward merge from remote tracking branch for the currently checked-out branch
-            await execa('git', ['merge', '--ff-only', `origin/${branch}`], { cwd: repoPath });
-          } else {
-            // Fast-forward local ref from remote ref without checkout
-            await execa('git', ['fetch', 'origin', `${branch}:${branch}`], { cwd: repoPath });
-          }
-        } catch {
-          // Ignore individual branch update failures
-        }
-      }
+      await fastForwardBranch(repoPath, baseBranch);
     } catch {
-      // Ignore failures
+      // Best-effort fast-forward; uncommitted work is preserved on dirty trees
     }
   }
 
-  // Determine starting point: remote branch if fetched successfully and exists, else local branch.
+  // Determine starting point: remote tracking ref if verified, else local baseBranch
   let startPoint = baseBranch;
-  if (fetched) {
+  if (hasRemote && trackingBranch) {
     try {
-      await execa('git', ['rev-parse', '--verify', `origin/${baseBranch}`], { cwd: repoPath });
-      startPoint = `origin/${baseBranch}`;
+      await execa('git', ['rev-parse', '--verify', `refs/remotes/${trackingBranch}`], {
+        cwd: repoPath,
+      });
+      startPoint = trackingBranch;
     } catch {
       // remote tracking branch does not exist, fallback to local branch
     }
@@ -112,14 +101,21 @@ export async function createWorktree(
     // Branch does not exist locally
   }
 
-  // Check for a remote-only branch (origin/<branchName> without a local ref).
+  // Check for a remote-only branch (<remote>/<branchName> without a local ref).
   let remoteBranchExists = false;
-  if (!branchExists) {
-    try {
-      await execa('git', ['rev-parse', '--verify', `refs/remotes/origin/${branchName}`], { cwd: repoPath });
-      remoteBranchExists = true;
-    } catch {
-      // Branch does not exist on origin either
+  let remoteRefToTrack = `origin/${branchName}`;
+  if (!branchExists && hasRemote) {
+    const targetTracking = await resolveTrackingBranch(repoPath, branchName);
+    if (targetTracking.trackingBranch) {
+      try {
+        await execa('git', ['rev-parse', '--verify', `refs/remotes/${targetTracking.trackingBranch}`], {
+          cwd: repoPath,
+        });
+        remoteBranchExists = true;
+        remoteRefToTrack = targetTracking.trackingBranch;
+      } catch {
+        // Branch does not exist on remote either
+      }
     }
   }
 
@@ -142,7 +138,7 @@ export async function createWorktree(
     // ref is new, so rollback may delete it — the remote still has the branch.
     await execa(
       'git',
-      ['worktree', 'add', '--track', '-b', branchName, targetPath, `origin/${branchName}`],
+      ['worktree', 'add', '--track', '-b', branchName, targetPath, remoteRefToTrack],
       { cwd: repoPath },
     );
   } else {

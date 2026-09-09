@@ -13,10 +13,8 @@ export interface ChatLaunchIntent {
   executionProfile: ChatExecutionProfile;
 }
 
-export const WORKSPACE_KICKOFF =
-  'Read the workspace instructions and implementation plan, inspect the repository state, then begin the task described for this workspace. Ask before making a decision that materially changes scope.';
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE_SESSION_ID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-zA-Z0-9_\-.]{1,128})$/i;
 
 const HARNESS_PROVIDERS = new Set<EmbeddedHarnessProvider>([
   'claude-cli',
@@ -33,37 +31,11 @@ export function providerForAssistant(assistant: unknown): EmbeddedHarnessProvide
   return null;
 }
 
-export function assistantLabel(assistant: EmbeddedHarnessAssistant): string {
-  switch (assistant) {
-    case 'claude':
-      return 'Claude';
-    case 'codex':
-      return 'Codex';
-    case 'antigravity':
-      return 'Antigravity';
-    case 'copilot':
-      return 'Copilot';
-  }
-}
-
-export function createChatLaunchIntent(
-  assistant: EmbeddedHarnessAssistant,
-  options: { sessionId?: string; model?: string; kickoff?: string; executionProfile?: ChatExecutionProfile } = {},
-): ChatLaunchIntent {
-  return {
-    nonce: globalThis.crypto.randomUUID(),
-    providerId: providerForAssistant(assistant)!,
-    assistant,
-    executionProfile: options.executionProfile ?? (options.kickoff ? 'workspace-write' : 'review'),
-    ...options,
-  };
-}
-
 /**
  * Router state is an untyped browser boundary. Only local CLI
- * providers may trigger a launch, and a resumable session must be a UUID owned
- * by the matching assistant. This prevents a stale or hand-authored history
- * entry from silently falling through to another provider.
+ * providers may trigger a launch, and a resumable session must be a valid UUID or
+ * safe session ID owned by the matching assistant. This prevents a stale or hand-authored
+ * history entry from silently falling through to another provider.
  */
 export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
   if (!state || typeof state !== 'object') return null;
@@ -83,7 +55,7 @@ export function readChatLaunchIntent(state: unknown): ChatLaunchIntent | null {
   }
   if (value.assistant !== undefined && providerForAssistant(value.assistant) !== value.providerId) return null;
   if (value.sessionId !== undefined) {
-    if (!UUID_RE.test(value.sessionId)) return null;
+    if (!SAFE_SESSION_ID_RE.test(value.sessionId)) return null;
     if (!value.assistant) return null;
   }
 

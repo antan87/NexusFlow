@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
+import { getAugmentedPath } from '../utils/user-paths.js';
 
 /**
  * Shared lifecycle for CLI-backed agents (claude, codex, agy). Each turn spawns the
@@ -96,7 +97,13 @@ export abstract class CliAdapterBase extends EventEmitter {
 
   /** Subclasses can customize environment variables for the CLI subprocess. */
   protected buildEnv(): NodeJS.ProcessEnv {
-    return { ...process.env, FORCE_COLOR: '0' }; // Strip colors for easier parsing
+    const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0' }; // Strip colors for easier parsing
+    const augmented = getAugmentedPath(env);
+    env.PATH = augmented;
+    if (process.platform === 'win32') {
+      env.Path = augmented;
+    }
+    return env;
   }
 
   /** Kept as a seam so lifecycle tests can exercise process failures without a real CLI. */

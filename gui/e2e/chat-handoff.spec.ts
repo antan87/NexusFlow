@@ -164,7 +164,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
         onclose: ((event: CloseEvent) => void) | null = null;
         onerror: ((event: Event) => void) | null = null;
 
-        constructor(_url: string) {
+        constructor() {
           setTimeout(() => {
             this.readyState = MockWebSocket.OPEN;
             this.onopen?.(new Event('open'));
@@ -215,8 +215,9 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     });
 
     await page.goto('/#/workspaces/feature-x/sessions');
+    await expect(page.getByRole('heading', { name: 'feature-x', level: 1 })).toBeVisible();
 
-    await expect(page.getByRole('heading', { name: 'Embedded harness' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
     await expect(page.getByLabel('Select Provider')).toContainText('Codex (First-Party SDK)');
 
     await page.getByLabel('Select model').click();

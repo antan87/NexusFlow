@@ -607,7 +607,7 @@ describe('Server API Endpoints Unit Tests', () => {
       await expect(response.json()).resolves.toEqual({ error: 'Forbidden cross-origin request.' });
     });
 
-    it('rejects invalid assistant and malformed session UUID', async () => {
+    it('rejects invalid assistant and malformed session ID', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
       vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
       vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({
@@ -625,15 +625,26 @@ describe('Server API Endpoints Unit Tests', () => {
       });
       expect(invalidAssistantRes.status).toBe(400);
 
-      const invalidUuidRes = await app.request('/api/workspace/safe-workspace/terminal', {
+      const invalidIdRes = await app.request('/api/workspace/safe-workspace/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           assistant: 'claude',
-          sessionId: 'not-a-valid-uuid',
+          sessionId: 'not-a-valid-session; rm -rf /',
         }),
       });
-      expect(invalidUuidRes.status).toBe(400);
+      expect(invalidIdRes.status).toBe(400);
+      await expect(invalidIdRes.json()).resolves.toEqual({ error: 'Invalid session ID format.' });
+
+      const validAlphanumericIdRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistant: 'copilot',
+          sessionId: 'copilot-session-12345',
+        }),
+      });
+      expect(validAlphanumericIdRes.status).toBe(200);
 
       const invalidTitleRes = await app.request('/api/workspace/safe-workspace/terminal', {
         method: 'POST',
@@ -645,6 +656,25 @@ describe('Server API Endpoints Unit Tests', () => {
       });
       expect(invalidTitleRes.status).toBe(400);
       await expect(invalidTitleRes.json()).resolves.toEqual({ error: 'Title must be a string.' });
+
+      const invalidCwdRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cwd: '../../outside',
+        }),
+      });
+      expect(invalidCwdRes.status).toBe(400);
+      await expect(invalidCwdRes.json()).resolves.toEqual({ error: 'Launch directory must be within workspace.' });
+
+      const validCwdRes = await app.request('/api/workspace/safe-workspace/terminal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cwd: path.join(workspacePath, 'repo'),
+        }),
+      });
+      expect(validCwdRes.status).toBe(200);
     });
   });
 
@@ -940,6 +970,39 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('GET /api/repos/freshness and POST /api/repos/freshness and POST /api/repos/pull', () => {
+    it('GET /api/repos/freshness returns 400 when path parameter is missing', async () => {
+      const response = await app.request('/api/repos/freshness');
+      expect(response.status).toBe(400);
+    });
+
+    it('GET /api/repos/freshness returns 400 when path escapes devDir', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ devDir: '/mock/dev' } as any);
+      const response = await app.request(
+        `/api/repos/freshness?path=${encodeURIComponent('/mock/dev/../../etc')}`,
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it('POST /api/repos/freshness returns 400 when repos array is missing', async () => {
+      const response = await app.request('/api/repos/freshness', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it('POST /api/repos/pull returns 400 when neither path nor repos is provided', async () => {
+      const response = await app.request('/api/repos/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(400);
+    });
+  });
+
   describe('POST /api/repos/new', () => {
     it('should return 400 when the name is missing', async () => {
       const response = await app.request('/api/repos/new', {
@@ -1043,6 +1106,32 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.content).toBe('# Mock Plan content');
+    });
+
+    it('should return placeholder content when plan file does not exist (ENOENT)', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+      } as any);
+      const enoentErr = Object.assign(new Error('File not found'), { code: 'ENOENT' });
+      vi.spyOn(fs, 'readFile').mockRejectedValue(enoentErr);
+
+      const response = await app.request('/api/workspace/test-ws/plan');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.content).toContain('No implementation plan file yet.');
+    });
+
+    it('should return 500 error when reading plan fails with permission or IO error', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        workspacesDir: '/mock/workspaces',
+      } as any);
+      const eaccesErr = Object.assign(new Error('Permission denied'), { code: 'EACCES' });
+      vi.spyOn(fs, 'readFile').mockRejectedValue(eaccesErr);
+
+      const response = await app.request('/api/workspace/test-ws/plan');
+      expect(response.status).toBe(500);
+      const data = await response.json();
+      expect(data.error).toBeDefined();
     });
   });
 

@@ -94,6 +94,43 @@ export interface RepoInfo {
   defaultBranch: string;
 }
 
+export type FreshnessStatus =
+  | 'up-to-date'
+  | 'behind'
+  | 'ahead'
+  | 'diverged'
+  | 'untracked'
+  | 'offline'
+  | 'error';
+
+export interface RepoFreshness {
+  repoPath: string;
+  repoName: string;
+  branch: string;
+  defaultBranch: string;
+  trackingBranch: string | null;
+  remoteName: string | null;
+  hasRemote: boolean;
+  isClean: boolean;
+  ahead: number;
+  behind: number;
+  status: FreshnessStatus;
+  message: string;
+  error?: string;
+}
+
+export interface FastForwardResult {
+  success: boolean;
+  repoPath: string;
+  repoName: string;
+  branch: string;
+  status: string;
+  message: string;
+  ahead: number;
+  behind: number;
+  error?: string;
+}
+
 /** A repository belonging to a {@link Project} (mirrors src/types.ts). */
 export interface ProjectRepo {
   path: string;

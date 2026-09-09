@@ -1,6 +1,6 @@
 {
   "name": "@mrpatronz/nexusflow",
-  "version": "2.10.0",
+  "version": "2.10.1",
   "description": "Combine multiple repos into a workspace with rich AI assistant context",
   "type": "module",
   "repository": {
@@ -16,7 +16,8 @@
   },
   "files": [
     "dist",
-    "resources"
+    "resources",
+    "desktop/assets/icon.png"
   ],
   "publishConfig": {
     "access": "public",
@@ -82,6 +83,9 @@
     "@hono/node-server": "$@hono/node-server",
     "@hono/node-ws": {
       "@hono/node-server": "$@hono/node-server"
+    },
+    "pm2": {
+      "js-yaml": "4.3.2"
     }
   },
   "devDependencies": {

@@ -14,6 +14,7 @@ export interface AgentSession {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE_SESSION_ID_RE = /^[a-zA-Z0-9_\-.]{1,128}$/;
 
 /**
  * Strict UUID check. Session ids come from the client and end up in the argv of a
@@ -21,6 +22,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 export function isValidSessionUuid(id: unknown): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
+}
+
+/**
+ * Validates a session ID as either a canonical UUID or a safe alphanumeric ID (e.g. Copilot/ACP).
+ * Strictly forbids shell metacharacters, control characters, spaces, and path traversals.
+ */
+export function isValidSessionId(id: unknown): id is string {
+  return typeof id === 'string' && (UUID_RE.test(id) || SAFE_SESSION_ID_RE.test(id));
 }
 
 /**

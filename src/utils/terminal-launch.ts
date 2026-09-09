@@ -6,7 +6,7 @@
 import { execa, execaSync } from 'execa';
 import * as path from 'node:path';
 
-import { isValidSessionUuid } from '../agent/session.js';
+import { isValidSessionId, isValidSessionUuid } from '../agent/session.js';
 import { TERMINAL_TITLE_PREFIX, TERMINAL_DEFAULT_TITLE } from '../core/constants.js';
 
 export interface TerminalLaunchOptions {
@@ -55,8 +55,8 @@ export function buildHarnessCliCommand(assistant: string, sessionId?: string): s
   }
 
   if (sessionId) {
-    if (!isValidSessionUuid(sessionId)) {
-      throw new Error('Invalid session UUID format.');
+    if (!isValidSessionId(sessionId)) {
+      throw new Error('Invalid session format.');
     }
     switch (normalized) {
       case 'antigravity':
@@ -108,7 +108,7 @@ export function formatTerminalTitle(
   if (options.assistant) {
     parts.push(`[${options.assistant}]`);
   }
-  if (options.sessionId && isValidSessionUuid(options.sessionId)) {
+  if (options.sessionId && isValidSessionId(options.sessionId)) {
     parts.push(`(${options.sessionId.slice(0, 8)})`);
   }
 
@@ -118,23 +118,31 @@ export function formatTerminalTitle(
 
 /**
  * Validates and sanitizes a custom command string for terminal execution.
+ * Prevents command injection and execution of dangerous shell control characters.
  */
 export function sanitizeTerminalCommand(cmd: string): string {
   const trimmed = cmd.trim();
+  if (!trimmed) {
+    throw new Error('Command cannot be empty.');
+  }
   if (/[\r\n\0]/.test(trimmed)) {
     throw new Error('Terminal command contains invalid newline or null characters.');
+  }
+  if (trimmed.length > 4096) {
+    throw new Error('Command length exceeds maximum limit of 4096 characters.');
   }
   return trimmed;
 }
 
 /**
- * Spawns an external interactive terminal at the given workspace directory.
+ * Spawns an external interactive terminal window positioned inside the workspace directory.
+ * Returns { success: true, command } or throws an error if no terminal could be spawned.
  */
 export async function launchWorkspaceTerminal(
   workspacePath: string,
   options: TerminalLaunchOptions = {},
   platform = process.platform,
-): Promise<{ success: boolean; command: string }> {
+): Promise<{ success: boolean; command?: string }> {
   const isAbsolute = platform === 'win32'
     ? path.win32.isAbsolute(workspacePath)
     : (path.posix.isAbsolute(workspacePath) || path.win32.isAbsolute(workspacePath));
@@ -164,23 +172,24 @@ export async function launchWorkspaceTerminal(
     // Method 0: Windows Terminal (wt.exe) with tab attachment to current window
     if (isBinaryOnPath('wt.exe')) {
       try {
-        const child = execa('wt.exe', [
+        const wtResult = await execa('wt.exe', [
           '-w', '0',
           'nt',
           '-d', workspacePath,
           '--title', terminalTitle,
-          shellBin, '-NoExit', '-EncodedCommand', encodedCmd,
+          shellBin, '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', encodedCmd,
         ], {
           detached: true,
           stdio: 'ignore',
+          windowsHide: false,
+          reject: false,
         });
-        if (child && typeof (child as any).catch === 'function') {
-          (child as any).catch(() => {});
+        if (wtResult && wtResult.exitCode === 0) {
+          if (typeof (wtResult as any).unref === 'function') {
+            (wtResult as any).unref();
+          }
+          return { success: true, command: cmdToRun };
         }
-        if (child && typeof (child as any).unref === 'function') {
-          (child as any).unref();
-        }
-        return { success: true, command: cmdToRun };
       } catch {
         // Fall back to standalone PowerShell/CMD if wt fails
       }
@@ -191,9 +200,10 @@ export async function launchWorkspaceTerminal(
       const res = await execa('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
         '-Command',
-        `Start-Process -FilePath '${shellBin}' -ArgumentList '-NoExit', '-EncodedCommand', '${encodedCmd}' -WorkingDirectory '${escapedWs}'`,
-      ], { reject: false, stdio: 'ignore' });
+        `Start-Process -FilePath '${shellBin}' -ArgumentList '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', '${encodedCmd}' -WorkingDirectory '${escapedWs}'`,
+      ], { reject: false, stdio: 'ignore', windowsHide: false });
       if (res.exitCode === 0) {
         return { success: true, command: cmdToRun };
       }
@@ -203,7 +213,7 @@ export async function launchWorkspaceTerminal(
     try {
       const child = execa(
         'cmd.exe',
-        ['/c', 'start', '""', shellBin, '-NoExit', '-EncodedCommand', encodedCmd],
+        ['/c', 'start', '""', shellBin, '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', encodedCmd],
         {
           detached: true,
           stdio: 'ignore',

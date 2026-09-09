@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { spawn, spawnSync } from 'child_process';
-import { existsSync, statSync, createWriteStream } from 'fs';
+import { existsSync, statSync, createWriteStream, readdirSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -286,11 +286,50 @@ function createWindow() {
   delete backendEnv.NODE_OPTIONS;
   delete backendEnv.ELECTRON_RUN_AS_NODE;
 
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const isWin = process.platform === 'win32';
+  const pathSep = isWin ? ';' : ':';
+  const rawPath = backendEnv.PATH || backendEnv.Path || '';
+  const currentPaths = rawPath.split(pathSep).filter(Boolean);
+  const extraPaths = [];
+
   if (process.platform === 'darwin') {
-    const home = process.env.HOME || '';
-    const extraPaths = ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local', 'bin'), path.join(home, '.cargo', 'bin')];
-    const currentPaths = (backendEnv.PATH || '').split(':');
-    backendEnv.PATH = [...new Set([...extraPaths, ...currentPaths])].filter(Boolean).join(':');
+    extraPaths.push('/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.local', 'bin'), path.join(home, '.cargo', 'bin'), path.join(home, '.npm-global', 'bin'));
+  } else if (process.platform === 'linux') {
+    extraPaths.push(
+      '/usr/local/bin',
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.npm-global', 'bin'),
+      path.join(home, '.cargo', 'bin'),
+    );
+  } else if (isWin) {
+    if (process.env.APPDATA) extraPaths.push(path.join(process.env.APPDATA, 'npm'));
+    if (process.env.LOCALAPPDATA) {
+      extraPaths.push(path.join(process.env.LOCALAPPDATA, 'Programs'));
+      extraPaths.push(path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps'));
+    }
+  }
+
+  // Scan for NVM node versions on Linux/macOS
+  if (process.platform !== 'win32') {
+    const nvmDir = process.env.NVM_DIR || path.join(home, '.nvm');
+    const nvmNodeDir = path.join(nvmDir, 'versions', 'node');
+    try {
+      if (existsSync(nvmNodeDir)) {
+        const versions = readdirSync(nvmNodeDir).sort().reverse();
+        for (const v of versions) {
+          const binPath = path.join(nvmNodeDir, v, 'bin');
+          if (existsSync(binPath)) extraPaths.push(binPath);
+        }
+      }
+    } catch { /* ignore */ }
+    const fnmBin = path.join(home, '.local', 'share', 'fnm', 'current', 'bin');
+    if (existsSync(fnmBin)) extraPaths.push(fnmBin);
+  }
+
+  backendEnv.PATH = [...new Set([...extraPaths, ...currentPaths])].filter(Boolean).join(pathSep);
+  if (isWin) {
+    backendEnv.Path = backendEnv.PATH;
   }
 
   // Run the minimal server entry (dist/desktop-server.js), not the full CLI —

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw } from 'lucide-react';
 
 import { Badge } from '../components/ui/badge.js';
 import { Button } from '../components/ui/button.js';
@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input.js';
 import { Textarea } from '../components/ui/textarea.js';
 import { Checkbox } from '../components/ui/checkbox.js';
 import { Spinner } from '../components/ui/spinner.js';
+import { StatusBadge } from '../components/ui/status-badge.js';
 import {
   Select,
   SelectItem,
@@ -28,11 +29,13 @@ import {
   useWorkflowTemplates,
   useSkills,
   useAgents,
+  useReposFreshness,
+  usePullRepos,
   type CreateWorkspacePayload,
 } from '../lib/api/queries.js';
 import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
-import type { RepoInfo, WorkspaceMode } from '../types.js';
+import type { RepoInfo, RepoFreshness, WorkspaceMode } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
@@ -214,6 +217,61 @@ export function StartWorkPage() {
     return (repos.data ?? []).filter((r) => adHocPaths.includes(r.path));
   }, [selectedProject, repos.data, adHocPaths]);
 
+  const [autoUpdateBase, setAutoUpdateBase] = useState(true);
+  const [pullWarning, setPullWarning] = useState<string | null>(null);
+  const pullRepos = usePullRepos();
+
+  const reposToCheck = useMemo(() => {
+    return selectedRepos.map((r) => ({
+      path: r.path,
+      branch: branchOverrides[r.path] || r.defaultBranch,
+    }));
+  }, [selectedRepos, branchOverrides]);
+
+  const freshnessQuery = useReposFreshness(reposToCheck, reposToCheck.length > 0);
+
+  const freshnessMap: Record<string, RepoFreshness> = useMemo(() => {
+    const map: Record<string, RepoFreshness> = {};
+    for (const item of freshnessQuery.data ?? []) {
+      map[item.repoPath] = item;
+    }
+    return map;
+  }, [freshnessQuery.data]);
+
+  const behindRepos = useMemo(() => {
+    return (freshnessQuery.data ?? []).filter((f) => f.status === 'behind');
+  }, [freshnessQuery.data]);
+
+  const pullAllBehind = async () => {
+    setPullWarning(null);
+    try {
+      const res = await pullRepos.mutateAsync({
+        repos: behindRepos.map((r) => ({ path: r.repoPath, branch: r.branch })),
+      });
+      const dirtyFails = res.results.filter((r) => r.status === 'dirty' || r.status === 'diverged');
+      if (dirtyFails.length > 0) {
+        setPullWarning(
+          `Could not update ${dirtyFails.length} repo(s): ${dirtyFails.map((d) => `${d.repoName} (${d.message})`).join('; ')}`,
+        );
+      }
+    } catch (err) {
+      setPullWarning(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handlePullSingle = async (repoPath: string, branch: string) => {
+    setPullWarning(null);
+    try {
+      const res = await pullRepos.mutateAsync({ path: repoPath, branch });
+      const fail = res.results.find((r) => !r.success);
+      if (fail) {
+        setPullWarning(`Could not update ${fail.repoName}: ${fail.message}`);
+      }
+    } catch (err) {
+      setPullWarning(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const inPlace = mode === 'in-place';
   const identityValid = inPlace ? workspaceName.trim().length > 0 : branchName.trim().length > 0;
   const formValid = identityValid && selectedRepos.length > 0 && description.trim().length > 0;
@@ -272,6 +330,7 @@ export function StartWorkPage() {
       enabledSkills: enabledSkills.length > 0 ? enabledSkills : undefined,
       enabledAgents: enabledAgents.length > 0 ? enabledAgents : undefined,
       teamworkInstructions: customInstructions.trim() || undefined,
+      autoUpdateBase,
     };
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
@@ -434,10 +493,102 @@ export function StartWorkPage() {
                   )
                 }
                 loading={repos.isLoading}
+                freshnessMap={freshnessMap}
               />
               <ScaffoldRepoInline onCreated={(repo) => setAdHocPaths((prev) => [...prev, repo.path])} />
             </div>
           )}
+
+          {selectedRepos.length > 0 && (
+            <div className="mt-3 rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <GitBranch className="size-3.5" />
+                  Base repository sync ({selectedRepos.length})
+                </span>
+                <div className="flex items-center gap-2">
+                  {behindRepos.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-xs px-2"
+                      onClick={pullAllBehind}
+                      disabled={pullRepos.isPending}
+                    >
+                      {pullRepos.isPending ? <Spinner className="size-3 mr-1" /> : <RefreshCw className="size-3 mr-1" />}
+                      Pull {behindRepos.length} stale {behindRepos.length === 1 ? 'repo' : 'repos'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <ul className="mt-2 divide-y divide-border text-xs">
+                {selectedRepos.map((repo) => {
+                  const freshness = freshnessMap[repo.path];
+                  const isBehind = freshness?.status === 'behind';
+                  return (
+                    <li key={repo.path} className="flex items-center justify-between py-1.5">
+                      <div className="min-w-0 flex-1 truncate pr-2">
+                        <span className="font-medium">{repo.name}</span>
+                        <span className="ml-2 font-mono text-[11px] text-muted-foreground">
+                          ({branchOverrides[repo.path] || repo.defaultBranch})
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {freshnessQuery.isLoading ? (
+                          <span className="text-muted-foreground text-[11px]">Checking…</span>
+                        ) : freshness ? (
+                          <StatusBadge
+                            tone={
+                              freshness.status === 'up-to-date'
+                                ? 'success'
+                                : freshness.status === 'behind'
+                                  ? 'warning'
+                                  : freshness.status === 'diverged'
+                                    ? 'danger'
+                                    : freshness.status === 'ahead'
+                                      ? 'info'
+                                      : 'neutral'
+                            }
+                            title={freshness.message}
+                          >
+                            {freshness.status === 'behind'
+                              ? `↓ ${freshness.behind} behind ${freshness.trackingBranch}`
+                              : freshness.status === 'up-to-date'
+                                ? 'Up to date'
+                                : freshness.status === 'diverged'
+                                  ? 'Diverged'
+                                  : freshness.status === 'ahead'
+                                    ? `↑ ${freshness.ahead} ahead`
+                                    : 'Local'}
+                          </StatusBadge>
+                        ) : null}
+                        {isBehind && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-5 px-1.5 text-[11px] text-amber-500 hover:text-amber-600"
+                            onClick={() =>
+                              handlePullSingle(
+                                repo.path,
+                                branchOverrides[repo.path] || repo.defaultBranch,
+                              )
+                            }
+                            disabled={pullRepos.isPending}
+                          >
+                            Pull
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              {pullWarning && (
+                <p className="mt-2 text-xs text-amber-500">{pullWarning}</p>
+              )}
+            </div>
+          )}
+
           {(projects.data ?? []).length === 0 && !projects.isLoading && (
             <p className="mt-2 text-xs text-muted-foreground">
               Tip: <Link to="/projects" className="text-primary hover:underline">register a project</Link> to skip
@@ -536,6 +687,14 @@ export function StartWorkPage() {
               )}
             </div>
           )}
+          <label className="mt-3 flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
+            <Checkbox
+              checked={autoUpdateBase}
+              onCheckedChange={(c) => setAutoUpdateBase(Boolean(c))}
+              aria-label="Fast-forward clean base branches before creating workspace"
+            />
+            <span>Fast-forward clean base branches to latest remote commits</span>
+          </label>
         </section>
 
         {/* 4. Description */}

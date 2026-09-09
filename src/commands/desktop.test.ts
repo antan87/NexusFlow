@@ -115,8 +115,12 @@ describe('desktop release installer', () => {
       expect(result.installedPath).toContain(path.join('.local', 'share', 'contextspace'));
       expect(path.basename(result.installedPath)).toBe('ContextSpace.AppImage');
       expect(await readFile(result.installedPath, 'utf8')).toBe(binary);
-      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain(`Exec=${quoteDesktopExecArg(result.installedPath)}`);
-      expect(await readFile(result.desktopEntryPath!, 'utf8')).toContain('Name=ContextSpace');
+      const desktopEntry = await readFile(result.desktopEntryPath!, 'utf8');
+      expect(desktopEntry).toContain(`Exec=${quoteDesktopExecArg(result.installedPath)}`);
+      expect(desktopEntry).toContain('Name=ContextSpace');
+      expect(desktopEntry).toContain('Icon=contextspace');
+      const installedIconPath = path.join(tmpDir, '.local', 'share', 'icons', 'hicolor', '512x512', 'apps', 'contextspace.png');
+      expect(await readFile(installedIconPath)).toEqual(await readFile(new URL('../../desktop/assets/icon.png', import.meta.url)));
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -261,6 +265,35 @@ describe('desktop release installer', () => {
     }
   });
 
+  it('keeps the previous Linux install when the bundled icon cannot be staged', async () => {
+    const binary = 'working-appimage';
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(releaseResponse())
+      .mockResolvedValueOnce(new Response(`${digest(binary)}  NexusFlow-9.9.9.AppImage\n`))
+      .mockResolvedValueOnce(new Response(binary));
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'nexusflow-icon-recovery-'));
+    try {
+      const first = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+      const iconPath = path.join(tmpDir, '.local', 'share', 'icons', 'hicolor', '512x512', 'apps', 'contextspace.png');
+      const entryBefore = await readFile(first.desktopEntryPath!, 'utf8');
+      const iconBefore = await readFile(iconPath);
+      await expect(installDesktop({
+        platform: 'linux',
+        arch: 'x64',
+        fetchImpl,
+        tmpDir,
+        homeDir: tmpDir,
+        iconSourcePath: path.join(tmpDir, 'missing-contextspace-icon.png'),
+      })).rejects.toThrow(/desktop icon is unavailable/i);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(await readFile(first.installedPath, 'utf8')).toBe(binary);
+      expect(await readFile(first.desktopEntryPath!, 'utf8')).toBe(entryBefore);
+      expect(await readFile(iconPath)).toEqual(iconBefore);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   describe('quoteDesktopExecArg', () => {
     it('leaves clean alphanumeric POSIX paths unquoted', () => {
       expect(quoteDesktopExecArg('/home/user/.local/share/nexusflow/NexusFlow.AppImage')).toBe('/home/user/.local/share/nexusflow/NexusFlow.AppImage');
@@ -275,4 +308,33 @@ describe('desktop release installer', () => {
       expect(quoteDesktopExecArg('/opt/app"dir/$test`cmd`')).toBe('"/opt/app\\"dir/\\$test\\`cmd\\`"');
     });
   });
+
+  describe('desktopInstallCommand output', () => {
+    it('provides clear guidance on how to launch after Linux installation', async () => {
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = vi.fn((...args: any[]) => {
+        logs.push(args.join(' '));
+      });
+
+      const binary = 'verified-contextspace-appimage';
+      const csAssetUrl = 'https://github.com/antan87/ContextSpace/releases/download/v2.10.0/ContextSpace-2.10.0.AppImage';
+      const csSidecarUrl = `${csAssetUrl}.sha256`;
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(releaseResponse('ContextSpace-2.10.0.AppImage', csAssetUrl, csSidecarUrl))
+        .mockResolvedValueOnce(new Response(`${digest(binary)}  ContextSpace-2.10.0.AppImage\n`))
+        .mockResolvedValueOnce(new Response(binary));
+
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'contextspace-cmd-test-'));
+      try {
+        const result = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+        expect(result.installedPath).toBeDefined();
+        expect(result.desktopEntryPath).toBeDefined();
+      } finally {
+        console.log = origLog;
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
+

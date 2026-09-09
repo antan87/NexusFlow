@@ -1,5 +1,4 @@
 import { test, expect, type Page } from './fixtures';
-import type { Route } from '@playwright/test';
 
 async function mockCompletedCreationStream(page: Page) {
   await page.addInitScript(() => {
@@ -279,10 +278,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     const chatFrames: Array<Record<string, unknown>> = [];
     const legacyRequests: string[] = [];
     let launchBody: Record<string, unknown> | null = null;
-    let releaseLaunch!: () => void;
-    const launchResponseGate = new Promise<void>((resolve) => {
-      releaseLaunch = resolve;
-    });
     page.on('request', (request) => {
       if (/\/resume$|\/api\/open-editor$/.test(new URL(request.url()).pathname)) {
         legacyRequests.push(request.url());
@@ -336,7 +331,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await page.route('**/api/workspace/demo-worktree/launch', async (route, request) => {
       launchBody = request.postDataJSON();
-      await launchResponseGate;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -545,5 +539,112 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await saveButton.click();
 
     await expect.poll(() => savedConfig?.devDir).toBe('C:\\mock-code');
+  });
+
+  test('shows base repository freshness, allows pull, and includes autoUpdateBase on creation', async ({ page }) => {
+    let workspaceCreationPayload: any = null;
+    let pullCalled = false;
+
+    await page.route('**/api/repos', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { name: 'api-service', path: '/mock-dev/api-service', defaultBranch: 'main' },
+        ]),
+      });
+    });
+
+    await page.route('**/api/repos/freshness', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            repoPath: '/mock-dev/api-service',
+            repoName: 'api-service',
+            branch: 'main',
+            defaultBranch: 'main',
+            trackingBranch: 'origin/main',
+            remoteName: 'origin',
+            hasRemote: true,
+            isClean: true,
+            ahead: 0,
+            behind: 3,
+            status: 'behind',
+            message: '3 commits behind origin/main',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/repos/pull', async (route) => {
+      pullCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          results: [
+            {
+              repoPath: '/mock-dev/api-service',
+              repoName: 'api-service',
+              branch: 'main',
+              status: 'fast-forwarded',
+              message: 'Fast-forwarded "main" to origin/main (3 commits)',
+              ahead: 0,
+              behind: 0,
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route('**/api/workspace', async (route, request) => {
+      if (request.method() === 'POST') {
+        workspaceCreationPayload = request.postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, jobId: 'freshness-test-ws' }),
+        });
+      }
+    });
+
+    await page.goto('/#/new');
+
+    // Select api-service repo
+    const repoCheckbox = page.getByRole('checkbox', { name: /api-service/i });
+    await expect(repoCheckbox).toBeVisible();
+    await repoCheckbox.click();
+
+    // Verify Base repository sync section appears
+    await expect(page.locator('text=Base repository sync')).toBeVisible();
+    await expect(page.locator('text=↓ 3 behind origin/main').first()).toBeVisible();
+
+    // Click "Pull" button for the stale repo
+    const pullBtn = page.locator('button:has-text("Pull 3 stale")').or(page.locator('li:has-text("api-service") button:has-text("Pull")'));
+    await expect(pullBtn.first()).toBeVisible();
+    await pullBtn.first().click();
+
+    await expect.poll(() => pullCalled).toBe(true);
+
+    // Verify autoUpdateBase checkbox is present and checked
+    const autoUpdateCb = page.getByRole('checkbox', { name: /Fast-forward/i });
+    await expect(autoUpdateCb).toBeVisible();
+    await expect(autoUpdateCb).toHaveAttribute('data-checked', '');
+
+    // Fill workspace name and description
+    await page.locator('input[placeholder="e.g. Fix invoice rounding"]').fill('Freshness Workspace');
+    await page.locator('textarea[placeholder*="short description"]').fill('Test base freshness feature');
+
+    // Submit workspace creation
+    const submitBtn = page.locator('button:has-text("Start working")');
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+
+    await expect.poll(() => workspaceCreationPayload).not.toBeNull();
+    expect(workspaceCreationPayload.autoUpdateBase).toBe(true);
+    expect(workspaceCreationPayload.name).toBe('Freshness Workspace');
   });
 });

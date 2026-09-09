@@ -21,6 +21,7 @@ import { detectEditors } from '../utils/detect-editors.js';
 import { openInEditor } from '../utils/open-editor.js';
 import { debugLog } from '../utils/debug.js';
 import { getSessionCwd } from '../utils/feature.js';
+import { checkReposFreshness, fastForwardRepos } from '../utils/repo-freshness.js';
 import {
   promptBranchName,
   promptDescription,
@@ -185,6 +186,52 @@ export async function createCommand(): Promise<void> {
       repo.existingBranch = override;
       console.log(chalk.dim(`  ${repo.name}: using existing branch "${override}"`));
     }
+  }
+
+  // ── 4.3. Check base repository freshness against remote tracking ───
+  const freshnessSpinner = ora('Checking base repository freshness...').start();
+  try {
+    const reposToCheck = selectedRepos.map((r) => ({
+      path: r.path,
+      branch: r.existingBranch ?? r.defaultBranch,
+    }));
+    const freshnessList = await checkReposFreshness(reposToCheck);
+    const behindRepos = freshnessList.filter((f) => f.status === 'behind');
+
+    if (behindRepos.length > 0) {
+      freshnessSpinner.warn(
+        `Detected ${behindRepos.length} repository(ies) behind remote tracking:`,
+      );
+      for (const item of behindRepos) {
+        console.log(
+          chalk.yellow(
+            `  • ${item.repoName} (${item.branch}): ${item.behind} commit(s) behind ${item.trackingBranch}`,
+          ),
+        );
+      }
+      const shouldUpdate = await confirm({
+        message: 'Fast-forward clean base branches to latest remote commits before branching?',
+        default: true,
+      });
+      if (shouldUpdate) {
+        const updateSpinner = ora('Fast-forwarding base branches...').start();
+        const updateResults = await fastForwardRepos(
+          behindRepos.map((r) => ({ path: r.repoPath, branch: r.branch })),
+        );
+        for (const res of updateResults) {
+          if (res.success) {
+            console.log(chalk.green(`  ✔ ${res.repoName}: ${res.message}`));
+          } else {
+            console.log(chalk.yellow(`  ⚠ ${res.repoName}: ${res.message}`));
+          }
+        }
+        updateSpinner.succeed('Base branches updated.');
+      }
+    } else {
+      freshnessSpinner.succeed('Base branches are up to date with remote tracking.');
+    }
+  } catch {
+    freshnessSpinner.stop();
   }
 
   // ── 5. Detect and select AI assistants ──────────────────────────────

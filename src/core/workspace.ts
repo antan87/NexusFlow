@@ -14,6 +14,7 @@ import type { Feature, RepoInfo, RepoSelection, WorkspaceContext } from '../type
 import { isInPlace, normalizeFeature } from '../utils/feature.js';
 import { createWorktree, removeWorktree } from './worktree.js';
 import { detectDefaultBranch } from '../utils/git.js';
+import { fastForwardRepos } from '../utils/repo-freshness.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import { deleteWorkspaceFiles } from './storage.js';
@@ -217,6 +218,15 @@ async function scaffoldWorkspaceDir(
   }
 }
 
+/** Options for {@link createWorkspace}. */
+export interface CreateWorkspaceOptions {
+  /**
+   * Whether to fast-forward clean base repository branches to remote tracking commits before branching.
+   * Defaults to true.
+   */
+  autoUpdateBase?: boolean;
+}
+
 /**
  * Creates a git worktree inside the workspace for every repo, recording a
  * rollback action per worktree into `rollbackActions` as it goes (so the
@@ -227,6 +237,7 @@ async function materializeWorktrees(
   repos: RepoSelection[],
   rollbackActions: WorktreeRollbackAction[],
   onProgress?: (repoName: string, index: number, total: number) => void,
+  options?: CreateWorkspaceOptions,
 ): Promise<void> {
   const workspacePath = feature.workspacePath;
   for (let i = 0; i < repos.length; i++) {
@@ -241,7 +252,10 @@ async function materializeWorktrees(
       repo.defaultBranch,
       // An explicitly chosen branch must exist — silently creating a fresh
       // one would defeat the point of picking it.
-      { mustExist: repo.existingBranch !== undefined },
+      {
+        mustExist: repo.existingBranch !== undefined,
+        autoUpdateBase: options?.autoUpdateBase,
+      },
     );
     rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
   }
@@ -278,21 +292,37 @@ async function finalizeWorkspace(feature: Feature): Promise<void> {
  *                     repo with `existingBranch` set checks out that branch
  *                     (which must exist) instead of the feature branch.
  * @param onProgress - Optional per-repo progress callback (repo name, index, total).
+ * @param options    - See {@link CreateWorkspaceOptions}.
  * @returns The absolute path to the newly created workspace.
  */
 export async function createWorkspace(
   feature: Feature,
   repos: RepoSelection[],
   onProgress?: (repoName: string, index: number, total: number) => void,
+  options?: CreateWorkspaceOptions,
 ): Promise<string> {
   const workspacePath = feature.workspacePath;
+
+  // In-place mode operates directly in source repos; fast-forward them if requested
+  if (isInPlace(feature) && options?.autoUpdateBase !== false) {
+    try {
+      await fastForwardRepos(
+        repos.map((r) => ({
+          path: r.path,
+          branch: r.existingBranch ?? r.defaultBranch,
+        })),
+      );
+    } catch {
+      // Best-effort update
+    }
+  }
 
   await scaffoldWorkspaceDir(feature, repos);
 
   const rollbackActions: WorktreeRollbackAction[] = [];
   try {
     if (!isInPlace(feature)) {
-      await materializeWorktrees(feature, repos, rollbackActions, onProgress);
+      await materializeWorktrees(feature, repos, rollbackActions, onProgress, options);
     }
     await finalizeWorkspace(feature);
   } catch (error) {

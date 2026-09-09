@@ -39,6 +39,11 @@ import { createNewRepo, isValidProjectName } from './core/new-repo.js';
 import { loadProjects, createProject, updateProject, removeProject, slugifyProjectName } from './core/projects.js';
 import { getSessionCwd, isInPlace, resolveFeatureRepoPath } from './utils/feature.js';
 import { listBranches } from './utils/git.js';
+import {
+  checkRepoFreshness,
+  checkReposFreshness,
+  fastForwardRepos,
+} from './utils/repo-freshness.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
@@ -62,7 +67,7 @@ import {
   getSessionTranscript,
 } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
-import { isValidSessionUuid, type AgentSession } from './agent/session.js';
+import { isValidSessionId, isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './agent/TurnSessionManager.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
@@ -348,9 +353,14 @@ export class PathAccessError extends Error {
 function assertWithin(baseDir: string, target: string): string {
   const base = path.resolve(baseDir);
   const resolved = path.resolve(target);
+  const isWin = process.platform === 'win32';
+  const normBase = isWin ? base.toLowerCase() : base;
+  const normResolved = isWin ? resolved.toLowerCase() : resolved;
+  const sep = isWin ? path.sep.toLowerCase() : path.sep;
+
   // Trailing separator prevents a sibling like `feat-secret` from passing the
   // prefix test for base `feat`.
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+  if (normResolved !== normBase && !normResolved.startsWith(normBase + (normBase.endsWith(sep) ? '' : sep))) {
     throw new PathAccessError();
   }
   return resolved;
@@ -415,7 +425,10 @@ async function resolveExactLaunchWorkspace(
 
   try {
     const declaredWorkspace = await fs.realpath(path.resolve(feature.workspacePath));
-    return path.resolve(declaredWorkspace) === path.resolve(safeWorkspacePath)
+    const isWin = process.platform === 'win32';
+    const normDeclared = isWin ? path.resolve(declaredWorkspace).toLowerCase() : path.resolve(declaredWorkspace);
+    const normSafe = isWin ? path.resolve(safeWorkspacePath).toLowerCase() : path.resolve(safeWorkspacePath);
+    return normDeclared === normSafe
       ? safeWorkspacePath
       : null;
   } catch {
@@ -783,6 +796,86 @@ app.get('/api/repos/branches', async (c) => {
   }
 });
 
+// 3a.1. Base repository freshness inspection
+app.get('/api/repos/freshness', async (c) => {
+  try {
+    const repoPath = c.req.query('path');
+    if (!repoPath) {
+      return c.json({ error: 'Missing "path" query parameter' }, 400);
+    }
+    const branch = c.req.query('branch') || undefined;
+    const fetchParam = c.req.query('fetch');
+    const config = await loadConfig();
+    const resolved = assertWithin(config.devDir, repoPath);
+    const freshness = await checkRepoFreshness(resolved, branch, {
+      fetch: fetchParam !== 'false' && fetchParam !== '0',
+    });
+    return c.json(freshness);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+app.post('/api/repos/freshness', async (c) => {
+  try {
+    const body = await c.req.json() as {
+      repos?: Array<{ path: string; branch?: string }>;
+      fetch?: boolean;
+    };
+    if (!body.repos || !Array.isArray(body.repos)) {
+      return c.json({ error: 'Missing "repos" array in request body' }, 400);
+    }
+    const config = await loadConfig();
+    const validatedRepos = body.repos.map((r) => ({
+      path: assertWithin(config.devDir, r.path),
+      branch: r.branch,
+    }));
+    const results = await checkReposFreshness(validatedRepos, {
+      fetch: body.fetch !== false,
+    });
+    return c.json(results);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 3a.2. Fast-forward base repository branch to remote tracking branch
+app.post('/api/repos/pull', async (c) => {
+  try {
+    const body = await c.req.json() as {
+      path?: string;
+      branch?: string;
+      repos?: Array<{ path: string; branch?: string }>;
+    };
+    const config = await loadConfig();
+    let reposToUpdate: Array<{ path: string; branch?: string }> = [];
+    if (body.repos && Array.isArray(body.repos)) {
+      reposToUpdate = body.repos.map((r) => ({
+        path: assertWithin(config.devDir, r.path),
+        branch: r.branch,
+      }));
+    } else if (body.path) {
+      reposToUpdate = [
+        {
+          path: assertWithin(config.devDir, body.path),
+          branch: body.branch,
+        },
+      ];
+    } else {
+      return c.json({ error: 'Missing "path" or "repos" in request body' }, 400);
+    }
+
+    const results = await fastForwardRepos(reposToUpdate);
+    const allSuccessful = results.every((r) => r.success);
+    return c.json({
+      success: allSuccessful,
+      results,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 3b. Scaffold a brand-new local git repository in devDir
 app.post('/api/repos/new', async (c) => {
   try {
@@ -1126,7 +1219,9 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     // Step 1: Materialize the workspace (worktrees, or just the lightweight
     // dir). One stable step id for both modes — only the wording differs.
     updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
-    await createWorkspace(feature, body.repos);
+    await createWorkspace(feature, body.repos, undefined, {
+      autoUpdateBase: body.autoUpdateBase !== false,
+    });
 
     if (Array.isArray(body.enabledSkills) || Array.isArray(body.enabledAgents) || Array.isArray(body.enabledCategories)) {
       await saveWorkspaceSkillsConfig(workspacePath, {
@@ -1193,6 +1288,7 @@ app.post('/api/workspace', async (c) => {
       enabledAgents?: string[];
       enabledCategories?: string[];
       teamworkInstructions?: string;
+      autoUpdateBase?: boolean;
       resumption?: {
         testCommand?: string;
         mockCommand?: string;
@@ -1518,11 +1614,12 @@ app.post('/api/workspace/:id/terminal', async (c) => {
 
   try {
     const id = decodeURIComponent(c.req.param('id'));
-    const { command, assistant, sessionId, title } = await c.req.json().catch(() => ({})) as {
+    const { command, assistant, sessionId, title, cwd } = await c.req.json().catch(() => ({})) as {
       command?: unknown;
       assistant?: unknown;
       sessionId?: unknown;
       title?: unknown;
+      cwd?: unknown;
     };
 
     if (assistant !== undefined) {
@@ -1532,8 +1629,8 @@ app.post('/api/workspace/:id/terminal', async (c) => {
     }
 
     if (sessionId !== undefined) {
-      if (typeof sessionId !== 'string' || !isValidSessionUuid(sessionId)) {
-        return c.json({ error: 'Invalid session UUID format.' }, 400);
+      if (typeof sessionId !== 'string' || !isValidSessionId(sessionId)) {
+        return c.json({ error: 'Invalid session ID format.' }, 400);
       }
     }
 
@@ -1543,6 +1640,10 @@ app.post('/api/workspace/:id/terminal', async (c) => {
 
     if (title !== undefined && typeof title !== 'string') {
       return c.json({ error: 'Title must be a string.' }, 400);
+    }
+
+    if (cwd !== undefined && typeof cwd !== 'string') {
+      return c.json({ error: 'Cwd must be a string.' }, 400);
     }
 
     const config = await loadConfig();
@@ -1560,7 +1661,21 @@ app.post('/api/workspace/:id/terminal', async (c) => {
 
     await checkGenerationLock(workspacePath, { markDocuments: true });
 
-    const res = await launchWorkspaceTerminal(workspacePath, {
+    let launchPath = workspacePath;
+    if (typeof cwd === 'string' && cwd.trim()) {
+      try {
+        const canonicalWorkspace = await fs.realpath(workspacePath);
+        const canonicalCwd = await fs.realpath(path.resolve(workspacePath, cwd.trim()));
+        launchPath = assertWithin(canonicalWorkspace, canonicalCwd);
+      } catch (error) {
+        if (error instanceof PathAccessError) {
+          return c.json({ error: 'Launch directory must be within workspace.' }, 400);
+        }
+        return c.json({ error: 'Launch directory not found or invalid.' }, 400);
+      }
+    }
+
+    const res = await launchWorkspaceTerminal(launchPath, {
       command: typeof command === 'string' ? command : undefined,
       assistant: typeof assistant === 'string' ? assistant : undefined,
       sessionId: typeof sessionId === 'string' ? sessionId : undefined,
@@ -2315,8 +2430,12 @@ app.get('/api/workspace/:id/plan', async (c) => {
     let content = '';
     try {
       content = await fs.readFile(resolved.path, 'utf-8');
-    } catch {
-      content = '# Workspace Plan\n\nNo implementation plan file yet.';
+    } catch (err: any) {
+      if (err && (err.code === 'ENOENT' || err.code === 'ENOTDIR')) {
+        content = '# Workspace Plan\n\nNo implementation plan file yet.';
+      } else {
+        throw err;
+      }
     }
 
     return c.json({ content });

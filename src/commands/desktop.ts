@@ -60,6 +60,8 @@ export interface DesktopInstallOptions {
   spawnImpl?: typeof spawn;
   /** Override process.arch in tests; published assets are x64 only. */
   arch?: NodeJS.Architecture;
+  /** Override the bundled Linux icon path in tests. */
+  iconSourcePath?: string;
 }
 
 // Metadata and checksum requests should fail promptly, but an AppImage can be
@@ -68,6 +70,7 @@ export interface DesktopInstallOptions {
 // is briefly slow.
 const RELEASE_METADATA_TIMEOUT_MS = 30_000;
 const DESKTOP_ASSET_TIMEOUT_MS = 15 * 60_000;
+const LINUX_ICON_NAME = BRAND_NAME.toLowerCase();
 
 function isSafeReleaseApiUrl(candidate: string): boolean {
   try {
@@ -199,6 +202,7 @@ async function writeLinuxDesktopEntry(entryPath: string, appImagePath: string, a
     `Name=${appName}`,
     'Comment=Multi-repo workspace manager for AI-assisted development',
     `Exec=${quoteDesktopExecArg(appImagePath)}`,
+    `Icon=${LINUX_ICON_NAME}`,
     'Terminal=false',
     'Categories=Development;Utility;',
     `StartupWMClass=${appName}`,
@@ -220,6 +224,16 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   const arch = options.arch ?? process.arch;
   if (arch !== 'x64') {
     throw new Error(`Desktop installer is unsupported on ${platform}/${arch}; published desktop assets are x64 only.`);
+  }
+
+  const iconSourcePath = platform === 'linux'
+    ? options.iconSourcePath ?? getDesktopIconPath()
+    : undefined;
+  if (iconSourcePath) {
+    const iconInfo = await stat(iconSourcePath).catch(() => undefined);
+    if (!iconInfo?.isFile()) {
+      throw new Error(`The bundled ${BRAND_NAME} desktop icon is unavailable at ${iconSourcePath}.`);
+    }
   }
 
   const releaseApiUrl = options.releaseApiUrl ?? GITHUB_RELEASE_API_URL;
@@ -255,6 +269,8 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
   const tempRoot = await mkdtemp(path.join(options.tmpDir ?? os.tmpdir(), `${CLI_NAME}-desktop-`));
   const downloadedPath = path.join(tempRoot, assetName);
   let stagedPath: string | undefined;
+  let stagedIconPath: string | undefined;
+  let stagedDesktopEntryPath: string | undefined;
   try {
     const sidecarResponse = await fetchRequired(
       fetchImpl(sidecar.browser_download_url, requestOptions({ 'User-Agent': DESKTOP_INSTALLER_USER_AGENT })),
@@ -287,24 +303,36 @@ export async function installDesktop(options: DesktopInstallOptions = {}): Promi
     const installDirName = installName.toLowerCase();
     const installDir = path.join(homeDir, '.local', 'share', installDirName);
     const desktopDir = path.join(homeDir, '.local', 'share', 'applications');
+    const iconDir = path.join(homeDir, '.local', 'share', 'icons', 'hicolor', '512x512', 'apps');
+    const iconPath = path.join(iconDir, `${LINUX_ICON_NAME}.png`);
     // Keep the launcher target stable across releases. A versioned filename
     // would leave an old desktop entry behind and make updates appear to
     // succeed while launching the previous AppImage.
     const installedPath = path.join(installDir, `${installName}.AppImage`);
     const desktopEntryPath = path.join(desktopDir, `${installName.toLowerCase()}.desktop`);
-    stagedPath = `${installedPath}.tmp-${process.pid}-${Date.now()}`;
+    const stagingSuffix = `.tmp-${process.pid}-${Date.now()}`;
+    stagedPath = `${installedPath}${stagingSuffix}`;
+    stagedIconPath = `${iconPath}${stagingSuffix}`;
+    stagedDesktopEntryPath = `${desktopEntryPath}${stagingSuffix}`;
     await mkdir(installDir, { recursive: true, mode: 0o755 });
     await mkdir(desktopDir, { recursive: true, mode: 0o755 });
+    await mkdir(iconDir, { recursive: true, mode: 0o755 });
     await copyFile(downloadedPath, stagedPath);
     await chmod(stagedPath, 0o755);
+    await copyFile(iconSourcePath!, stagedIconPath);
+    await chmod(stagedIconPath, 0o644);
+    await writeLinuxDesktopEntry(stagedDesktopEntryPath, installedPath, appName);
     await rename(stagedPath, installedPath);
-    await writeLinuxDesktopEntry(desktopEntryPath, installedPath, appName);
+    await rename(stagedIconPath, iconPath);
+    await rename(stagedDesktopEntryPath, desktopEntryPath);
     await rm(tempRoot, { recursive: true, force: true });
     return { platform, assetName, sha256: actualHash, installedPath, desktopEntryPath };
   } catch (error) {
     // A failed copy/rename must not damage the currently installed AppImage.
     // The temporary sibling is safe to remove independently.
     if (stagedPath) await rm(stagedPath, { force: true }).catch(() => {});
+    if (stagedIconPath) await rm(stagedIconPath, { force: true }).catch(() => {});
+    if (stagedDesktopEntryPath) await rm(stagedDesktopEntryPath, { force: true }).catch(() => {});
     await rm(tempRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
@@ -327,6 +355,10 @@ function resolveRepoRoot(): string {
   return path.resolve(thisDir, '..', '..');
 }
 
+function getDesktopIconPath(): string {
+  return path.join(resolveRepoRoot(), 'desktop', 'assets', 'icon.png');
+}
+
 function getDesktopDir(): string {
   return path.join(resolveRepoRoot(), 'desktop');
 }
@@ -340,41 +372,71 @@ export async function desktopCommand(): Promise<void> {
 
   const desktopDir = getDesktopDir();
 
-  if (!existsSync(path.join(desktopDir, 'main.js'))) {
-    console.log(chalk.yellow('Desktop app not found at:'));
-    console.log(chalk.dim(`  ${desktopDir}\n`));
-    console.log(chalk.white('The Electron app lives in the workspace `desktop/` folder. From a source checkout:\n'));
-    console.log(chalk.green('  cd desktop && npm install && npm start\n'));
+  // 1. If running inside a source checkout where desktop/main.js exists:
+  if (existsSync(path.join(desktopDir, 'main.js'))) {
+    if (!existsSync(path.join(desktopDir, 'node_modules'))) {
+      console.log(chalk.yellow('Desktop dependencies are not installed.\n'));
+      console.log(chalk.white('Install them first:\n'));
+      console.log(chalk.green('  cd desktop && npm install\n'));
+      return;
+    }
+
+    console.log(chalk.dim('Launching the desktop app from source checkout…'));
+
+    const isWin = process.platform === 'win32';
+    const child = spawn(isWin ? 'npm.cmd' : 'npm', ['start'], {
+      cwd: desktopDir,
+      detached: true,
+      stdio: 'ignore',
+      shell: isWin,
+      windowsHide: true,
+    });
+
+    child.on('error', (err) => {
+      console.error(chalk.red(`  ✖ Failed to launch desktop app: ${err.message}`));
+    });
+
+    child.unref();
+
+    console.log(chalk.green('Desktop app launched.\n'));
+    console.log(chalk.dim('(Ensure the CLI is built — `npm run build` — so the app can start its backend.)\n'));
     return;
   }
 
-  if (!existsSync(path.join(desktopDir, 'node_modules'))) {
-    console.log(chalk.yellow('Desktop dependencies are not installed.\n'));
-    console.log(chalk.white('Install them first:\n'));
-    console.log(chalk.green('  cd desktop && npm install\n'));
-    return;
+  // 2. Check for an installed packaged desktop AppImage on Linux
+  if (process.platform === 'linux') {
+    const homeDir = os.homedir();
+    const candidates = [
+      path.join(homeDir, '.local', 'share', 'contextspace', 'ContextSpace.AppImage'),
+      path.join(homeDir, '.local', 'share', 'nexusflow', 'NexusFlow.AppImage'),
+    ];
+    const installed = candidates.find((p) => existsSync(p));
+    if (installed) {
+      console.log(chalk.dim(`Launching installed desktop app from:\n  ${installed}…`));
+      const child = spawn(installed, [], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.on('error', (err) => {
+        console.error(chalk.red(`  ✖ Failed to launch installed desktop app: ${err.message}`));
+      });
+      child.unref();
+      console.log(chalk.green('Desktop app launched.\n'));
+      return;
+    }
   }
 
-  console.log(chalk.dim('Launching the desktop app…'));
-
-  // The Electron app spawns the backend from ../dist, so the CLI must be built.
-  const isWin = process.platform === 'win32';
-  const child = spawn(isWin ? 'npm.cmd' : 'npm', ['start'], {
-    cwd: desktopDir,
-    detached: true,
-    stdio: 'ignore',
-    shell: isWin, // .cmd requires a shell on patched Node (CVE-2024-27980)
-    windowsHide: true,
-  });
-
-  child.on('error', (err) => {
-    console.error(chalk.red(`  ✖ Failed to launch desktop app: ${err.message}`));
-  });
-
-  child.unref();
-
-  console.log(chalk.green('Desktop app launched.\n'));
-  console.log(chalk.dim('(Ensure the CLI is built — `npm run build` — so the app can start its backend.)\n'));
+  // 3. Neither source nor installed app found: provide actionable instructions
+  console.log(chalk.yellow('No installed desktop application or source checkout found.\n'));
+  console.log(chalk.white('To install the desktop application, run:'));
+  console.log(chalk.green(`  ${CLI_NAME} desktop install\n`));
+  if (process.platform === 'linux') {
+    console.log(chalk.white('Once installed, you can also launch ContextSpace from:'));
+    console.log(chalk.cyan('  • Application menu: ') + chalk.white('Activities / App Grid (press Super key, search for ContextSpace)'));
+    console.log(chalk.cyan('  • Terminal:         ') + chalk.green('gtk-launch contextspace') + chalk.white(' or execute the AppImage directly\n'));
+  }
+  console.log(chalk.dim('From a source repository checkout, run:'));
+  console.log(chalk.dim('  cd desktop && npm install && npm start\n'));
 }
 
 /** Explicit, user-initiated desktop installer command. */
@@ -382,9 +444,21 @@ export async function desktopInstallCommand(): Promise<void> {
   console.log(chalk.bold.cyan(`\n🖥️  ${BRAND_NAME} — Desktop Installer\n`));
   const result = await installDesktop();
   if (result.platform === 'win32') {
-    console.log(chalk.green(`Downloaded and verified ${result.assetName}. Launching the Windows installer…`));
+    console.log(chalk.green(`✔ Downloaded and verified ${result.assetName}. Launching the Windows installer…`));
   } else {
-    console.log(chalk.green(`Installed and verified ${result.assetName} at ${result.installedPath}.`));
-    console.log(chalk.dim(`Desktop entry created at ${result.desktopEntryPath}.`));
+    const desktopFile = result.desktopEntryPath
+      ? path.basename(result.desktopEntryPath, '.desktop')
+      : 'contextspace';
+    console.log(chalk.green(`✔ Installed and verified ${result.assetName}`));
+    console.log(chalk.dim(`  AppImage:      ${result.installedPath}`));
+    if (result.desktopEntryPath) {
+      console.log(chalk.dim(`  Desktop entry: ${result.desktopEntryPath}`));
+    }
+    console.log(chalk.bold('\nTo start ContextSpace Desktop:\n'));
+    console.log(chalk.cyan('  • Application menu: ') + chalk.white('Open Activities (press Super / Windows key), search for ') + chalk.bold.white(BRAND_NAME) + chalk.white(', and click to launch.'));
+    console.log(chalk.cyan('  • Terminal:         ') + chalk.white('Run ') + chalk.green(`gtk-launch ${desktopFile}`) + chalk.white(' or execute:\n') + chalk.dim(`                      ${result.installedPath}\n`));
+    console.log(chalk.cyan(`  • CLI shortcut:     `) + chalk.white('Run ') + chalk.green(`${CLI_NAME} desktop`) + chalk.white(' anytime.\n'));
+    console.log(chalk.dim('Note: This runs the packaged desktop application. If developing from a source checkout,'));
+    console.log(chalk.dim('use `npm run build && cd desktop && npm start` instead.\n'));
   }
 }

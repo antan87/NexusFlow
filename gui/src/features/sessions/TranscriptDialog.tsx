@@ -51,6 +51,8 @@ const getResumeCommand = (assistant: string, sessionId: string): string => {
       return `codex resume ${sessionId}`;
     case 'copilot':
       return `copilot --resume ${sessionId}`;
+    case 'cursor':
+      return `cursor-agent --resume ${sessionId}`;
     default:
       return `agy --conversation ${sessionId}`;
   }
@@ -126,6 +128,7 @@ export function TranscriptDialog({
         workspaceId: ws.branchName,
         assistant: activeSession.assistant,
         sessionId: activeSession.id,
+        cwd: activeSession.workspacePath,
       });
       showToast(`Launched interactive terminal for ${assistantLabel(activeSession.assistant)}.`, 'success');
       setActiveSession(null);
