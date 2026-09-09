@@ -178,11 +178,20 @@ function AppInner() {
   const [gitChangesLoading, setGitChangesLoading] = useState(false);
   const [knowledgeContent, setKnowledgeContent] = useState<string>('');
   const [knowledgeLoading, setKnowledgeLoading] = useState<boolean>(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [isEditingKnowledge, setIsEditingKnowledge] = useState<boolean>(false);
   const [editedKnowledge, setEditedKnowledge] = useState<string>('');
   const [saveKnowledgeLoading, setSaveKnowledgeLoading] = useState<boolean>(false);
+  const [saveKnowledgeError, setSaveKnowledgeError] = useState<string | null>(null);
   const [planContent, setPlanContent] = useState<string>('');
   const [planLoading, setPlanLoading] = useState<boolean>(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const activeWorkspaceRef = useRef<string | null>(null);
+  const knowledgeLoadRequestRef = useRef(0);
+  const planLoadRequestRef = useRef(0);
+  const saveKnowledgeRequestRef = useRef(0);
+  const editedKnowledgeRef = useRef('');
+  const isEditingKnowledgeRef = useRef(false);
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
   const [syncResults, setSyncResults] = useState<any[] | null>(null);
   const [commitMessage, setCommitMessage] = useState<string>('');
@@ -191,6 +200,17 @@ function AppInner() {
   const [commitResults, setCommitResults] = useState<any[] | null>(null);
   const [deleteWsLoading, setDeleteWsLoading] = useState<string | null>(null);
   const [addRepoLoading, setAddRepoLoading] = useState<boolean>(false);
+
+  // Keep refs in sync with the editor controls so async document requests can
+  // preserve a draft even when the user types while a request is in flight.
+  const updateEditedKnowledge = (value: string) => {
+    editedKnowledgeRef.current = value;
+    setEditedKnowledge(value);
+  };
+  const updateIsEditingKnowledge = (value: boolean) => {
+    isEditingKnowledgeRef.current = value;
+    setIsEditingKnowledge(value);
+  };
 
   // AI toolchain update states
   const [toolsStatus, setToolsStatus] = useState<any[]>([]);
@@ -517,51 +537,109 @@ function AppInner() {
 
 
   const fetchKnowledge = async (wsId: string) => {
+    const requestId = ++knowledgeLoadRequestRef.current;
+    const isCurrentRequest = () =>
+      activeWorkspaceRef.current === wsId && knowledgeLoadRequestRef.current === requestId;
+
     setKnowledgeLoading(true);
+    setKnowledgeError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`);
-      const data = await res.json();
-      setKnowledgeContent(data.content || '');
-      setEditedKnowledge(data.content || '');
+      if (!res.ok) throw new Error('knowledge request failed');
+      const data: unknown = await res.json();
+      if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
+        throw new Error('knowledge response was malformed');
+      }
+      if (!isCurrentRequest()) return;
+
+      const content = (data as { content: string }).content;
+      setKnowledgeContent(content);
+      // A retry can finish after the editor opened and the user started
+      // typing. In that case the loaded revision must not replace the draft.
+      if (!isEditingKnowledgeRef.current) {
+        editedKnowledgeRef.current = content;
+        setEditedKnowledge(content);
+      }
+      setKnowledgeError(null);
     } catch (e) {
-      console.error(e);
+      if (!isCurrentRequest()) return;
+      console.error('Failed to load workspace knowledge:', e);
+      setKnowledgeError('Could not load Knowledge. Existing content and your draft were kept. Retry when ready.');
     } finally {
-      setKnowledgeLoading(false);
+      if (isCurrentRequest()) setKnowledgeLoading(false);
     }
   };
 
   const handleSaveKnowledge = async (wsId: string) => {
+    const requestId = ++saveKnowledgeRequestRef.current;
+    const draftToSave = editedKnowledgeRef.current;
+    const isCurrentRequest = () =>
+      activeWorkspaceRef.current === wsId && saveKnowledgeRequestRef.current === requestId;
+
     setSaveKnowledgeLoading(true);
+    setSaveKnowledgeError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: editedKnowledge }),
+        body: JSON.stringify({ content: draftToSave }),
       });
-      if (res.ok) {
-        setKnowledgeContent(editedKnowledge);
-        setIsEditingKnowledge(false);
+      if (!res.ok) throw new Error('knowledge save request failed');
+      const data: unknown = await res.json();
+      if (!data || typeof data !== 'object' || (data as { success?: unknown }).success !== true) {
+        throw new Error('knowledge save response was not confirmed');
+      }
+      if (!isCurrentRequest()) return;
+
+      // A load that started before this confirmed save is now stale. Advance
+      // the load generation before publishing the saved revision so a late
+      // response cannot overwrite it or put the spinner back into the view.
+      knowledgeLoadRequestRef.current += 1;
+      setKnowledgeLoading(false);
+      setKnowledgeContent(draftToSave);
+      setKnowledgeError(null);
+      setSaveKnowledgeError(null);
+      // If typing continued while the save was pending, keep the editor open
+      // with the newer draft while recording the confirmed saved revision.
+      if (isEditingKnowledgeRef.current && editedKnowledgeRef.current === draftToSave) {
+        updateIsEditingKnowledge(false);
       }
     } catch (e) {
-      console.error(e);
+      if (!isCurrentRequest()) return;
+      console.error('Failed to save workspace knowledge:', e);
+      setSaveKnowledgeError('Could not save Knowledge. Your draft is still open. Retry the save.');
     } finally {
-      setSaveKnowledgeLoading(false);
+      if (isCurrentRequest()) setSaveKnowledgeLoading(false);
     }
   };
 
   const fetchPlan = async (wsId: string) => {
+    const requestId = ++planLoadRequestRef.current;
+    const isCurrentRequest = () =>
+      activeWorkspaceRef.current === wsId && planLoadRequestRef.current === requestId;
+
     setPlanLoading(true);
+    setPlanError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`);
-      const data = await res.json();
-      setPlanContent(data.content || '');
+      if (!res.ok) throw new Error('plan request failed');
+      const data: unknown = await res.json();
+      if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
+        throw new Error('plan response was malformed');
+      }
+      if (!isCurrentRequest()) return;
+
+      setPlanContent((data as { content: string }).content);
+      setPlanError(null);
     } catch (e) {
-      console.error(e);
+      if (!isCurrentRequest()) return;
+      console.error('Failed to load workspace plan:', e);
+      setPlanError('Could not load Plan. Existing content was kept. Retry when ready.');
     } finally {
-      setPlanLoading(false);
+      if (isCurrentRequest()) setPlanLoading(false);
     }
   };
 
@@ -746,10 +824,27 @@ function AppInner() {
 
   // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
   useEffect(() => {
+    activeWorkspaceRef.current = activeWsId;
+    // Invalidate every in-flight operation before clearing the old workspace's
+    // view. Late responses then fail their identity check and cannot repopulate
+    // this state with another workspace's document or draft.
+    knowledgeLoadRequestRef.current += 1;
+    planLoadRequestRef.current += 1;
+    saveKnowledgeRequestRef.current += 1;
     setSessions([]);
     setGitChanges([]);
     setKnowledgeContent('');
+    setKnowledgeError(null);
+    setKnowledgeLoading(false);
+    setSaveKnowledgeError(null);
+    setSaveKnowledgeLoading(false);
+    editedKnowledgeRef.current = '';
+    isEditingKnowledgeRef.current = false;
+    setEditedKnowledge('');
+    setIsEditingKnowledge(false);
     setPlanContent('');
+    setPlanError(null);
+    setPlanLoading(false);
   }, [activeWsId]);
 
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
@@ -930,8 +1025,20 @@ Core Instructions:
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
       changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
-      knowledgeProps={{ knowledgeContent, knowledgeLoading, isEditingKnowledge, editedKnowledge, saveKnowledgeLoading, setEditedKnowledge, setIsEditingKnowledge, handleSaveKnowledge }}
-      planProps={{ planContent, planLoading }}
+      knowledgeProps={{
+        knowledgeContent,
+        knowledgeLoading,
+        knowledgeError,
+        isEditingKnowledge,
+        editedKnowledge,
+        saveKnowledgeLoading,
+        saveKnowledgeError,
+        setEditedKnowledge: updateEditedKnowledge,
+        setIsEditingKnowledge: updateIsEditingKnowledge,
+        handleSaveKnowledge,
+        handleRetryKnowledge: fetchKnowledge,
+      }}
+      planProps={{ planContent, planLoading, planError, handleRetryPlan: fetchPlan }}
       showToast={showToast}
     />
   );

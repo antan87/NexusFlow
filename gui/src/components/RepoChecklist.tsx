@@ -3,8 +3,9 @@ import { Search } from 'lucide-react';
 
 import { Input } from './ui/input.js';
 import { Checkbox } from './ui/checkbox.js';
+import { StatusBadge } from './ui/status-badge.js';
 import { cn } from '../lib/utils.js';
-import type { RepoInfo } from '../types.js';
+import type { RepoInfo, RepoFreshness } from '../types.js';
 
 interface RepoChecklistProps {
   repos: RepoInfo[];
@@ -13,13 +14,22 @@ interface RepoChecklistProps {
   loading?: boolean;
   emptyHint?: string;
   className?: string;
+  freshnessMap?: Record<string, RepoFreshness>;
 }
 
 /**
  * Searchable checkbox list of scanned repositories, shared by the project
  * dialog and the ad-hoc start-work flow.
  */
-export function RepoChecklist({ repos, selectedPaths, onToggle, loading, emptyHint, className }: RepoChecklistProps) {
+export function RepoChecklist({
+  repos,
+  selectedPaths,
+  onToggle,
+  loading,
+  emptyHint,
+  className,
+  freshnessMap,
+}: RepoChecklistProps) {
   const [search, setSearch] = useState('');
 
   const visible = useMemo(() => {
@@ -49,6 +59,7 @@ export function RepoChecklist({ repos, selectedPaths, onToggle, loading, emptyHi
           <ul className="divide-y divide-border">
             {visible.map((repo) => {
               const checked = selectedPaths.includes(repo.path);
+              const freshness = freshnessMap?.[repo.path];
               return (
                 <li key={repo.path}>
                   <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-accent">
@@ -57,7 +68,35 @@ export function RepoChecklist({ repos, selectedPaths, onToggle, loading, emptyHi
                       <span className="block truncate text-sm font-medium">{repo.name}</span>
                       <span className="block truncate font-mono text-xs text-muted-foreground">{repo.path}</span>
                     </span>
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{repo.defaultBranch}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {freshness && (
+                        <StatusBadge
+                          tone={
+                            freshness.status === 'up-to-date'
+                              ? 'success'
+                              : freshness.status === 'behind'
+                                ? 'warning'
+                                : freshness.status === 'diverged'
+                                  ? 'danger'
+                                  : freshness.status === 'ahead'
+                                    ? 'info'
+                                    : 'neutral'
+                          }
+                          title={freshness.message}
+                        >
+                          {freshness.status === 'behind'
+                            ? `↓ ${freshness.behind} behind`
+                            : freshness.status === 'up-to-date'
+                              ? 'Up to date'
+                              : freshness.status === 'diverged'
+                                ? 'Diverged'
+                                : freshness.status === 'ahead'
+                                  ? `↑ ${freshness.ahead} ahead`
+                                  : 'Local'}
+                        </StatusBadge>
+                      )}
+                      <span className="font-mono text-xs text-muted-foreground">{repo.defaultBranch}</span>
+                    </div>
                   </label>
                 </li>
               );

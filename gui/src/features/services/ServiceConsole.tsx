@@ -74,6 +74,49 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
         </div>
       )}
 
+      {servicesQuery.isError && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} />
+            <span>Failed to load services: {servicesQuery.error?.message || 'Unknown error'}</span>
+          </div>
+          <Button size="xs" variant="outline" onClick={() => servicesQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {(serviceAction.isError || orchestratorAction.isError) && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} />
+            <span>
+              Action failed: {serviceAction.error?.message || orchestratorAction.error?.message || 'Operation failed'}
+            </span>
+          </div>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              serviceAction.reset();
+              orchestratorAction.reset();
+            }}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
+      {!servicesQuery.isLoading && !servicesQuery.isError && services.length === 0 && orchTools.length === 0 && (
+        <div className="rounded-md border border-border/80 bg-card p-6 text-center surface-card">
+          <Terminal size={24} className="mx-auto mb-2 text-muted-foreground/60" />
+          <h4 className="text-xs font-bold text-foreground">No Services Detected</h4>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            ContextSpace scans for runnable background services in <code className="font-mono text-[10px]">package.json</code> scripts (such as <code className="font-mono text-[10px]">start</code>, <code className="font-mono text-[10px]">dev</code>), <code className="font-mono text-[10px]">docker-compose.yml</code>, or <code className="font-mono text-[10px]">Procfile</code>.
+          </p>
+        </div>
+      )}
+
       {/* Orchestration tools — actionable rows. */}
       {orchTools.length > 0 && (
         <div className="mb-4 rounded-md border border-border/80 bg-card p-4 surface-card">

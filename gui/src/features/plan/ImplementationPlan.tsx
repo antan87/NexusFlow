@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
-import { ListOrdered, RefreshCw, FileText, Code } from 'lucide-react';
+import { AlertTriangle, ListOrdered, RefreshCw, FileText, Code } from 'lucide-react';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Button } from '../../components/ui/button.js';
 
 interface ImplementationPlanProps {
   planContent: string;
   planLoading: boolean;
+  planError: string | null;
+  handleRetryPlan: (wsId: string) => Promise<void>;
+  workspaceId?: string;
 }
 
 export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   planContent,
   planLoading,
+  planError,
+  handleRetryPlan,
+  workspaceId,
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
@@ -42,7 +48,26 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         )}
       </header>
 
-      {planLoading ? (
+      {planError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>{planError}</span>
+          </div>
+          {workspaceId && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => void handleRetryPlan(workspaceId)}
+              disabled={planLoading}
+            >
+              <RefreshCw size={11} className={planLoading ? 'animate-spin' : ''} /> Retry load
+            </Button>
+          )}
+        </div>
+      )}
+
+      {planLoading && !planContent ? (
         <div className="flex justify-center py-10">
           <RefreshCw className="animate-spin text-primary" size={20} />
         </div>

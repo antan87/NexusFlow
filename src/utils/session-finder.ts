@@ -337,6 +337,21 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     return false;
   };
 
+  const resolveTargetCwd = (sessPath?: string): string => {
+    if (!sessPath) return workspacePath;
+    const normSess = cleanPath(sessPath);
+    for (let i = 0; i < repoPaths.length; i++) {
+      const r = normRepos[i];
+      if (normSess === r || normSess.startsWith(r + sep)) {
+        return repoPaths[i];
+      }
+    }
+    if (normSess === normWorkspace || normSess.startsWith(normWorkspace + sep)) {
+      return sessPath;
+    }
+    return workspacePath;
+  };
+
   // ─── 1. Scan Antigravity Sessions ──────────────────────────────────────
   const agDir = getAntigravityDir();
   const agHistoryPath = path.join(agDir, 'history.jsonl');
@@ -401,7 +416,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         createdAt,
         updatedAt,
         messageCount,
-        workspacePath,
+        workspacePath: resolveTargetCwd(convData.entries[0]?.workspace),
       });
     }
   } catch {}
@@ -411,12 +426,12 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   const claudeProjectsDir = path.join(claudeConfigDir, 'projects');
   
   try {
-    const candidateFolders = [
-      getClaudeProjectFolderName(workspacePath),
-      ...repoPaths.map(r => getClaudeProjectFolderName(r))
+    const candidateTargets = [
+      { folder: getClaudeProjectFolderName(workspacePath), targetPath: workspacePath },
+      ...repoPaths.map(r => ({ folder: getClaudeProjectFolderName(r), targetPath: r }))
     ];
 
-    for (const folder of candidateFolders) {
+    for (const { folder, targetPath } of candidateTargets) {
       const projectPath = path.join(claudeProjectsDir, folder);
       try {
         const files = await fs.readdir(projectPath);
@@ -467,7 +482,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               createdAt: createdAt || new Date().toISOString(),
               updatedAt: updatedAt || new Date().toISOString(),
               messageCount,
-              workspacePath,
+              workspacePath: targetPath,
             });
           } catch {}
         }
@@ -542,7 +557,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           createdAt: createdAt || new Date().toISOString(),
           updatedAt: updatedAt || new Date().toISOString(),
           messageCount,
-          workspacePath,
+          workspacePath: resolveTargetCwd(sessionCwd || undefined),
         });
       } catch {}
     }
@@ -590,7 +605,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           createdAt: row.created_at || new Date().toISOString(),
           updatedAt: row.updated_at || new Date().toISOString(),
           messageCount,
-          workspacePath,
+          workspacePath: resolveTargetCwd(row.cwd),
         });
       }
     } catch {

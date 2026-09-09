@@ -83,6 +83,9 @@
     "@hono/node-server": "$@hono/node-server",
     "@hono/node-ws": {
       "@hono/node-server": "$@hono/node-server"
+    },
+    "pm2": {
+      "js-yaml": "4.3.2"
     }
   },
   "devDependencies": {

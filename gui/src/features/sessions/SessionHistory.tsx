@@ -56,6 +56,8 @@ const getResumeCliCommand = (assistant: string, sessionId: string): string => {
       return `codex resume ${sessionId}`;
     case 'copilot':
       return `copilot --resume ${sessionId}`;
+    case 'cursor':
+      return `cursor-agent --resume ${sessionId}`;
     default:
       return `agy --conversation ${sessionId}`;
   }
@@ -189,7 +191,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     }
   };
 
-  const resumeTerminalSession = async (sessionId: string, assistant: string) => {
+  const resumeTerminalSession = async (sessionId: string, assistant: string, sessionCwd?: string) => {
     if (resumingTerminalRef.current) return;
     resumingTerminalRef.current = true;
     setResumingTerminalId(sessionId);
@@ -198,6 +200,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         workspaceId: ws.branchName,
         sessionId,
         assistant,
+        cwd: sessionCwd,
       });
       const cmd = getResumeCliCommand(assistant, sessionId);
       setLaunchedInfo({
@@ -580,7 +583,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                     size="xs"
                     variant="default"
                     disabled={resumingTerminalId === sess.id}
-                    onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
+                    onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
                     title={`Resume session in terminal (${sess.id})`}
                   >
                     {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
@@ -751,7 +754,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                               size="xs"
                               variant="default"
                               disabled={resumingTerminalId === sess.id}
-                              onClick={() => void resumeTerminalSession(sess.id, sess.assistant)}
+                              onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
                               title={`Resume session in terminal (${sess.id})`}
                             >
                               {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}

@@ -64,7 +64,6 @@ import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
-import { AgentChat } from '../features/chat/AgentChat.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
@@ -73,8 +72,6 @@ import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 import { WorkspaceWorkroomTab } from '../features/workrooms/WorkspaceWorkroomTab.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
-
-export type WorkspaceLayoutMode = 'cockpit' | 'split' | 'chat-only' | 'inspector-only';
 
 type SubTab = 'overview' | 'workroom' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills' | 'services';
 
@@ -453,25 +450,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               })}
             </TabsList>
 
-            {/* Embedded Harness (AI & Sessions) */}
-            <section
-              aria-labelledby="embedded-harness-heading"
-              aria-hidden={subTab !== 'sessions'}
-              className={cn('space-y-3 pt-4', subTab !== 'sessions' && 'hidden')}
-            >
-              <div>
-                <h2 id="embedded-harness-heading" className="text-sm font-bold text-foreground">
-                  Embedded Harness & Live Chat
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Direct execution engine for Claude, OpenAI, Antigravity, and Copilot in this workspace.
-                </p>
-              </div>
-              <div className="h-[38rem] min-h-[28rem] overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
-                <AgentChat key={selected.branchName} ws={selected} />
-              </div>
-            </section>
-
             {/* Tab Panels */}
             <TabsPanel value={subTab} className="animate-fade-in pt-4">
               {subTab === 'overview' && (
@@ -745,7 +723,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'workroom' && <WorkspaceWorkroomTab ws={selected} showToast={showToast} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
-              {subTab === 'plan' && <ImplementationPlan {...planProps} />}
+              {subTab === 'plan' && <ImplementationPlan workspaceId={selected.branchName} {...planProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
             </TabsPanel>

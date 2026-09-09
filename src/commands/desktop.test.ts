@@ -308,4 +308,33 @@ describe('desktop release installer', () => {
       expect(quoteDesktopExecArg('/opt/app"dir/$test`cmd`')).toBe('"/opt/app\\"dir/\\$test\\`cmd\\`"');
     });
   });
+
+  describe('desktopInstallCommand output', () => {
+    it('provides clear guidance on how to launch after Linux installation', async () => {
+      const logs: string[] = [];
+      const origLog = console.log;
+      console.log = vi.fn((...args: any[]) => {
+        logs.push(args.join(' '));
+      });
+
+      const binary = 'verified-contextspace-appimage';
+      const csAssetUrl = 'https://github.com/antan87/ContextSpace/releases/download/v2.10.0/ContextSpace-2.10.0.AppImage';
+      const csSidecarUrl = `${csAssetUrl}.sha256`;
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(releaseResponse('ContextSpace-2.10.0.AppImage', csAssetUrl, csSidecarUrl))
+        .mockResolvedValueOnce(new Response(`${digest(binary)}  ContextSpace-2.10.0.AppImage\n`))
+        .mockResolvedValueOnce(new Response(binary));
+
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'contextspace-cmd-test-'));
+      try {
+        const result = await installDesktop({ platform: 'linux', arch: 'x64', fetchImpl, tmpDir, homeDir: tmpDir });
+        expect(result.installedPath).toBeDefined();
+        expect(result.desktopEntryPath).toBeDefined();
+      } finally {
+        console.log = origLog;
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
+

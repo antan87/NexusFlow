@@ -113,4 +113,62 @@ test.describe('Service console', () => {
     await req;
     expect(body?.id).toBe('docker-compose:docker-compose.yml');
   });
+
+  test('displays error banner with Retry button when services query fails, and recovers on retry', async ({ page }) => {
+    let shouldFail = true;
+    await page.route('**/api/workspace/*/services', async (route) => {
+      if (shouldFail) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Database service discovery failed' }),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ services: [webService], orchestrationTools: [], runningState: [], runningOrchestrators: [] }),
+        });
+      }
+    });
+
+    await page.goto('/#/workspaces/demo/services');
+    await expect(page.getByText('Failed to load services: Database service discovery failed')).toBeVisible();
+    const retryBtn = page.getByRole('button', { name: 'Retry' });
+    await expect(retryBtn).toBeVisible();
+
+    shouldFail = false;
+    await retryBtn.click();
+    await expect(page.getByRole('button', { name: 'Start web' })).toBeVisible();
+    await expect(page.getByText('Failed to load services')).toBeHidden();
+  });
+
+  test('displays action error banner when a service action fails and dismisses it', async ({ page }) => {
+    await page.route('**/api/workspace/*/services', async (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ services: [webService], orchestrationTools: [], runningState: [], runningOrchestrators: [] }),
+      }),
+    );
+
+    await page.route('**/api/workspace/*/services/web/start', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Port 5173 is already allocated' }),
+      });
+    });
+
+    await page.goto('/#/workspaces/demo/services');
+    await expect(page.getByRole('button', { name: 'Start web' })).toBeVisible();
+    await page.getByRole('button', { name: 'Start web' }).click();
+
+    await expect(page.getByText('Action failed: Port 5173 is already allocated')).toBeVisible();
+    const dismissBtn = page.getByRole('button', { name: 'Dismiss' });
+    await expect(dismissBtn).toBeVisible();
+    await dismissBtn.click();
+    await expect(page.getByText('Action failed:')).toBeHidden();
+  });
 });
+

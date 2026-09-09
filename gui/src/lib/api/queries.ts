@@ -28,6 +28,8 @@ import type {
   WorkspaceStatus,
   WorkspaceStreamMessage,
   WorkspaceStreamResponse,
+  RepoFreshness,
+  FastForwardResult,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ export interface CreateWorkspacePayload {
   repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
   assistants: string[];
   teamworkInstructions?: string;
+  autoUpdateBase?: boolean;
   enabledSkills?: string[];
   enabledAgents?: string[];
   enabledCategories?: string[];
@@ -161,6 +164,50 @@ export function useRepoBranches(repoPath: string, enabled: boolean) {
     queryFn: () => apiFetch<RepoBranches>(`/api/repos/branches?path=${encodeURIComponent(repoPath)}`),
     enabled,
     staleTime: 60_000,
+  });
+}
+
+/** Freshness of a single repository branch. */
+export function useRepoFreshness(repoPath: string, branch?: string, enabled = true) {
+  return useQuery({
+    queryKey: ['repo-freshness', repoPath, branch],
+    queryFn: () => {
+      const q = new URLSearchParams({ path: repoPath });
+      if (branch) q.set('branch', branch);
+      return apiFetch<RepoFreshness>(`/api/repos/freshness?${q.toString()}`);
+    },
+    enabled: enabled && !!repoPath,
+    staleTime: 30_000,
+  });
+}
+
+/** Freshness for a batch of repositories. */
+export function useReposFreshness(repos: Array<{ path: string; branch?: string }>, enabled = true) {
+  return useQuery({
+    queryKey: ['repos-freshness', repos],
+    queryFn: () =>
+      apiFetch<RepoFreshness[]>('/api/repos/freshness', {
+        method: 'POST',
+        body: JSON.stringify({ repos }),
+      }),
+    enabled: enabled && repos.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+/** Pulls and fast-forwards base repository branches to remote tracking. */
+export function usePullRepos() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { path?: string; branch?: string; repos?: Array<{ path: string; branch?: string }> }) =>
+      apiFetch<{ success: boolean; results: FastForwardResult[] }>('/api/repos/pull', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repo-freshness'] });
+      queryClient.invalidateQueries({ queryKey: ['repos-freshness'] });
+    },
   });
 }
 
@@ -252,6 +299,7 @@ export function useWorkspaceServices(wsId: string | null) {
     queryFn: () => apiFetch<WorkspaceServicesResponse>(`/api/workspace/${encodeURIComponent(wsId!)}/services`),
     enabled: !!wsId,
     refetchInterval: 3000,
+    retry: 1,
   });
 }
 
@@ -451,6 +499,7 @@ export interface LaunchTerminalPayload {
   assistant?: string;
   sessionId?: string;
   title?: string;
+  cwd?: string;
 }
 
 export function useLaunchTerminal() {

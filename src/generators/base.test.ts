@@ -249,6 +249,13 @@ describe('buildContextContent', () => {
       expect(content).not.toContain('**Instruction**');
     });
 
+    it('omits cross-harness collaboration stream instructions that cause token waste', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).not.toContain('read_workroom_stream');
+      expect(content).not.toContain('post_workroom_handoff');
+    });
+
 
     it('says nothing about relationships or ordering when there are none', async () => {
       // An empty "needs: none" column and a start hint that asserts a

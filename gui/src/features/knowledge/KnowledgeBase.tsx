@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, RefreshCw, Save, Edit, FileText, Code } from 'lucide-react';
+import { AlertTriangle, BookOpen, RefreshCw, Save, Edit, FileText, Code } from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
@@ -10,24 +10,30 @@ interface KnowledgeBaseProps {
   ws: Feature;
   knowledgeContent: string;
   knowledgeLoading: boolean;
+  knowledgeError: string | null;
   isEditingKnowledge: boolean;
   editedKnowledge: string;
   saveKnowledgeLoading: boolean;
+  saveKnowledgeError: string | null;
   setEditedKnowledge: (val: string) => void;
   setIsEditingKnowledge: (val: boolean) => void;
   handleSaveKnowledge: (wsId: string) => Promise<void>;
+  handleRetryKnowledge: (wsId: string) => Promise<void>;
 }
 
 export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   ws,
   knowledgeContent,
   knowledgeLoading,
+  knowledgeError,
   isEditingKnowledge,
   editedKnowledge,
   saveKnowledgeLoading,
+  saveKnowledgeError,
   setEditedKnowledge,
   setIsEditingKnowledge,
   handleSaveKnowledge,
+  handleRetryKnowledge,
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
@@ -76,7 +82,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
                 onClick={() => handleSaveKnowledge(ws.branchName)}
                 disabled={saveKnowledgeLoading}
               >
-                {saveKnowledgeLoading ? <Spinner className="size-3" /> : <Save size={10} />} Save
+                {saveKnowledgeLoading ? <Spinner className="size-3" /> : <Save size={10} />} {saveKnowledgeError ? 'Retry save' : 'Save'}
               </Button>
             </>
           ) : (
@@ -92,16 +98,41 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
         </div>
       </header>
 
-      {knowledgeLoading ? (
-        <div className="flex justify-center py-10">
-          <RefreshCw className="animate-spin text-primary" size={20} />
+      {knowledgeError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>{knowledgeError}</span>
+          </div>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => void handleRetryKnowledge(ws.branchName)}
+            disabled={knowledgeLoading}
+          >
+            <RefreshCw size={11} className={knowledgeLoading ? 'animate-spin' : ''} /> Retry load
+          </Button>
         </div>
-      ) : isEditingKnowledge ? (
+      )}
+
+      {saveKnowledgeError && (
+        <div role="alert" className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>{saveKnowledgeError}</span>
+        </div>
+      )}
+
+      {isEditingKnowledge ? (
         <Textarea
+          aria-label="Knowledge editor"
           className="[&_[data-slot=textarea]]:h-96 [&_[data-slot=textarea]]:resize-y [&_[data-slot=textarea]]:font-mono [&_[data-slot=textarea]]:text-xs"
           value={editedKnowledge}
           onChange={(e) => setEditedKnowledge(e.target.value)}
         />
+      ) : knowledgeLoading && !knowledgeContent ? (
+        <div className="flex justify-center py-10">
+          <RefreshCw className="animate-spin text-primary" size={20} />
+        </div>
       ) : !knowledgeContent ? (
         <div className="rounded-md border border-dashed border-border/80 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
           No knowledge file generated yet.

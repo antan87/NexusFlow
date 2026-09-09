@@ -193,6 +193,25 @@ describe('orchestration runner PM2 state handling', () => {
       // Services now empty → state file removed.
       expect(fs.unlink).toHaveBeenCalled();
     });
+
+    it('stopService retains service in runningState and returns false when PM2 delete fails with non-zero exit', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      const expectedApp = pm2AppName(ws, 'api');
+      const state: RunningState = {
+        workspacePath: ws,
+        services: [{ name: 'api', pid: 1, config: service('api', ws), startedAt: 'x' }],
+        updatedAt: 'x',
+      };
+      vi.mocked(execa)
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp }]) } as any) // jlist
+        .mockResolvedValueOnce({ exitCode: 1, failed: true, stdout: '', stderr: 'error' } as any); // pm2 delete fails
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+
+      expect(await stopService(ws, 'api')).toBe(false);
+      // Service was retained in state — unlink was NOT called.
+      expect(fs.unlink).not.toHaveBeenCalled();
+    });
   });
 
   describe('stop-all carve-out', () => {
@@ -236,6 +255,32 @@ describe('orchestration runner PM2 state handling', () => {
       expect(deleted).toContain(apiApp);
       // ...but the recorded orchestrator app is left running.
       expect(deleted).not.toContain(orchApp);
+    });
+
+    it('retains services in runningState if PM2 delete fails during stop-all', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      const prefix = pm2Prefix(ws);
+      const apiApp = `${prefix}api`;
+      const state: RunningState = {
+        workspacePath: ws,
+        services: [{ name: 'api', pid: 1, config: service('api', ws), startedAt: 'x' }],
+        updatedAt: 'x',
+      };
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+      vi.mocked(execa)
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify([{ name: apiApp }]),
+        } as any)
+        .mockResolvedValueOnce({ exitCode: 1, failed: true, stdout: '', stderr: 'error' } as any); // pm2 delete fails
+
+      await stopServices(ws);
+
+      // Mutated state was written to disk preserving the failed service
+      expect(fs.writeFile).toHaveBeenCalled();
+      const writtenState = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string);
+      expect(writtenState.services).toHaveLength(1);
+      expect(writtenState.services[0].name).toBe('api');
     });
   });
 

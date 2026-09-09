@@ -1,6 +1,7 @@
 import { CliAdapterBase } from './CliAdapterBase.js';
 import { buildClaudeTurnArgs, isValidSessionUuid, type AgentSession } from './session.js';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
+import { findExecutable } from '../utils/user-paths.js';
 
 export type ClaudeOutputEvent =
   | { type: 'session'; id: string }
@@ -146,11 +147,12 @@ export class ClaudeJsonlDecoder {
 }
 
 export class ClaudeCliAdapter extends CliAdapterBase {
-  protected readonly binary = 'claude';
+  protected override readonly binary = findExecutable('claude') ?? 'claude';
   protected readonly label = 'claude CLI';
-  // claude is an npm .cmd shim: needs a shell on Windows, and under a shell an
-  // argv prompt would split on spaces, so the prompt goes over stdin.
-  protected readonly useShell = true;
+  // On Windows, claude is an npm .cmd shim requiring shell: true.
+  // On POSIX, running via /bin/sh strips the environment and drops NVM/local binaries,
+  // so spawn directly with the augmented PATH.
+  protected override readonly useShell = process.platform === 'win32';
   protected readonly promptViaStdin = true;
   protected readonly advanceFirstTurnOnDispatch = false;
 

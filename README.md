@@ -64,6 +64,11 @@ It launches the Windows installer, or installs a stable Linux AppImage under
 `~/.local/share/contextspace/` and creates a desktop entry (existing NexusFlow installs keep their launcher and install directory). It never runs from
 `npm install`/postinstall and does not support macOS or ARM assets yet.
 
+**To start ContextSpace Desktop on Ubuntu / Linux:**
+- **Application Menu:** Open Activities / App Grid (press `Super` / Windows key), search for **ContextSpace**, and launch.
+- **Terminal:** Run `gtk-launch contextspace` or execute `~/.local/share/contextspace/ContextSpace.AppImage`.
+- **CLI Shortcut:** Run `ctxspace desktop` anytime.
+
 ### Install the secondary npm CLI
 
 ContextSpace continues to use the existing `@mrpatronz/nexusflow` npm package.

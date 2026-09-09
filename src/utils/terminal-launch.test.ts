@@ -57,17 +57,22 @@ describe('terminal-launch utility', () => {
       expect(buildHarnessCliCommand('cursor')).toBe('cursor-agent');
     });
 
-    it('builds resume commands when a valid UUID is provided', () => {
+    it('builds resume commands when a valid UUID or safe session ID is provided', () => {
       const uuid = '3a14e9f7-628b-4d51-87b4-1065a7df4921';
       expect(buildHarnessCliCommand('antigravity', uuid)).toBe(`agy --conversation ${uuid}`);
       expect(buildHarnessCliCommand('claude', uuid)).toBe(`claude --resume ${uuid}`);
       expect(buildHarnessCliCommand('codex', uuid)).toBe(`codex resume ${uuid}`);
       expect(buildHarnessCliCommand('copilot', uuid)).toBe(`copilot --resume ${uuid}`);
       expect(buildHarnessCliCommand('cursor', uuid)).toBe(`cursor-agent --resume ${uuid}`);
+
+      // Safe alphanumeric Copilot / ACP session IDs
+      const copilotId = 'ses_copilot-123456_abc';
+      expect(buildHarnessCliCommand('copilot', copilotId)).toBe(`copilot --resume ${copilotId}`);
     });
 
-    it('throws on invalid session UUID', () => {
-      expect(() => buildHarnessCliCommand('claude', 'invalid-id')).toThrow('Invalid session UUID format');
+    it('throws on invalid session format with shell metacharacters', () => {
+      expect(() => buildHarnessCliCommand('claude', 'invalid; rm -rf /')).toThrow('Invalid session format');
+      expect(() => buildHarnessCliCommand('copilot', 'bad session && echo hi')).toThrow('Invalid session format');
     });
 
     it('throws on unsupported assistant', () => {
@@ -87,7 +92,7 @@ describe('terminal-launch utility', () => {
         if (Array.isArray(args) && args[0] === 'pwsh.exe') return { exitCode: 0 } as any;
         return { exitCode: 1 } as any;
       });
-      vi.mocked(execa).mockReturnValue({ unref: mockUnref, catch: vi.fn() } as any);
+      vi.mocked(execa).mockResolvedValue({ exitCode: 0, unref: mockUnref } as any);
 
       const res = await launchWorkspaceTerminal("C:\\workspaces\\bob's-app", {
         assistant: 'antigravity',
@@ -103,20 +108,26 @@ describe('terminal-launch utility', () => {
           'nt',
           '-d', "C:\\workspaces\\bob's-app",
           '--title', `${TERMINAL_TITLE_PREFIX} bobs-app [antigravity] (3a14e9f7)`,
-          'pwsh.exe', '-NoExit', '-EncodedCommand', expect.any(String),
+          'pwsh.exe', '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', expect.any(String),
         ],
-        expect.objectContaining({ detached: true, stdio: 'ignore' }),
+        expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: false }),
       );
       expect(mockUnref).toHaveBeenCalled();
     });
 
-    it('falls back to PowerShell Start-Process when wt.exe is absent on Windows', async () => {
+    it('falls back to PowerShell Start-Process when wt.exe fails or is absent on Windows', async () => {
       vi.mocked(execaSync).mockImplementation((_cmd: any, args?: any) => {
-        if (Array.isArray(args) && args[0] === 'wt.exe') return { exitCode: 1 } as any;
+        if (Array.isArray(args) && args[0] === 'wt.exe') return { exitCode: 0 } as any;
         if (Array.isArray(args) && args[0] === 'pwsh.exe') return { exitCode: 0 } as any;
         return { exitCode: 1 } as any;
       });
-      vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+      // wt.exe returns exit code 1 (e.g. window 0 not found)
+      vi.mocked(execa).mockImplementation((cmd: any) => {
+        if (cmd === 'wt.exe') {
+          return Promise.resolve({ exitCode: 1 } as any);
+        }
+        return Promise.resolve({ exitCode: 0 } as any);
+      });
 
       const res = await launchWorkspaceTerminal("C:\\workspaces\\bob's-app", {
         assistant: 'antigravity',
@@ -127,8 +138,8 @@ describe('terminal-launch utility', () => {
       expect(res.command).toBe('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921');
       expect(execa).toHaveBeenCalledWith(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', expect.stringContaining('Start-Process')],
-        { reject: false, stdio: 'ignore' },
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', expect.stringContaining('Start-Process')],
+        { reject: false, stdio: 'ignore', windowsHide: false },
       );
     });
 
@@ -155,7 +166,7 @@ describe('terminal-launch utility', () => {
       expect(res.command).toBe('agy --conversation 3a14e9f7-628b-4d51-87b4-1065a7df4921');
       expect(execa).toHaveBeenCalledWith(
         'cmd.exe',
-        ['/c', 'start', '""', 'pwsh.exe', '-NoExit', '-EncodedCommand', expect.any(String)],
+        ['/c', 'start', '""', 'pwsh.exe', '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', expect.any(String)],
         expect.objectContaining({ detached: true, shell: false, windowsHide: false }),
       );
       expect(mockUnref).toHaveBeenCalled();
