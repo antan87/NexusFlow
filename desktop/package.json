@@ -1,5 +1,6 @@
 {
   "name": "contextspace-desktop",
+  "desktopName": "contextspace",
   "version": "2.10.1",
   "type": "module",
   "main": "main.js",
@@ -59,7 +60,7 @@
       "target": "dmg"
     },
     "linux": {
-      "desktopName": "contextspace",
+      "syncDesktopName": true,
       "target": [
         {
           "target": "AppImage",
