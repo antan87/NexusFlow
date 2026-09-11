@@ -103,6 +103,11 @@ function buildKnowledgeContent(ctx: WorkspaceContext): string {
 > Accumulated decisions and gotchas for this feature. Append with
 > \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\`, or append directly
 > under the relevant section as \`### <YYYY-MM-DD> — <Title>\` followed by one rule and its reason.
+>
+> Prefer facts that cannot be recovered from the code or git history:
+> environment quirks, contradictions in a spec, decisions and the reason
+> behind them, things that cost you time to discover. Avoid restating
+> structure the code already shows.
 
 ## Feature Goal
 
