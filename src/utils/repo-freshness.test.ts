@@ -36,6 +36,12 @@ async function initRepo(dir: string, branch = 'main'): Promise<void> {
   await git(dir, 'commit', '-m', 'initial commit');
 }
 
+async function initBareRepo(dir: string, branch = 'main'): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  await git(dir, 'init', '--bare', '-b', branch);
+  await git(dir, 'symbolic-ref', 'HEAD', `refs/heads/${branch}`);
+}
+
 describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
   let tmpDir = '';
 
@@ -62,8 +68,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
   it('detects up-to-date repository', async () => {
     const bare = path.join(tmpDir, 'bare.git');
     const local = path.join(tmpDir, 'local');
-    await fs.mkdir(bare, { recursive: true });
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
 
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
@@ -87,8 +92,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const local = path.join(tmpDir, 'local');
     const pusher = path.join(tmpDir, 'pusher');
 
-    await fs.mkdir(bare, { recursive: true });
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
 
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
@@ -124,7 +128,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const local = path.join(tmpDir, 'local');
     const pusher = path.join(tmpDir, 'pusher');
 
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
     await git(seed, 'remote', 'add', 'origin', bare);
@@ -164,7 +168,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const local = path.join(tmpDir, 'local');
     const pusher = path.join(tmpDir, 'pusher');
 
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
     await git(seed, 'remote', 'add', 'origin', bare);
@@ -196,7 +200,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const local = path.join(tmpDir, 'local');
     const pusher = path.join(tmpDir, 'pusher');
 
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
     await git(seed, 'remote', 'add', 'origin', bare);
@@ -232,7 +236,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const local = path.join(tmpDir, 'local');
     const pusher = path.join(tmpDir, 'pusher');
 
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
     await git(seed, 'remote', 'add', 'origin', bare);
@@ -271,7 +275,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
     const bare = path.join(tmpDir, 'bare.git');
     const local = path.join(tmpDir, 'local');
 
-    await git(tmpDir, 'init', '--bare', bare);
+    await initBareRepo(bare);
     const seed = path.join(tmpDir, 'seed');
     await initRepo(seed);
     await git(seed, 'remote', 'add', 'origin', bare);
@@ -289,7 +293,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
   it('runs batch checkReposFreshness and fastForwardRepos', async () => {
     const bare1 = path.join(tmpDir, 'bare1.git');
     const local1 = path.join(tmpDir, 'local1');
-    await git(tmpDir, 'init', '--bare', bare1);
+    await initBareRepo(bare1);
     const seed1 = path.join(tmpDir, 'seed1');
     await initRepo(seed1);
     await git(seed1, 'remote', 'add', 'origin', bare1);
@@ -298,7 +302,7 @@ describe.skipIf(!hasGit)('repo-freshness (real git)', () => {
 
     const bare2 = path.join(tmpDir, 'bare2.git');
     const local2 = path.join(tmpDir, 'local2');
-    await git(tmpDir, 'init', '--bare', bare2);
+    await initBareRepo(bare2);
     const seed2 = path.join(tmpDir, 'seed2');
     await initRepo(seed2);
     await git(seed2, 'remote', 'add', 'origin', bare2);
