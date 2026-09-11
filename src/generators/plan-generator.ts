@@ -15,7 +15,7 @@ import type {
   DependencyGraph,
 } from '../types.js';
 import { GENERATED_SNAPSHOT_HEADER, renderFreshnessBanner } from '../core/generation-lock.js';
-import { PRIMARY_PLAN_FILE, PRIMARY_KNOWLEDGE_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
+import { PRIMARY_PLAN_FILE, PRIMARY_KNOWLEDGE_FILE, PRIMARY_CHAT_LEDGER_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 // ─── Dependency Graph Builder ─────────────────────────────────────────────
 
@@ -239,8 +239,8 @@ export async function generateImplementationPlan(
         md.push('## Implementation Guidance');
         md.push('');
         md.push('- **Vertical Slice**: Implement in small, testable increments and verify tests pass after each step.');
-        md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\` (or append directly to \`${PRIMARY_KNOWLEDGE_FILE}\`).`);
-        md.push('- **Cross-Harness Handoff**: Use `post_workroom_handoff` to post milestone updates or hand off to other agents.');
+        md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\` (or read/append \`${PRIMARY_KNOWLEDGE_FILE}\` directly if MCP is not connected or CLI is not on PATH).`);
+        md.push(`- **Cross-Harness Handoff**: If the MCP server is connected, use \`post_workroom_handoff\` to post milestone updates; otherwise record handoffs in \`${PRIMARY_CHAT_LEDGER_FILE}\` or generate a bundle with \`${CLI_NAME} handoff\`.`);
         md.push('');
       }
       await writeWorkspaceFile(workspacePath, feature.id, PRIMARY_PLAN_FILE, md.join('\n'));

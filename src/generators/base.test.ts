@@ -218,6 +218,12 @@ describe('buildContextContent', () => {
       expect(content).toContain('append a `### <YYYY-MM-DD> — <Title>` heading directly');
     });
 
+    it('provides file-based fallback when MCP server is not connected', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).toContain('if the MCP server is not connected');
+    });
+
     it('names repos that carry their own instructions, which override these', async () => {
       const ctx = ctxFor({});
       (ctx.analysis!.get(nodeRepo)! as { existingAIConfigs: unknown }).existingAIConfigs = [
