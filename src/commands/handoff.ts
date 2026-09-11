@@ -117,7 +117,7 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
   md.push('## 🧪 Verification & Run Commands');
   md.push('');
   for (const r of reposStatusInfo) {
-    md.push(`- **${r.name}**: \`${r.testCommand}\``);
+    md.push(`- **${r.name}**: ${r.testCommand}`);
   }
   md.push('');
 
@@ -184,9 +184,10 @@ function getSuggestedFiles(repoPath: string, dirtyFiles: string[], analysis?: an
  */
 function getTestCommand(repoPath: string, analysis?: any): string {
   if (analysis) {
-    return getConventionalTestCommands(analysis).join(', ');
+    const commands = getConventionalTestCommands(analysis);
+    return commands.map((c) => '`' + c + '`').join(', ');
   }
-  return 'npm test'; // fallback
+  return '`npm test`'; // fallback
 }
 
 /**

@@ -257,7 +257,9 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     if (!a) continue;
 
     const testCommands = getConventionalTestCommands(a);
-    const hasTypeScriptOrJs = a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript');
+    const hasTypeScriptOrJs = Boolean(
+      a.techStack?.languages?.includes('typescript') || a.techStack?.languages?.includes('javascript'),
+    );
     const isFallback = testCommands.length === 1 &&
       testCommands[0] === 'npm test' &&
       !hasTypeScriptOrJs;
