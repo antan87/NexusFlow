@@ -11,7 +11,7 @@ import { globby } from 'globby';
 
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { isInPlace, resolveFeatureRepoPath } from '../utils/feature.js';
-import { getConventionalTestCommand } from '../utils/test-command.js';
+import { getConventionalTestCommands } from '../utils/test-command.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
@@ -256,12 +256,23 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
     const a = analysis.get(repo.path);
     if (!a) continue;
 
-    const testCommand = getConventionalTestCommand(a);
-    if (testCommand === 'npm test' && !a.techStack.languages.includes('typescript') && !a.techStack.languages.includes('javascript')) {
+    const testCommands = getConventionalTestCommands(a);
+    const hasTypeScriptOrJs = a.techStack.languages.includes('typescript') || a.techStack.languages.includes('javascript');
+    const isFallback = testCommands.length === 1 &&
+      testCommands[0] === 'npm test' &&
+      !hasTypeScriptOrJs;
+
+    if (isFallback) {
       warnings.push(`Repository "${repo.name}" fell back to default test command "npm test".`);
       checks.push({ category: 'Test Commands', name: repo.name, status: 'warn', message: 'Using default fallback test command "npm test"' });
     } else {
-      checks.push({ category: 'Test Commands', name: repo.name, status: 'pass', message: `Test command is "${testCommand}"` });
+      const commandStr = testCommands.map((c) => `"${c}"`).join(', ');
+      checks.push({
+        category: 'Test Commands',
+        name: repo.name,
+        status: 'pass',
+        message: testCommands.length > 1 ? `Test commands are ${commandStr}` : `Test command is ${commandStr}`,
+      });
     }
   }
 

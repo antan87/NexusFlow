@@ -11,6 +11,7 @@ import { readWorkspaceKnowledge } from '../core/knowledge.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
 import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, PRIMARY_MANIFEST_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
+import { getConventionalTestCommands } from '../utils/test-command.js';
 
 /**
  * Runs the handoff command.
@@ -183,18 +184,7 @@ function getSuggestedFiles(repoPath: string, dirtyFiles: string[], analysis?: an
  */
 function getTestCommand(repoPath: string, analysis?: any): string {
   if (analysis) {
-    if (analysis.techStack.languages.includes('csharp')) {
-      return 'dotnet test';
-    }
-    if (analysis.techStack.languages.includes('typescript') || analysis.techStack.languages.includes('javascript')) {
-      return 'npm test';
-    }
-    if (analysis.techStack.languages.includes('python')) {
-      return 'pytest';
-    }
-    if (analysis.techStack.languages.includes('go')) {
-      return 'go test ./...';
-    }
+    return getConventionalTestCommands(analysis).join(', ');
   }
   return 'npm test'; // fallback
 }
