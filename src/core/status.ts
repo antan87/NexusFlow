@@ -15,6 +15,17 @@ import {
 } from '../utils/multi-git.js';
 import { execa } from 'execa';
 
+/** A file collision or concurrent modification detected on disk. */
+export interface FileCollision {
+  filePath: string;
+  code: string;
+  lastCommittedBy?: string;
+  lastCommitSha?: string;
+  lastCommitMessage?: string;
+  lastCommitDate?: string;
+  collisionHint?: string;
+}
+
 /** Full status for a single repo in a workspace. */
 export interface RepoStatusReport {
   name: string;
@@ -34,6 +45,9 @@ export interface RepoStatusReport {
   behind: number | null;
   remoteUrl: string | null;
   defaultBranch: string;
+  /** Concurrent modifications or collisions detected for modified files. */
+  collisions?: FileCollision[];
+  collisionWarning?: string;
 }
 
 /** Aggregate workspace status. */
@@ -45,6 +59,10 @@ export interface WorkspaceStatusReport {
   allClean: boolean;
   /** True when every repo is pushed (ahead === 0). A never-pushed branch counts as NOT pushed. */
   allPushed: boolean;
+  /** True when file collisions or concurrent modifications are detected. */
+  hasCollisions?: boolean;
+  /** Actionable warning advising coordination when concurrent changes occur. */
+  collisionWarning?: string;
 }
 
 /**
@@ -72,6 +90,50 @@ export async function getWorkspaceStatusReport(
           .catch(() => null),
       ]);
 
+      const collisions: FileCollision[] = [];
+      if (status.hasChanges && status.files.length > 0) {
+        await Promise.all(
+          status.files.slice(0, 15).map(async (file) => {
+            try {
+              const { stdout } = await execa(
+                'git',
+                ['log', '-n', '1', '--format=%an <%ae>|%h|%s|%cI', '--', file.path],
+                { cwd: repo.path },
+              );
+              if (stdout.trim()) {
+                const [author, sha, subject, date] = stdout.trim().split('|');
+                collisions.push({
+                  filePath: file.path,
+                  code: file.code,
+                  lastCommittedBy: author,
+                  lastCommitSha: sha,
+                  lastCommitMessage: subject,
+                  lastCommitDate: date,
+                  collisionHint: `File "${file.path}" modified on disk; last commit was by ${author} ("${subject}"). Coordinate with post_workroom_handoff before editing.`,
+                });
+              } else {
+                collisions.push({
+                  filePath: file.path,
+                  code: file.code,
+                  collisionHint: `File "${file.path}" modified on disk. Coordinate with post_workroom_handoff before editing.`,
+                });
+              }
+            } catch {
+              collisions.push({
+                filePath: file.path,
+                code: file.code,
+              });
+            }
+          }),
+        );
+      }
+
+      const authors = [...new Set(collisions.map((c) => c.lastCommittedBy).filter(Boolean))];
+      const collisionWarning =
+        collisions.length > 0
+          ? `${collisions.length} modified file(s) detected on disk${authors.length > 0 ? ` (last touched by ${authors.join(', ')})` : ''}. Use 'post_workroom_handoff' to coordinate before editing.`
+          : undefined;
+
       return {
         name: repo.name,
         path: repo.path,
@@ -85,6 +147,8 @@ export async function getWorkspaceStatusReport(
         behind: aheadBehind.behind,
         remoteUrl,
         defaultBranch: repo.defaultBranch,
+        collisions: collisions.length > 0 ? collisions : undefined,
+        collisionWarning,
       };
     }),
   );
@@ -93,6 +157,11 @@ export async function getWorkspaceStatusReport(
   const allClean = reports.every((r) => !r.dirty);
   // `ahead === null` means the branch was never pushed, which is not "pushed".
   const allPushed = reports.every((r) => r.ahead === 0);
+  const allCollisions = reports.flatMap((r) => r.collisions ?? []);
+  const hasCollisions = allCollisions.length > 0;
+  const collisionWarning = hasCollisions
+    ? `Concurrent file modifications detected on disk across ${reports.filter((r) => (r.collisions?.length ?? 0) > 0).length} repo(s). Use 'post_workroom_handoff' to coordinate before editing.`
+    : undefined;
 
-  return { workspacePath, branchName, repos: reports, allClean, allPushed };
+  return { workspacePath, branchName, repos: reports, allClean, allPushed, hasCollisions, collisionWarning };
 }
