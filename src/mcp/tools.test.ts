@@ -5,11 +5,13 @@ import * as refresh from '../core/refresh.js';
 import * as fs from 'node:fs/promises';
 import type { NexusFlowConfig } from '../types.js';
 import * as workroomManager from '../workrooms/manager.js';
+import * as statusCore from '../core/status.js';
 
 vi.mock('../core/workspace.js');
 vi.mock('../core/refresh.js');
 vi.mock('node:fs/promises');
 vi.mock('../workrooms/manager.js');
+vi.mock('../core/status.js');
 
 const mockConfig: NexusFlowConfig = {
   version: '1.0',
@@ -386,5 +388,32 @@ describe('MCP tools', () => {
       expect.stringContaining('Completed research and plan.'),
       'utf8',
     );
+  });
+
+  it('executes workspace_status tool handler successfully', async () => {
+    const tool = findTool('workspace_status');
+    expect(tool).toBeDefined();
+    expect(tool!.description).toContain('collaborator collision alerts');
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(statusCore.getWorkspaceStatusReport).mockResolvedValue({
+      workspacePath: '/dev/workspaces/feat-test',
+      branchName: 'main',
+      repos: [],
+      allClean: true,
+      allPushed: true,
+      hasCollisions: false,
+    });
+
+    const result = await tool!.handler(
+      {},
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content).toBeDefined();
+    expect(content.workspacePath).toBe('/dev/workspaces/feat-test');
+    expect(content.hasCollisions).toBe(false);
   });
 });

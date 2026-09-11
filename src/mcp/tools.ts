@@ -153,7 +153,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'workspace_status',
     description:
-      'Report live git state for every repo: HEAD SHA, current branch, branch alignment, dirty files, commits ahead/behind origin, and remote URL. Read-only; use this instead of generated prose for volatile facts.',
+      'Report live git state for every repo: HEAD SHA, current branch, branch alignment, dirty files, commits ahead/behind origin, collaborator collision alerts, and remote URL. Read-only; use this instead of generated prose for volatile facts.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
     handler: async (_args, ctx) => {

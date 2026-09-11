@@ -91,47 +91,86 @@ export async function getWorkspaceStatusReport(
       ]);
 
       const collisions: FileCollision[] = [];
-      if (status.hasChanges && status.files.length > 0) {
-        await Promise.all(
-          status.files.slice(0, 15).map(async (file) => {
-            try {
-              const { stdout } = await execa(
+      const trackedDirtyFiles = status.files.filter((f) => f.code !== '??');
+
+      if (trackedDirtyFiles.length > 0) {
+        // 1. Identify merge/rebase conflict files immediately
+        const conflictFiles = trackedDirtyFiles.filter((f) => f.code.includes('U') || f.code === 'AA');
+        for (const cf of conflictFiles) {
+          collisions.push({
+            filePath: cf.path,
+            code: cf.code,
+            collisionHint: `File "${cf.path}" is in unresolved merge conflict state (${cf.code}). Coordinate with post_workroom_handoff or resolve conflict before continuing.`,
+          });
+        }
+
+        // 2. Identify collaborator commits landing on modified files
+        try {
+          const [userName, userEmail, recentCommitsOut] = await Promise.all([
+            execa('git', ['config', 'user.name'], { cwd: repo.path }).then((r) => r.stdout.trim()).catch(() => ''),
+            execa('git', ['config', 'user.email'], { cwd: repo.path }).then((r) => r.stdout.trim()).catch(() => ''),
+            execa('git', ['log', '-n', '10', '--format=%H|%an|%ae|%s|%cI'], { cwd: repo.path })
+              .then((r) => r.stdout.trim())
+              .catch(() => ''),
+          ]);
+
+          if (recentCommitsOut) {
+            const commits = recentCommitsOut.split('\n').filter(Boolean).map((line) => {
+              const [sha, authorName, authorEmail, subject, date] = line.split('|');
+              return {
+                sha: sha || '',
+                authorName: authorName || '',
+                authorEmail: authorEmail || '',
+                author: `${authorName || ''} <${authorEmail || ''}>`.trim(),
+                subject: subject || '',
+                date: date || '',
+              };
+            });
+
+            // Find commits authored by other collaborators
+            const collaboratorCommits = commits.filter((c) => {
+              if (userName && c.authorName && c.authorName !== userName) return true;
+              if (userEmail && c.authorEmail && c.authorEmail !== userEmail) return true;
+              return false;
+            });
+
+            if (collaboratorCommits.length > 0) {
+              const shas = collaboratorCommits.map((c) => c.sha);
+              const { stdout: touchedFilesOut } = await execa(
                 'git',
-                ['log', '-n', '1', '--format=%an <%ae>|%h|%s|%cI', '--', file.path],
+                ['diff-tree', '--no-commit-id', '--name-only', '-r', ...shas],
                 { cwd: repo.path },
-              );
-              if (stdout.trim()) {
-                const [author, sha, subject, date] = stdout.trim().split('|');
-                collisions.push({
-                  filePath: file.path,
-                  code: file.code,
-                  lastCommittedBy: author,
-                  lastCommitSha: sha,
-                  lastCommitMessage: subject,
-                  lastCommitDate: date,
-                  collisionHint: `File "${file.path}" modified on disk; last commit was by ${author} ("${subject}"). Coordinate with post_workroom_handoff before editing.`,
-                });
-              } else {
-                collisions.push({
-                  filePath: file.path,
-                  code: file.code,
-                  collisionHint: `File "${file.path}" modified on disk. Coordinate with post_workroom_handoff before editing.`,
-                });
+              ).catch(() => ({ stdout: '' }));
+
+              const touchedSet = new Set(touchedFilesOut.split('\n').map((f) => f.trim()).filter(Boolean));
+
+              for (const file of trackedDirtyFiles) {
+                if (collisions.some((c) => c.filePath === file.path)) continue;
+
+                if (touchedSet.has(file.path)) {
+                  const commit = collaboratorCommits.find((c) => c.sha);
+                  collisions.push({
+                    filePath: file.path,
+                    code: file.code,
+                    lastCommittedBy: commit?.author,
+                    lastCommitSha: commit?.sha?.slice(0, 7),
+                    lastCommitMessage: commit?.subject,
+                    lastCommitDate: commit?.date,
+                    collisionHint: `File "${file.path}" modified on disk was recently committed by collaborator ${commit?.author} ("${commit?.subject}"). Coordinate with post_workroom_handoff before editing.`,
+                  });
+                }
               }
-            } catch {
-              collisions.push({
-                filePath: file.path,
-                code: file.code,
-              });
             }
-          }),
-        );
+          }
+        } catch {
+          // Graceful fallback if git queries fail
+        }
       }
 
       const authors = [...new Set(collisions.map((c) => c.lastCommittedBy).filter(Boolean))];
       const collisionWarning =
         collisions.length > 0
-          ? `${collisions.length} modified file(s) detected on disk${authors.length > 0 ? ` (last touched by ${authors.join(', ')})` : ''}. Use 'post_workroom_handoff' to coordinate before editing.`
+          ? `${collisions.length} modified file(s) collide with recent collaborator commits${authors.length > 0 ? ` (${authors.join(', ')})` : ''}. Use 'post_workroom_handoff' to coordinate before editing.`
           : undefined;
 
       return {
