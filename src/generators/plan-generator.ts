@@ -15,7 +15,7 @@ import type {
   DependencyGraph,
 } from '../types.js';
 import { GENERATED_SNAPSHOT_HEADER, renderFreshnessBanner } from '../core/generation-lock.js';
-import { PRIMARY_PLAN_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
+import { PRIMARY_PLAN_FILE, PRIMARY_KNOWLEDGE_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 // ─── Dependency Graph Builder ─────────────────────────────────────────────
 
@@ -239,7 +239,7 @@ export async function generateImplementationPlan(
         md.push('## Implementation Guidance');
         md.push('');
         md.push('- **Vertical Slice**: Implement in small, testable increments and verify tests pass after each step.');
-        md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\`.`);
+        md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\` (or append directly to \`${PRIMARY_KNOWLEDGE_FILE}\`).`);
         md.push('- **Cross-Harness Handoff**: Use `post_workroom_handoff` to post milestone updates or hand off to other agents.');
         md.push('');
       }

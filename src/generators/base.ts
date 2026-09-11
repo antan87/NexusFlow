@@ -10,6 +10,7 @@ import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import { isInPlace } from '../utils/feature.js';
 import { getConventionalTestCommands } from '../utils/test-command.js';
 import { renderFreshnessBanner } from '../core/generation-lock.js';
+import { PRIMARY_KNOWLEDGE_FILE, CLI_NAME } from '../core/constants.js';
 
 /** How a repo relates to its siblings in this workspace. */
 export interface RepoRelations {
@@ -235,7 +236,7 @@ ${reposSection}
 
 ## Where to look
 
-- \`contextspace-knowledge.md\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup or search headings for your topic and read only those entries, not the whole file. Add with \`ctxspace knowledge add -t decision|gotcha --title "..." -m "..."\`, keeping each entry to a rule and its reason
+- \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup or search headings for your topic and read only those entries, not the whole file. Add with \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\` (or append a \`### <YYYY-MM-DD> — <Title>\` heading directly to \`${PRIMARY_KNOWLEDGE_FILE}\` if the CLI is not on PATH), keeping each entry to a rule and its reason
 - \`contextspace-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
 - \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.codex/skills/\`, \`.claude/skills/\`, \`.github/skills/\`, \`.cursor/skills/\` where supported)
 ${ownInstructions}${customCommands}${teamwork}`;

@@ -212,6 +212,12 @@ describe('buildContextContent', () => {
       expect(content).toContain('not the whole file');
     });
 
+    it('documents direct file append fallback when the CLI is not on PATH', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).toContain('append a `### <YYYY-MM-DD> — <Title>` heading directly');
+    });
+
     it('names repos that carry their own instructions, which override these', async () => {
       const ctx = ctxFor({});
       (ctx.analysis!.get(nodeRepo)! as { existingAIConfigs: unknown }).existingAIConfigs = [

@@ -101,8 +101,8 @@ function buildKnowledgeContent(ctx: WorkspaceContext): string {
   return `# Workspace Knowledge — ${feature.id}
 
 > Accumulated decisions and gotchas for this feature. Append with
-> \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\`, which creates the
-> section it needs.
+> \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\`, or append directly
+> under the relevant section as \`### <YYYY-MM-DD> — <Title>\` followed by one rule and its reason.
 
 ## Feature Goal
 
