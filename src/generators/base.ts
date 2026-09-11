@@ -8,7 +8,7 @@
 import type { WorkspaceContext } from '../types.js';
 import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import { isInPlace } from '../utils/feature.js';
-import { getConventionalTestCommand } from '../utils/test-command.js';
+import { getConventionalTestCommands } from '../utils/test-command.js';
 import { renderFreshnessBanner } from '../core/generation-lock.js';
 
 /** How a repo relates to its siblings in this workspace. */
@@ -134,7 +134,10 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
   const rows = ordered.map((repo) => {
     const a = analysis?.get(repo.path);
     const rel = relations.get(repo.name);
-    const verify = a ? getConventionalTestCommand(a) : '';
+    const verifyCommands = a ? getConventionalTestCommands(a) : [];
+    const verify = verifyCommands.length > 0
+      ? verifyCommands.map((cmd) => '`' + cmd + '`').join(', ')
+      : '—';
 
     // In-place repos can each sit on a different branch, which is worth stating.
     // Repos dynamically isolated into dedicated worktrees show their worktree path.
@@ -153,7 +156,7 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     if (rel?.dependsOn.length) ties.push(`needs ${rel.dependsOn.map((n) => '`' + n + '`').join(', ')}`);
     if (rel?.consumedBy.length) ties.push(`used by ${rel.consumedBy.map((n) => '`' + n + '`').join(', ')}`);
 
-    return `| \`${repo.name}\` | ${location} | ${verify ? '`' + verify + '`' : '—'} | ${ties.join('; ') || '—'} |`;
+    return `| \`${repo.name}\` | ${location} | ${verify} | ${ties.join('; ') || '—'} |`;
   });
 
   // The earliest repo something actually builds on — and it names what. The

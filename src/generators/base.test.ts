@@ -92,6 +92,17 @@ describe('buildContextContent', () => {
       expect(content).toContain('| `my-tool` | `my-tool` | `pytest` |');
     });
 
+    it('formats multiple verify commands with fast gate first for mixed repositories', async () => {
+      const mixedRepo = path.join(dir, 'my-mixed');
+      const ctx = ctxFor({});
+      ctx.repos.push({ name: 'my-mixed', path: mixedRepo, defaultBranch: 'main' });
+      ctx.analysis!.set(mixedRepo, analysisFor('my-mixed', mixedRepo, ['csharp', 'typescript']));
+
+      const content = await buildContextContent(ctx);
+
+      expect(content).toContain('| `my-mixed` | `my-mixed` | `npm test`, `dotnet test` |');
+    });
+
     it('states the cross-repo tie in both directions', async () => {
       // The one thing a single-repo view cannot show, and the reason a
       // multi-repo workspace is worth generating at all.
