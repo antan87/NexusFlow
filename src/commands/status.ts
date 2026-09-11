@@ -37,6 +37,9 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
   console.log(chalk.bold('Repositories:'));
   for (const repo of repositories.repos) {
     console.log(`  ${repo.name}: ${repo.branch ?? 'detached'} @ ${repo.headSha?.slice(0, 12) ?? 'unknown'}; ${repo.dirty ? 'dirty' : 'clean'}; ${repo.ahead === null ? 'not pushed' : `${repo.ahead} ahead / ${repo.behind} behind`}`);
+    if (repo.collisionWarning) {
+      console.log(chalk.yellow(`    ⚠ ${repo.collisionWarning}`));
+    }
   }
   const freshness = await checkGenerationLock(workspacePath);
   console.log(`\n${freshness.fresh ? chalk.green('Generated context: fresh') : chalk.red(`Generated context: stale/drifted (${freshness.drift.length})`)}`);
