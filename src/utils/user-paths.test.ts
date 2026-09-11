@@ -21,17 +21,19 @@ afterEach(async () => {
 
 describe('getUserCandidatePaths', () => {
   it('returns linux candidate paths', () => {
-    const paths = getUserCandidatePaths('linux', {}, tmpDir);
+    const fakeHome = '/home/testuser';
+    const paths = getUserCandidatePaths('linux', {}, fakeHome);
     expect(paths).toContain('/usr/local/bin');
-    expect(paths).toContain(path.join(tmpDir, '.local', 'bin'));
-    expect(paths).toContain(path.join(tmpDir, '.cargo', 'bin'));
+    expect(paths).toContain('/home/testuser/.local/bin');
+    expect(paths).toContain('/home/testuser/.cargo/bin');
   });
 
   it('returns darwin candidate paths', () => {
-    const paths = getUserCandidatePaths('darwin', {}, tmpDir);
+    const fakeHome = '/Users/testuser';
+    const paths = getUserCandidatePaths('darwin', {}, fakeHome);
     expect(paths).toContain('/opt/homebrew/bin');
     expect(paths).toContain('/usr/local/bin');
-    expect(paths).toContain(path.join(tmpDir, '.local', 'bin'));
+    expect(paths).toContain('/Users/testuser/.local/bin');
   });
 
   it('returns windows candidate paths when environment variables are set', () => {
@@ -52,29 +54,34 @@ describe('getUserCandidatePaths', () => {
     await fs.mkdir(v22, { recursive: true });
 
     const paths = getUserCandidatePaths('linux', {}, tmpDir);
-    expect(paths).toContain(v22);
-    expect(paths).toContain(v20);
+    const normalizedPaths = paths.map((p) => path.normalize(p));
+    expect(normalizedPaths).toContain(path.normalize(v22));
+    expect(normalizedPaths).toContain(path.normalize(v20));
   });
 });
 
 describe('getAugmentedPath', () => {
   it('appends existing candidate directories to PATH without duplicates', async () => {
-    const localBin = path.join(tmpDir, '.local', 'bin');
-    await fs.mkdir(localBin, { recursive: true });
+    const isWin = process.platform === 'win32';
+    const candidateBin = path.join(tmpDir, '.cargo', 'bin');
+    await fs.mkdir(candidateBin, { recursive: true });
 
-    const existingPath = '/bin:/usr/bin';
-    const augmented = getAugmentedPath({ PATH: existingPath }, 'linux', tmpDir);
+    const existingPath = isWin ? 'C:\\Windows\\system32;C:\\Windows' : '/bin:/usr/bin';
+    const augmented = getAugmentedPath({ PATH: existingPath, Path: existingPath }, process.platform, tmpDir);
     expect(augmented.startsWith(existingPath)).toBe(true);
-    expect(augmented).toContain(localBin);
+    expect(augmented).toContain(candidateBin);
   });
 
   it('does not duplicate directories already in PATH', async () => {
-    const localBin = path.join(tmpDir, '.local', 'bin');
-    await fs.mkdir(localBin, { recursive: true });
+    const isWin = process.platform === 'win32';
+    const sep = isWin ? ';' : ':';
+    const candidateBin = path.join(tmpDir, '.cargo', 'bin');
+    await fs.mkdir(candidateBin, { recursive: true });
 
-    const existingPath = `/bin:${localBin}:/usr/bin`;
-    const augmented = getAugmentedPath({ PATH: existingPath }, 'linux', tmpDir);
-    const count = augmented.split(':').filter((p) => p === localBin).length;
+    const base = isWin ? 'C:\\Windows\\system32;C:\\Windows' : '/bin:/usr/bin';
+    const existingPath = `${base}${sep}${candidateBin}`;
+    const augmented = getAugmentedPath({ PATH: existingPath, Path: existingPath }, process.platform, tmpDir);
+    const count = augmented.split(sep).filter((p) => p === candidateBin).length;
     expect(count).toBe(1);
   });
 });
