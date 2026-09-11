@@ -103,6 +103,9 @@ export function checkEntryLength(message: string): boolean {
   );
   console.log(chalk.dim('  This file is read by an assistant and only grows, so an entry has to be a'));
   console.log(chalk.dim('  rule, not a write-up. State what to do and why in one or two sentences.'));
+  console.log(chalk.dim('  Prefer facts that cannot be recovered from code or git history: environment quirks,'));
+  console.log(chalk.dim('  contradictions in a spec, decisions and reasons, things that cost you time to discover.'));
+  console.log(chalk.dim('  Avoid restating structure the code already shows.'));
   console.log(chalk.dim('  Split genuinely separate findings into separate entries, and put long'));
   console.log(chalk.dim('  material in a document the entry points to.'));
   return false;

@@ -224,6 +224,13 @@ describe('buildContextContent', () => {
       expect(content).toContain('if the MCP server is not connected');
     });
 
+    it('steers knowledge capture toward facts not recoverable from code', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      expect(content).toContain('cannot be recovered from the code or git history');
+      expect(content).toContain('Avoid restating structure the code already shows');
+    });
+
     it('names repos that carry their own instructions, which override these', async () => {
       const ctx = ctxFor({});
       (ctx.analysis!.get(nodeRepo)! as { existingAIConfigs: unknown }).existingAIConfigs = [

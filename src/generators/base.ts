@@ -236,7 +236,7 @@ ${reposSection}
 
 ## Where to look
 
-- \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup (or read \`${PRIMARY_KNOWLEDGE_FILE}\` directly if the MCP server is not connected; inspect headings and read only those entries, not the whole file). Add with \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\` (or append a \`### <YYYY-MM-DD> — <Title>\` heading directly to \`${PRIMARY_KNOWLEDGE_FILE}\` if the CLI is not on PATH), keeping each entry to a rule and its reason
+- \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup (or read \`${PRIMARY_KNOWLEDGE_FILE}\` directly if the MCP server is not connected; inspect headings and read only those entries, not the whole file). Add with \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\` (or append a \`### <YYYY-MM-DD> — <Title>\` heading directly to \`${PRIMARY_KNOWLEDGE_FILE}\` if the CLI is not on PATH), keeping each entry to a rule and its reason. Prefer facts that cannot be recovered from the code or git history: environment quirks, contradictions in a spec, decisions and the reason behind them, things that cost you time to discover. Avoid restating structure the code already shows.
 - \`contextspace-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
 - \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.codex/skills/\`, \`.claude/skills/\`, \`.github/skills/\`, \`.cursor/skills/\` where supported)
 ${ownInstructions}${customCommands}${teamwork}`;
