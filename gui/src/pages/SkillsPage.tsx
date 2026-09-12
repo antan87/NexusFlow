@@ -1129,12 +1129,15 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
       {/* ─── Skill Playbook Editor Modal ───────────────────────────────────── */}
       <Dialog open={skillModalOpen} onOpenChange={setSkillModalOpen}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <div className="flex items-center justify-between pr-6">
+        <DialogContent className="max-w-[96vw] sm:max-w-5xl lg:max-w-6xl xl:max-w-7xl h-[90vh] max-h-[92vh] flex flex-col p-6">
+          <DialogHeader className="pb-3 border-b border-border/70 shrink-0">
+            <div className="flex items-center justify-between pr-8">
               <div>
-                <DialogTitle>{editingSkill?.id ? 'Edit Skill Package' : 'Create New Skill'}</DialogTitle>
-                <DialogDescription>
+                <DialogTitle className="text-base font-bold flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span>{editingSkill?.id ? 'Edit Skill Package' : 'Create New Skill'}</span>
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   Configure SKILL.md metadata triggers and markdown playbook instructions.
                 </DialogDescription>
               </div>
@@ -1143,9 +1146,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                   type="button"
                   onClick={() => setSkillModalTab('edit')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md flex items-center gap-1 font-medium transition-colors',
+                    'px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors cursor-pointer',
                     skillModalTab === 'edit'
-                      ? 'bg-background text-foreground shadow-sm'
+                      ? 'bg-background text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -1156,9 +1159,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                   type="button"
                   onClick={() => setSkillModalTab('preview')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md flex items-center gap-1 font-medium transition-colors',
+                    'px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors cursor-pointer',
                     skillModalTab === 'preview'
-                      ? 'bg-background text-foreground shadow-sm'
+                      ? 'bg-background text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -1169,162 +1172,163 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             </div>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 pr-4 py-2">
-            {skillModalTab === 'edit' ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="skill-title" className="text-xs font-medium">
-                      Display Title
-                    </Label>
-                    <Input
-                      id="skill-title"
-                      value={editingSkill?.title || ''}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="e.g. Pull Request Reviewer"
-                      className="mt-1 text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="skill-name" className="text-xs font-medium">
-                      Identifier (Slug)
-                    </Label>
-                    <Input
-                      id="skill-name"
-                      value={editingSkill?.name || ''}
-                      disabled={!!editingSkill?.id}
-                      onChange={(e) => {
-                        setSlugManuallyEdited(true);
-                        setEditingSkill((prev) => (prev ? { ...prev, name: e.target.value } : null));
-                      }}
-                      placeholder="e.g. pr-review-toolkit"
-                      className="mt-1 text-xs font-mono"
-                    />
-                  </div>
+          {/* Modal Main Body - 2-Column Responsive Layout */}
+          <div className="flex-1 min-h-0 py-4 flex flex-col lg:flex-row gap-6 overflow-hidden">
+            {/* Left Column: Metadata & Scopes */}
+            <div className="lg:w-[420px] xl:w-[460px] shrink-0 flex flex-col gap-4 overflow-y-auto pr-2 pb-2">
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="skill-title" className="text-xs font-medium">
+                    Display Title
+                  </Label>
+                  <Input
+                    id="skill-title"
+                    value={editingSkill?.title || ''}
+                    onChange={(e) => handleTitleChange(e.target.value)}
+                    placeholder="e.g. Pull Request Reviewer"
+                    className="mt-1 text-xs"
+                  />
                 </div>
 
-                {/* Scope Selector: Global vs Workspace-Local */}
-                <div className="p-3 rounded-lg border border-border/80 bg-muted/20 space-y-2">
+                <div>
+                  <Label htmlFor="skill-name" className="text-xs font-medium">
+                    Identifier (Slug)
+                  </Label>
+                  <Input
+                    id="skill-name"
+                    value={editingSkill?.name || ''}
+                    disabled={!!editingSkill?.id}
+                    onChange={(e) => {
+                      setSlugManuallyEdited(true);
+                      setEditingSkill((prev) => (prev ? { ...prev, name: e.target.value } : null));
+                    }}
+                    placeholder="e.g. pr-review-toolkit"
+                    className="mt-1 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Scope Selector: Global vs Workspace-Local */}
+              <div className="p-3 rounded-lg border border-border/80 bg-muted/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Boxes className="h-3.5 w-3.5 text-primary" />
+                    <span>Skill Scope</span>
+                  </Label>
+                  <span className="text-[10px] text-muted-foreground">
+                    {editingSkillScope === 'global' ? 'Machine-wide catalog' : 'Project-specific (.agents/skills/)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingSkillScope('global')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
+                      editingSkillScope === 'global'
+                        ? 'border-blue-500/50 bg-blue-500/15 text-blue-300 font-semibold shadow-xs'
+                        : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <span>🌐 Global Catalog</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingSkillScope('workspace')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
+                      editingSkillScope === 'workspace'
+                        ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 font-semibold shadow-xs'
+                        : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <span>📁 Workspace-Local</span>
+                  </button>
+                </div>
+
+                {editingSkillScope === 'workspace' && (
+                  <div className="pt-1">
+                    <Label htmlFor="target-ws" className="text-[11px] font-medium text-muted-foreground">
+                      Target Workspace:
+                    </Label>
+                    {workspaces.length > 0 ? (
+                      <select
+                        id="target-ws"
+                        value={editingSkillWorkspaceId}
+                        onChange={(e) => setEditingSkillWorkspaceId(e.target.value)}
+                        className="mt-1 w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                      >
+                        {workspaces.map((ws) => (
+                          <option key={ws.id} value={ws.id}>
+                            📁 {ws.id} ({ws.branchName})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="mt-1 text-xs text-destructive italic">
+                        No active workspaces found. Please create a workspace first.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Category & Tags */}
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="skill-cat" className="text-xs font-medium">
+                    Category Box
+                  </Label>
+                  <select
+                    id="skill-cat"
+                    value={editingSkill?.category || ''}
+                    onChange={(e) =>
+                      setEditingSkill((prev) => (prev ? { ...prev, category: e.target.value } : null))
+                    }
+                    className="mt-1 w-full bg-background border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Boxes className="h-3.5 w-3.5 text-primary" />
-                      <span>Skill Scope</span>
+                    <Label htmlFor="skill-tags" className="text-xs font-medium">
+                      Tags & Domain Categories
                     </Label>
-                    <span className="text-[10px] text-muted-foreground">
-                      {editingSkillScope === 'global' ? 'Machine-wide catalog' : 'Project-specific (.agents/skills/)'}
-                    </span>
+                    <span className="text-[10px] text-muted-foreground">Click chips below to toggle</span>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditingSkillScope('global')}
-                      className={cn(
-                        'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
-                        editingSkillScope === 'global'
-                          ? 'border-blue-500/50 bg-blue-500/15 text-blue-300 font-semibold shadow-xs'
-                          : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                      )}
-                    >
-                      <span>🌐 Global Catalog</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingSkillScope('workspace')}
-                      className={cn(
-                        'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
-                        editingSkillScope === 'workspace'
-                          ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 font-semibold shadow-xs'
-                          : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                      )}
-                    >
-                      <span>📁 Workspace-Local</span>
-                    </button>
-                  </div>
-
-                  {editingSkillScope === 'workspace' && (
-                    <div className="pt-1">
-                      <Label htmlFor="target-ws" className="text-[11px] font-medium text-muted-foreground">
-                        Target Workspace:
-                      </Label>
-                      {workspaces.length > 0 ? (
-                        <select
-                          id="target-ws"
-                          value={editingSkillWorkspaceId}
-                          onChange={(e) => setEditingSkillWorkspaceId(e.target.value)}
-                          className="mt-1 w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-                        >
-                          {workspaces.map((ws) => (
-                            <option key={ws.id} value={ws.id}>
-                              📁 {ws.id} ({ws.branchName})
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="mt-1 text-xs text-destructive italic">
-                          No active workspaces found. Please create a workspace first.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="skill-cat" className="text-xs font-medium">
-                      Category Box
-                    </Label>
-                    <select
-                      id="skill-cat"
-                      value={editingSkill?.category || ''}
-                      onChange={(e) =>
-                        setEditingSkill((prev) => (prev ? { ...prev, category: e.target.value } : null))
-                      }
-                      className="mt-1 w-full bg-background border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="skill-tags" className="text-xs font-medium">
-                        Tags & Domain Categories
-                      </Label>
-                      <span className="text-[10px] text-muted-foreground">Click chips below to toggle</span>
-                    </div>
-                    <Input
-                      id="skill-tags"
-                      value={editingSkill?.tags?.join(', ') || ''}
-                      onChange={(e) =>
-                        setEditingSkill((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                tags: e.target.value
-                                  .split(',')
-                                  .map((t) => t.trim())
-                                  .filter(Boolean),
-                              }
-                            : null,
-                        )
-                      }
-                      placeholder="e.g. economy, git, pr, security"
-                      className="mt-1 text-xs font-mono"
-                    />
-                  </div>
+                  <Input
+                    id="skill-tags"
+                    value={editingSkill?.tags?.join(', ') || ''}
+                    onChange={(e) =>
+                      setEditingSkill((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              tags: e.target.value
+                                .split(',')
+                                .map((t) => t.trim())
+                                .filter(Boolean),
+                            }
+                          : null,
+                      )
+                    }
+                    placeholder="e.g. nexusflow, core, cli, testing"
+                    className="mt-1 text-xs font-mono"
+                  />
                 </div>
 
                 {/* Interactive Tag Chips */}
                 {availableSkillTags.length > 0 && (
                   <div className="space-y-1">
                     <span className="text-[11px] text-muted-foreground">Quick Tag Assignment:</span>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
                       {availableSkillTags.map((tag) => {
                         const isAssigned = editingSkill?.tags?.includes(tag);
                         return (
@@ -1355,51 +1359,82 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                     </div>
                   </div>
                 )}
+              </div>
 
-                <div>
-                  <Label htmlFor="skill-desc" className="text-xs font-medium">
-                    Trigger Description (for AI Autonomous Discovery)
-                  </Label>
-                  <Input
-                    id="skill-desc"
-                    value={editingSkill?.description || ''}
-                    onChange={(e) =>
-                      setEditingSkill((prev) => (prev ? { ...prev, description: e.target.value } : null))
-                    }
-                    placeholder="e.g. Use when reviewing PR diffs or when user asks for a PR audit..."
-                    className="mt-1 text-xs"
-                  />
-                </div>
+              {/* Trigger Description */}
+              <div>
+                <Label htmlFor="skill-desc" className="text-xs font-medium">
+                  Trigger Description (for AI Autonomous Discovery)
+                </Label>
+                <Textarea
+                  id="skill-desc"
+                  rows={3}
+                  value={editingSkill?.description || ''}
+                  onChange={(e) =>
+                    setEditingSkill((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                  }
+                  placeholder="e.g. Use when reviewing PR diffs or when user asks for a PR audit..."
+                  className="mt-1 text-xs leading-relaxed resize-none"
+                />
+              </div>
+            </div>
 
-                {/* SKILL.md Playbook Content */}
-                <div>
-                  <Label htmlFor="skill-content" className="text-xs font-medium">
-                    Playbook Instructions (Markdown)
-                  </Label>
+            {/* Right Column: Playbook Editor or Preview */}
+            <div className="flex-1 min-w-0 flex flex-col min-h-[380px] lg:min-h-0 border-t lg:border-t-0 lg:border-l border-border/70 pt-4 lg:pt-0 lg:pl-6">
+              {skillModalTab === 'edit' ? (
+                <div className="flex flex-col flex-1 min-h-0 h-full">
+                  <div className="flex items-center justify-between pb-2 shrink-0">
+                    <Label htmlFor="skill-content" className="text-xs font-semibold flex items-center gap-1.5">
+                      <Code2 className="h-3.5 w-3.5 text-primary" />
+                      <span>Playbook Instructions (Markdown)</span>
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {(editingSkill?.content || '').split('\n').length} lines · {(editingSkill?.content || '').length} characters
+                    </span>
+                  </div>
                   <Textarea
                     id="skill-content"
                     value={editingSkill?.content || ''}
                     onChange={(e) =>
                       setEditingSkill((prev) => (prev ? { ...prev, content: e.target.value } : null))
                     }
-                    rows={12}
                     placeholder="# Playbook Title&#10;&#10;Detailed instructions for the AI assistant..."
-                    className="mt-1 font-mono text-xs leading-relaxed"
+                    className="flex-1 w-full min-h-[360px] lg:min-h-full font-mono text-xs leading-relaxed resize-none p-4 bg-background/80 border border-border rounded-lg focus:ring-1 focus:ring-primary"
                   />
                 </div>
-              </div>
-            ) : (
-              <div className="p-4 border rounded-xl bg-card/40 prose prose-sm dark:prose-invert max-w-none">
-                <div className="mb-4 pb-3 border-b">
-                  <h2 className="text-lg font-bold m-0">{editingSkill?.title || editingSkill?.name}</h2>
-                  <p className="text-xs text-muted-foreground m-0 mt-1">{editingSkill?.description}</p>
+              ) : (
+                <div className="flex flex-col flex-1 min-h-0 h-full">
+                  <div className="flex items-center justify-between pb-2 shrink-0">
+                    <span className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                      <Eye className="h-3.5 w-3.5 text-primary" />
+                      <span>Documentation Preview</span>
+                    </span>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      SKILL.md
+                    </Badge>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5 border rounded-lg bg-card/40 prose prose-sm dark:prose-invert max-w-none">
+                    <div className="mb-4 pb-3 border-b border-border/70">
+                      <h2 className="text-lg font-bold m-0 text-foreground">{editingSkill?.title || editingSkill?.name}</h2>
+                      <p className="text-xs text-muted-foreground m-0 mt-1">{editingSkill?.description}</p>
+                      {editingSkill?.tags && editingSkill.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2.5">
+                          {editingSkill.tags.map((t) => (
+                            <span key={t} className="px-2 py-0.5 rounded bg-muted text-[11px] font-mono text-muted-foreground">
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <pre className="text-xs whitespace-pre-wrap font-sans bg-transparent p-0 border-0 leading-relaxed">
+                      {editingSkill?.content || '*(No playbook markdown provided)*'}
+                    </pre>
+                  </div>
                 </div>
-                <pre className="text-xs whitespace-pre-wrap font-sans bg-transparent p-0 border-0">
-                  {editingSkill?.content || '*(No playbook markdown provided)*'}
-                </pre>
-              </div>
-            )}
-          </ScrollArea>
+              )}
+            </div>
+          </div>
 
           <DialogFooter className="mt-4 pt-3 border-t flex items-center justify-between sm:justify-between w-full">
             <div>
