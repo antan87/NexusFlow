@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as skillsCatalog from '../utils/skills-catalog.js';
 import * as resolveUtil from '../utils/resolve-workspace.js';
 import * as refreshCore from '../core/refresh.js';
-import { skillListCommand, skillCreateCommand, skillDeleteCommand } from './skill.js';
+import { skillListCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './skill.js';
 
 vi.mock('../utils/skills-catalog.js');
 vi.mock('../utils/resolve-workspace.js');
@@ -36,6 +36,7 @@ describe('skill CLI commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(resolveUtil.resolveWorkspaceInteractive).mockResolvedValue(mockWsPath);
+    vi.mocked(resolveUtil.resolveWorkspaceQuiet).mockImplementation(async (arg?: string) => (arg ? mockWsPath : null));
     vi.mocked(skillsCatalog.getAllSkills).mockResolvedValue([...sampleSkills]);
     vi.mocked(skillsCatalog.saveSkill).mockImplementation(async (skill: any) => ({
       ...skill,
@@ -87,6 +88,15 @@ describe('skill CLI commands', () => {
       expect(calls).toContain('Global Company Skills');
       expect(calls).toContain('local-test-skill');
       expect(calls).toContain('global-standard-skill');
+      consoleSpy.mockRestore();
+    });
+
+    it('lists skills quietly without interactive prompt when outside workspace', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillListCommand(undefined, {});
+
+      expect(resolveUtil.resolveWorkspaceInteractive).not.toHaveBeenCalled();
+      expect(skillsCatalog.getAllSkills).toHaveBeenCalledWith(undefined);
       consoleSpy.mockRestore();
     });
   });
@@ -152,6 +162,85 @@ describe('skill CLI commands', () => {
       );
       expect(refreshCore.refreshWorkspace).toHaveBeenCalledWith(mockWsPath, { force: true });
       consoleSpy.mockRestore();
+    });
+
+    it('deletes a global skill without workspace or prompt when scope is global', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillDeleteCommand('global-standard-skill', undefined, { scope: 'global' });
+
+      expect(resolveUtil.resolveWorkspaceInteractive).not.toHaveBeenCalled();
+      expect(skillsCatalog.deleteSkill).toHaveBeenCalledWith(
+        'global-standard-skill',
+        expect.objectContaining({
+          scope: 'global',
+        }),
+      );
+      expect(refreshCore.refreshWorkspace).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('skillShowCommand', () => {
+    it('outputs skill details in JSON format', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillShowCommand('local-test-skill', mockWsPath, { json: true });
+
+      expect(consoleSpy).toHaveBeenCalled();
+      const output = JSON.parse(consoleSpy.mock.calls[0][0]);
+      expect(output.id).toBe('local-test-skill');
+      expect(output.title).toBe('Local Test Skill');
+      expect(output.description).toBe('Skill scoped to workspace');
+      consoleSpy.mockRestore();
+    });
+
+    it('prints human-readable skill details including metadata and content', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillShowCommand('local-test-skill', mockWsPath, {});
+
+      const calls = consoleSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(calls).toContain('Local Test Skill');
+      expect(calls).toContain('local-test-skill');
+      expect(calls).toContain('Workspace-local');
+      expect(calls).toContain('Skill scoped to workspace');
+      expect(calls).toContain('Instructions for local');
+      consoleSpy.mockRestore();
+    });
+
+    it('shows global skill quietly without workspace or prompt when outside workspace', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillShowCommand('global-standard-skill', undefined, {});
+
+      expect(resolveUtil.resolveWorkspaceInteractive).not.toHaveBeenCalled();
+      expect(skillsCatalog.getAllSkills).toHaveBeenCalledWith(undefined);
+      const calls = consoleSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(calls).toContain('Global Standard Skill');
+      consoleSpy.mockRestore();
+    });
+
+    it('handles skill not found with error message and exitCode 1', async () => {
+      const consoleErrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const originalExitCode = process.exitCode;
+      try {
+        await skillShowCommand('non-existent-skill', mockWsPath, {});
+        expect(consoleErrSpy).toHaveBeenCalledWith(expect.stringContaining('not found'));
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = originalExitCode;
+        consoleErrSpy.mockRestore();
+      }
+    });
+
+    it('handles empty skill id with error and exitCode 1', async () => {
+      const consoleErrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const originalExitCode = process.exitCode;
+      try {
+        await skillShowCommand('   ', mockWsPath, {});
+        expect(consoleErrSpy).toHaveBeenCalledWith(expect.stringContaining('Skill ID is required'));
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = originalExitCode;
+        consoleErrSpy.mockRestore();
+      }
     });
   });
 });

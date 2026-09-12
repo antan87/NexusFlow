@@ -22,10 +22,12 @@ import {
 describe('Skills Catalog & Frontmatter Utils', () => {
   let tempHome: string;
   const originalEnv = process.env.NEXUSFLOW_HOME;
+  const originalCsEnv = process.env.CONTEXTSPACE_HOME;
 
   beforeEach(async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-skills-test-home-'));
     process.env.NEXUSFLOW_HOME = tempHome;
+    delete process.env.CONTEXTSPACE_HOME;
   });
 
   afterEach(async () => {
@@ -33,6 +35,11 @@ describe('Skills Catalog & Frontmatter Utils', () => {
       process.env.NEXUSFLOW_HOME = originalEnv;
     } else {
       delete process.env.NEXUSFLOW_HOME;
+    }
+    if (originalCsEnv !== undefined) {
+      process.env.CONTEXTSPACE_HOME = originalCsEnv;
+    } else {
+      delete process.env.CONTEXTSPACE_HOME;
     }
     await fse.remove(tempHome);
   });

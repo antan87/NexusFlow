@@ -226,11 +226,15 @@ export async function getSkillCategories(): Promise<SkillCategory[]> {
     categoryMap.set(cat.id, { ...cat });
   }
 
-  // 2. Load user categories (legacy fallback then primary)
-  const candidateFiles: string[] = [
-    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'categories.json'),
-    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'categories.json'),
-  ];
+  // 2. Load user categories (legacy fallback then primary, or isolated custom home)
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+  const candidateFiles: string[] = (csHome || nfHome)
+    ? [getUserCategoriesPath()]
+    : [
+        path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'categories.json'),
+        path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'categories.json'),
+      ];
   const userPath = getUserCategoriesPath();
   if (!candidateFiles.includes(userPath)) {
     candidateFiles.push(userPath);
@@ -461,11 +465,15 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
     skillMap.set(s.id, { ...s, scope: 'global' });
   }
 
-  // 2. User directory (~/.nexusflow/skills/ and ~/.contextspace/skills/)
-  const candidateDirs: string[] = [
-    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
-    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
-  ];
+  // 2. User directory (~/.nexusflow/skills/ and ~/.contextspace/skills/, or isolated custom home)
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+  const candidateDirs: string[] = (csHome || nfHome)
+    ? [getUserSkillsDir()]
+    : [
+        path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
+        path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
+      ];
   const activeSkillsDir = getUserSkillsDir();
   if (!candidateDirs.includes(activeSkillsDir)) {
     candidateDirs.push(activeSkillsDir);

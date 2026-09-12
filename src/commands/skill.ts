@@ -6,9 +6,10 @@
 import chalk from 'chalk';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import fse from 'fs-extra';
 
 import { getAllSkills, saveSkill, deleteSkill, type SkillItem } from '../utils/skills-catalog.js';
-import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
+import { resolveWorkspaceInteractive, resolveWorkspaceQuiet } from '../utils/resolve-workspace.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { BRAND_NAME } from '../core/constants.js';
 
@@ -19,7 +20,18 @@ export interface SkillListOptions {
 }
 
 export async function skillListCommand(workspaceArg?: string, options: SkillListOptions = {}): Promise<void> {
-  const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:').catch(() => null);
+  let workspacePath: string | null = null;
+  if (workspaceArg) {
+    try {
+      workspacePath = await resolveWorkspaceQuiet(workspaceArg);
+    } catch (error) {
+      console.error(chalk.red(`\nError: ${error instanceof Error ? error.message : String(error)}\n`));
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    workspacePath = await resolveWorkspaceQuiet().catch(() => null);
+  }
   const skills = await getAllSkills(workspacePath || undefined);
 
   let filtered = skills;
@@ -160,9 +172,35 @@ export async function skillDeleteCommand(
   options: { scope?: 'workspace' | 'global' } = {},
 ): Promise<void> {
   const cleanId = id.trim().toLowerCase();
-  const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:').catch(() => null);
+  if (!cleanId) {
+    console.error(chalk.red('Error: Skill ID is required.'));
+    process.exitCode = 1;
+    return;
+  }
 
-  const scope = options.scope ?? (workspacePath ? 'workspace' : 'global');
+  let scope: 'workspace' | 'global' = options.scope ?? 'global';
+  let workspacePath: string | null = null;
+
+  if (options.scope === 'global') {
+    scope = 'global';
+  } else if (options.scope === 'workspace') {
+    scope = 'workspace';
+    workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace:').catch(() => null);
+    if (!workspacePath) {
+      console.error(chalk.red('Error: A workspace must be selected to delete a workspace-scoped skill.'));
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    workspacePath = await resolveWorkspaceQuiet(workspaceArg).catch(() => null);
+    if (workspacePath) {
+      const wsSkillDir = path.join(workspacePath, '.agents', 'skills', cleanId);
+      const existsLocally = await fse.pathExists(wsSkillDir);
+      scope = existsLocally ? 'workspace' : 'global';
+    } else {
+      scope = 'global';
+    }
+  }
 
   try {
     await deleteSkill(cleanId, {
@@ -170,13 +208,93 @@ export async function skillDeleteCommand(
       workspacePath: workspacePath || undefined,
     });
 
-    if (workspacePath) {
+    if (workspacePath && scope === 'workspace') {
       await refreshWorkspace(workspacePath, { force: true }).catch(() => {});
     }
 
     console.log(chalk.green(`\n✔ Skill "${cleanId}" deleted successfully (${scope} scope).\n`));
   } catch (err: any) {
     console.error(chalk.red(`\nError deleting skill: ${err.message}\n`));
-    process.exit(1);
+    process.exitCode = 1;
+  }
+}
+
+export interface SkillShowOptions {
+  json?: boolean;
+}
+
+export async function skillShowCommand(
+  id: string,
+  workspaceArg?: string,
+  options: SkillShowOptions = {},
+): Promise<void> {
+  const cleanId = id.trim().toLowerCase();
+  if (!cleanId) {
+    console.error(chalk.red('Error: Skill ID is required.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  let workspacePath: string | null = null;
+  if (workspaceArg) {
+    try {
+      workspacePath = await resolveWorkspaceQuiet(workspaceArg);
+    } catch (error) {
+      console.error(chalk.red(`\nError: ${error instanceof Error ? error.message : String(error)}\n`));
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    workspacePath = await resolveWorkspaceQuiet().catch(() => null);
+  }
+
+  const skills = await getAllSkills(workspacePath || undefined);
+  const skill = skills.find((s) => s.id.toLowerCase() === cleanId || s.name?.toLowerCase() === cleanId);
+
+  if (!skill) {
+    console.error(chalk.red(`\nError: Skill "${id}" not found in catalog or workspace.\n`));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(skill, null, 2));
+    return;
+  }
+
+  console.log(chalk.bold.cyan(`\n🛠️  Skill: ${skill.title || skill.id} (${chalk.bold(skill.id)})\n`));
+  console.log(chalk.dim('Scope:        ') + (skill.scope === 'workspace' ? chalk.yellow('Workspace-local') : chalk.blue('Global / Personal')));
+  console.log(chalk.dim('Category:     ') + chalk.magenta(skill.category || 'general'));
+  if (skill.sourcePath) {
+    console.log(chalk.dim('Source Path:  ') + chalk.dim(skill.sourcePath));
+  }
+  if (skill.description) {
+    console.log(chalk.dim('Description:  ') + skill.description);
+  }
+  if (skill.tags?.length) {
+    console.log(chalk.dim('Tags:         ') + skill.tags.join(', '));
+  }
+  if (skill.allowedTools?.length) {
+    console.log(chalk.dim('Allowed Tools:') + ' ' + skill.allowedTools.join(', '));
+  }
+  if (skill.references?.length) {
+    console.log(chalk.dim('\nReferences:'));
+    for (const ref of skill.references) {
+      console.log(`  • ${chalk.bold(ref.name)} ${chalk.dim(`(${ref.relativePath})`)}`);
+    }
+  }
+  if (skill.scripts?.length) {
+    console.log(chalk.dim('\nScripts:'));
+    for (const script of skill.scripts) {
+      console.log(`  • ${chalk.bold(script.name)} ${chalk.dim(`(${script.relativePath})`)}`);
+    }
+  }
+
+  if (skill.content) {
+    console.log(chalk.dim('\n─── Instructions ──────────────────────────────────────────'));
+    console.log(skill.content.trim());
+    console.log(chalk.dim('───────────────────────────────────────────────────────────\n'));
+  } else {
+    console.log();
   }
 }

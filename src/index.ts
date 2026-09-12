@@ -36,7 +36,7 @@ import { isolateCommand } from './commands/isolate.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { tagListCommand, tagAddCommand, tagRemoveCommand, tagShowCommand } from './commands/tag.js';
-import { skillListCommand, skillCreateCommand, skillDeleteCommand } from './commands/skill.js';
+import { skillListCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './commands/skill.js';
 import { refreshCommand } from './commands/refresh.js';
 import { progressCommand } from './commands/progress.js';
 import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
@@ -327,17 +327,38 @@ tagCmd
   .command('show <id>')
   .description('Show details, parent tree, microservices, and rules for a category or trait')
   .option('--json', 'Output in JSON format')
-  .action(runAction(async (id: string, options: any) => {
-    await tagShowCommand(id, options);
+  .action(runAction(async (id: string, options: any, cmd: any) => {
+    const merged = cmd?.optsWithGlobals ? { ...cmd.optsWithGlobals(), ...options } : options;
+    await tagShowCommand(id, merged);
   }));
 
 // Default action for `ctxspace tag` without subcommands runs `tag list`
 tagCmd
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('--json', 'Output in JSON format')
-  .action(runAction(async (workspace: string | undefined, options: any) => {
-    await tagListCommand(workspace, options);
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = cmd?.optsWithGlobals ? { ...cmd.optsWithGlobals(), ...options } : options;
+    await tagListCommand(workspace, merged);
   }));
+
+function resolveCliOptions(cmd: any, options: any): any {
+  const result: Record<string, any> = { ...options };
+  if (!cmd) return result;
+  const parent = cmd.parent;
+  if (parent) {
+    for (const [key, val] of Object.entries(parent.opts() || {})) {
+      if (parent.getOptionValueSource?.(key) === 'cli') {
+        result[key] = val;
+      }
+    }
+  }
+  for (const [key, val] of Object.entries(cmd.opts() || {})) {
+    if (cmd.getOptionValueSource?.(key) === 'cli') {
+      result[key] = val;
+    }
+  }
+  return result;
+}
 
 const skillCmd = program
   .command('skill')
@@ -351,12 +372,13 @@ skillCmd
   .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
   .option('-t, --tag <tag>', 'Filter skills by tag')
   .option('--json', 'Output in JSON format')
-  .action(runAction(async (workspace: string | undefined, options: any) => {
-    await skillListCommand(workspace, options);
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillListCommand(workspace, merged);
   }));
 
 skillCmd
-  .command('create <id>')
+  .command('create')
   .description('Create a new agent skill (workspace-local or global)')
   .argument('<id>', 'Skill identifier (e.g. commit-rules or vat-calc)')
   .argument('[workspace]', 'Path to workspace (required if workspace scope)')
@@ -366,19 +388,33 @@ skillCmd
   .option('-f, --file <path>', 'File path to read skill markdown instructions from')
   .option('-t, --tag <tags...>', 'Tags to attach to the skill')
   .option('--scope <scope>', 'Skill scope: workspace (local) or global', 'workspace')
-  .action(runAction(async (id: string, workspace: string | undefined, options: any) => {
-    await skillCreateCommand(id, workspace, options);
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillCreateCommand(id, workspace, merged);
   }));
 
 skillCmd
-  .command('delete <id>')
+  .command('show')
+  .alias('info')
+  .description('Show instructions, metadata, and references for an agent skill')
+  .argument('<id>', 'Skill identifier to inspect')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillShowCommand(id, workspace, merged);
+  }));
+
+skillCmd
+  .command('delete')
   .alias('rm')
   .description('Delete an agent skill')
   .argument('<id>', 'Skill identifier to remove')
   .argument('[workspace]', 'Path to workspace')
   .option('--scope <scope>', 'Scope to delete from: workspace or global')
-  .action(runAction(async (id: string, workspace: string | undefined, options: any) => {
-    await skillDeleteCommand(id, workspace, options);
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillDeleteCommand(id, workspace, merged);
   }));
 
 // Default action for `ctxspace skill` without subcommands runs `skill list`
@@ -387,8 +423,9 @@ skillCmd
   .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
   .option('-t, --tag <tag>', 'Filter skills by tag')
   .option('--json', 'Output in JSON format')
-  .action(runAction(async (workspace: string | undefined, options: any) => {
-    await skillListCommand(workspace, options);
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillListCommand(workspace, merged);
   }));
 
 program
