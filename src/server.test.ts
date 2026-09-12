@@ -14,6 +14,7 @@ import * as skillsCatalog from './utils/skills-catalog.js';
 import * as agentsCatalog from './resources/agents-catalog.js';
 import * as resourceService from './resources/service.js';
 import * as detectAi from './utils/detect-ai.js';
+import { clearCustomDomainRegistrations, registerSampleDomainPacks } from './core/domain-packs.js';
 
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
@@ -2353,14 +2354,26 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('Enterprise & Modular Domain Packs Endpoints', () => {
-    it('GET /api/enterprise/organizations returns built-in organizations', async () => {
+    it('GET /api/enterprise/domain-packs returns empty array when clean slate (generic default)', async () => {
+      clearCustomDomainRegistrations();
+      try {
+        const response = await app.request('/api/enterprise/domain-packs');
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.domainPacks).toEqual([]);
+      } finally {
+        registerSampleDomainPacks();
+      }
+    });
+
+    it('GET /api/enterprise/organizations returns registered organizations', async () => {
       const response = await app.request('/api/enterprise/organizations');
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.organizations.some((o: any) => o.id === 'hogia')).toBe(true);
     });
 
-    it('GET /api/enterprise/domain-packs returns built-in domain packs', async () => {
+    it('GET /api/enterprise/domain-packs returns registered domain packs', async () => {
       const response = await app.request('/api/enterprise/domain-packs');
       expect(response.status).toBe(200);
       const data = await response.json();
@@ -2560,7 +2573,7 @@ describe('Server API Endpoints Unit Tests', () => {
       const afterDelRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
       expect(afterDelRes.status).toBe(404);
 
-      // Customizing built-in template and resetting it back
+      // Customizing registered domain pack and deleting it
       const overrideBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -2572,21 +2585,16 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(overrideBuiltin.status).toBe(200);
       const overrideData = await overrideBuiltin.json();
       expect(overrideData.domainPack.name).toBe('Overridden Economy');
-      expect(overrideData.domainPack.builtin).toBe(true);
       expect(overrideData.domainPack.isTemplate).toBe(false);
 
-      // Reset to template defaults via DELETE
+      // Reset / unregister via DELETE
       const resetBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
         method: 'DELETE',
       });
       expect(resetBuiltin.status).toBe(200);
 
       const restoredBuiltin = await app.request('/api/enterprise/domain-packs/economy');
-      expect(restoredBuiltin.status).toBe(200);
-      const restoredData = await restoredBuiltin.json();
-      expect(restoredData.domainPack.name).toBe('Economy & Invoicing');
-      expect(restoredData.domainPack.builtin).toBe(true);
-      expect(restoredData.domainPack.isTemplate).toBe(true);
+      expect(restoredBuiltin.status).toBe(404);
     });
 
     it('POST and DELETE /api/enterprise/organizations registers and unregisters custom organizations', async () => {

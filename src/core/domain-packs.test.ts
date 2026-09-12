@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getAvailableOrganizations,
   getOrganization,
@@ -10,11 +10,30 @@ import {
   unregisterCustomOrganization,
   registerCustomDomainPack,
   unregisterCustomDomainPack,
+  clearCustomDomainRegistrations,
+  registerSampleDomainPacks,
+  BUILTIN_ORGANIZATIONS,
+  BUILTIN_DOMAIN_PACKS,
 } from './domain-packs.js';
 
 describe('domain-packs', () => {
+  beforeEach(() => {
+    clearCustomDomainRegistrations();
+    registerSampleDomainPacks();
+  });
+
+  describe('generic clean slate default', () => {
+    it('starts with empty organizations and domain packs by default', () => {
+      clearCustomDomainRegistrations();
+      expect(BUILTIN_ORGANIZATIONS).toEqual([]);
+      expect(BUILTIN_DOMAIN_PACKS).toEqual([]);
+      expect(getAvailableOrganizations()).toEqual([]);
+      expect(getAvailableDomainPacks()).toEqual([]);
+    });
+  });
+
   describe('organizations', () => {
-    it('returns built-in organizations', () => {
+    it('returns registered organizations', () => {
       const orgs = getAvailableOrganizations();
       expect(orgs.length).toBeGreaterThan(0);
       expect(orgs.some((o) => o.id === 'hogia')).toBe(true);
@@ -35,7 +54,7 @@ describe('domain-packs', () => {
   });
 
   describe('domain packs', () => {
-    it('returns built-in domain packs', () => {
+    it('returns registered domain packs', () => {
       const packs = getAvailableDomainPacks();
       expect(packs.length).toBeGreaterThanOrEqual(3);
       const ids = packs.map((p) => p.id);

@@ -13,5 +13,6 @@ export default defineConfig({
       '**/desktop/e2e/**'
     ],
     testTimeout: 30000,
+    setupFiles: ['./src/test-setup.ts'],
   }
 });

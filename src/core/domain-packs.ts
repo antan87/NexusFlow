@@ -8,8 +8,17 @@
 import type { DomainPack, OrganizationConventions, ResolvedCategoryRules } from '../types.js';
 export type { ResolvedCategoryRules };
 
-/** Built-in enterprise organization conventions. */
-export const BUILTIN_ORGANIZATIONS: OrganizationConventions[] = [
+/** Built-in enterprise organization conventions (clean slate by default; generic solution). */
+export const BUILTIN_ORGANIZATIONS: OrganizationConventions[] = [];
+
+/** Built-in enterprise domain pack starter templates (clean slate by default; generic solution). */
+export const BUILTIN_DOMAIN_PACKS: DomainPack[] = [];
+
+/**
+ * Optional sample organization conventions for tests, documentation, or manual seeding.
+ * Never loaded by default so NexusFlow remains 100% generic.
+ */
+export const SAMPLE_ORGANIZATIONS: OrganizationConventions[] = [
   {
     id: 'hogia',
     name: 'Hogia',
@@ -25,8 +34,11 @@ export const BUILTIN_ORGANIZATIONS: OrganizationConventions[] = [
   },
 ];
 
-/** Built-in enterprise domain pack starter templates. */
-export const BUILTIN_DOMAIN_PACKS: DomainPack[] = [
+/**
+ * Optional sample domain packs for tests, documentation, or manual seeding.
+ * Never loaded by default so NexusFlow remains 100% generic.
+ */
+export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
   {
     id: 'economy',
     name: 'Economy & Invoicing',
@@ -193,6 +205,18 @@ export function unregisterCustomDomainPack(id: string): boolean {
 export function clearCustomDomainRegistrations(): void {
   customOrganizations.clear();
   customDomainPacks.clear();
+}
+
+/**
+ * Helper to seed sample domain packs and organizations (useful for tests or documentation).
+ */
+export function registerSampleDomainPacks(): void {
+  for (const org of SAMPLE_ORGANIZATIONS) {
+    registerCustomOrganization(org);
+  }
+  for (const pack of SAMPLE_DOMAIN_PACKS) {
+    registerCustomDomainPack(pack);
+  }
 }
 
 /**

@@ -947,6 +947,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                 </div>
                               )}
 
+                              {/* Empty State */}
+                              {availableDomainPacks.length === 0 && !domainData?.organization && (
+                                <span className="text-xs text-muted-foreground italic py-1">
+                                  No category or trait tags defined yet.
+                                </span>
+                              )}
+
                               {/* Subsystem Verticals (Grouped with Children) */}
                               {availableDomainPacks
                                 .filter((p) => p.categoryType !== 'trait' && (!p.parent || !availableDomainPacks.some((parent) => parent.id === p.parent)))
