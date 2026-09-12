@@ -159,6 +159,8 @@ export interface ChatMessage {
 export interface ResumptionConfig {
   /** The command to run verification tests. */
   testCommand?: string;
+  /** Explicit verification command override (alias for testCommand). */
+  verifyCommand?: string;
   /** The command to spin up dev databases/mocks/caches. */
   mockCommand?: string;
   /** The command to start workspace services manually if needed. */
@@ -265,6 +267,12 @@ export interface Feature {
 
   /** Custom teamwork coordination instructions for the agent team. */
   teamworkInstructions?: string;
+
+  /** Optional organization/company identifier (e.g. 'hogia'). */
+  organizationId?: string;
+
+  /** Active domain packs for this workspace (e.g. ['economy']). */
+  domainPacks?: string[];
 
   /** Explicit runtime/intra-repo seams that package dependency analysis cannot infer. */
   contracts?: Array<{
@@ -557,6 +565,42 @@ export interface WorkspaceStatus {
 }
 
 /** Persisted sync/validation state for a single repo in a workspace. */
+export type VerificationStatus =
+  | 'pass'
+  | 'pass_dirty'
+  | 'fail'
+  | 'timeout'
+  | 'no-tests'
+  | 'skipped';
+
+/** Detailed mechanical verification proof for a single repo. */
+export interface RepoVerificationReport {
+  repoName: string;
+  repoPath: string;
+  status: VerificationStatus;
+  command: string;
+  exitCode: number | null;
+  headSha: string;
+  clean: boolean;
+  dirtyFiles?: string[];
+  durationMs: number;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+  verifiedAt: string;
+}
+
+/** Aggregate mechanical verification report across all repos in a workspace. */
+export interface WorkspaceVerificationReport {
+  workspacePath: string;
+  overallStatus: VerificationStatus;
+  canProgress: boolean;
+  verifiedAt: string;
+  durationMs: number;
+  repos: RepoVerificationReport[];
+}
+
+/** Persisted sync/validation state for a single repo in a workspace. */
 export interface RepoSyncState {
   /** Directory name of the repo. */
   repoName: string;
@@ -572,6 +616,55 @@ export interface RepoSyncState {
   lastValidationResult?: 'pass' | 'fail' | null;
   /** ISO timestamp of the last validation run. */
   lastValidatedAt?: string;
+  /** Last structured mechanical verification proof, if any. */
+  lastVerification?: RepoVerificationReport;
+}
+
+export type LifecycleStepStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'verified'
+  | 'completed'
+  | 'blocked';
+
+/** A vertical slice or discrete development milestone in the workspace lifecycle. */
+export interface LifecycleStep {
+  id: string;
+  title: string;
+  description?: string;
+  branch?: string;
+  owner?: string;
+  status: LifecycleStepStatus;
+  dependsOn?: string[];
+  verificationCommand?: string;
+  lastVerificationSha?: string;
+  lastVerificationStatus?: VerificationStatus;
+  completedAt?: string;
+}
+
+/** Information about sister branches and collaborator commits tracked in the workspace. */
+export interface BranchFleetMember {
+  branch: string;
+  repoName: string;
+  owner?: string;
+  isCurrent: boolean;
+  headSha?: string;
+  ahead: number;
+  behind: number;
+  lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitDate?: string;
+  remoteTracked: boolean;
+}
+
+/** Machine-readable workspace lifecycle state. */
+export interface WorkspaceLifecycle {
+  workspaceId: string;
+  flowType: 'quick' | 'feature' | 'epic';
+  currentStepId?: string;
+  steps: LifecycleStep[];
+  fleet?: BranchFleetMember[];
+  updatedAt: string;
 }
 
 /** State file saved to track per-repo sync/validation status (`.nexusflow-state.json`). */
@@ -580,6 +673,10 @@ export interface WorkspaceState {
   workspacePath: string;
   /** Per-repo state, keyed by repo name. */
   repos: Record<string, RepoSyncState>;
+  /** Most recent workspace-wide mechanical verification result. */
+  lastVerification?: WorkspaceVerificationReport;
+  /** Active structured lifecycle state machine. */
+  lifecycle?: WorkspaceLifecycle;
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }
@@ -653,6 +750,10 @@ export interface SkillItem {
   description: string;
   /** Tags / Keywords for discovery. */
   tags?: string[];
+  /** Optional company / organization identifier (e.g. 'hogia'). */
+  organization?: string;
+  /** Optional domain subsystem this skill belongs to (e.g. 'economy', 'hr'). */
+  domain?: string;
   /** Allowed / required tool primitives. */
   allowedTools?: string[];
   /** Typed arguments / parameters. */
@@ -667,6 +768,24 @@ export interface SkillItem {
   references?: SkillSupportingFile[];
   /** Helper scripts inside `scripts/`. */
   scripts?: SkillSupportingFile[];
+  /** Scope of the skill: 'workspace' for project-specific or 'global' for machine-wide catalog. */
+  scope?: 'workspace' | 'global';
+  /** Additional frontmatter metadata (custom properties, deeply nested configurations, etc.). */
+  metadata?: Record<string, unknown>;
+  /** Optional license expression or identifier. */
+  license?: string;
+  /** Optional environment/assistant compatibility statement. */
+  compatibility?: string;
+}
+
+/** Options for saving a skill to the global or workspace catalog. */
+export interface SaveSkillOptions {
+  scope?: 'workspace' | 'global';
+  workspacePath?: string;
+  category?: string;
+  overwrite?: boolean;
+  readonly beforeCommit?: () => Promise<void>;
+  readonly supportFileModes?: Readonly<Record<string, number>>;
 }
 
 /** A reusable Codex custom-agent definition. */
@@ -707,5 +826,79 @@ export interface WorkspaceSkillsConfig {
   enabledAgents?: string[];
   /** Active enabled category IDs. */
   enabledCategories?: string[];
+}
+
+/** Universal conventions for a company / organization (e.g. Hogia). */
+export interface OrganizationConventions {
+  /** Unique slug (e.g. 'hogia'). */
+  id: string;
+  /** Human-readable company name. */
+  name: string;
+  /** Regex pattern enforced on commit messages (e.g. Jira issue key format). */
+  commitMessagePattern?: string;
+  /** Example commit message compliant with company standard. */
+  commitExample?: string;
+  /** Relative path to PR template file. */
+  prTemplate?: string;
+  /** Universal company rules injected into all assistant contexts. */
+  rules: string[];
+  /** True if this is a sample starter template rather than a user-created organization. */
+  isTemplate?: boolean;
+}
+
+export type CategoryType = 'vertical' | 'trait';
+
+/** Microservice / repository binding with target mode ('edit' vs 'reference'). */
+export interface CategoryRepoBinding {
+  name: string;
+  target?: 'edit' | 'reference';
+  description?: string;
+  suggestedTestCommand?: string;
+}
+
+/** A modular category & tag pack scoped to a subsystem or cross-cutting trait. */
+export interface DomainPack {
+  /** Unique category / tag slug (e.g. 'economy', 'workforce/payroll', 'compliance/gdpr'). */
+  id: string;
+  /** Human-readable category name (e.g. 'Economy & Invoicing', 'Payroll'). */
+  name: string;
+  /** Description of this subsystem's scope and rules. */
+  description: string;
+  /** Parent category slug for tree hierarchy (e.g. 'workforce' for 'workforce/payroll'). */
+  parent?: string;
+  /** Category classification: 'vertical' (business subsystem) or 'trait' (cross-cutting horizontal). */
+  categoryType?: CategoryType;
+  /** Associated organization ID if company-specific. */
+  organization?: string;
+  /** Keywords / tags for discovery and auto-matching from specs. */
+  tags: string[];
+  /** IDs of skills bundled in this category pack. */
+  skills?: string[];
+  /** Relative or absolute paths to reference context documents. */
+  contextFiles?: string[];
+  /** Category-specific mechanical verification command override. */
+  verifyCommand?: string;
+  /** Architectural, domain, or compliance rules. */
+  rules?: string[];
+  /** Repositories typically associated with this category. */
+  defaultRepos?: string[];
+  /** Microservice bindings with edit vs reference modes. */
+  microservices?: CategoryRepoBinding[];
+  /** True if this is a sample starter template rather than a user-created pack. */
+  isTemplate?: boolean;
+}
+
+/** Alias for DomainPack reflecting hierarchical Category & Tag Tree architecture. */
+export type CategoryTagPack = DomainPack;
+
+export interface ResolvedCategoryRules {
+  organization: OrganizationConventions | null;
+  domainPacks: DomainPack[];
+  verticals: DomainPack[];
+  traits: DomainPack[];
+  allRules: string[];
+  compositeVerifyCommand?: string;
+  editRepos: string[];
+  referenceRepos: string[];
 }
 
