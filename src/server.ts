@@ -3138,7 +3138,13 @@ app.delete('/api/skills/categories/:id', async (c) => {
 // materializations are deliberately never treated as catalog sources.
 app.get('/api/skills', async (c) => {
   try {
-    const skills = await getAllSkills();
+    const config = await loadConfig();
+    const wsParam = c.req.query('workspace');
+    let wsPath: string | undefined;
+    if (wsParam && wsParam !== 'global') {
+      wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+    }
+    const skills = await getAllSkills(wsPath);
     return c.json({ skills });
   } catch (error) {
     return errorResponse(c, error);
@@ -3152,7 +3158,18 @@ app.post('/api/skills', async (c) => {
     if (!body.name || !body.content) {
       return c.json({ error: 'Skill name and content are required.' }, 400);
     }
-    const skill = await saveSkill(body);
+    const config = await loadConfig();
+    const wsParam = body.workspaceId || body.workspace || c.req.query('workspace');
+    let wsPath: string | undefined;
+    if (wsParam && wsParam !== 'global') {
+      wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+    }
+    const isWorkspaceScope = body.scope === 'workspace' || (Boolean(wsPath) && body.scope !== 'global');
+    const options = isWorkspaceScope && wsPath
+      ? { scope: 'workspace' as const, workspacePath: wsPath }
+      : { scope: 'global' as const };
+
+    const skill = await saveSkill(body, options);
     return c.json({ success: true, skill });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -3165,6 +3182,15 @@ app.delete('/api/skills/:id', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const config = await loadConfig();
+    const wsParam = c.req.query('workspace');
+    let wsPath: string | undefined;
+    if (wsParam && wsParam !== 'global') {
+      wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+    }
+    if (wsPath) {
+      await deleteSkill(id, { scope: 'workspace', workspacePath: wsPath });
+      return c.json({ success: true });
+    }
     const assignments = await withResourceAdministrationLock(async () => {
       const currentAssignments = await findResourceAssignments(config.workspacesDir, id, 'skill');
       if (!currentAssignments.length) await deleteSkill(id);
@@ -3178,7 +3204,8 @@ app.delete('/api/skills/:id', async (c) => {
     }
     return c.json({ success: true });
   } catch (error) {
-    return errorResponse(c, error);
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
   }
 });
 
@@ -3316,15 +3343,70 @@ app.get('/api/enterprise/domain-packs', (c) => {
   return c.json({ domainPacks: getAvailableDomainPacks() });
 });
 
+// Get a single domain pack by ID
+app.get('/api/enterprise/domain-packs/:id', (c) => {
+  const id = decodeURIComponent(c.req.param('id')).toLowerCase().trim();
+  const pack = getDomainPack(id);
+  if (!pack) {
+    return c.json({ error: `Domain pack "${id}" not found.` }, 404);
+  }
+  return c.json({ domainPack: pack });
+});
+
 // Register custom domain pack
 app.post('/api/enterprise/domain-packs', async (c) => {
   try {
     const body = await c.req.json() as DomainPack;
-    if (!body.id || !body.name || !Array.isArray(body.tags)) {
-      return c.json({ error: 'id, name, and tags array are required for a domain pack.' }, 400);
+    if (!body.id || !body.name) {
+      return c.json({ error: 'id and name are required for a domain pack.' }, 400);
     }
-    registerCustomDomainPack(body);
-    return c.json({ success: true, domainPack: getDomainPack(body.id) });
+    const normalizedId = body.id.toLowerCase().trim();
+    const tags = Array.isArray(body.tags) && body.tags.length > 0
+      ? body.tags
+      : [normalizedId, ...body.name.toLowerCase().split(/\s+/).filter(Boolean)];
+    const packToRegister: DomainPack = {
+      ...body,
+      id: normalizedId,
+      tags,
+      isTemplate: false,
+    };
+    registerCustomDomainPack(packToRegister);
+    return c.json({ success: true, domainPack: getDomainPack(normalizedId) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Update or customize a domain pack
+app.put('/api/enterprise/domain-packs/:id', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id')).toLowerCase().trim();
+    const existing = getDomainPack(id);
+    const body = await c.req.json() as Partial<DomainPack>;
+
+    const tags = Array.isArray(body.tags)
+      ? body.tags
+      : (existing?.tags ?? [id, ...(body.name || existing?.name || id).toLowerCase().split(/\s+/).filter(Boolean)]);
+
+    const updatedPack: DomainPack = {
+      id,
+      name: body.name ?? existing?.name ?? id,
+      description: body.description ?? existing?.description ?? '',
+      categoryType: body.categoryType ?? existing?.categoryType ?? 'vertical',
+      parent: body.parent !== undefined ? (body.parent || undefined) : existing?.parent,
+      organization: body.organization ?? existing?.organization,
+      tags,
+      skills: Array.isArray(body.skills) ? body.skills : existing?.skills,
+      contextFiles: Array.isArray(body.contextFiles) ? body.contextFiles : existing?.contextFiles,
+      verifyCommand: body.verifyCommand !== undefined ? (body.verifyCommand || undefined) : existing?.verifyCommand,
+      rules: Array.isArray(body.rules) ? body.rules : existing?.rules,
+      defaultRepos: Array.isArray(body.defaultRepos) ? body.defaultRepos : existing?.defaultRepos,
+      microservices: Array.isArray(body.microservices) ? body.microservices : existing?.microservices,
+      isTemplate: false,
+    };
+
+    registerCustomDomainPack(updatedPack);
+    return c.json({ success: true, domainPack: getDomainPack(id) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -3332,7 +3414,7 @@ app.post('/api/enterprise/domain-packs', async (c) => {
 
 // Unregister custom domain pack
 app.delete('/api/enterprise/domain-packs/:id', (c) => {
-  const id = decodeURIComponent(c.req.param('id'));
+  const id = decodeURIComponent(c.req.param('id')).toLowerCase().trim();
   const deleted = unregisterCustomDomainPack(id);
   return c.json({ success: deleted });
 });

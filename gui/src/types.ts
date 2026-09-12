@@ -321,6 +321,9 @@ export interface SkillItem {
   sourcePath?: string;
   references?: SkillSupportingFile[];
   scripts?: SkillSupportingFile[];
+  scope?: 'workspace' | 'global';
+  organization?: string;
+  domain?: string;
 }
 
 export interface CodexAgentItem {

@@ -99,6 +99,35 @@ export function useDomainPacks() {
   });
 }
 
+export function useSaveDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pack: Partial<DomainPack> & { id: string; name: string }) =>
+      apiFetch<{ success: boolean; domainPack: DomainPack }>(`/api/enterprise/domain-packs/${encodeURIComponent(pack.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(pack),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
+}
+
+export function useDeleteDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/enterprise/domain-packs/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
+}
+
 export function useCreateWorkspace() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -412,7 +441,7 @@ export function useSkills(workspaceId?: string) {
 export function useSaveSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (skill: Partial<SkillItem> & { name: string; content: string }) =>
+    mutationFn: (skill: Partial<SkillItem> & { name: string; content: string; workspaceId?: string; workspace?: string; scope?: 'global' | 'workspace' }) =>
       apiFetch<{ success: boolean; skill: SkillItem }>('/api/skills', {
         method: 'POST',
         body: JSON.stringify(skill),
@@ -420,6 +449,7 @@ export function useSaveSkill() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skills'] });
       queryClient.invalidateQueries({ queryKey: ['skill-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-skills'] });
     },
   });
 }
@@ -427,12 +457,19 @@ export function useSaveSkill() {
 export function useDeleteSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ success: boolean }>(`/api/skills/${encodeURIComponent(id)}`, {
+    mutationFn: (arg: string | { id: string; workspaceId?: string }) => {
+      const id = typeof arg === 'string' ? arg : arg.id;
+      const ws = typeof arg === 'string' ? undefined : arg.workspaceId;
+      const url = ws
+        ? `/api/skills/${encodeURIComponent(id)}?workspace=${encodeURIComponent(ws)}`
+        : `/api/skills/${encodeURIComponent(id)}`;
+      return apiFetch<{ success: boolean }>(url, {
         method: 'DELETE',
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skills'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-skills'] });
     },
   });
 }

@@ -2441,7 +2441,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.feature.domainPacks).toContain('hr');
     });
 
-    it('POST and DELETE /api/enterprise/domain-packs registers and unregisters custom domain packs', async () => {
+    it('POST, GET, PUT, and DELETE /api/enterprise/domain-packs manages custom domain packs', async () => {
       const postRes = await app.request('/api/enterprise/domain-packs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2451,6 +2451,7 @@ describe('Server API Endpoints Unit Tests', () => {
           description: 'Payment gateway integrations and settlement reconciliations.',
           tags: ['fintech', 'payment', 'stripe', 'pci'],
           rules: ['Zero plain-text credit card storage (PCI-DSS).'],
+          verifyCommand: 'npm test -- fintech',
         }),
       });
       expect(postRes.status).toBe(200);
@@ -2459,12 +2460,43 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(postData.domainPack.id).toBe('custom-fintech');
       expect(postData.domainPack.isTemplate).toBe(false);
 
+      // GET by id
+      const getRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
+      expect(getRes.status).toBe(200);
+      const getData = await getRes.json();
+      expect(getData.domainPack.id).toBe('custom-fintech');
+      expect(getData.domainPack.verifyCommand).toBe('npm test -- fintech');
+
+      // GET non-existent returns 404
+      const missingRes = await app.request('/api/enterprise/domain-packs/non-existent-pack');
+      expect(missingRes.status).toBe(404);
+
+      // PUT update
+      const putRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Fintech, Payments & Crypto',
+          rules: ['Zero plain-text credit card storage (PCI-DSS).', 'All crypto ledger transactions require signature.'],
+          verifyCommand: 'npm test -- fintech-crypto',
+        }),
+      });
+      expect(putRes.status).toBe(200);
+      const putData = await putRes.json();
+      expect(putData.success).toBe(true);
+      expect(putData.domainPack.name).toBe('Fintech, Payments & Crypto');
+      expect(putData.domainPack.rules).toHaveLength(2);
+      expect(putData.domainPack.verifyCommand).toBe('npm test -- fintech-crypto');
+
       const delRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
         method: 'DELETE',
       });
       expect(delRes.status).toBe(200);
       const delData = await delRes.json();
       expect(delData.success).toBe(true);
+
+      const afterDelRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
+      expect(afterDelRes.status).toBe(404);
     });
 
     it('POST and DELETE /api/enterprise/organizations registers and unregisters custom organizations', async () => {

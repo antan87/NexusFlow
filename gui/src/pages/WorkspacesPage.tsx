@@ -24,6 +24,9 @@ import {
   Edit3,
   Check,
   Plus,
+  SlidersHorizontal,
+  RotateCcw,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
@@ -212,6 +215,23 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const [newTagMicroserviceTarget, setNewTagMicroserviceTarget] = useState<'edit' | 'reference'>('edit');
   const [savingNewTag, setSavingNewTag] = useState(false);
 
+  // Inspect / Edit Existing Category / Trait dialog state
+  const [inspectingTag, setInspectingTag] = useState<DomainPack | null>(null);
+  const [inspectTagName, setInspectTagName] = useState('');
+  const [inspectTagDescription, setInspectTagDescription] = useState('');
+  const [inspectTagType, setInspectTagType] = useState<'vertical' | 'trait'>('vertical');
+  const [inspectTagParent, setInspectTagParent] = useState('');
+  const [inspectTagVerifyCmd, setInspectTagVerifyCmd] = useState('');
+  const [inspectTagRules, setInspectTagRules] = useState('');
+  const [inspectTagMicroservices, setInspectTagMicroservices] = useState<Array<{ name: string; target: 'edit' | 'reference' }>>([]);
+  const [inspectNewMsName, setInspectNewMsName] = useState('');
+  const [inspectNewMsTarget, setInspectNewMsTarget] = useState<'edit' | 'reference'>('edit');
+  const [inspectTagSkills, setInspectTagSkills] = useState<string[]>([]);
+  const [inspectNewSkill, setInspectNewSkill] = useState('');
+  const [inspectTagTags, setInspectTagTags] = useState('');
+  const [savingTagDetails, setSavingTagDetails] = useState(false);
+  const [deletingTagDetails, setDeletingTagDetails] = useState(false);
+
   useEffect(() => {
     if (!selected) {
       setDomainData(null);
@@ -340,6 +360,116 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       showToast?.(err.message || 'Failed to create category tag', 'error');
     } finally {
       setSavingNewTag(false);
+    }
+  };
+
+  const handleOpenTagDetails = (tag: DomainPack) => {
+    setInspectingTag(tag);
+    setInspectTagName(tag.name || '');
+    setInspectTagDescription(tag.description || '');
+    setInspectTagType(tag.categoryType || 'vertical');
+    setInspectTagParent(tag.parent || '');
+    setInspectTagVerifyCmd(tag.verifyCommand || '');
+    setInspectTagRules(tag.rules ? tag.rules.join('\n') : '');
+    const msList: Array<{ name: string; target: 'edit' | 'reference' }> = tag.microservices
+      ? tag.microservices.map((m) => ({ name: m.name, target: m.target || 'edit' }))
+      : tag.defaultRepos
+        ? tag.defaultRepos.map((r) => ({ name: r, target: 'edit' as const }))
+        : [];
+    setInspectTagMicroservices(msList);
+    setInspectNewMsName('');
+    setInspectNewMsTarget('edit');
+    setInspectTagSkills(tag.skills ? [...tag.skills] : []);
+    setInspectNewSkill('');
+    setInspectTagTags(tag.tags ? tag.tags.join(', ') : '');
+  };
+
+  const handleSaveTagDetails = async () => {
+    if (!inspectingTag || !inspectTagName.trim()) return;
+    setSavingTagDetails(true);
+    try {
+      const rulesArray = inspectTagRules
+        .split('\n')
+        .map((r) => r.trim())
+        .filter(Boolean);
+      const tagsArray = inspectTagTags
+        .split(',')
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+
+      const payload = {
+        name: inspectTagName.trim(),
+        description: inspectTagDescription.trim(),
+        categoryType: inspectTagType,
+        parent: inspectTagType === 'vertical' && inspectTagParent.trim() ? inspectTagParent.trim() : undefined,
+        verifyCommand: inspectTagVerifyCmd.trim() || undefined,
+        rules: rulesArray.length > 0 ? rulesArray : undefined,
+        microservices: inspectTagMicroservices.length > 0 ? inspectTagMicroservices : undefined,
+        skills: inspectTagSkills.length > 0 ? inspectTagSkills : undefined,
+        tags: tagsArray.length > 0 ? tagsArray : [inspectingTag.id],
+      };
+
+      await apiFetch(`/api/enterprise/domain-packs/${encodeURIComponent(inspectingTag.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
+      if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
+      if (selected) {
+        await fetchDomainData(selected.branchName);
+        if (props.fetchWorkspaces) await props.fetchWorkspaces();
+      }
+
+      showToast?.(`Tag "${inspectTagName.trim()}" updated successfully`, 'success');
+      setInspectingTag(null);
+    } catch (err: any) {
+      showToast?.(err.message || 'Failed to update tag', 'error');
+    } finally {
+      setSavingTagDetails(false);
+    }
+  };
+
+  const handleDeleteOrResetTag = async () => {
+    if (!inspectingTag) return;
+    const isOverriddenBuiltin = !inspectingTag.isTemplate && ['economy', 'transport', 'tax', 'payroll', 'fintech', 'security', 'audit', 'performance', 'testing', 'accessibility', 'offline'].includes(inspectingTag.id);
+    const actionLabel = isOverriddenBuiltin ? 'reset to built-in template' : 'delete';
+    if (!window.confirm(`Are you sure you want to ${actionLabel} the tag "${inspectingTag.name}"?`)) {
+      return;
+    }
+    setDeletingTagDetails(true);
+    try {
+      await apiFetch(`/api/enterprise/domain-packs/${encodeURIComponent(inspectingTag.id)}`, {
+        method: 'DELETE',
+      });
+
+      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
+      if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
+
+      if (selected) {
+        const currentPacks = domainData?.assignedDomainPackIds || selected.domainPacks || [];
+        if (!isOverriddenBuiltin && currentPacks.includes(inspectingTag.id)) {
+          const updatedPacks = currentPacks.filter((p) => p !== inspectingTag.id);
+          await apiFetch(`/api/workspace/${encodeURIComponent(selected.branchName)}/domain-packs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              organizationId: selected.organizationId || 'hogia',
+              domainPacks: updatedPacks,
+            }),
+          });
+        }
+        await fetchDomainData(selected.branchName);
+        if (props.fetchWorkspaces) await props.fetchWorkspaces();
+      }
+
+      showToast?.(isOverriddenBuiltin ? `Reset "${inspectingTag.name}" to built-in defaults` : `Deleted tag "${inspectingTag.name}"`, 'success');
+      setInspectingTag(null);
+    } catch (err: any) {
+      showToast?.(err.message || 'Failed to delete/reset tag', 'error');
+    } finally {
+      setDeletingTagDetails(false);
     }
   };
 
@@ -839,48 +969,87 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                   const children = availableDomainPacks.filter((c) => c.parent === root.id);
                                   return (
                                     <div key={root.id} className="inline-flex items-center rounded-lg border border-border/60 bg-muted/20 p-0.5 gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => void toggleDomainPack(root.id)}
-                                        className={cn(
-                                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium transition-all cursor-pointer',
-                                          isRootAssigned
-                                            ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-xs'
-                                            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                                        )}
-                                        title={`${root.name}: ${root.description} (Click to toggle)`}
-                                      >
-                                        <Tag size={10} className={isRootAssigned ? 'text-emerald-400' : 'text-muted-foreground'} />
-                                        <span>{root.name}</span>
-                                        {isRootAssigned ? (
-                                          <span className="size-1.5 rounded-full bg-emerald-400" />
-                                        ) : (
-                                          <Plus size={10} className="opacity-50" />
-                                        )}
-                                      </button>
+                                      <div className="inline-flex items-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => void toggleDomainPack(root.id)}
+                                          className={cn(
+                                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-l-md text-xs font-medium transition-all cursor-pointer',
+                                            isRootAssigned
+                                              ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-xs'
+                                              : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                                          )}
+                                          title={`${root.name}: ${root.description} (Click to toggle)`}
+                                        >
+                                          <Tag size={10} className={isRootAssigned ? 'text-emerald-400' : 'text-muted-foreground'} />
+                                          <span>{root.name}</span>
+                                          {!root.isTemplate && (
+                                            <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                          )}
+                                          {isRootAssigned ? (
+                                            <span className="size-1.5 rounded-full bg-emerald-400" />
+                                          ) : (
+                                            <Plus size={10} className="opacity-50" />
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenTagDetails(root);
+                                          }}
+                                          className={cn(
+                                            'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer',
+                                            isRootAssigned ? 'bg-emerald-500/20 text-emerald-300/80 hover:text-emerald-200' : '',
+                                          )}
+                                          title={`Inspect & edit ${root.name} details`}
+                                          aria-label={`Inspect & edit ${root.name} details`}
+                                        >
+                                          <SlidersHorizontal size={10} />
+                                        </button>
+                                      </div>
                                       {children.map((child) => {
                                         const isChildAssigned = (domainData?.assignedDomainPackIds || selected.domainPacks || []).includes(child.id);
                                         return (
-                                          <button
-                                            key={child.id}
-                                            type="button"
-                                            onClick={() => void toggleDomainPack(child.id)}
-                                            className={cn(
-                                              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-medium transition-all cursor-pointer border',
-                                              isChildAssigned
-                                                ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200 font-semibold shadow-xs'
-                                                : 'border-transparent text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground',
-                                            )}
-                                            title={`${child.name} (Inherits ${root.name}): ${child.description} (Click to toggle)`}
-                                          >
-                                            <span className="text-muted-foreground text-[10px]">↳</span>
-                                            <span>{child.name.replace(/^.*\s*›\s*/, '')}</span>
-                                            {isChildAssigned ? (
-                                              <span className="size-1.5 rounded-full bg-emerald-400" />
-                                            ) : (
-                                              <Plus size={9} className="opacity-50" />
-                                            )}
-                                          </button>
+                                          <div key={child.id} className="inline-flex items-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => void toggleDomainPack(child.id)}
+                                              className={cn(
+                                                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l-md text-[11px] font-medium transition-all cursor-pointer border-y border-l',
+                                                isChildAssigned
+                                                  ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200 font-semibold shadow-xs'
+                                                  : 'border-transparent text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground',
+                                              )}
+                                              title={`${child.name} (Inherits ${root.name}): ${child.description} (Click to toggle)`}
+                                            >
+                                              <span className="text-muted-foreground text-[10px]">↳</span>
+                                              <span>{child.name.replace(/^.*\s*›\s*/, '')}</span>
+                                              {!child.isTemplate && (
+                                                <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                              )}
+                                              {isChildAssigned ? (
+                                                <span className="size-1.5 rounded-full bg-emerald-400" />
+                                              ) : (
+                                                <Plus size={9} className="opacity-50" />
+                                              )}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenTagDetails(child);
+                                              }}
+                                              className={cn(
+                                                'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer border-y border-r',
+                                                isChildAssigned ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200/80 hover:text-emerald-100' : 'border-transparent',
+                                              )}
+                                              title={`Inspect & edit ${child.name} details`}
+                                              aria-label={`Inspect & edit ${child.name} details`}
+                                            >
+                                              <SlidersHorizontal size={9} />
+                                            </button>
+                                          </div>
                                         );
                                       })}
                                     </div>
@@ -893,27 +1062,46 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                 .map((trait) => {
                                   const isAssigned = (domainData?.assignedDomainPackIds || selected.domainPacks || []).includes(trait.id);
                                   return (
-                                    <button
+                                    <div
                                       key={trait.id}
-                                      type="button"
-                                      onClick={() => void toggleDomainPack(trait.id)}
                                       className={cn(
-                                        'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer',
+                                        'inline-flex items-center rounded-lg border transition-all p-0.5 gap-0.5',
                                         isAssigned
                                           ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300 shadow-xs'
                                           : 'border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                                       )}
-                                      title={`Cross-cutting Trait: ${trait.name} - ${trait.description} (Click to toggle)`}
                                     >
-                                      <ShieldCheck size={11} className={isAssigned ? 'text-indigo-400' : 'text-muted-foreground'} />
-                                      <span>{trait.name}</span>
-                                      <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-200 font-mono">Trait</span>
-                                      {isAssigned ? (
-                                        <span className="size-1.5 rounded-full bg-indigo-400" />
-                                      ) : (
-                                        <Plus size={10} className="opacity-50" />
-                                      )}
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => void toggleDomainPack(trait.id)}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-l-md text-xs font-medium cursor-pointer"
+                                        title={`Cross-cutting Trait: ${trait.name} - ${trait.description} (Click to toggle)`}
+                                      >
+                                        <ShieldCheck size={11} className={isAssigned ? 'text-indigo-400' : 'text-muted-foreground'} />
+                                        <span>{trait.name}</span>
+                                        <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-200 font-mono">Trait</span>
+                                        {!trait.isTemplate && (
+                                          <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                        )}
+                                        {isAssigned ? (
+                                          <span className="size-1.5 rounded-full bg-indigo-400" />
+                                        ) : (
+                                          <Plus size={10} className="opacity-50" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenTagDetails(trait);
+                                        }}
+                                        className="p-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                                        title={`Inspect & edit ${trait.name} details`}
+                                        aria-label={`Inspect & edit ${trait.name} details`}
+                                      >
+                                        <SlidersHorizontal size={10} />
+                                      </button>
+                                    </div>
                                   );
                                 })}
                             </div>
@@ -1261,6 +1449,341 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {savingNewTag ? <Spinner size="sm" /> : <Check size={12} />}
               <span>Create Category</span>
             </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      {/* MODAL: INSPECT & EDIT EXISTING CATEGORY / TRAIT TAG */}
+      <Dialog open={!!inspectingTag} onOpenChange={(open) => !open && setInspectingTag(null)}>
+        <DialogPopup className="max-w-xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="flex items-center gap-2">
+                {inspectTagType === 'trait' ? (
+                  <ShieldCheck size={18} className="text-indigo-400" />
+                ) : (
+                  <Tag size={18} className="text-primary" />
+                )}
+                <span>Inspect & Edit {inspectTagType === 'trait' ? 'Trait' : 'Category'}</span>
+              </DialogTitle>
+              {inspectingTag && (
+                <span
+                  className={cn(
+                    'text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold border',
+                    inspectingTag.isTemplate
+                      ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+                  )}
+                >
+                  {inspectingTag.isTemplate ? 'Built-in Template' : 'Custom / Overridden'}
+                </span>
+              )}
+            </div>
+            <DialogDescription>
+              View and configure full details: architectural invariants, verification command, scoped microservices, and attached agent skills.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogPanel className="space-y-4 py-2 overflow-y-auto flex-1 pr-1">
+            {/* Name & ID Slug */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Name</label>
+                <Input
+                  value={inspectTagName}
+                  onChange={(e) => setInspectTagName(e.target.value)}
+                  placeholder="e.g. Order Processing"
+                  size="sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Tag ID / Slug</label>
+                <Input
+                  value={inspectingTag?.id || ''}
+                  disabled
+                  size="sm"
+                  className="bg-muted/50 font-mono text-xs cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            {/* Type & Parent */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Category Type</label>
+                <select
+                  value={inspectTagType}
+                  onChange={(e) => setInspectTagType(e.target.value as 'vertical' | 'trait')}
+                  className="w-full h-7.5 px-2 text-xs rounded-md border border-border bg-background text-foreground"
+                >
+                  <option value="vertical">Vertical Subsystem</option>
+                  <option value="trait">Horizontal Trait</option>
+                </select>
+              </div>
+              {inspectTagType === 'vertical' && (
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-foreground">Parent Category</label>
+                  <select
+                    value={inspectTagParent}
+                    onChange={(e) => setInspectTagParent(e.target.value)}
+                    className="w-full h-7.5 px-2 text-xs rounded-md border border-border bg-background text-foreground"
+                  >
+                    <option value="">None (Top-level vertical)</option>
+                    {availableDomainPacks
+                      .filter((p) => p.categoryType !== 'trait' && !p.parent && p.id !== inspectingTag?.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} (#{p.id})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Description</label>
+              <Input
+                value={inspectTagDescription}
+                onChange={(e) => setInspectTagDescription(e.target.value)}
+                placeholder="Brief description of scope & responsibility"
+                size="sm"
+              />
+            </div>
+
+            {/* Architectural Invariants & Rules */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">Architectural Invariants & Rules</label>
+                <span className="text-[10px] text-muted-foreground">Injected into workspace AGENTS.md</span>
+              </div>
+              <textarea
+                rows={4}
+                value={inspectTagRules}
+                onChange={(e) => setInspectTagRules(e.target.value)}
+                placeholder="e.g. Orders must be signed before publishing to event bus.&#10;Amounts must include ISO-4217 currency code."
+                className="w-full text-xs font-mono p-2 rounded-md border border-border bg-background text-foreground resize-y leading-relaxed"
+              />
+            </div>
+
+            {/* Verification Command */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">Mechanical Verification Command</label>
+                <span className="text-[10px] text-muted-foreground">Runs during verification gates</span>
+              </div>
+              <Input
+                value={inspectTagVerifyCmd}
+                onChange={(e) => setInspectTagVerifyCmd(e.target.value)}
+                placeholder="e.g. npm test -- orders"
+                size="sm"
+                className="font-mono text-xs"
+              />
+            </div>
+
+            {/* Scoped Microservices */}
+            <div className="space-y-2 p-3 rounded-lg bg-muted/20 border border-border/60">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <FolderGit2 size={13} className="text-primary" />
+                  <span>Scoped Microservices ({inspectTagMicroservices.length})</span>
+                </label>
+                <span className="text-[10px] text-muted-foreground">Worktrees created when tag attached</span>
+              </div>
+
+              {inspectTagMicroservices.length > 0 && (
+                <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  {inspectTagMicroservices.map((ms, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between px-2 py-1 rounded bg-card border border-border/60 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-medium text-foreground">{ms.name}</span>
+                        <span
+                          className={cn(
+                            'text-[9px] px-1.5 py-0.2 rounded font-semibold',
+                            ms.target === 'edit'
+                              ? 'bg-primary/15 text-primary border border-primary/20'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {ms.target === 'edit' ? 'Edit (Worktree)' : 'Reference'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInspectTagMicroservices((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="p-1 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                        title="Remove microservice binding"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  value={inspectNewMsName}
+                  onChange={(e) => setInspectNewMsName(e.target.value)}
+                  placeholder="Microservice repo name (e.g. orders-service)"
+                  size="sm"
+                  className="flex-1 text-xs font-mono"
+                />
+                <select
+                  value={inspectNewMsTarget}
+                  onChange={(e) => setInspectNewMsTarget(e.target.value as 'edit' | 'reference')}
+                  className="h-7.5 px-2 text-xs rounded-md border border-border bg-background text-foreground"
+                >
+                  <option value="edit">Edit (Worktree)</option>
+                  <option value="reference">Reference Only</option>
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={!inspectNewMsName.trim()}
+                  onClick={() => {
+                    if (!inspectNewMsName.trim()) return;
+                    setInspectTagMicroservices((prev) => [
+                      ...prev,
+                      { name: inspectNewMsName.trim(), target: inspectNewMsTarget },
+                    ]);
+                    setInspectNewMsName('');
+                  }}
+                  className="h-7.5 text-xs shrink-0"
+                >
+                  <Plus size={11} className="mr-1" />
+                  Add
+                </Button>
+              </div>
+            </div>
+
+            {/* Attached Skills */}
+            <div className="space-y-2 p-3 rounded-lg bg-muted/20 border border-border/60">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-primary" />
+                  <span>Attached Skills ({inspectTagSkills.length})</span>
+                </label>
+                <span className="text-[10px] text-muted-foreground">Auto-activated when tag is selected</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 min-h-7">
+                {inspectTagSkills.length === 0 ? (
+                  <span className="text-xs text-muted-foreground italic">No attached skills.</span>
+                ) : (
+                  inspectTagSkills.map((skId) => {
+                    const skillObj = allSkills.find((s) => s.id === skId);
+                    return (
+                      <span
+                        key={skId}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-primary/10 text-primary border border-primary/20 font-medium"
+                      >
+                        <span>{skillObj?.title || skillObj?.name || skId}</span>
+                        <button
+                          type="button"
+                          onClick={() => setInspectTagSkills((prev) => prev.filter((id) => id !== skId))}
+                          className="hover:text-destructive cursor-pointer ml-0.5"
+                        >
+                          <X size={11} />
+                        </button>
+                      </span>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <select
+                  value={inspectNewSkill}
+                  onChange={(e) => setInspectNewSkill(e.target.value)}
+                  className="flex-1 h-7.5 px-2 text-xs rounded-md border border-border bg-background text-foreground"
+                >
+                  <option value="">Select a skill to attach...</option>
+                  {allSkills
+                    .filter((s) => !inspectTagSkills.includes(s.id))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.title || s.name} ({s.id})
+                      </option>
+                    ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={!inspectNewSkill}
+                  onClick={() => {
+                    if (!inspectNewSkill) return;
+                    setInspectTagSkills((prev) => [...prev, inspectNewSkill]);
+                    setInspectNewSkill('');
+                  }}
+                  className="h-7.5 text-xs shrink-0"
+                >
+                  <Plus size={11} className="mr-1" />
+                  Attach Skill
+                </Button>
+              </div>
+            </div>
+
+            {/* Tags / Keywords */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Discovery Tags (comma-separated)</label>
+              <Input
+                value={inspectTagTags}
+                onChange={(e) => setInspectTagTags(e.target.value)}
+                placeholder="e.g. economy, finance, invoicing"
+                size="sm"
+                className="font-mono text-xs"
+              />
+            </div>
+          </DialogPanel>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between w-full pt-3 border-t">
+            <div>
+              {!inspectingTag?.isTemplate && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleDeleteOrResetTag()}
+                  disabled={deletingTagDetails || savingTagDetails}
+                  className="text-destructive hover:bg-destructive/10 border-destructive/30 text-xs gap-1.5"
+                >
+                  {deletingTagDetails ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <RotateCcw size={12} />
+                  )}
+                  <span>
+                    {['economy', 'transport', 'tax', 'payroll', 'fintech', 'security', 'audit', 'performance', 'testing', 'accessibility', 'offline'].includes(inspectingTag?.id || '')
+                      ? 'Reset to Defaults'
+                      : 'Delete Tag'}
+                  </span>
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setInspectingTag(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                disabled={!inspectTagName.trim() || savingTagDetails}
+                onClick={() => void handleSaveTagDetails()}
+                className="gap-1.5"
+              >
+                {savingTagDetails ? <Spinner size="sm" /> : <Check size={12} />}
+                <span>Save Changes</span>
+              </Button>
+            </div>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
