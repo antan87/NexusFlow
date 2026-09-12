@@ -527,7 +527,104 @@ describe('AntigravityCliAdapter lifecycle', () => {
     ]);
   });
 
-  it('rejects conflicting session identities emitted by the provider', async () => {
+  it('self-heals when resuming an expired session and pins the new session identity for turn 2', async () => {
+    const adapter = new TestAntigravityCliAdapter();
+    const sessionEvents: string[] = [];
+    const errors: string[] = [];
+    const HEALED_SESSION_ID = '00000000-0000-0000-0000-000000000009';
+
+    adapter.on('session', (id) => sessionEvents.push(id));
+    adapter.on('error', (err: Error) => errors.push(err.message));
+
+    await adapter.start('/workspace', { id: SESSION_ID, resume: true });
+    await adapter.send('message');
+
+    // agy returns a new session identity due to expiry
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'init',
+      conversationId: HEALED_SESSION_ID,
+    }) + '\n');
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'result',
+      conversationId: HEALED_SESSION_ID,
+      result: 'turn result',
+    }) + '\n');
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(errors).toHaveLength(0);
+    expect(sessionEvents).toEqual([HEALED_SESSION_ID]);
+
+    // Second turn should now resume the newly assigned healed session ID
+    await adapter.send('next message');
+    expect(adapter.processes).toHaveLength(2);
+    expect(adapter.processes[1].args).toEqual([
+      '--output-format',
+      'stream-json',
+      '--add-dir',
+      '/workspace',
+      '--conversation',
+      HEALED_SESSION_ID,
+      '--mode',
+      'plan',
+      '-p',
+      'next message',
+    ]);
+  });
+
+  it('adopts genuine provider-assigned session on turn 1 with model override and without fake UUID', async () => {
+    const adapter = new TestAntigravityCliAdapter();
+    const sessionEvents: string[] = [];
+    adapter.on('session', (id) => sessionEvents.push(id));
+
+    // Turn 1 started with model but no session id (resume: false)
+    await adapter.start('/workspace', { resume: false, model: 'gemini-2.5-pro' });
+    await adapter.send('first prompt');
+
+    expect(adapter.processes[0].args).toEqual([
+      '--output-format',
+      'stream-json',
+      '--add-dir',
+      '/workspace',
+      '--mode',
+      'plan',
+      '--model',
+      'gemini-2.5-pro',
+      '-p',
+      'first prompt',
+    ]);
+
+    // agy emits provider-assigned conversationId
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'init',
+      conversationId: CAPTURED_SESSION_ID,
+    }) + '\n');
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'result',
+      conversationId: CAPTURED_SESSION_ID,
+    }) + '\n');
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(sessionEvents).toEqual([CAPTURED_SESSION_ID]);
+
+    // Turn 2 must now resume the provider's genuine conversation ID while preserving model
+    await adapter.send('second prompt');
+    expect(adapter.processes[1].args).toEqual([
+      '--output-format',
+      'stream-json',
+      '--add-dir',
+      '/workspace',
+      '--conversation',
+      CAPTURED_SESSION_ID,
+      '--mode',
+      'plan',
+      '--model',
+      'gemini-2.5-pro',
+      '-p',
+      'second prompt',
+    ]);
+  });
+
+  it('rejects conflicting session identities emitted mid-turn in the same stream', async () => {
     const adapter = new TestAntigravityCliAdapter();
     const errors: string[] = [];
     adapter.on('error', (err: Error) => errors.push(err.message));
@@ -535,15 +632,40 @@ describe('AntigravityCliAdapter lifecycle', () => {
     await adapter.start('/workspace', { id: SESSION_ID, resume: true });
     await adapter.send('message');
 
-    // agy returns a conflicting session identity
+    // agy emits initial matching session identity
     adapter.processes[0].child.stdout.emit('data', JSON.stringify({
       type: 'init',
+      conversationId: SESSION_ID,
+    }) + '\n');
+
+    // then suddenly emits a different session identity mid-turn
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'result',
       conversationId: '00000000-0000-0000-0000-000000000009',
     }) + '\n');
     adapter.processes[0].child.emit('close', 0);
 
     expect(errors).toEqual([
       'Antigravity returned a conflicting session identity. The unexpected identity was rejected; the acknowledged session remains resumable.',
+    ]);
+  });
+
+  it('rejects invalid session UUIDs emitted by the provider', async () => {
+    const adapter = new TestAntigravityCliAdapter();
+    const errors: string[] = [];
+    adapter.on('error', (err: Error) => errors.push(err.message));
+
+    await adapter.start('/workspace');
+    await adapter.send('message');
+
+    adapter.processes[0].child.stdout.emit('data', JSON.stringify({
+      type: 'init',
+      conversationId: 'not-a-valid-uuid',
+    }) + '\n');
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(errors).toEqual([
+      'Antigravity started without a valid session identity. The turn was not marked resumable.',
     ]);
   });
 });

@@ -331,7 +331,7 @@ export function buildAntigravityTurnArgs(
 
   // --conversation only loads an existing provider-owned conversation. It is
   // not a caller-assigned session id, so a new chat must let agy create one.
-  if (session?.resume) {
+  if (session?.resume && session.id) {
     args.push('--conversation', session.id);
   } else if (!isFirstTurn) {
     args.push('-c');
@@ -370,6 +370,7 @@ export class AntigravityCliAdapter extends CliAdapterBase {
   private sawTextDelta = false;
   private sawTurnOutcome = false;
   private acknowledgedThisTurn = false;
+  private turnEstablishedSessionId?: string;
   private turnFinished = false;
 
   public async start(cwd: string, session?: AgentSession): Promise<void> {
@@ -380,6 +381,7 @@ export class AntigravityCliAdapter extends CliAdapterBase {
     this.sawTextDelta = false;
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = Boolean(session?.id && session.resume);
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
   }
 
@@ -397,6 +399,7 @@ export class AntigravityCliAdapter extends CliAdapterBase {
     this.sawTextDelta = false;
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = Boolean(this.session?.id && this.session.resume);
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
     return buildAntigravityTurnArgs(isFirstTurn, prompt, this.session, executionProfile, this.cwd);
   }
@@ -440,12 +443,7 @@ export class AntigravityCliAdapter extends CliAdapterBase {
       if (this.turnFinished) break;
 
       if (event.type === 'session') {
-        const expectedId = this.session?.id;
-        const matchesExpectedId = expectedId === undefined
-          || !this.session?.resume
-          || event.id.toLowerCase() === expectedId.toLowerCase();
-
-        if (!isValidSessionUuid(event.id) || !matchesExpectedId) {
+        if (!isValidSessionUuid(event.id)) {
           const wasAcknowledged = this.acknowledgedThisTurn;
           this.turnFinished = true;
           this.sawTurnOutcome = true;
@@ -458,11 +456,42 @@ export class AntigravityCliAdapter extends CliAdapterBase {
           continue;
         }
 
-        if (!this.acknowledgedThisTurn || this.session?.id !== event.id) {
+        const expectedId = this.session?.id;
+        const isResuming = Boolean(this.session?.resume);
+
+        if (this.turnEstablishedSessionId === undefined) {
+          let adoptedId = event.id;
+          if (!isResuming) {
+            // Fresh conversation: provider-assigned session identity. ALWAYS adopt event.id!
+            adoptedId = event.id;
+            this.session = { ...this.session, id: adoptedId, resume: true };
+          } else if (expectedId) {
+            if (event.id.toLowerCase() === expectedId.toLowerCase()) {
+              adoptedId = expectedId;
+            } else {
+              // Self-healing: agy expired or recreated the conversation
+              console.warn(`[AntigravityCliAdapter] Provider assigned new session identity ${event.id} (previous: ${expectedId})`);
+              adoptedId = event.id;
+              this.session = { ...this.session, id: adoptedId, resume: true };
+            }
+          } else {
+            adoptedId = event.id;
+            this.session = { ...this.session, id: adoptedId, resume: true };
+          }
+
+          this.turnEstablishedSessionId = adoptedId;
           this.acknowledgedThisTurn = true;
           this.acknowledgeFirstTurn();
-          this.session = { ...this.session, id: expectedId ?? event.id, resume: true };
-          this.emit('session', expectedId ?? event.id);
+          this.emit('session', adoptedId);
+        } else if (event.id.toLowerCase() !== this.turnEstablishedSessionId.toLowerCase()) {
+          // Mid-turn conflicting session identity after an identity was already established in this turn
+          this.turnFinished = true;
+          this.sawTurnOutcome = true;
+          handledOutcome = true;
+          this.failCurrentTurn(new Error(
+            'Antigravity returned a conflicting session identity. The unexpected identity was rejected; the acknowledged session remains resumable.',
+          ), true);
+          continue;
         }
       } else if (event.type === 'message') {
         this.sawTextDelta = true;

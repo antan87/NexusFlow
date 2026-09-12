@@ -195,6 +195,7 @@ app.get('/ws', async (c, next) => {
   //                     | {type:'close', code} | {type:'pong'}
   return upgradeWebSocket((c) => {
     let currentCwd: string | null = null;
+    let currentCommand: string | null = null;
     let currentWs: { send: (data: string) => void } | null = null;
 
     return {
@@ -230,6 +231,7 @@ app.get('/ws', async (c, next) => {
                 return;
               }
               currentCwd = safeCwd;
+              currentCommand = typeof command === 'string' && command.trim() ? command.trim() : null;
 
               let session: AgentSession | undefined;
               const model = ProviderRegistry.resolveModel(provider, payload.model);
@@ -248,7 +250,11 @@ app.get('/ws', async (c, next) => {
                 }
                 session = { id: payload.sessionId, resume: Boolean(payload.resume), model, effort };
               } else if (model || effort) {
-                session = { id: crypto.randomUUID(), resume: false, model, effort };
+                if (provider.capabilities.sessionIdentity === 'provider-assigned') {
+                  session = { resume: false, model, effort };
+                } else {
+                  session = { id: crypto.randomUUID(), resume: false, model, effort };
+                }
               }
 
               await defaultTurnSessionManager.startSession({
@@ -275,20 +281,26 @@ app.get('/ws', async (c, next) => {
               }
               currentCwd = safeCwd;
 
-              const existingSession = defaultTurnSessionManager.getSession(safeCwd);
+              let existingSession = await defaultTurnSessionManager.awaitPendingStart(safeCwd);
               if (!existingSession) {
-                const command = typeof payload.command === 'string' ? payload.command : 'antigravity-cli';
+                const command = typeof payload.command === 'string' && payload.command.trim()
+                  ? payload.command.trim()
+                  : (currentCommand || 'antigravity-cli');
                 const provider = ProviderRegistry.getProvider(command);
                 if (!provider) {
                   ws.send(JSON.stringify({ type: 'error', message: `No provider found for ${command}.` }));
                   return;
                 }
-                await defaultTurnSessionManager.startSession({
+                currentCommand = command;
+                existingSession = await defaultTurnSessionManager.startSession({
                   workspaceCwd: safeCwd,
                   command,
                   client: ws,
                   provider,
                 });
+              } else {
+                existingSession.clients.add(ws);
+                currentCommand = existingSession.command;
               }
 
               const result = defaultTurnSessionManager.dispatchInput(safeCwd, payload);

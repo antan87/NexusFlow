@@ -140,6 +140,7 @@ export class CodexCliAdapter extends CliAdapterBase {
   private sawTurnOutcome = false;
   private sawAssistantMessage = false;
   private acknowledgedThisTurn = false;
+  private turnEstablishedSessionId?: string;
   private turnFinished = false;
 
   constructor() {
@@ -158,6 +159,7 @@ export class CodexCliAdapter extends CliAdapterBase {
     this.sawTurnOutcome = false;
     this.sawAssistantMessage = false;
     this.acknowledgedThisTurn = false;
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
     return super.start(cwd);
   }
@@ -171,6 +173,7 @@ export class CodexCliAdapter extends CliAdapterBase {
     this.sawTurnOutcome = false;
     this.sawAssistantMessage = false;
     this.acknowledgedThisTurn = false;
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
     const sessionId = isFirstTurn
       ? (this.requestedSession?.resume ? this.requestedSession.id : undefined)
@@ -213,7 +216,21 @@ export class CodexCliAdapter extends CliAdapterBase {
 
       if (event.type === 'session') {
         const expectedId = this.activeSessionId;
-        if (expectedId && event.id.toLowerCase() !== expectedId.toLowerCase()) {
+        if (this.turnEstablishedSessionId === undefined) {
+          let adoptedId = event.id;
+          if (expectedId) {
+            if (event.id.toLowerCase() === expectedId.toLowerCase()) {
+              adoptedId = expectedId;
+            } else {
+              console.warn(`[CodexCliAdapter] Provider assigned new session identity ${event.id} (previous: ${expectedId})`);
+              adoptedId = event.id;
+            }
+          }
+          this.activeSessionId = adoptedId;
+          this.turnEstablishedSessionId = adoptedId;
+          this.acknowledgedThisTurn = true;
+          this.emit('session', adoptedId);
+        } else if (event.id.toLowerCase() !== this.turnEstablishedSessionId.toLowerCase()) {
           this.turnFinished = true;
           this.sawTurnOutcome = true;
           handled = true;
@@ -221,12 +238,6 @@ export class CodexCliAdapter extends CliAdapterBase {
             'Codex returned a conflicting thread identity. The unexpected identity was rejected; the active session remains resumable.',
           ), true);
           continue;
-        }
-        if (!this.acknowledgedThisTurn) {
-          const acknowledgedId = expectedId ?? event.id;
-          this.activeSessionId = acknowledgedId;
-          this.acknowledgedThisTurn = true;
-          this.emit('session', acknowledgedId);
         }
       } else if (event.type === 'message') {
         handled = true;

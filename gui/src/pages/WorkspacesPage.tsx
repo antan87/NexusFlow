@@ -1,4 +1,4 @@
-import { useState, useEffect, type ComponentProps } from 'react';
+import { useState, useEffect, useCallback, type ComponentProps } from 'react';
 import {
   RefreshCw,
   MoreVertical,
@@ -64,6 +64,9 @@ import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
+import { AgentChat } from '../features/chat/AgentChat.js';
+import { loadChatStore, saveChatStore } from '../features/chat/chatStore.js';
+import { providerForAssistant } from '../features/chat/chatLaunch.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
@@ -73,7 +76,7 @@ import { WorkspaceWorkroomTab } from '../features/workrooms/WorkspaceWorkroomTab
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
-type SubTab = 'overview' | 'workroom' | 'sessions' | 'changes' | 'knowledge' | 'plan' | 'skills' | 'services';
+type SubTab = 'overview' | 'chat' | 'workroom' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'plan' | 'skills';
 
 interface TabDef {
   value: SubTab;
@@ -83,10 +86,11 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { value: 'chat', label: 'AI Chat', icon: Bot },
   { value: 'workroom', label: 'Workroom', icon: Radio },
   { value: 'changes', label: 'Changes', icon: GitCompare },
   { value: 'services', label: 'Services', icon: Zap },
-  { value: 'sessions', label: 'AI & Sessions', icon: Bot },
+  { value: 'sessions', label: 'AI & Sessions', icon: Terminal },
   { value: 'knowledge', label: 'Knowledge', icon: Brain },
   { value: 'plan', label: 'Plan', icon: ListTodo },
   { value: 'skills', label: 'Skills', icon: Puzzle },
@@ -218,6 +222,21 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     }
   };
 
+  const handleStartChat = useCallback((assistant: string, sessionId?: string) => {
+    if (!selected) return;
+    const store = loadChatStore(selected.branchName);
+    const pid = providerForAssistant(assistant) || (assistant.endsWith('-cli') ? assistant : `${assistant}-cli`);
+    store.providerId = pid;
+    if (sessionId) {
+      store.sessions = {
+        ...store.sessions,
+        [pid]: { id: sessionId, started: true },
+      };
+    }
+    saveChatStore(selected.branchName, store);
+    onSelectTab(selected.branchName, 'chat');
+  }, [selected, onSelectTab]);
+
   const renderInspector = () => {
     if (!selected) return null;
     const st = workspaceStatuses[selected.branchName];
@@ -345,6 +364,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </Button>
                 )
               )}
+
+              {/* Prominent Chat Button */}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => onSelectTab(selected.branchName, 'chat')}
+                aria-label="Chat"
+                title="Start AI chat session"
+                className="font-bold h-9 gap-1.5"
+              >
+                <Bot size={14} />
+                <span>Chat</span>
+              </Button>
 
               {/* Fast Copy Prompt Button */}
               <Button
@@ -486,7 +518,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
                     {/* Tile 2: AI Assistant Engine */}
                     <div
-                      onClick={() => onSelectTab(selected.branchName, 'sessions')}
+                      onClick={() => onSelectTab(selected.branchName, 'chat')}
                       className="group p-4 rounded-xl border border-border/80 bg-card/70 hover:bg-card hover:border-primary/40 transition-all cursor-pointer shadow-xs flex flex-col justify-between"
                     >
                       <div className="flex items-center justify-between mb-3">
@@ -503,7 +535,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           {selected.assistants[0] || 'Antigravity'}
                         </div>
                         <div className="text-[11px] text-muted-foreground mt-1">
-                          Context rules & templates ready
+                          Click to start chat session
                         </div>
                       </div>
                     </div>
@@ -695,6 +727,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </Card>
                 </div>
               )}
+              {subTab === 'chat' && (
+                <div className="h-[calc(100vh-230px)] min-h-[620px] flex flex-col rounded-xl border border-border bg-card shadow-xs overflow-hidden">
+                  <AgentChat ws={selected} />
+                </div>
+              )}
               {subTab === 'sessions' && (
                 <section aria-labelledby="session-history-heading" className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-border bg-card shadow-xs">
@@ -717,7 +754,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       <span>Open Floating Chat</span>
                     </Button>
                   </div>
-                  <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
+                  <SessionHistory ws={selected} showToast={showToast} {...sessionProps} onStartChat={handleStartChat} />
                 </section>
               )}
               {subTab === 'workroom' && <WorkspaceWorkroomTab ws={selected} showToast={showToast} />}

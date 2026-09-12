@@ -6,6 +6,7 @@ import {
   ExternalLink,
   MessageSquare,
   Terminal,
+  Bot,
   Plus,
   Search,
   ArrowUpDown,
@@ -44,6 +45,7 @@ interface SessionHistoryProps {
   fetchSessionTranscript: (assistant: string, sessionId: string) => Promise<void>;
   handleOpenDesktopSession: (ws: Feature, sessionId: string, assistant: string) => Promise<boolean>;
   showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
+  onStartChat?: (assistant: string, sessionId?: string) => void;
 }
 
 const getResumeCliCommand = (assistant: string, sessionId: string): string => {
@@ -115,6 +117,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   fetchSessionTranscript,
   handleOpenDesktopSession,
   showToast,
+  onStartChat,
 }) => {
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
@@ -579,9 +582,21 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
                 {/* Sleek Balanced Action Toolbar */}
                 <div className="flex items-center gap-1.5 shrink-0 pl-8 sm:pl-0">
+                  {onStartChat && (
+                    <Button
+                      size="xs"
+                      variant="default"
+                      onClick={() => onStartChat(sess.assistant, sess.id)}
+                      title="Resume in GUI Chat"
+                    >
+                      <Bot size={12} />
+                      <span>Chat</span>
+                    </Button>
+                  )}
+
                   <Button
                     size="xs"
-                    variant="default"
+                    variant={onStartChat ? 'outline' : 'default'}
                     disabled={resumingTerminalId === sess.id}
                     onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
                     title={`Resume session in terminal (${sess.id})`}
@@ -683,16 +698,32 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                     <Button
                       size="xs"
                       variant="default"
+                      onClick={() => {
+                        if (onStartChat) {
+                          onStartChat(harness.id);
+                        } else {
+                          void startNewSession(harness.id);
+                        }
+                      }}
+                      title={`Start chat with ${harness.name}`}
+                    >
+                      <Bot size={12} />
+                      <span>Start Chat</span>
+                    </Button>
+
+                    <Button
+                      size="xs"
+                      variant="outline"
                       disabled={launchingNewAssistant === harness.id}
                       onClick={() => void startNewSession(harness.id)}
-                      title={`Launch new ${harness.cliCommand} session in terminal`}
+                      title={`Launch ${harness.cliCommand} in terminal`}
                     >
                       {launchingNewAssistant === harness.id ? (
                         <Spinner className="size-3" />
                       ) : (
-                        <Plus size={12} />
+                        <Terminal size={12} />
                       )}
-                      <span>New Session</span>
+                      <span>Terminal</span>
                     </Button>
 
                     {harness.hasApp && (
@@ -750,9 +781,21 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
                           {/* Sleek Balanced Action Toolbar */}
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {onStartChat && (
+                              <Button
+                                size="xs"
+                                variant="default"
+                                onClick={() => onStartChat(sess.assistant, sess.id)}
+                                title="Resume in GUI Chat"
+                              >
+                                <Bot size={12} />
+                                <span>Chat</span>
+                              </Button>
+                            )}
+
                             <Button
                               size="xs"
-                              variant="default"
+                              variant={onStartChat ? 'outline' : 'default'}
                               disabled={resumingTerminalId === sess.id}
                               onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
                               title={`Resume session in terminal (${sess.id})`}

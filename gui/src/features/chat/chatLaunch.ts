@@ -14,7 +14,7 @@ export interface ChatLaunchIntent {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SAFE_SESSION_ID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-zA-Z0-9_\-.]{1,128})$/i;
+export const SAFE_SESSION_ID_RE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-zA-Z0-9_\-.]{1,128})$/i;
 
 const HARNESS_PROVIDERS = new Set<EmbeddedHarnessProvider>([
   'claude-cli',

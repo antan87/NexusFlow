@@ -6,6 +6,7 @@ import type { PermissionMode } from '../harness/types.js';
 import type { AgentExecutionProfile, AgentHarness } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import { getLocalMcpServerConfig } from './mcp-config.js';
+import { getAugmentedPath } from '../utils/user-paths.js';
 import {
   MCP_SERVER_NAME,
   LEGACY_MCP_SERVER_NAME,
@@ -77,6 +78,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
           env: {
             CLAUDE_CODE_PROJECT_DIR_NAME: workspaceId,
             CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '.', '.claude'),
+            PATH: getAugmentedPath(process.env),
           },
           mcpServers: {
             [MCP_ADAPTER_SERVER_NAME]: getLocalMcpServerConfig(this.cwd, role),
@@ -84,7 +86,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
           },
         };
 
-        if (this.session && this.session.resume) {
+        if (this.session && this.session.resume && this.session.id) {
           this.handle = await this.adapter.resume({
             ...spec,
             sessionId: this.session.id,

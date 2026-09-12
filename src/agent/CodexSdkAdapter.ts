@@ -53,7 +53,7 @@ export class CodexSdkAdapter extends EventEmitter implements AgentHarness {
           },
         };
 
-        if (this.session && this.session.resume) {
+        if (this.session && this.session.resume && this.session.id) {
           this.handle = await this.adapter.resume({
             ...spec,
             sessionId: this.session.id,

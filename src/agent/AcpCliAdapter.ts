@@ -242,7 +242,7 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
       );
     }
 
-    if (requestedSession?.resume) {
+    if (requestedSession?.resume && requestedSession.id) {
       if (initialized.agentCapabilities?.loadSession) {
         await withTimeout(transport.connection.loadSession({
           sessionId: requestedSession.id,

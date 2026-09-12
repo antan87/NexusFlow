@@ -12,7 +12,7 @@ import { API_BASE } from '../../lib/apiBase.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, fetchRemoteChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
-import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
+import { providerForAssistant, readChatLaunchIntent, SAFE_SESSION_ID_RE } from './chatLaunch.js';
 import { SessionPicker, type PickableSession } from './SessionPicker.js';
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import { CHAT_LAUNCH_CONSUMED_KEY, LEGACY_CHAT_LAUNCH_CONSUMED_KEY } from '../../brand.js';
@@ -1035,7 +1035,7 @@ export function AgentChat({ ws }: AgentChatProps) {
             return [...prev, { role: 'assistant', content: payload.text, ts: Date.now() }];
           });
         } else if (payload.type === 'session' && typeof payload.id === 'string') {
-          const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id);
+          const validId = SAFE_SESSION_ID_RE.test(payload.id);
           if (validId) {
             updateSessions(prev => ({
               ...prev,

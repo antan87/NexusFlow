@@ -488,4 +488,38 @@ describe('ClaudeCliAdapter acknowledged session lifecycle', () => {
       expect.stringMatching(/Claude completed without a recognized text result/i),
     ]);
   });
+
+  it('self-heals when resuming an expired session and resumes the new id on subsequent turns', async () => {
+    const adapter = new TestClaudeCliAdapter();
+    const sessions: string[] = [];
+    const errors: string[] = [];
+    const data: string[] = [];
+    adapter.on('session', (id: string) => sessions.push(id));
+    adapter.on('error', (error: Error) => errors.push(error.message));
+    adapter.on('data', (text: string) => data.push(text));
+
+    await adapter.start('C:\\workspace', { id: SESSION_ID, resume: true });
+    await adapter.send('Resume expired claude session');
+
+    // Claude outputs new session ID (OTHER_SESSION_ID) due to expiry
+    adapter.processes[0].child.stdout.emit('data', Buffer.from(
+      initRecord(OTHER_SESSION_ID) +
+      `${JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Self-healed response' } },
+      })}\n` +
+      successRecord(OTHER_SESSION_ID),
+    ));
+    adapter.processes[0].child.emit('close', 0);
+
+    expect(errors).toEqual([]);
+    expect(sessions).toEqual([OTHER_SESSION_ID]);
+    expect(data).toEqual(['Self-healed response']);
+
+    // Next turn must resume the healed session id
+    await adapter.send('Next turn');
+    expect(adapter.processes[1].args).toEqual([
+      '-p', ...STREAM_ARGS, '--permission-mode', 'plan', '--resume', OTHER_SESSION_ID,
+    ]);
+  });
 });

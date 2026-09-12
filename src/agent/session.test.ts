@@ -59,6 +59,13 @@ describe('buildClaudeTurnArgs', () => {
       '-p', ...STREAM_ARGS, '--permission-mode', 'plan', '--model', 'sonnet', '--resume', ID,
     ]);
   });
+
+  it('builds args for session without explicit id', () => {
+    const session = { resume: false, model: 'sonnet' };
+    expect(buildClaudeTurnArgs(true, session)).toEqual([
+      '-p', ...STREAM_ARGS, '--permission-mode', 'plan', '--model', 'sonnet',
+    ]);
+  });
 });
 
 describe('isValidSessionUuid', () => {

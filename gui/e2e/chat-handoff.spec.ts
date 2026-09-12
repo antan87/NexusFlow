@@ -244,6 +244,54 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await expect(page.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
     expect(await page.evaluate(() => (window as any).__harnessSocketCloseCount)).toBe(0);
   });
+
+  test('switches to in-page AI Chat tab from header, harness cards, and session rows', async ({ page }) => {
+    const sessionId = '0199a213-81c0-7800-8aa1-bbab2a035a53';
+    await page.route('**/api/workspace/feature-x/sessions*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            {
+              id: sessionId,
+              assistant: 'codex',
+              title: 'Implement feature workflow',
+              createdAt: '2026-08-15T00:00:00.000Z',
+              updatedAt: '2026-08-16T00:00:00.000Z',
+              messageCount: 2,
+              workspacePath: feature.workspacePath,
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.goto('/#/workspaces/feature-x');
+    await expect(page.getByRole('heading', { name: 'feature-x', level: 1 })).toBeVisible();
+
+    // Click prominent header Chat button
+    await page.getByRole('button', { name: 'Chat', exact: true }).first().click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x\/chat/);
+    await expect(page.getByRole('tab', { name: /AI Chat/i })).toHaveAttribute('aria-selected', 'true');
+
+    // Go to Sessions tab
+    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    await expect(page.getByRole('button', { name: 'Start Chat' }).first()).toBeVisible();
+
+    // Click "Start Chat" on the primary harness card
+    await page.getByRole('button', { name: 'Start Chat' }).first().click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x\/chat/);
+
+    // Go back to Sessions and switch to timeline view
+    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x\/sessions/);
+    await page.getByRole('button', { name: /Timeline/i }).click();
+
+    // Click "Chat" button on session row
+    await page.getByRole('button', { name: 'Chat', description: 'Resume in GUI Chat' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x\/chat/);
+  });
 });
 
 

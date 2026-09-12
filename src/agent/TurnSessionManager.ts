@@ -73,6 +73,18 @@ export class TurnSessionManager {
     return this.sessions.get(workspaceCwd);
   }
 
+  public async awaitPendingStart(workspaceCwd: string): Promise<TurnSession | undefined> {
+    const inFlight = this.pendingStarts.get(workspaceCwd);
+    if (inFlight) {
+      try {
+        await inFlight;
+      } catch {
+        return undefined;
+      }
+    }
+    return this.sessions.get(workspaceCwd);
+  }
+
   public hasActiveTurn(workspaceCwd: string): boolean {
     const session = this.sessions.get(workspaceCwd);
     return Boolean(session && session.isBusy);

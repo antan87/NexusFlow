@@ -264,4 +264,87 @@ describe('TurnSessionManager', () => {
     expect(sessionA.clients.has(clientA)).toBe(true);
     expect(sessionA.clients.has(clientB)).toBe(true);
   });
+
+  it('awaitPendingStart awaits in-flight startup and returns the resolved session', async () => {
+    let finishStart!: () => void;
+    const delayedHarness = new MockAgentHarness();
+    delayedHarness.start = () => new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+
+    const delayedProvider: ProviderAdapter = {
+      ...mockProvider,
+      createInstance: () => delayedHarness,
+    };
+
+    const client: TurnClient = { send: vi.fn() };
+
+    // Start is in flight
+    const startPromise = manager.startSession({
+      workspaceCwd: '/ws/in-flight',
+      command: 'mock-provider',
+      client,
+      provider: delayedProvider,
+    });
+
+    // Before start completes, getSession is undefined
+    expect(manager.getSession('/ws/in-flight')).toBeUndefined();
+
+    // Call awaitPendingStart
+    const awaitPromise = manager.awaitPendingStart('/ws/in-flight');
+
+    // Resolve startup
+    finishStart();
+
+    const [startedSession, awaitedSession] = await Promise.all([startPromise, awaitPromise]);
+    expect(awaitedSession).toBe(startedSession);
+    expect(awaitedSession?.command).toBe('mock-provider');
+  });
+
+  it('awaitPendingStart returns existing session immediately if no start is in flight', async () => {
+    const client: TurnClient = { send: vi.fn() };
+    const session = await manager.startSession({
+      workspaceCwd: '/ws/ready',
+      command: 'mock-provider',
+      client,
+      provider: mockProvider,
+    });
+
+    const result = await manager.awaitPendingStart('/ws/ready');
+    expect(result).toBe(session);
+
+    const nonExistent = await manager.awaitPendingStart('/ws/non-existent');
+    expect(nonExistent).toBeUndefined();
+  });
+
+  it('awaitPendingStart returns undefined if in-flight start fails', async () => {
+    let rejectStart!: (err: Error) => void;
+    const failingHarness = new MockAgentHarness();
+    failingHarness.start = () => new Promise<void>((_, reject) => {
+      rejectStart = reject;
+    });
+
+    const failingProvider: ProviderAdapter = {
+      ...mockProvider,
+      createInstance: () => failingHarness,
+    };
+
+    const client: TurnClient = { send: vi.fn() };
+
+    const startPromise = manager.startSession({
+      workspaceCwd: '/ws/failing',
+      command: 'mock-provider',
+      client,
+      provider: failingProvider,
+    }).catch(() => undefined);
+
+    const awaitPromise = manager.awaitPendingStart('/ws/failing');
+
+    rejectStart(new Error('Harness failed to spawn'));
+
+    await startPromise;
+    const awaited = await awaitPromise;
+    expect(awaited).toBeUndefined();
+    expect(manager.getSession('/ws/failing')).toBeUndefined();
+  });
 });

@@ -286,24 +286,29 @@ describe('Codex acknowledged thread lifecycle', () => {
     expect(adapter.processes[1].args).toContain(requestedId);
   });
 
-  it('rejects a conflicting resume identity and keeps the requested id active', async () => {
+  it('self-heals when resuming an expired session and resumes the new id on subsequent turns', async () => {
     const adapter = new TestCodexCliAdapter();
     const sessions: string[] = [];
     const errors: string[] = [];
+    const data: string[] = [];
     adapter.on('session', (id: string) => sessions.push(id));
     adapter.on('error', (error: Error) => errors.push(error.message));
+    adapter.on('data', (text: string) => data.push(text));
     await adapter.start('C:\\workspace', { id: ID, resume: true });
 
-    await adapter.send('Resume safely');
-    adapter.processes[0].child.stdout.emit('data', Buffer.from(threadRecord(OTHER_ID)));
-    adapter.processes[0].child.emit('close', 1);
-    await adapter.send('Retry the requested session');
+    await adapter.send('Resume expired session');
+    adapter.processes[0].child.stdout.emit('data', Buffer.from(
+      threadRecord(OTHER_ID) + messageRecord('Recovered turn') + completeRecord(),
+    ));
+    adapter.processes[0].child.emit('close', 0);
 
-    expect(sessions).toEqual([]);
-    expect(errors).toEqual([
-      'Codex returned a conflicting thread identity. The unexpected identity was rejected; the active session remains resumable.',
-    ]);
-    expect(adapter.processes[1].args).toContain(ID);
+    expect(errors).toEqual([]);
+    expect(sessions).toEqual([OTHER_ID]);
+    expect(data).toEqual(['Recovered turn']);
+
+    // Next turn must resume the healed session identity
+    await adapter.send('Continue after recovery');
+    expect(adapter.processes[1].args).toContain(OTHER_ID);
   });
 
   it('rejects a later identity change and resumes only the acknowledged id', async () => {

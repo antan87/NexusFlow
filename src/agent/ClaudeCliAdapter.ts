@@ -161,6 +161,7 @@ export class ClaudeCliAdapter extends CliAdapterBase {
   private sawTextDelta = false;
   private sawTurnOutcome = false;
   private acknowledgedThisTurn = false;
+  private turnEstablishedSessionId?: string;
   private turnFinished = false;
 
   public async start(cwd: string, session?: AgentSession) {
@@ -170,6 +171,7 @@ export class ClaudeCliAdapter extends CliAdapterBase {
     this.sawTextDelta = false;
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = false;
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
   }
 
@@ -190,6 +192,7 @@ export class ClaudeCliAdapter extends CliAdapterBase {
     this.sawTextDelta = false;
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = false;
+    this.turnEstablishedSessionId = undefined;
     this.turnFinished = false;
     return buildClaudeTurnArgs(isFirstTurn, this.session, executionProfile);
   }
@@ -217,9 +220,9 @@ export class ClaudeCliAdapter extends CliAdapterBase {
 
       if (event.type === 'session') {
         const expectedId = this.session?.id;
-        const matchesExpectedId = expectedId === undefined
-          || event.id.toLowerCase() === expectedId.toLowerCase();
-        if (!isValidSessionUuid(event.id) || !matchesExpectedId) {
+        const isResuming = Boolean(this.session?.resume);
+
+        if (!isValidSessionUuid(event.id)) {
           const wasAcknowledged = this.acknowledgedThisTurn;
           this.turnFinished = true;
           this.sawTurnOutcome = true;
@@ -231,12 +234,40 @@ export class ClaudeCliAdapter extends CliAdapterBase {
           ), true);
           continue;
         }
-        if (!this.acknowledgedThisTurn) {
+
+        if (this.turnEstablishedSessionId === undefined) {
+          let adoptedId = event.id;
+          if (expectedId) {
+            if (event.id.toLowerCase() === expectedId.toLowerCase()) {
+              adoptedId = expectedId;
+            } else if (isResuming) {
+              console.warn(`[ClaudeCliAdapter] Provider assigned new session identity ${event.id} (previous: ${expectedId})`);
+              adoptedId = event.id;
+              this.session = { ...this.session, id: event.id, resume: true };
+            } else {
+              this.turnFinished = true;
+              this.sawTurnOutcome = true;
+              handledOutcome = true;
+              this.failCurrentTurn(new Error(
+                'Claude returned an unexpected session identity. The turn was not marked resumable.',
+              ), true);
+              continue;
+            }
+          } else if (this.session) {
+            this.session = { ...this.session, id: event.id, resume: true };
+          }
+          this.turnEstablishedSessionId = adoptedId;
           this.acknowledgedThisTurn = true;
           this.acknowledgeFirstTurn();
-          // For client-assigned sessions, retain exactly the id NexusFlow
-          // requested even if Claude canonicalizes its UUID casing.
-          this.emit('session', expectedId ?? event.id);
+          this.emit('session', adoptedId);
+        } else if (event.id.toLowerCase() !== this.turnEstablishedSessionId.toLowerCase()) {
+          this.turnFinished = true;
+          this.sawTurnOutcome = true;
+          handledOutcome = true;
+          this.failCurrentTurn(new Error(
+            'Claude returned a conflicting session identity. The unexpected identity was rejected; the acknowledged session remains resumable.',
+          ), true);
+          continue;
         }
       } else if (event.type === 'message') {
         this.sawTextDelta = true;

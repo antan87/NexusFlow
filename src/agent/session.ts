@@ -7,7 +7,7 @@ import type { AgentExecutionProfile } from './ProviderRegistry.js';
 
 /** A chat session to create or resume. `resume` means the session already has turns on disk. */
 export interface AgentSession {
-  id: string;
+  id?: string;
   resume: boolean;
   model?: string;
   effort?: string;
@@ -62,7 +62,7 @@ export function buildClaudeTurnArgs(
       : ['-c', '-p', ...outputArgs, ...permissionArgs];
   }
   if (!session.resume && isFirstTurn) {
-    return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, '--session-id', session.id];
+    return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, ...(session.id ? ['--session-id', session.id] : [])];
   }
-  return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, '--resume', session.id];
+  return ['-p', ...outputArgs, ...permissionArgs, ...modelArgs, ...(session.id ? ['--resume', session.id] : [])];
 }
