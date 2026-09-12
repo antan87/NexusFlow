@@ -2158,6 +2158,46 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.skill.custom).toBe(true);
     });
 
+    it('POST /api/skills validates workspace-local scope parameters', async () => {
+      // workspace scope without workspaceId returns 400
+      const noWsRes = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'local-test',
+          content: '# Local Test',
+          scope: 'workspace',
+        }),
+      });
+      expect(noWsRes.status).toBe(400);
+
+      // workspace scope with unknown workspace returns 404
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([]);
+
+      const unknownWsRes = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'local-test',
+          content: '# Local Test',
+          scope: 'workspace',
+          workspaceId: 'non-existent-ws',
+        }),
+      });
+      expect(unknownWsRes.status).toBe(404);
+    });
+
+    it('DELETE /api/skills/:id?workspace=non-existent returns 404', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([]);
+
+      const response = await app.request('/api/skills/local-test?workspace=non-existent-ws', {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(404);
+    });
+
     it('GET and POST /api/agents administer Codex-native agents', async () => {
       const agent = {
         id: 'reviewer',
@@ -2471,6 +2511,14 @@ describe('Server API Endpoints Unit Tests', () => {
       const missingRes = await app.request('/api/enterprise/domain-packs/non-existent-pack');
       expect(missingRes.status).toBe(404);
 
+      // PUT non-existent returns 404
+      const missingPutRes = await app.request('/api/enterprise/domain-packs/non-existent-pack', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Non Existent' }),
+      });
+      expect(missingPutRes.status).toBe(404);
+
       // PUT update
       const putRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
         method: 'PUT',
@@ -2488,6 +2536,20 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(putData.domainPack.rules).toHaveLength(2);
       expect(putData.domainPack.verifyCommand).toBe('npm test -- fintech-crypto');
 
+      // PUT update clearing rules and verifyCommand
+      const clearPutRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rules: [],
+          verifyCommand: '',
+        }),
+      });
+      expect(clearPutRes.status).toBe(200);
+      const clearPutData = await clearPutRes.json();
+      expect(clearPutData.domainPack.rules).toHaveLength(0);
+      expect(clearPutData.domainPack.verifyCommand).toBeUndefined();
+
       const delRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
         method: 'DELETE',
       });
@@ -2497,6 +2559,34 @@ describe('Server API Endpoints Unit Tests', () => {
 
       const afterDelRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
       expect(afterDelRes.status).toBe(404);
+
+      // Customizing built-in template and resetting it back
+      const overrideBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Overridden Economy',
+          rules: ['Strict bespoke invoice rules'],
+        }),
+      });
+      expect(overrideBuiltin.status).toBe(200);
+      const overrideData = await overrideBuiltin.json();
+      expect(overrideData.domainPack.name).toBe('Overridden Economy');
+      expect(overrideData.domainPack.builtin).toBe(true);
+      expect(overrideData.domainPack.isTemplate).toBe(false);
+
+      // Reset to template defaults via DELETE
+      const resetBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
+        method: 'DELETE',
+      });
+      expect(resetBuiltin.status).toBe(200);
+
+      const restoredBuiltin = await app.request('/api/enterprise/domain-packs/economy');
+      expect(restoredBuiltin.status).toBe(200);
+      const restoredData = await restoredBuiltin.json();
+      expect(restoredData.domainPack.name).toBe('Economy & Invoicing');
+      expect(restoredData.domainPack.builtin).toBe(true);
+      expect(restoredData.domainPack.isTemplate).toBe(true);
     });
 
     it('POST and DELETE /api/enterprise/organizations registers and unregisters custom organizations', async () => {

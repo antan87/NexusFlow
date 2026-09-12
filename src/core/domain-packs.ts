@@ -222,12 +222,13 @@ export function getOrganization(id?: string): OrganizationConventions | null {
  * Returns all available domain packs (built-in sample templates + user-defined).
  */
 export function getAvailableDomainPacks(): DomainPack[] {
+  const builtinIds = new Set(BUILTIN_DOMAIN_PACKS.map((p) => p.id.toLowerCase().trim()));
   const map = new Map<string, DomainPack>();
   for (const pack of BUILTIN_DOMAIN_PACKS) {
-    map.set(pack.id.toLowerCase().trim(), { ...pack, isTemplate: true });
+    map.set(pack.id.toLowerCase().trim(), { ...pack, isTemplate: true, builtin: true });
   }
   for (const [id, pack] of customDomainPacks) {
-    map.set(id, pack);
+    map.set(id, { ...pack, builtin: builtinIds.has(id) });
   }
   return Array.from(map.values());
 }

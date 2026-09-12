@@ -75,7 +75,15 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js
 import { Spinner } from '../components/ui/spinner.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
-import { useWorkspaceLaunchTargets, useWorkspaceSkills, useSkills } from '../lib/api/queries.js';
+import {
+  useWorkspaceLaunchTargets,
+  useWorkspaceSkills,
+  useSkills,
+  useDomainPacks,
+  useCreateDomainPack,
+  useSaveDomainPack,
+  useDeleteDomainPack,
+} from '../lib/api/queries.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
@@ -197,7 +205,10 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   // Enterprise domain packs, hierarchical categories, and specifications
   const [domainData, setDomainData] = useState<ResolvedCategoryRules | null>(null);
-  const [availableDomainPacks, setAvailableDomainPacks] = useState<DomainPack[]>([]);
+  const { data: availableDomainPacks = [] } = useDomainPacks();
+  const createDomainPackMutation = useCreateDomainPack();
+  const saveDomainPackMutation = useSaveDomainPack();
+  const deleteDomainPackMutation = useDeleteDomainPack();
   const [editingSpec, setEditingSpec] = useState(false);
   const [specInput, setSpecInput] = useState('');
   const [savingSpec, setSavingSpec] = useState(false);
@@ -241,14 +252,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     setEditingSpec(false);
     void fetchDomainData(selected.branchName);
   }, [selected?.branchName]);
-
-  useEffect(() => {
-    void apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs')
-      .then((res) => {
-        if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
-      })
-      .catch(() => {});
-  }, []);
 
   const fetchDomainData = async (wsId: string) => {
     try {
@@ -324,24 +327,17 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         ? [{ name: newTagMicroserviceName.trim(), target: newTagMicroserviceTarget }]
         : undefined;
 
-      await apiFetch('/api/enterprise/domain-packs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newTagId.trim().toLowerCase(),
-          name: newTagName.trim(),
-          description: newTagDescription.trim(),
-          categoryType: newTagType,
-          parent: newTagType === 'vertical' && newTagParent.trim() ? newTagParent.trim() : undefined,
-          verifyCommand: newTagVerifyCmd.trim() || undefined,
-          rules: rulesArray.length > 0 ? rulesArray : undefined,
-          microservices: microservicesArray,
-          tags: [newTagId.trim().toLowerCase(), ...newTagName.trim().toLowerCase().split(/\s+/).filter(Boolean)],
-        }),
+      await createDomainPackMutation.mutateAsync({
+        id: newTagId.trim().toLowerCase(),
+        name: newTagName.trim(),
+        description: newTagDescription.trim(),
+        categoryType: newTagType,
+        parent: newTagType === 'vertical' && newTagParent.trim() ? newTagParent.trim() : undefined,
+        verifyCommand: newTagVerifyCmd.trim() || undefined,
+        rules: rulesArray.length > 0 ? rulesArray : undefined,
+        microservices: microservicesArray,
+        tags: [newTagId.trim().toLowerCase(), ...newTagName.trim().toLowerCase().split(/\s+/).filter(Boolean)],
       });
-
-      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
-      if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
 
       if (selected) {
         await toggleDomainPack(newTagId.trim().toLowerCase());
@@ -398,25 +394,20 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         .filter(Boolean);
 
       const payload = {
+        id: inspectingTag.id,
         name: inspectTagName.trim(),
         description: inspectTagDescription.trim(),
         categoryType: inspectTagType,
-        parent: inspectTagType === 'vertical' && inspectTagParent.trim() ? inspectTagParent.trim() : undefined,
-        verifyCommand: inspectTagVerifyCmd.trim() || undefined,
-        rules: rulesArray.length > 0 ? rulesArray : undefined,
-        microservices: inspectTagMicroservices.length > 0 ? inspectTagMicroservices : undefined,
-        skills: inspectTagSkills.length > 0 ? inspectTagSkills : undefined,
+        parent: inspectTagType === 'vertical' ? inspectTagParent.trim() : '',
+        verifyCommand: inspectTagVerifyCmd.trim(),
+        rules: rulesArray,
+        microservices: inspectTagMicroservices,
+        skills: inspectTagSkills,
         tags: tagsArray.length > 0 ? tagsArray : [inspectingTag.id],
       };
 
-      await apiFetch(`/api/enterprise/domain-packs/${encodeURIComponent(inspectingTag.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      await saveDomainPackMutation.mutateAsync(payload);
 
-      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
-      if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
       if (selected) {
         await fetchDomainData(selected.branchName);
         if (props.fetchWorkspaces) await props.fetchWorkspaces();
@@ -433,19 +424,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const handleDeleteOrResetTag = async () => {
     if (!inspectingTag) return;
-    const isOverriddenBuiltin = !inspectingTag.isTemplate && ['economy', 'transport', 'tax', 'payroll', 'fintech', 'security', 'audit', 'performance', 'testing', 'accessibility', 'offline'].includes(inspectingTag.id);
+    const isOverriddenBuiltin = Boolean(inspectingTag.builtin && !inspectingTag.isTemplate);
     const actionLabel = isOverriddenBuiltin ? 'reset to built-in template' : 'delete';
     if (!window.confirm(`Are you sure you want to ${actionLabel} the tag "${inspectingTag.name}"?`)) {
       return;
     }
     setDeletingTagDetails(true);
     try {
-      await apiFetch(`/api/enterprise/domain-packs/${encodeURIComponent(inspectingTag.id)}`, {
-        method: 'DELETE',
-      });
-
-      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
-      if (res?.domainPacks) setAvailableDomainPacks(res.domainPacks);
+      await deleteDomainPackMutation.mutateAsync(inspectingTag.id);
 
       if (selected) {
         const currentPacks = domainData?.assignedDomainPackIds || selected.domainPacks || [];
@@ -963,7 +949,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
                               {/* Subsystem Verticals (Grouped with Children) */}
                               {availableDomainPacks
-                                .filter((p) => p.categoryType !== 'trait' && !p.parent)
+                                .filter((p) => p.categoryType !== 'trait' && (!p.parent || !availableDomainPacks.some((parent) => parent.id === p.parent)))
                                 .map((root) => {
                                   const isRootAssigned = (domainData?.assignedDomainPackIds || selected.domainPacks || []).includes(root.id);
                                   const children = availableDomainPacks.filter((c) => c.parent === root.id);
@@ -1747,7 +1733,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
           <DialogFooter className="flex items-center justify-between sm:justify-between w-full pt-3 border-t">
             <div>
-              {!inspectingTag?.isTemplate && (
+              {Boolean(inspectingTag && (!inspectingTag.builtin || !inspectingTag.isTemplate)) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -1762,9 +1748,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     <RotateCcw size={12} />
                   )}
                   <span>
-                    {['economy', 'transport', 'tax', 'payroll', 'fintech', 'security', 'audit', 'performance', 'testing', 'accessibility', 'offline'].includes(inspectingTag?.id || '')
-                      ? 'Reset to Defaults'
-                      : 'Delete Tag'}
+                    {inspectingTag?.builtin ? 'Reset to Defaults' : 'Delete Tag'}
                   </span>
                 </Button>
               )}

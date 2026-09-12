@@ -99,6 +99,21 @@ export function useDomainPacks() {
   });
 }
 
+export function useCreateDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pack: DomainPack) =>
+      apiFetch<{ success: boolean; domainPack: DomainPack }>('/api/enterprise/domain-packs', {
+        method: 'POST',
+        body: JSON.stringify(pack),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
+}
+
 export function useSaveDomainPack() {
   const queryClient = useQueryClient();
   return useMutation({

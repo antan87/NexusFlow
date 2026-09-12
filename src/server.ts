@@ -3163,6 +3163,12 @@ app.post('/api/skills', async (c) => {
     let wsPath: string | undefined;
     if (wsParam && wsParam !== 'global') {
       wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+      if (!wsPath) {
+        return c.json({ error: `Workspace "${wsParam}" not found.` }, 404);
+      }
+    }
+    if (body.scope === 'workspace' && !wsPath) {
+      return c.json({ error: 'A valid workspace is required when saving a workspace-scoped skill.' }, 400);
     }
     const isWorkspaceScope = body.scope === 'workspace' || (Boolean(wsPath) && body.scope !== 'global');
     const options = isWorkspaceScope && wsPath
@@ -3186,6 +3192,9 @@ app.delete('/api/skills/:id', async (c) => {
     let wsPath: string | undefined;
     if (wsParam && wsParam !== 'global') {
       wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+      if (!wsPath) {
+        return c.json({ error: `Workspace "${wsParam}" not found.` }, 404);
+      }
     }
     if (wsPath) {
       await deleteSkill(id, { scope: 'workspace', workspacePath: wsPath });
@@ -3382,26 +3391,29 @@ app.put('/api/enterprise/domain-packs/:id', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id')).toLowerCase().trim();
     const existing = getDomainPack(id);
+    if (!existing) {
+      return c.json({ error: `Domain pack "${id}" not found.` }, 404);
+    }
     const body = await c.req.json() as Partial<DomainPack>;
 
     const tags = Array.isArray(body.tags)
       ? body.tags
-      : (existing?.tags ?? [id, ...(body.name || existing?.name || id).toLowerCase().split(/\s+/).filter(Boolean)]);
+      : (existing.tags ?? [id, ...(body.name || existing.name || id).toLowerCase().split(/\s+/).filter(Boolean)]);
 
     const updatedPack: DomainPack = {
       id,
-      name: body.name ?? existing?.name ?? id,
-      description: body.description ?? existing?.description ?? '',
-      categoryType: body.categoryType ?? existing?.categoryType ?? 'vertical',
-      parent: body.parent !== undefined ? (body.parent || undefined) : existing?.parent,
-      organization: body.organization ?? existing?.organization,
+      name: body.name ?? existing.name ?? id,
+      description: body.description ?? existing.description ?? '',
+      categoryType: body.categoryType ?? existing.categoryType ?? 'vertical',
+      parent: body.parent !== undefined ? (body.parent ? body.parent.trim() : undefined) : existing.parent,
+      organization: body.organization ?? existing.organization,
       tags,
-      skills: Array.isArray(body.skills) ? body.skills : existing?.skills,
-      contextFiles: Array.isArray(body.contextFiles) ? body.contextFiles : existing?.contextFiles,
-      verifyCommand: body.verifyCommand !== undefined ? (body.verifyCommand || undefined) : existing?.verifyCommand,
-      rules: Array.isArray(body.rules) ? body.rules : existing?.rules,
-      defaultRepos: Array.isArray(body.defaultRepos) ? body.defaultRepos : existing?.defaultRepos,
-      microservices: Array.isArray(body.microservices) ? body.microservices : existing?.microservices,
+      skills: Array.isArray(body.skills) ? body.skills : existing.skills,
+      contextFiles: Array.isArray(body.contextFiles) ? body.contextFiles : existing.contextFiles,
+      verifyCommand: body.verifyCommand !== undefined ? (body.verifyCommand ? body.verifyCommand.trim() : undefined) : existing.verifyCommand,
+      rules: Array.isArray(body.rules) ? body.rules : existing.rules,
+      defaultRepos: Array.isArray(body.defaultRepos) ? body.defaultRepos : existing.defaultRepos,
+      microservices: Array.isArray(body.microservices) ? body.microservices : existing.microservices,
       isTemplate: false,
     };
 

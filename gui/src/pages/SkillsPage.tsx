@@ -256,6 +256,12 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
     setSkillModalOpen(true);
   };
 
+  useEffect(() => {
+    if (!editingSkillWorkspaceId && workspaces.length > 0) {
+      setEditingSkillWorkspaceId(workspaces[0].id);
+    }
+  }, [workspaces, editingSkillWorkspaceId]);
+
   const handleTitleChange = (newTitle: string) => {
     if (!editingSkill) return;
     const next: Partial<SkillItem> = { ...editingSkill, title: newTitle };
@@ -276,6 +282,10 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
       !editingSkill.content?.trim()
     ) {
       showToast?.('Skill name, trigger description, and content are required', 'error');
+      return;
+    }
+    if (editingSkillScope === 'workspace' && !editingSkillWorkspaceId) {
+      showToast?.('Please select a target workspace for workspace-local skill', 'error');
       return;
     }
     try {
@@ -307,7 +317,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
   const confirmDeleteSkill = (skill: SkillItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    const wsId = skill.scope === 'workspace' ? (selectedWorkspace !== 'global' ? selectedWorkspace : undefined) : undefined;
+    const wsId = (skill.scope === 'workspace' || editingSkillScope === 'workspace')
+      ? (selectedWorkspace !== 'global' ? selectedWorkspace : (editingSkillWorkspaceId || undefined))
+      : undefined;
     setDeleteTarget({ type: 'skill', id: skill.id, title: skill.title || skill.name, workspaceId: wsId });
     setDeleteConfirmModalOpen(true);
   };
@@ -957,15 +969,40 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                         </div>
                         <p className="text-xs text-muted-foreground line-clamp-2">{skill.description}</p>
                       </div>
-                      {skill.tags && skill.tags.length > 0 && (
-                        <div className="pt-2 mt-2 border-t border-border/40 flex items-center gap-1 flex-wrap">
-                          {skill.tags.slice(0, 3).map((tag) => (
-                            <span key={tag} className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                              #{tag}
+                      {/* Card Bottom: Tags & Quick Menu */}
+                      <div className="pt-2 mt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">
+                          {skill.tags && skill.tags.length > 0 ? (
+                            skill.tags.slice(0, 3).map((tag) => (
+                              <span key={tag} className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                                #{tag}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground italic">No tags</span>
+                          )}
+                          {skill.allowedTools && skill.allowedTools.length > 0 && (
+                            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 font-mono">
+                              <Wrench className="h-2.5 w-2.5" />
+                              {skill.allowedTools.length}
                             </span>
-                          ))}
+                          )}
                         </div>
-                      )}
+
+                        {skill.custom && (
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={(e) => confirmDeleteSkill(skill, e)}
+                              title="Delete skill"
+                              className="h-6 w-6 text-destructive hover:text-destructive cursor-pointer"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </Card>
                   ))}
                 </div>
@@ -1211,18 +1248,24 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                       <Label htmlFor="target-ws" className="text-[11px] font-medium text-muted-foreground">
                         Target Workspace:
                       </Label>
-                      <select
-                        id="target-ws"
-                        value={editingSkillWorkspaceId}
-                        onChange={(e) => setEditingSkillWorkspaceId(e.target.value)}
-                        className="mt-1 w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-                      >
-                        {workspaces.map((ws) => (
-                          <option key={ws.id} value={ws.id}>
-                            📁 {ws.id} ({ws.branchName})
-                          </option>
-                        ))}
-                      </select>
+                      {workspaces.length > 0 ? (
+                        <select
+                          id="target-ws"
+                          value={editingSkillWorkspaceId}
+                          onChange={(e) => setEditingSkillWorkspaceId(e.target.value)}
+                          className="mt-1 w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                        >
+                          {workspaces.map((ws) => (
+                            <option key={ws.id} value={ws.id}>
+                              📁 {ws.id} ({ws.branchName})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="mt-1 text-xs text-destructive italic">
+                          No active workspaces found. Please create a workspace first.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1457,10 +1500,10 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-destructive">
-              Delete {deleteTarget?.type === 'category' ? 'Category' : 'Skill'}
+              Delete {deleteTarget?.type === 'category' ? 'Category' : (deleteTarget?.workspaceId ? 'Workspace Skill' : 'Global Skill')}
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deleteTarget?.title}"? This action cannot be undone.
+              Are you sure you want to delete "{deleteTarget?.title}"{deleteTarget?.workspaceId ? ` from workspace "${deleteTarget.workspaceId}"` : ''}? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 

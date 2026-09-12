@@ -886,6 +886,8 @@ export interface DomainPack {
   microservices?: CategoryRepoBinding[];
   /** True if this is a sample starter template rather than a user-created pack. */
   isTemplate?: boolean;
+  /** True if this pack originated from built-in starter templates. */
+  builtin?: boolean;
 }
 
 /** Alias for DomainPack reflecting hierarchical Category & Tag Tree architecture. */

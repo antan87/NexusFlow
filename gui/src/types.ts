@@ -204,6 +204,7 @@ export interface DomainPack {
   defaultRepos?: string[];
   microservices?: CategoryRepoBinding[];
   isTemplate?: boolean;
+  builtin?: boolean;
 }
 
 export type CategoryTagPack = DomainPack;
