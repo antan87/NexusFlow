@@ -12,6 +12,7 @@ import { loadFeatureConfig, deleteWorkspace } from '../core/workspace.js';
 import { stopServices } from '../orchestration/runner.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
 import { finishWorkspace, type RepoFinishReport } from '../core/finish.js';
+import { getLastVerificationReport } from '../core/workspace-state.js';
 import { getWorkspaceRepos } from '../utils/multi-git.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { readWorkspaceKnowledge, parseKnowledgeEntries, promoteKnowledge, type KnowledgeEntryType } from '../core/knowledge.js';
@@ -69,6 +70,21 @@ export async function finishCommand(
     console.log('  ' + r.name.padEnd(nameW) + branchCol + dirtyCol + aheadCol);
   }
   console.log();
+
+  const verification = await getLastVerificationReport(workspacePath);
+  if (verification && verification.overallStatus === 'fail') {
+    console.log(chalk.yellow(`⚠ Warning: The latest mechanical verification run (${verification.overallStatus.toUpperCase()}) recorded test failures.`));
+    if (!options.yes && !options.dryRun) {
+      const proceed = await confirm({
+        message: 'Tests failed during verification. Do you want to finish and push anyway?',
+        default: false,
+      });
+      if (!proceed) {
+        console.log(chalk.red('Aborted finish. Run `ctxspace verify` and fix test failures before finishing.\n'));
+        return;
+      }
+    }
+  }
 
   if (options.dryRun) {
     const dirty = preflight.repos.filter((r) => r.dirty && r.onExpectedBranch);

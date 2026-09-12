@@ -6,12 +6,16 @@ import * as fs from 'node:fs/promises';
 import type { NexusFlowConfig } from '../types.js';
 import * as workroomManager from '../workrooms/manager.js';
 import * as statusCore from '../core/status.js';
+import * as verifyCore from '../core/verify.js';
+import * as skillsCatalog from '../utils/skills-catalog.js';
 
 vi.mock('../core/workspace.js');
 vi.mock('../core/refresh.js');
 vi.mock('node:fs/promises');
 vi.mock('../workrooms/manager.js');
 vi.mock('../core/status.js');
+vi.mock('../core/verify.js');
+vi.mock('../utils/skills-catalog.js');
 
 const mockConfig: NexusFlowConfig = {
   version: '1.0',
@@ -415,5 +419,144 @@ describe('MCP tools', () => {
     expect(content).toBeDefined();
     expect(content.workspacePath).toBe('/dev/workspaces/feat-test');
     expect(content.hasCollisions).toBe(false);
+  });
+
+  it('executes verify_workspace tool handler successfully', async () => {
+    const tool = findTool('verify_workspace');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(verifyCore.verifyWorkspace).mockResolvedValue({
+      workspacePath: '/dev/workspaces/feat-test',
+      overallStatus: 'pass',
+      canProgress: true,
+      verifiedAt: '2026-09-11T12:00:00.000Z',
+      durationMs: 1200,
+      repos: [
+        {
+          repoName: 'api',
+          repoPath: '/dev/workspaces/feat-test/api',
+          status: 'pass',
+          command: 'npm test',
+          exitCode: 0,
+          headSha: 'abc1234',
+          clean: true,
+          durationMs: 1200,
+          verifiedAt: '2026-09-11T12:00:00.000Z',
+        },
+      ],
+    });
+
+    const result = await tool!.handler(
+      { filter: 'test.ts' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content.overallStatus).toBe('pass');
+    expect(content.canProgress).toBe(true);
+    expect(content.repos).toHaveLength(1);
+    expect(verifyCore.verifyWorkspace).toHaveBeenCalledWith(
+      '/dev/workspaces/feat-test',
+      expect.objectContaining({ filter: 'test.ts' }),
+    );
+  });
+
+  it('executes create_skill tool handler successfully for workspace scope', async () => {
+    const tool = findTool('create_skill');
+    expect(tool).toBeDefined();
+
+    vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({ id: 'feat-test' } as any);
+    vi.mocked(skillsCatalog.saveSkill).mockResolvedValue({
+      id: 'vat-calc',
+      name: 'vat-calc',
+      title: 'VAT Calculator',
+      description: 'Calculates VAT for invoices',
+      content: '# VAT Calc',
+      tags: ['billing', 'tax'],
+      scope: 'workspace',
+      custom: true,
+      sourcePath: '/dev/workspaces/feat-test/.agents/skills/vat-calc',
+      path: '/dev/workspaces/feat-test/.agents/skills/vat-calc/SKILL.md',
+    } as any);
+
+    const result = await tool!.handler(
+      {
+        id: 'vat-calc',
+        title: 'VAT Calculator',
+        description: 'Calculates VAT for invoices',
+        content: '# VAT Calc',
+        tags: ['billing', 'tax'],
+        scope: 'workspace',
+      },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+
+    expect(result.isError).toBeFalsy();
+    const content = JSON.parse(result.content[0]!.text);
+    expect(content.success).toBe(true);
+    expect(content.skill.id).toBe('vat-calc');
+    expect(content.skill.scope).toBe('workspace');
+    expect(skillsCatalog.saveSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'vat-calc', title: 'VAT Calculator' }),
+      expect.objectContaining({ scope: 'workspace', workspacePath: '/dev/workspaces/feat-test' }),
+    );
+    expect(refresh.refreshWorkspace).toHaveBeenCalledWith('/dev/workspaces/feat-test', { force: true });
+  });
+
+  it('executes list_skills tool handler with filtering', async () => {
+    const tool = findTool('list_skills');
+    expect(tool).toBeDefined();
+
+    vi.mocked(skillsCatalog.getAllSkills).mockResolvedValue([
+      {
+        id: 'global-git',
+        name: 'global-git',
+        title: 'Git Rules',
+        description: 'Global git conventions',
+        tags: ['git'],
+        scope: 'global',
+        content: '',
+        custom: false,
+      },
+      {
+        id: 'local-billing',
+        name: 'local-billing',
+        title: 'Billing Rules',
+        description: 'Local billing logic',
+        tags: ['billing'],
+        scope: 'workspace',
+        content: '',
+        custom: true,
+      },
+    ] as any);
+
+    // List all
+    const allResult = await tool!.handler(
+      {},
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+    expect(allResult.isError).toBeFalsy();
+    const allContent = JSON.parse(allResult.content[0]!.text);
+    expect(allContent.skills).toHaveLength(2);
+
+    // Filter workspace scope
+    const wsResult = await tool!.handler(
+      { scope: 'workspace' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+    const wsContent = JSON.parse(wsResult.content[0]!.text);
+    expect(wsContent.skills).toHaveLength(1);
+    expect(wsContent.skills[0].id).toBe('local-billing');
+
+    // Filter by tag
+    const tagResult = await tool!.handler(
+      { tag: 'git' },
+      { config: mockConfig, workspacePath: '/dev/workspaces/feat-test' },
+    );
+    const tagContent = JSON.parse(tagResult.content[0]!.text);
+    expect(tagContent.skills).toHaveLength(1);
+    expect(tagContent.skills[0].id).toBe('global-git');
   });
 });

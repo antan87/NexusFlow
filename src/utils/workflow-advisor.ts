@@ -11,7 +11,7 @@ import type { RepoInfo } from '../types.js';
 export interface WorkflowSuggestion {
   difficulty: 'simple' | 'moderate' | 'complex';
   rationale: string;
-  suggestedWorkflowId: 'solo-developer' | 'research-verify' | 'plan-implement-review';
+  suggestedWorkflowId: 'solo-developer' | 'research-verify' | 'plan-implement-review' | 'epic-multi-slice';
   customInstructions: string;
 }
 
@@ -47,6 +47,11 @@ export async function suggestWorkflow(
   const words = new Set((description || '').toLowerCase().match(/[a-z0-9]+/g) ?? []);
   const mentions = (...candidates: string[]) => candidates.some((word) => words.has(word));
 
+  const isEpicWord = mentions(
+    'epic', 'multi-pr', 'multipr', 'multi-branch', 'multibranch',
+    'stacked', 'sub-branch', 'subbranch', 'slices', 'slice', 'milestone', 'milestones',
+  );
+
   const isComplexWord = mentions(
     'refactor', 'refactoring', 'migrate', 'migration', 'architecture', 'architectural',
     'rewrite', 'optimize', 'optimise', 'performance', 'security', 'database',
@@ -58,10 +63,23 @@ export async function suggestWorkflow(
     'comment', 'readme', 'doc', 'docs', 'rename', 'wording',
   );
 
+  // Epic / multi-PR / multi-branch workflow detection
+  if (isEpicWord && !isSimpleWord) {
+    const where = repoNames.length === 1 ? repoNames[0]! : repoNames.join(', ') || 'the project';
+    const content = await loadTemplateContent(
+      'epic-multi-slice',
+      `# Team Strategy: Epic & Multi-PR Slices\n\nThis workspace coordinates a large feature, multi-PR module, or epic across ${where}.\n\n## Guidelines & Lifecycle\n1. **Vertical Slice Decomposition**: Do not attempt to deliver the entire epic in a single monolithic branch or PR. Decompose into atomic, reviewable slices.\n2. **Independent Reviewability**: Every slice must build cleanly and pass its test gate (\`verify\` command) independently.\n3. **Cumulative Knowledge & Contracts**: Record architectural decisions and cross-slice contracts in contextspace-knowledge.md.\n4. **Milestone Handoffs**: Complete and verify each slice before advancing to the next.`
+    );
+    return {
+      difficulty: 'complex',
+      suggestedWorkflowId: 'epic-multi-slice',
+      rationale: `This task involves an epic, multi-PR, or multi-branch flow across ${where}. An Epic & Multi-PR Slices strategy is recommended to deliver changes in reviewable, incremental batches.`,
+      customInstructions: content,
+    };
   // Repo count no longer overrides an explicit signal. Coordinating several
   // repos is real work, but a typo across three repos is still a typo — and the
-  // old `repos.length > 2 ||` sent it to the heaviest tier.
-  if (isComplexWord || (repos.length > 2 && !isSimpleWord)) {
+  // old \`repos.length > 2 ||\` sent it to the heaviest tier.
+  } else if (isComplexWord || (repos.length > 2 && !isSimpleWord)) {
     const content = await loadTemplateContent(
       'plan-implement-review',
       `# Team Strategy: Plan, Implement, Review\n\nThis workspace involves complex changes across multiple projects: ${repoNames.join(', ')}.\n\n## Roles & Coordination\n1. **Lead Planner**: Analyzes requirements and details a step-by-step design plan in \`implementation_plan.md\`.\n2. **Code Implementer**: Executes modifications project-by-project following the approved design.\n3. **Code Reviewer**: Runs testing/verification and approves before completion.\n\nPlease follow these roles strictly.`

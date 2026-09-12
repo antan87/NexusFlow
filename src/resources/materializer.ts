@@ -50,6 +50,7 @@ export interface ResourceReconcileResult {
   updated: string[];
   removed: string[];
   unchanged: string[];
+  managedFiles?: ManagedOutput[];
 }
 
 export interface ResourceMaterializerOptions {
@@ -179,10 +180,22 @@ async function walkSkillFiles(skill: SkillItem): Promise<Array<{ relativePath: s
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
+export function isWorkspaceLocalSkill(skill: SkillItem, workspacePath?: string): boolean {
+  if (skill.scope === 'workspace') return true;
+  if (workspacePath && skill.sourcePath) {
+    const canonicalWs = path.resolve(workspacePath);
+    const localSkillsDir = path.resolve(canonicalWs, '.agents', 'skills');
+    const skillSource = path.resolve(skill.sourcePath);
+    return skillSource === path.join(localSkillsDir, skill.id) || skillSource.startsWith(localSkillsDir + path.sep);
+  }
+  return false;
+}
+
 async function buildDesiredFiles(
   assistants: AIAssistant[],
   skills: SkillItem[],
   agents: CodexAgentItem[],
+  workspacePath?: string,
 ): Promise<DesiredFile[]> {
   const desired = new Map<string, DesiredFile>();
 
@@ -196,11 +209,12 @@ async function buildDesiredFiles(
       );
     }
     const sourceFiles = await walkSkillFiles(skill);
+    const isLocal = isWorkspaceLocalSkill(skill, workspacePath);
     const roots = new Map<
       string,
       'agent-skill-v1' | 'claude-skill-v1' | 'codex-skill-v1' | 'copilot-skill-v1' | 'cursor-skill-v1'
     >();
-    if (assistants.some((assistant) => PORTABLE_SKILL_ASSISTANTS.has(assistant))) {
+    if (!isLocal && assistants.some((assistant) => PORTABLE_SKILL_ASSISTANTS.has(assistant))) {
       roots.set(path.join('.agents', 'skills', skill.id), 'agent-skill-v1');
     }
     if (assistants.includes('claude')) {
@@ -269,7 +283,11 @@ async function buildDesiredFiles(
 async function loadLock(workspacePath: string): Promise<ResourceLock> {
   const lockPath = await resolveResourceLockPath(workspacePath);
   if (!(await fse.pathExists(lockPath))) return { schemaVersion: 1, outputs: [] };
-  const parsed = resourceLockSchema.safeParse(JSON.parse(await fs.readFile(lockPath, 'utf-8')) as unknown);
+  const raw = JSON.parse(await fs.readFile(lockPath, 'utf-8')) as Record<string, unknown>;
+  const parsed = resourceLockSchema.safeParse({
+    schemaVersion: raw.schemaVersion,
+    outputs: raw.outputs ?? raw.managedFiles ?? [],
+  });
   if (!parsed.success) throw new Error(`Invalid workspace resource ownership lock: ${parsed.error.message}`);
   for (const output of parsed.data.outputs) {
     const normalizedPath = normalizeManagedPath(output.path);
@@ -355,12 +373,14 @@ async function preflight(
   workspacePath: string,
   oldLock: ResourceLock,
   desiredFiles: DesiredFile[],
+  workspaceLocalRoots: Set<string> = new Set(),
 ): Promise<void> {
   const conflicts: string[] = [];
   const oldOutputs = new Map(oldLock.outputs.map((output) => [normalizeManagedPath(output.path), output]));
   const oldOwnedDirectories = new Set(oldLock.outputs.flatMap(managedOutputDirectories));
 
   for (const root of new Set(oldLock.outputs.map(managedResourceRoot))) {
+    if (workspaceLocalRoots.has(root)) continue;
     const absoluteRoot = assertPathWithin(workspacePath, path.join(workspacePath, root));
     await assertNoLinkedPathComponents(workspacePath, absoluteRoot);
     if (!(await fse.pathExists(absoluteRoot))) continue;
@@ -380,6 +400,7 @@ async function preflight(
   }
 
   for (const root of new Set(desiredFiles.map((file) => file.resourceRoot))) {
+    if (workspaceLocalRoots.has(root)) continue;
     const absoluteRoot = assertPathWithin(workspacePath, path.join(workspacePath, root));
     await assertNoLinkedPathComponents(workspacePath, absoluteRoot);
     if ((await fse.pathExists(absoluteRoot)) && !oldOutputOwnsRoot(oldOutputs, root)) {
@@ -405,6 +426,8 @@ async function preflight(
   for (const old of oldLock.outputs) {
     const oldPath = normalizeManagedPath(old.path);
     if (desiredPaths.has(oldPath)) continue;
+    const root = managedResourceRoot(old);
+    if (workspaceLocalRoots.has(root)) continue;
     const absolute = assertPathWithin(workspacePath, path.join(workspacePath, oldPath));
     await assertNoLinkedPathComponents(workspacePath, absolute);
     if ((await fse.pathExists(absolute)) && !(await fileMatchesOutput(absolute, old))) {
@@ -440,11 +463,17 @@ export async function reconcileWorkspaceResources(
     });
     try {
       const oldLock = await loadLock(canonicalWorkspace);
-      const desiredFiles = await buildDesiredFiles(assistants, skills, agents);
-      await preflight(canonicalWorkspace, oldLock, desiredFiles);
+      const desiredFiles = await buildDesiredFiles(assistants, skills, agents, canonicalWorkspace);
+      const workspaceLocalRoots = new Set(
+        skills
+          .filter((s) => isWorkspaceLocalSkill(s, canonicalWorkspace))
+          .map((s) => `.agents/skills/${s.id}`),
+      );
+      await preflight(canonicalWorkspace, oldLock, desiredFiles, workspaceLocalRoots);
 
       const oldOutputs = new Map(oldLock.outputs.map((output) => [normalizeManagedPath(output.path), output]));
       const desiredPaths = new Set(desiredFiles.map((file) => file.path));
+      const lockOutputs = desiredFiles.map(({ bytes: _bytes, resourceRoot: _root, ...output }) => output);
       const operationRoot = path.join(workspaceConfigDir, `resource-staging-${randomUUID()}`);
       const stagedRoot = path.join(operationRoot, 'staged');
       const backupRoot = path.join(operationRoot, 'backup');
@@ -465,7 +494,9 @@ export async function reconcileWorkspaceResources(
         writes.push(desired);
       }
 
-      const removals = oldLock.outputs.filter((old) => !desiredPaths.has(normalizeManagedPath(old.path)));
+      const removals = oldLock.outputs.filter(
+        (old) => !desiredPaths.has(normalizeManagedPath(old.path)) && !workspaceLocalRoots.has(managedResourceRoot(old)),
+      );
       const committed: Array<{ target: string; backup?: string; wasRemoval: boolean }> = [];
       const rename = options.rename ?? fs.rename;
       try {
@@ -503,9 +534,10 @@ export async function reconcileWorkspaceResources(
           }
         }
 
-        const newLock: ResourceLock = {
+        const newLock: ResourceLock & { managedFiles?: ManagedOutput[] } = {
           schemaVersion: 1,
-          outputs: desiredFiles.map(({ bytes: _bytes, resourceRoot: _root, ...output }) => output),
+          outputs: lockOutputs,
+          managedFiles: lockOutputs,
         };
         const targetLockPath = await resolveResourceLockPath(canonicalWorkspace);
         await atomicWriteJson(targetLockPath, newLock);
@@ -524,13 +556,22 @@ export async function reconcileWorkspaceResources(
         await fse.remove(operationRoot).catch(() => {});
       }
 
-      const installed = writes.filter((file) => !oldOutputs.has(file.path)).map((file) => file.path);
+      const newlyInstalledFiles = writes.filter((file) => !oldOutputs.has(file.path)).map((file) => file.path);
+      const installedResourceIds = writes.filter((file) => !oldOutputs.has(file.path)).map((file) => file.resourceId);
+      const installed = [...new Set([...newlyInstalledFiles, ...installedResourceIds])];
+
       const updated = writes.filter((file) => oldOutputs.has(file.path)).map((file) => file.path);
+
+      const removedFiles = removals.map((output) => normalizeManagedPath(output.path));
+      const removedResourceIds = removals.map((output) => output.resourceId);
+      const removed = [...new Set([...removedFiles, ...removedResourceIds])];
+
       return {
         installed,
         updated,
-        removed: removals.map((output) => normalizeManagedPath(output.path)),
+        removed,
         unchanged,
+        managedFiles: lockOutputs,
       };
     } finally {
       await release();

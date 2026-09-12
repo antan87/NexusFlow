@@ -395,4 +395,32 @@ describe('buildContextContent', () => {
       expect(content).toContain('Plan then implement');
     });
   });
+
+  describe('enterprise conventions & domain rules', () => {
+    it('injects organization conventions when organizationId is present', async () => {
+      const content = await buildContextContent(
+        ctxFor({ organizationId: 'hogia' }),
+      );
+
+      expect(content).toContain('## Organization Conventions (Hogia)');
+      expect(content).toContain('Commit Convention');
+      expect(content).toContain('feat(ECO-412)');
+      expect(content).toContain('All commit messages should follow conventional commits');
+    });
+
+    it('injects active domain rules without polluting other domains', async () => {
+      const content = await buildContextContent(
+        ctxFor({ organizationId: 'hogia', domainPacks: ['economy'] }),
+      );
+
+      expect(content).toContain('## Organization Conventions (Hogia)');
+      expect(content).toContain('## Active Domain Rules (Economy & Invoicing)');
+      expect(content).toContain('Swedish VAT standard rates');
+      expect(content).toContain('Domain Verification');
+
+      // Crucial: no leaking HR or Transport rules
+      expect(content).not.toContain('GDPR Compliance: Personal identity numbers');
+      expect(content).not.toContain('Vehicle telemetry');
+    });
+  });
 });

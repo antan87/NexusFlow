@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw, Tag } from 'lucide-react';
 
 import { Badge } from '../components/ui/badge.js';
 import { Button } from '../components/ui/button.js';
@@ -23,6 +23,7 @@ import { apiFetch } from '../lib/api/client.js';
 import {
   useAiDetect,
   useCreateWorkspace,
+  useDomainPacks,
   useProjects,
   useRepoBranches,
   useRepos,
@@ -136,6 +137,7 @@ export function StartWorkPage() {
   const templates = useWorkflowTemplates();
   const skillsQuery = useSkills();
   const agentsQuery = useAgents();
+  const domainPacksQuery = useDomainPacks();
   const createWorkspace = useCreateWorkspace();
   const { progress, start, reset } = useCreationStream();
   const creationJobId = searchParams.get('job');
@@ -145,6 +147,7 @@ export function StartWorkPage() {
   const [branchName, setBranchName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [description, setDescription] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [adHocPaths, setAdHocPaths] = useState<string[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
@@ -329,6 +332,7 @@ export function StartWorkPage() {
       assistants,
       enabledSkills: enabledSkills.length > 0 ? enabledSkills : undefined,
       enabledAgents: enabledAgents.length > 0 ? enabledAgents : undefined,
+      domainPacks: selectedTags.length > 0 ? selectedTags : undefined,
       teamworkInstructions: customInstructions.trim() || undefined,
       autoUpdateBase,
     };
@@ -710,7 +714,98 @@ export function StartWorkPage() {
           </label>
         </section>
 
-        {/* 5. Advanced */}
+        {/* 5. Category & Domain Tags (Skill Bundles) */}
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium flex items-center gap-1.5">
+              <Tag className="size-4 text-primary" />
+              Category & Domain Tags
+              {selectedTags.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  ({selectedTags.length} attached)
+                </span>
+              )}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Tags attach curated skill bundles & standards
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {domainPacksQuery.isLoading ? (
+              <div className="flex items-center justify-center p-4 gap-2 text-xs text-muted-foreground rounded-lg border border-border">
+                <Spinner className="size-3" />
+                Loading category tags...
+              </div>
+            ) : (domainPacksQuery.data ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground p-3 border border-border rounded-lg bg-card/40">
+                No tags defined yet. You can attach tags anytime with <code className="font-mono text-primary">ctxspace tag add &lt;id&gt;</code>.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(domainPacksQuery.data ?? []).map((pack) => {
+                  const isChecked = selectedTags.includes(pack.id);
+                  const skillCount = pack.skills?.length ?? 0;
+                  const ruleCount = pack.rules?.length ?? 0;
+                  return (
+                    <div
+                      key={pack.id}
+                      onClick={() =>
+                        setSelectedTags((prev) =>
+                          prev.includes(pack.id) ? prev.filter((id) => id !== pack.id) : [...prev, pack.id],
+                        )
+                      }
+                      className={cn(
+                        'flex flex-col justify-between p-3 rounded-xl border cursor-pointer transition-colors text-left outline-none select-none',
+                        isChecked
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
+                          : 'border-border bg-card hover:border-foreground/20',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={() =>
+                              setSelectedTags((prev) =>
+                                prev.includes(pack.id) ? prev.filter((id) => id !== pack.id) : [...prev, pack.id],
+                              )
+                            }
+                            aria-label={`Attach ${pack.name}`}
+                          />
+                          <span className="font-medium text-xs font-mono">#{pack.id}</span>
+                        </div>
+                        {pack.categoryType && (
+                          <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 capitalize">
+                            {pack.categoryType === 'trait' ? 'trait' : 'domain'}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{pack.description || pack.name}</p>
+                      {(skillCount > 0 || ruleCount > 0) && (
+                        <div className="mt-2 pt-2 border-t border-border/50 flex flex-wrap gap-1 items-center text-[10px]">
+                          {skillCount > 0 && (
+                            <span className="text-primary font-mono flex items-center gap-1">
+                              <Boxes className="size-2.5" />
+                              {pack.skills!.join(', ')}
+                            </span>
+                          )}
+                          {ruleCount > 0 && (
+                            <span className="text-muted-foreground ml-auto font-mono">
+                              {ruleCount} rule{ruleCount === 1 ? '' : 's'}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* 6. Advanced */}
         <section className="rounded-xl border border-border">
           <button
             type="button"

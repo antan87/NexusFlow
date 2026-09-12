@@ -107,8 +107,16 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
       await execa('git', ['commit', '-m', 'test fixture'], { cwd: repo.path });
     }
 
+    await saveSkill({
+      name: 'pr-review-toolkit',
+      title: 'Pull Request Review Toolkit',
+      category: 'pull-requests',
+      description: 'Reviews pull requests for breaking changes, code style, edge cases, and test coverage.',
+      content: '# Pull Request Review Toolkit\n\nThis skill guides the AI assistant through a structured pull request review.',
+    });
+
     await saveWorkspaceSkillsConfig(tempWorkspace, {
-      enabledSkills: DEFAULT_SKILLS.map((skill) => skill.id),
+      enabledSkills: ['pr-review-toolkit', 'nexusflow-local-package-loop', 'verifier-workspace'],
     });
 
     // 1. Run the workspace generation pipeline

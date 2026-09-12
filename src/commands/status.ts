@@ -11,6 +11,7 @@ import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getServiceStatus, loadRunningState } from '../orchestration/index.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
 import { checkGenerationLock } from '../core/generation-lock.js';
+import { getLastVerificationReport } from '../core/workspace-state.js';
 import { BRAND_NAME } from '../core/constants.js';
 
 /**
@@ -43,6 +44,21 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
   }
   const freshness = await checkGenerationLock(workspacePath);
   console.log(`\n${freshness.fresh ? chalk.green('Generated context: fresh') : chalk.red(`Generated context: stale/drifted (${freshness.drift.length})`)}`);
+
+  const verification = await getLastVerificationReport(workspacePath);
+  if (verification) {
+    const statusColor =
+      verification.overallStatus === 'pass'
+        ? chalk.green
+        : verification.overallStatus === 'pass_dirty'
+        ? chalk.yellow
+        : chalk.red;
+    const timeAgo = Math.max(0, Math.round((Date.now() - new Date(verification.verifiedAt).getTime()) / 60000));
+    console.log(statusColor(`Verification Gate: ${verification.overallStatus.toUpperCase()} (${timeAgo === 0 ? 'just now' : `${timeAgo}m ago`}, ${verification.repos.length} repo(s))`));
+  } else {
+    console.log(chalk.dim('Verification Gate: not run yet (run `ctxspace verify`)'));
+  }
+
   console.log(chalk.bold('\nServices:'));
   await getServiceStatus(workspacePath);
   console.log();

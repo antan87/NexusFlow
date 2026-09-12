@@ -87,13 +87,11 @@ describe('Skills Catalog & Frontmatter Utils', () => {
   });
 
   describe('Categories Management', () => {
-    it('should return default template categories when no custom categories exist', async () => {
+    it('should start with an empty category list when no custom categories exist', async () => {
       const categories = await getSkillCategories();
-      expect(categories.length).toBe(DEFAULT_CATEGORIES.length);
-      const prCat = categories.find((c) => c.id === 'pull-requests');
-      expect(prCat).toBeDefined();
-      expect(prCat?.name).toBe('Pull Requests & Review');
-      expect(prCat?.isTemplate).toBe(true);
+      expect(categories).toEqual([]);
+      expect(categories.length).toBe(0);
+      expect(DEFAULT_CATEGORIES.length).toBe(0);
     });
 
     it('should create, save, and delete a new user custom category', async () => {
@@ -119,39 +117,35 @@ describe('Skills Catalog & Frontmatter Utils', () => {
       expect(afterDelete.find((c) => c.id === 'devops-cloud')).toBeUndefined();
     });
 
-    it('should allow customizing a template category and deleting the override to reset to defaults', async () => {
-      // 1. Customize a template category
-      const overridden = await saveSkillCategory({
-        id: 'pull-requests',
-        name: 'Customized PR Workflow',
-        description: 'Company-specific PR flow',
+    it('should create a custom category and delete it completely', async () => {
+      const created = await saveSkillCategory({
+        id: 'team-workflows',
+        name: 'Team Workflows',
+        description: 'Company-specific team workflows',
       });
-      expect(overridden.name).toBe('Customized PR Workflow');
+      expect(created.name).toBe('Team Workflows');
 
       let current = await getSkillCategories();
-      expect(current.find((c) => c.id === 'pull-requests')?.name).toBe('Customized PR Workflow');
+      expect(current.find((c) => c.id === 'team-workflows')?.name).toBe('Team Workflows');
 
-      // 2. Delete override (resets back to default built-in template)
-      await deleteSkillCategory('pull-requests');
+      await deleteSkillCategory('team-workflows');
       current = await getSkillCategories();
-      expect(current.find((c) => c.id === 'pull-requests')?.name).toBe('Pull Requests & Review');
+      expect(current.find((c) => c.id === 'team-workflows')).toBeUndefined();
     });
 
-    it('should reject deleting un-customized built-in template categories', async () => {
-      await expect(deleteSkillCategory('database-migrations')).rejects.toThrow(
-        /Cannot delete built-in/i,
+    it('should reject deleting non-existent categories', async () => {
+      await expect(deleteSkillCategory('non-existent-category')).rejects.toThrow(
+        /Category not found/i,
       );
     });
   });
 
   describe('Skills Management', () => {
-    it('should list all default built-in template skills', async () => {
+    it('should start with an empty skill catalog when no custom skills are saved', async () => {
       const skills = await getAllSkills();
-      expect(skills.length).toBe(DEFAULT_SKILLS.length);
-      const prSkill = skills.find((s) => s.id === 'pr-review-toolkit');
-      expect(prSkill).toBeDefined();
-      expect(prSkill?.category).toBe('pull-requests');
-      expect(prSkill?.allowedTools).toContain('run_command');
+      expect(skills).toEqual([]);
+      expect(skills.length).toBe(0);
+      expect(DEFAULT_SKILLS.length).toBe(0);
     });
 
     it('should save and delete a custom skill package with references and scripts', async () => {
@@ -193,12 +187,17 @@ describe('Skills Catalog & Frontmatter Utils', () => {
       await expect(deleteSkill('../../evil-skill')).rejects.toThrow();
     });
 
-    it('rejects personal packages that would shadow a built-in skill', async () => {
-      await expect(saveSkill({
+    it('saves and deletes a custom skill with standard identity', async () => {
+      const saved = await saveSkill({
         name: 'pr-review-toolkit',
-        description: 'Attempted override.',
-        content: '# Override',
-      })).rejects.toThrow(/built-in skills cannot be overwritten/i);
+        description: 'Custom review toolkit.',
+        content: '# Review Toolkit',
+      });
+      expect(saved.id).toBe('pr-review-toolkit');
+      expect(saved.custom).toBe(true);
+      expect(await fse.pathExists(path.join(tempHome, 'skills', 'pr-review-toolkit'))).toBe(true);
+
+      await deleteSkill('pr-review-toolkit');
       expect(await fse.pathExists(path.join(tempHome, 'skills', 'pr-review-toolkit'))).toBe(false);
     });
 
@@ -340,6 +339,137 @@ describe('Skills Catalog & Frontmatter Utils', () => {
       } finally {
         await fse.remove(tempDir);
       }
+    });
+  });
+
+  describe('Project-Specific (Workspace-Scoped) Skills', () => {
+    it('saves a workspace-scoped skill into .agents/skills/ and does not expose it globally', async () => {
+      const ws = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-ws-local-'));
+      try {
+        const saved = await saveSkill(
+          {
+            name: 'workspace-local-helper',
+            title: 'Local Helper',
+            category: 'testing',
+            description: 'Only for this project',
+            content: '# Local Helper\n\nRun workspace command.',
+          },
+          { scope: 'workspace', workspacePath: ws },
+        );
+
+        expect(saved.id).toBe('workspace-local-helper');
+        expect(saved.custom).toBe(true);
+        expect(saved.scope).toBe('workspace');
+        expect(saved.path).toBe(path.join(ws, '.agents', 'skills', 'workspace-local-helper', 'SKILL.md'));
+        expect(saved.skill.id).toBe('workspace-local-helper');
+
+        // Verify file written to <ws>/.agents/skills/workspace-local-helper/SKILL.md
+        const localSkillPath = path.join(ws, '.agents', 'skills', 'workspace-local-helper', 'SKILL.md');
+        expect(await fse.pathExists(localSkillPath)).toBe(true);
+
+        // Verify NOT present in global user home
+        expect(await fse.pathExists(path.join(tempHome, 'skills', 'workspace-local-helper'))).toBe(false);
+
+        // Global catalog is still empty
+        const globalSkills = await getAllSkills();
+        expect(globalSkills.some((s) => s.id === 'workspace-local-helper')).toBe(false);
+
+        // Workspace-scoped query discovers it
+        const wsSkills = await getAllSkills(ws);
+        expect(wsSkills.some((s) => s.id === 'workspace-local-helper')).toBe(true);
+        const wsFound = wsSkills.find((s) => s.id === 'workspace-local-helper');
+        expect(wsFound?.scope).toBe('workspace');
+      } finally {
+        await fse.remove(ws);
+      }
+    });
+
+    it('saves a global skill into user dir and exposes it across workspaces', async () => {
+      const ws = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-ws-global-'));
+      try {
+        await saveSkill(
+          {
+            name: 'company-standard-skill',
+            title: 'Company Standard',
+            category: 'quality',
+            description: 'Available in all workspaces',
+            content: '# Company Standard\n\nGlobal instructions.',
+          },
+          { scope: 'global' },
+        );
+
+        // Present in global user dir
+        expect(await fse.pathExists(path.join(tempHome, 'skills', 'company-standard-skill', 'SKILL.md'))).toBe(true);
+
+        // Present in global query
+        expect((await getAllSkills()).some((s) => s.id === 'company-standard-skill')).toBe(true);
+
+        // Present in workspace query
+        expect((await getAllSkills(ws)).some((s) => s.id === 'company-standard-skill')).toBe(true);
+      } finally {
+        await fse.remove(ws);
+        await deleteSkill('company-standard-skill').catch(() => {});
+      }
+    });
+
+    it('allows a workspace skill to shadow a global skill and deletes properly by scope', async () => {
+      const ws = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-ws-shadow-'));
+      try {
+        await saveSkill(
+          {
+            name: 'shared-name-skill',
+            description: 'Global definition',
+            content: '# Global',
+          },
+          { scope: 'global' },
+        );
+
+        await saveSkill(
+          {
+            name: 'shared-name-skill',
+            description: 'Workspace-specific override',
+            content: '# Local Override',
+          },
+          { scope: 'workspace', workspacePath: ws },
+        );
+
+        const wsSkills = await getAllSkills(ws);
+        const active = wsSkills.find((s) => s.id === 'shared-name-skill');
+        expect(active?.content).toContain('# Local Override');
+        expect(active?.scope).toBe('workspace');
+
+        // Delete workspace skill
+        await deleteSkill('shared-name-skill', { scope: 'workspace', workspacePath: ws });
+        expect(await fse.pathExists(path.join(ws, '.agents', 'skills', 'shared-name-skill'))).toBe(false);
+
+        // Global skill remains intact
+        const afterLocalDelete = await getAllSkills(ws);
+        const globalRemaining = afterLocalDelete.find((s) => s.id === 'shared-name-skill');
+        expect(globalRemaining?.content).toContain('# Global');
+        expect(globalRemaining?.scope).toBe('global');
+      } finally {
+        await fse.remove(ws);
+        await deleteSkill('shared-name-skill').catch(() => {});
+      }
+    });
+
+    it('rejects saving a workspace skill without workspacePath', async () => {
+      await expect(
+        saveSkill(
+          {
+            name: 'missing-path-skill',
+            description: 'No ws path',
+            content: '# Test',
+          },
+          { scope: 'workspace' },
+        ),
+      ).rejects.toThrow(/workspacePath is required/i);
+    });
+
+    it('rejects deleting a workspace skill without workspacePath', async () => {
+      await expect(
+        deleteSkill('any-skill', { scope: 'workspace' }),
+      ).rejects.toThrow(/workspacePath is required/i);
     });
   });
 });

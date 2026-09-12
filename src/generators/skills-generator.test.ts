@@ -5,7 +5,11 @@ import * as os from 'node:os';
 import fse from 'fs-extra';
 
 import { generateSkills } from './skills-generator.js';
-import { saveWorkspaceSkillsConfig } from '../utils/skills-catalog.js';
+import {
+  saveWorkspaceSkillsConfig,
+  saveSkill,
+  saveSkillCategory,
+} from '../utils/skills-catalog.js';
 import type { WorkspaceContext, ProjectAnalysis, AIAssistant } from '../types.js';
 import { PRIMARY_CONFIG_DIR_NAME } from '../core/constants.js';
 
@@ -30,9 +34,22 @@ describe('skills-generator', () => {
     await fse.remove(tempHome);
   });
 
-
-
   it('deploys enabled skills across claude, antigravity, cursor, copilot, and codex', async () => {
+    await saveSkill({
+      name: 'pr-review-toolkit',
+      title: 'Pull Request Review Toolkit',
+      category: 'pull-requests',
+      description: 'Reviews pull requests',
+      content: '# PR Review',
+    });
+    await saveSkill({
+      name: 'verifier-workspace',
+      title: 'Local Runtime Verifier',
+      category: 'testing-qa',
+      description: 'Local runtime verifier',
+      content: '# Verifier',
+    });
+
     // Enable 2 specific skills
     await saveWorkspaceSkillsConfig(tempWorkspace, {
       enabledSkills: ['pr-review-toolkit', 'verifier-workspace'],
@@ -205,4 +222,49 @@ describe('skills-generator', () => {
     expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'verifier-workspace'))).toBe(false);
     expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'nexusflow-local-package-loop'))).toBe(false);
   });
+
+  it('auto-deploys skills bundled in active category tags', async () => {
+    await saveSkillCategory({
+      id: 'pull-requests',
+      name: 'Pull Requests & Review',
+      description: 'PR workflows',
+      skills: ['pr-review-toolkit'],
+    });
+    await saveSkill({
+      name: 'pr-review-toolkit',
+      title: 'Pull Request Review Toolkit',
+      category: 'pull-requests',
+      description: 'Reviews pull requests',
+      content: '# PR Review',
+    });
+
+    // Workspace with 'pull-requests' category enabled in wsConfig
+    await saveWorkspaceSkillsConfig(tempWorkspace, {
+      enabledSkills: [],
+      enabledCategories: ['pull-requests'],
+    });
+
+    const ctx: WorkspaceContext = {
+      feature: {
+        id: 'test-category-skills',
+        branchName: 'feature-pr',
+        description: 'Review PR feature',
+        repos: [],
+        assistants: ['antigravity'],
+        workspacePath: tempWorkspace,
+        createdAt: new Date().toISOString(),
+      },
+      repos: [],
+    };
+
+    await generateSkills(ctx, ['antigravity'], tempWorkspace);
+
+    // pr-review-toolkit from pull-requests category should be auto-deployed
+    expect(
+      await fse.pathExists(
+        path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit', 'SKILL.md'),
+      ),
+    ).toBe(true);
+  });
 });
+

@@ -13,6 +13,7 @@ import type {
   DetectedEditor,
   Feature,
   ContextSpaceConfig,
+  DomainPack,
   OrchestrationDetection,
   Project,
   RepoInfo,
@@ -84,6 +85,18 @@ export interface CreateWorkspacePayload {
   enabledSkills?: string[];
   enabledAgents?: string[];
   enabledCategories?: string[];
+  domainPacks?: string[];
+  organizationId?: string;
+}
+
+export function useDomainPacks() {
+  return useQuery({
+    queryKey: ['domain-packs'],
+    queryFn: async () => {
+      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
+      return res?.domainPacks ?? [];
+    },
+  });
 }
 
 export function useCreateWorkspace() {

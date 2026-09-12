@@ -242,6 +242,13 @@ export async function generateImplementationPlan(
         md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\` (or read/append \`${PRIMARY_KNOWLEDGE_FILE}\` directly if MCP is not connected or CLI is not on PATH).`);
         md.push(`- **Cross-Harness Handoff**: If the MCP server is connected, use \`post_workroom_handoff\` to post milestone updates; otherwise record handoffs in \`${PRIMARY_CHAT_LEDGER_FILE}\` or generate a bundle with \`${CLI_NAME} handoff\`.`);
         md.push('');
+        md.push('### Recommended Lifecycle Phases');
+        md.push('');
+        md.push('1. **Discovery & Reproduction**: Inspect existing tests, entry points, and contracts before writing code.');
+        md.push('2. **Targeted Implementation**: Write code changes in modular, test-backed vertical slices.');
+        md.push('3. **Verification**: Run the conventional repository test command to confirm clean passes without regressions.');
+        md.push(`4. **Documentation & Handoff**: Record non-derivable decisions in \`${PRIMARY_KNOWLEDGE_FILE}\`, then run \`${CLI_NAME} status\` and commit.`);
+        md.push('');
       }
       await writeWorkspaceFile(workspacePath, feature.id, PRIMARY_PLAN_FILE, md.join('\n'));
       console.log(chalk.green('  ✔'), `Generated ${PRIMARY_PLAN_FILE}`);

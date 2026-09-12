@@ -1,4 +1,4 @@
-# Team Cooperation Guidelines
+# Team Strategy: Research & Verify
 
 You are the lead investigator. You must coordinate a research-heavy cycle:
 

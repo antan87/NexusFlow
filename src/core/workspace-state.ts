@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs/promises';
 
-import type { RepoSyncState, SyncStatus, WorkspaceState } from '../types.js';
+import type { RepoSyncState, SyncStatus, WorkspaceState, WorkspaceVerificationReport } from '../types.js';
 import { resolveWorkspaceFilePath, resolveWorkspaceFilePathSync } from './constants.js';
 
 /**
@@ -127,3 +127,50 @@ export async function markValidated(
   await saveWorkspaceState(state);
   return updated;
 }
+
+/**
+ * Records a full mechanical verification report for the workspace, updating
+ * both top-level workspace state and individual repo validation results.
+ *
+ * @param workspacePath - Absolute path to the workspace root.
+ * @param report        - The aggregate verification report to persist.
+ * @returns The updated workspace state.
+ */
+export async function recordVerificationReport(
+  workspacePath: string,
+  report: WorkspaceVerificationReport,
+): Promise<WorkspaceState> {
+  const state = await loadWorkspaceState(workspacePath);
+  state.lastVerification = report;
+
+  for (const repoReport of report.repos) {
+    const existing = state.repos[repoReport.repoName] ?? { repoName: repoReport.repoName };
+    const passed = repoReport.status === 'pass' || repoReport.status === 'pass_dirty';
+
+    state.repos[repoReport.repoName] = {
+      ...existing,
+      repoName: repoReport.repoName,
+      lastValidationResult: passed ? 'pass' : repoReport.status === 'no-tests' ? (existing.lastValidationResult ?? null) : 'fail',
+      lastValidatedAt: repoReport.verifiedAt,
+      pendingValidation: passed ? false : existing.pendingValidation,
+      lastVerification: repoReport,
+    };
+  }
+
+  await saveWorkspaceState(state);
+  return state;
+}
+
+/**
+ * Retrieves the latest recorded verification report for a workspace, if any.
+ *
+ * @param workspacePath - Absolute path to the workspace root.
+ * @returns The last verification report or null if none recorded.
+ */
+export async function getLastVerificationReport(
+  workspacePath: string,
+): Promise<WorkspaceVerificationReport | null> {
+  const state = await loadWorkspaceState(workspacePath);
+  return state.lastVerification ?? null;
+}
+

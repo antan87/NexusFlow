@@ -5,7 +5,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron . --no-sandbox",
     "generate-icons": "electron scripts/generate-icons.mjs",
     "setup": "install-electron",
     "prepare-backend": "node scripts/prepare-backend.mjs",

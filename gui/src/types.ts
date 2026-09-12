@@ -147,6 +147,8 @@ export interface Project {
   updatedAt: string;
 }
 
+export type FlowPreset = 'quick' | 'quick-fix' | 'feature' | 'epic';
+
 /** How a feature attaches to its repos (mirrors src/types.ts). */
 export type WorkspaceMode = 'worktree' | 'in-place';
 
@@ -162,6 +164,61 @@ export interface Feature {
   assistants: string[];
   workspacePath: string;
   createdAt: string;
+  workflow?: string;
+  flowType?: FlowPreset;
+  organizationId?: string;
+  domainPacks?: string[];
+}
+
+export interface OrganizationConventions {
+  id: string;
+  name: string;
+  commitMessagePattern?: string;
+  commitExample?: string;
+  prTemplate?: string;
+  rules: string[];
+  isTemplate?: boolean;
+}
+
+export type CategoryType = 'vertical' | 'trait';
+
+export interface CategoryRepoBinding {
+  name: string;
+  target?: 'edit' | 'reference';
+  description?: string;
+  suggestedTestCommand?: string;
+}
+
+export interface DomainPack {
+  id: string;
+  name: string;
+  description: string;
+  parent?: string;
+  categoryType?: CategoryType;
+  organization?: string;
+  tags: string[];
+  skills?: string[];
+  contextFiles?: string[];
+  verifyCommand?: string;
+  rules?: string[];
+  defaultRepos?: string[];
+  microservices?: CategoryRepoBinding[];
+  isTemplate?: boolean;
+}
+
+export type CategoryTagPack = DomainPack;
+
+export interface ResolvedCategoryRules {
+  organizationId?: string;
+  assignedDomainPackIds?: string[];
+  organization: OrganizationConventions | null;
+  domainPacks: DomainPack[];
+  verticals: DomainPack[];
+  traits: DomainPack[];
+  allRules: string[];
+  compositeVerifyCommand?: string;
+  editRepos: string[];
+  referenceRepos: string[];
 }
 
 
@@ -426,5 +483,49 @@ export interface WorkspaceStreamResponse {
   } | null;
   isLegacy?: boolean;
   ledgerPath?: string;
+}
+
+export type LifecycleStepStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'verified'
+  | 'completed'
+  | 'blocked';
+
+export interface LifecycleStep {
+  id: string;
+  title: string;
+  description?: string;
+  branch?: string;
+  owner?: string;
+  status: LifecycleStepStatus;
+  dependsOn?: string[];
+  verificationCommand?: string;
+  lastVerificationSha?: string;
+  lastVerificationStatus?: string;
+  completedAt?: string;
+}
+
+export interface BranchFleetMember {
+  branch: string;
+  repoName: string;
+  owner?: string;
+  isCurrent: boolean;
+  headSha?: string;
+  ahead: number;
+  behind: number;
+  lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitDate?: string;
+  remoteTracked: boolean;
+}
+
+export interface WorkspaceLifecycle {
+  workspaceId: string;
+  flowType: 'quick' | 'feature' | 'epic';
+  currentStepId?: string;
+  steps: LifecycleStep[];
+  fleet?: BranchFleetMember[];
+  updatedAt: string;
 }
 

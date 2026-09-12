@@ -4,8 +4,10 @@ import {
   loadWorkspaceState,
   recordRepoSync,
   markValidated,
+  recordVerificationReport,
+  getLastVerificationReport,
 } from './workspace-state.js';
-import type { WorkspaceState } from '../types.js';
+import type { WorkspaceState, WorkspaceVerificationReport } from '../types.js';
 
 vi.mock('node:fs/promises');
 
@@ -103,6 +105,76 @@ describe('workspace-state', () => {
       expect(entry.lastValidationResult).toBe('pass');
       expect(entry.pendingValidation).toBe(false);
       expect(entry.lastValidatedAt).toBeTruthy();
+    });
+  });
+
+  describe('recordVerificationReport', () => {
+    it('persists verification report and updates repo state', async () => {
+      const existing: WorkspaceState = {
+        workspacePath: '/ws',
+        repos: { api: { repoName: 'api', pendingValidation: true } },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      };
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existing) as any);
+
+      const report: WorkspaceVerificationReport = {
+        workspacePath: '/ws',
+        overallStatus: 'pass',
+        canProgress: true,
+        verifiedAt: '2026-09-11T12:00:00.000Z',
+        durationMs: 1500,
+        repos: [
+          {
+            repoName: 'api',
+            repoPath: '/ws/api',
+            status: 'pass',
+            command: 'npm test',
+            exitCode: 0,
+            headSha: 'abc1234',
+            clean: true,
+            durationMs: 1500,
+            verifiedAt: '2026-09-11T12:00:00.000Z',
+          },
+        ],
+      };
+
+      const updated = await recordVerificationReport('/ws', report);
+
+      expect(updated.lastVerification).toEqual(report);
+      expect(updated.repos.api.lastValidationResult).toBe('pass');
+      expect(updated.repos.api.pendingValidation).toBe(false);
+      expect(updated.repos.api.lastVerification?.headSha).toBe('abc1234');
+
+      const saved = lastWritten();
+      expect(saved.lastVerification?.overallStatus).toBe('pass');
+      expect(saved.repos.api.lastVerification?.status).toBe('pass');
+    });
+  });
+
+  describe('getLastVerificationReport', () => {
+    it('returns null when no verification was recorded', async () => {
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      const report = await getLastVerificationReport('/ws');
+      expect(report).toBeNull();
+    });
+
+    it('returns recorded report when present', async () => {
+      const existing: WorkspaceState = {
+        workspacePath: '/ws',
+        repos: {},
+        lastVerification: {
+          workspacePath: '/ws',
+          overallStatus: 'pass',
+          canProgress: true,
+          verifiedAt: '2026-09-11T12:00:00.000Z',
+          durationMs: 500,
+          repos: [],
+        },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      };
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existing) as any);
+      const report = await getLastVerificationReport('/ws');
+      expect(report?.overallStatus).toBe('pass');
     });
   });
 });

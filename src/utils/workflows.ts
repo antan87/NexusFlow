@@ -87,6 +87,8 @@ function parseMarkdownTemplate(id: string, content: string): Omit<WorkflowTempla
       description = 'Research specialist subagent analyzes codebase, followed by test-driven developer subagent implementation.';
     } else if (id === 'solo-developer') {
       description = 'Direct coding and verification by the primary agent without subagent delegation overhead.';
+    } else if (id === 'epic-multi-slice') {
+      description = 'Decompose large epics or multi-PR modules into independently reviewable vertical slices with persistent contracts.';
     } else {
       description = 'Custom user-defined teamwork strategy.';
     }

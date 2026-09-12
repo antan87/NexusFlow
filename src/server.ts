@@ -44,10 +44,22 @@ import {
   checkReposFreshness,
   fastForwardRepos,
 } from './utils/repo-freshness.js';
-import { createWorkspace, listWorkspaces, loadFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
+import { createWorkspace, listWorkspaces, loadFeatureConfig, saveFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
+import {
+  getAvailableOrganizations,
+  getAvailableDomainPacks,
+  getOrganization,
+  getDomainPack,
+  matchDomainPacks,
+  resolveActiveDomainRules,
+  registerCustomDomainPack,
+  unregisterCustomDomainPack,
+  registerCustomOrganization,
+  unregisterCustomOrganization,
+} from './core/domain-packs.js';
 
 import { detectAIAssistants } from './utils/detect-ai.js';
 import { detectEditors } from './utils/detect-editors.js';
@@ -134,7 +146,7 @@ import {
   withResourceAdministrationLock,
 } from './resources/service.js';
 
-import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus } from './types.js';
+import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus, OrganizationConventions, DomainPack } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 import {
   WorkroomAuthorizationError,
@@ -1211,6 +1223,10 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       createdAt: new Date().toISOString(),
       resumption: body.resumption,
       teamworkInstructions: body.teamworkInstructions,
+      organizationId: body.organizationId,
+      domainPacks: Array.isArray(body.domainPacks) && body.domainPacks.length > 0
+        ? body.domainPacks
+        : matchDomainPacks(body.description, (body.repos || []).map((r: any) => r.name)).map((p) => p.id),
     };
     if (job) {
       job.feature = feature;
@@ -1287,6 +1303,8 @@ app.post('/api/workspace', async (c) => {
       enabledSkills?: string[];
       enabledAgents?: string[];
       enabledCategories?: string[];
+      domainPacks?: string[];
+      organizationId?: string;
       teamworkInstructions?: string;
       autoUpdateBase?: boolean;
       resumption?: {
@@ -2444,6 +2462,66 @@ app.get('/api/workspace/:id/plan', async (c) => {
   }
 });
 
+// 13c-1. Get active workspace lifecycle and sister branch fleet
+app.get('/api/workspace/:id/lifecycle', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { loadWorkspaceLifecycle } = await import('./core/lifecycle.js');
+    const lifecycle = await loadWorkspaceLifecycle(workspacePath);
+    return c.json({ lifecycle });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2. Transition or advance a lifecycle step
+app.post('/api/workspace/:id/lifecycle/step', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      stepId?: string;
+      action?: 'start' | 'verify' | 'complete';
+    };
+    if (!body.stepId || !body.action) {
+      return c.json({ error: 'stepId and action (start|verify|complete) are required.' }, 400);
+    }
+    const { advanceLifecycleStep } = await import('./core/lifecycle.js');
+    const lifecycle = await advanceLifecycleStep(workspacePath, body.stepId, body.action);
+    return c.json({ lifecycle });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-3. Run mechanical verification gate for workspace
+app.post('/api/workspace/:id/verify', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      repoName?: string;
+      filter?: string;
+      command?: string;
+      allowDirty?: boolean;
+    };
+    const { verifyWorkspace } = await import('./core/verify.js');
+    const report = await verifyWorkspace(workspacePath, {
+      repoName: body.repoName,
+      filter: body.filter,
+      command: body.command,
+      allowDirty: body.allowDirty,
+    });
+    return c.json({ report });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 13c-2. Check workspace migration status (legacy NexusFlow files detected)
 app.get('/api/workspace/:id/migration-status', async (c) => {
   try {
@@ -3200,6 +3278,169 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
       );
     });
     return c.json({ success: true, config: saved });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// ─── Enterprise & Modular Domain Packs ─────────────────────────────────────
+
+// List available enterprise organizations
+app.get('/api/enterprise/organizations', (c) => {
+  return c.json({ organizations: getAvailableOrganizations() });
+});
+
+// Register custom organization conventions
+app.post('/api/enterprise/organizations', async (c) => {
+  try {
+    const body = await c.req.json() as OrganizationConventions;
+    if (!body.id || !body.name || !Array.isArray(body.rules)) {
+      return c.json({ error: 'id, name, and rules array are required for an organization.' }, 400);
+    }
+    registerCustomOrganization(body);
+    return c.json({ success: true, organization: getOrganization(body.id) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Unregister custom organization
+app.delete('/api/enterprise/organizations/:id', (c) => {
+  const id = decodeURIComponent(c.req.param('id'));
+  const deleted = unregisterCustomOrganization(id);
+  return c.json({ success: deleted });
+});
+
+// List available domain packs
+app.get('/api/enterprise/domain-packs', (c) => {
+  return c.json({ domainPacks: getAvailableDomainPacks() });
+});
+
+// Register custom domain pack
+app.post('/api/enterprise/domain-packs', async (c) => {
+  try {
+    const body = await c.req.json() as DomainPack;
+    if (!body.id || !body.name || !Array.isArray(body.tags)) {
+      return c.json({ error: 'id, name, and tags array are required for a domain pack.' }, 400);
+    }
+    registerCustomDomainPack(body);
+    return c.json({ success: true, domainPack: getDomainPack(body.id) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Unregister custom domain pack
+app.delete('/api/enterprise/domain-packs/:id', (c) => {
+  const id = decodeURIComponent(c.req.param('id'));
+  const deleted = unregisterCustomDomainPack(id);
+  return c.json({ success: deleted });
+});
+
+// Auto-match domain packs from specification or description
+app.post('/api/enterprise/match-domains', async (c) => {
+  try {
+    const body = await c.req.json() as { description?: string; repos?: string[] };
+    const text = body.description || '';
+    const repos = Array.isArray(body.repos) ? body.repos : [];
+    const matched = matchDomainPacks(text, repos);
+    return c.json({ matched });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Get domain packs & organization conventions for a workspace
+app.get('/api/workspace/:id/domain-packs', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const feature = await loadFeatureConfig(wsPath);
+    if (!feature) return c.json({ error: 'Failed to load workspace feature.' }, 404);
+
+    const resolved = resolveActiveDomainRules(feature.organizationId, feature.domainPacks ?? []);
+    return c.json({
+      organizationId: feature.organizationId,
+      assignedDomainPackIds: feature.domainPacks ?? [],
+      ...resolved,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Assign or update domain packs & organization for a workspace
+app.post('/api/workspace/:id/domain-packs', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json() as { organizationId?: string; domainPacks?: string[] };
+    const config = await loadConfig();
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const feature = await loadFeatureConfig(wsPath);
+    if (!feature) return c.json({ error: 'Failed to load workspace feature.' }, 404);
+
+    if (body.organizationId !== undefined) {
+      feature.organizationId = body.organizationId;
+    }
+    if (Array.isArray(body.domainPacks)) {
+      feature.domainPacks = body.domainPacks;
+    }
+
+    await saveFeatureConfig(wsPath, feature);
+    // Refresh workspace context so AGENTS.md immediately reflects active domain rules
+    await refreshWorkspace(wsPath, { force: true }).catch(() => {});
+
+    const resolved = resolveActiveDomainRules(feature.organizationId, feature.domainPacks ?? []);
+    return c.json({
+      success: true,
+      feature,
+      ...resolved,
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// Update workspace specification / PO requirements & adaptively match domain packs
+app.post('/api/workspace/:id/update-spec', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json() as { description: string; autoMatchDomains?: boolean };
+    if (!body.description || typeof body.description !== 'string') {
+      return c.json({ error: 'Description is required.' }, 400);
+    }
+    const config = await loadConfig();
+    const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
+    if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
+    const feature = await loadFeatureConfig(wsPath);
+    if (!feature) return c.json({ error: 'Failed to load workspace feature.' }, 404);
+
+    feature.description = body.description.trim();
+
+    const newlyMatched: string[] = [];
+    if (body.autoMatchDomains !== false) {
+      const matchedPacks = matchDomainPacks(feature.description);
+      const currentPacks = new Set(feature.domainPacks ?? []);
+      for (const pack of matchedPacks) {
+        if (!currentPacks.has(pack.id)) {
+          currentPacks.add(pack.id);
+          newlyMatched.push(pack.id);
+        }
+      }
+      feature.domainPacks = Array.from(currentPacks);
+    }
+
+    await saveFeatureConfig(wsPath, feature);
+    await refreshWorkspace(wsPath, { force: true }).catch(() => {});
+
+    return c.json({
+      success: true,
+      feature,
+      newlyMatched,
+    });
   } catch (error) {
     return errorResponse(c, error);
   }

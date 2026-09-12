@@ -11,6 +11,8 @@ import {
   getRepoStatus,
   commitAndPush,
 } from '../utils/multi-git.js';
+import { loadFeatureConfig } from './workspace.js';
+import { getOrganization } from './domain-packs.js';
 
 /** Options for {@link commitWorkspace}. */
 export interface WorkspaceCommitOptions {
@@ -35,6 +37,8 @@ export interface WorkspaceCommitReport {
   repos: RepoCommitReport[];
   committedCount: number;
   failedCount: number;
+  /** Warning message if the commit message violated active organization conventions. */
+  conventionWarning?: string;
 }
 
 /**
@@ -66,6 +70,19 @@ export async function commitWorkspace(
     repos = repos.filter((r) => filter.includes(r.name));
   }
 
+  let conventionWarning: string | undefined;
+  const feature = await loadFeatureConfig(workspacePath).catch(() => null);
+  if (feature?.organizationId) {
+    const org = getOrganization(feature.organizationId);
+    if (org?.commitMessagePattern) {
+      const regex = new RegExp(org.commitMessagePattern);
+      if (!regex.test(message)) {
+        conventionWarning = `Commit message "${message}" violates ${org.name} convention pattern (${org.commitMessagePattern}).` +
+          (org.commitExample ? ` Example: "${org.commitExample}"` : '');
+      }
+    }
+  }
+
   const reports: RepoCommitReport[] = [];
   for (const repo of repos) {
     const status = await getRepoStatus(repo.path);
@@ -88,5 +105,6 @@ export async function commitWorkspace(
     repos: reports,
     committedCount: reports.filter((r) => r.success).length,
     failedCount: reports.filter((r) => !r.success).length,
+    conventionWarning,
   };
 }

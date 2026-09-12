@@ -1,4 +1,4 @@
-# Team Cooperation Guidelines
+# Team Strategy: Plan, Implement, Review
 
 You are the lead developer. You must coordinate a Plan-Implement-Review loop to complete the task:
 

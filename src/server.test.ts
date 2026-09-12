@@ -2312,6 +2312,186 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('Enterprise & Modular Domain Packs Endpoints', () => {
+    it('GET /api/enterprise/organizations returns built-in organizations', async () => {
+      const response = await app.request('/api/enterprise/organizations');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.organizations.some((o: any) => o.id === 'hogia')).toBe(true);
+    });
+
+    it('GET /api/enterprise/domain-packs returns built-in domain packs', async () => {
+      const response = await app.request('/api/enterprise/domain-packs');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      const ids = data.domainPacks.map((p: any) => p.id);
+      expect(ids).toContain('economy');
+      expect(ids).toContain('hr');
+      expect(ids).toContain('transport');
+    });
+
+    it('POST /api/enterprise/match-domains matches domain packs from text spec', async () => {
+      const response = await app.request('/api/enterprise/match-domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: 'Calculate Swedish VAT and export customer invoice' }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.matched.length).toBeGreaterThan(0);
+      expect(data.matched[0].id).toBe('economy');
+    });
+
+    it('GET /api/workspace/:id/domain-packs returns resolved domain rules for workspace', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Enterprise integration',
+        organizationId: 'hogia',
+        domainPacks: ['economy'],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      } as any);
+
+      const response = await app.request('/api/workspace/enterprise-ws/domain-packs');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.organizationId).toBe('hogia');
+      expect(data.assignedDomainPackIds).toEqual(['economy']);
+      expect(data.organization.name).toBe('Hogia');
+      expect(data.allRules.some((r: string) => r.includes('Swedish VAT standard rates'))).toBe(true);
+    });
+
+    it('POST /api/workspace/:id/domain-packs updates workspace domains and rules', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      const featureMock = {
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Enterprise integration',
+        organizationId: undefined,
+        domainPacks: [],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      };
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue(featureMock as any);
+      vi.mocked(workspace.saveFeatureConfig).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/enterprise-ws/domain-packs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: 'hogia',
+          domainPacks: ['economy', 'transport'],
+        }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.feature.organizationId).toBe('hogia');
+      expect(data.feature.domainPacks).toEqual(['economy', 'transport']);
+      expect(workspace.saveFeatureConfig).toHaveBeenCalledWith(workspacePath, expect.objectContaining({
+        organizationId: 'hogia',
+        domainPacks: ['economy', 'transport'],
+      }));
+    });
+
+    it('POST /api/workspace/:id/update-spec updates specification and auto-matches domain packs', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      const featureMock = {
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Original spec',
+        organizationId: 'hogia',
+        domainPacks: ['economy'],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      };
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue(featureMock as any);
+      vi.mocked(workspace.saveFeatureConfig).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/enterprise-ws/update-spec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: 'Updated PO requirements: calculate employee payroll deductions and kollektivavtal benefits',
+          autoMatchDomains: true,
+        }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.newlyMatched).toContain('hr');
+      expect(data.feature.domainPacks).toContain('economy');
+      expect(data.feature.domainPacks).toContain('hr');
+    });
+
+    it('POST and DELETE /api/enterprise/domain-packs registers and unregisters custom domain packs', async () => {
+      const postRes = await app.request('/api/enterprise/domain-packs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'custom-fintech',
+          name: 'Fintech & Payments',
+          description: 'Payment gateway integrations and settlement reconciliations.',
+          tags: ['fintech', 'payment', 'stripe', 'pci'],
+          rules: ['Zero plain-text credit card storage (PCI-DSS).'],
+        }),
+      });
+      expect(postRes.status).toBe(200);
+      const postData = await postRes.json();
+      expect(postData.success).toBe(true);
+      expect(postData.domainPack.id).toBe('custom-fintech');
+      expect(postData.domainPack.isTemplate).toBe(false);
+
+      const delRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'DELETE',
+      });
+      expect(delRes.status).toBe(200);
+      const delData = await delRes.json();
+      expect(delData.success).toBe(true);
+    });
+
+    it('POST and DELETE /api/enterprise/organizations registers and unregisters custom organizations', async () => {
+      const postRes = await app.request('/api/enterprise/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'spotify',
+          name: 'Spotify',
+          commitMessagePattern: '^SPOT-[0-9]+: .+$',
+          rules: ['Squad ownership tags required in PR.'],
+        }),
+      });
+      expect(postRes.status).toBe(200);
+      const postData = await postRes.json();
+      expect(postData.success).toBe(true);
+      expect(postData.organization.id).toBe('spotify');
+
+      const delRes = await app.request('/api/enterprise/organizations/spotify', {
+        method: 'DELETE',
+      });
+      expect(delRes.status).toBe(200);
+      const delData = await delRes.json();
+      expect(delData.success).toBe(true);
+    });
+  });
+
   describe('GET /api/workspaces/status', () => {
     it('returns workspace statuses including active AI assistants', async () => {
       vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
