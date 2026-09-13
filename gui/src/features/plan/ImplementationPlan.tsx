@@ -30,6 +30,7 @@ interface ImplementationPlanProps {
   planError: string | null;
   handleRetryPlan: (wsId: string) => Promise<void>;
   workspaceId?: string;
+  defaultViewMode?: 'flow' | 'preview' | 'raw';
 }
 
 export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
@@ -38,14 +39,21 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   planError,
   handleRetryPlan,
   workspaceId,
+  defaultViewMode = 'flow',
 }) => {
-  const [viewMode, setViewMode] = useState<'flow' | 'preview' | 'raw'>('flow');
+  const [viewMode, setViewMode] = useState<'flow' | 'preview' | 'raw'>(defaultViewMode);
   const [lifecycle, setLifecycle] = useState<WorkspaceLifecycle | null>(null);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<{ status: string; text: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isFleetExpanded, setIsFleetExpanded] = useState(false);
+
+  useEffect(() => {
+    if (defaultViewMode) {
+      setViewMode(defaultViewMode);
+    }
+  }, [defaultViewMode]);
 
   const loadLifecycle = useCallback(async () => {
     if (!workspaceId) return;
@@ -56,7 +64,8 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       );
       setLifecycle(data.lifecycle);
     } catch (error) {
-      setVerifyMessage({ status: 'fail', text: error instanceof Error ? error.message : 'Unable to load lifecycle.' });
+      // Missing lifecycle state is normal for newly initialized or test workspaces.
+      console.warn('Could not load workspace lifecycle:', error);
     } finally {
       setLifecycleLoading(false);
     }
@@ -194,6 +203,29 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           >
             Dismiss
           </Button>
+        </div>
+      )}
+
+      {/* Plan Load Error Alert */}
+      {planError && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>{planError}</span>
+          </div>
+          {workspaceId && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => void handleRetryPlan(workspaceId)}
+              disabled={planLoading}
+            >
+              <RefreshCw size={11} className={planLoading ? 'animate-spin' : ''} /> Retry load
+            </Button>
+          )}
         </div>
       )}
 
@@ -486,28 +518,6 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       ) : (
         /* MARKDOWN / RAW PREVIEW MODE */
         <div>
-          {planError && (
-            <div
-              role="alert"
-              className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground"
-            >
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={14} className="shrink-0" />
-                <span>{planError}</span>
-              </div>
-              {workspaceId && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => void handleRetryPlan(workspaceId)}
-                  disabled={planLoading}
-                >
-                  <RefreshCw size={11} className={planLoading ? 'animate-spin' : ''} /> Retry load
-                </Button>
-              )}
-            </div>
-          )}
-
           {planLoading && !planContent ? (
             <div className="flex justify-center py-10">
               <RefreshCw className="animate-spin text-primary" size={20} />

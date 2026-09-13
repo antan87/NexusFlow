@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   RotateCcw,
   X,
+  Calendar,
   type LucideIcon,
 } from 'lucide-react';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
@@ -34,6 +35,7 @@ import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import type { Feature, WorkspaceStatus, RepoInfo, DomainPack, ResolvedCategoryRules } from '../types.js';
 import { API_BASE } from '../lib/apiBase.js';
 import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
+import { ServiceConsole } from '../features/services/ServiceConsole.js';
 
 const renderEditorIcon = (id: string, name: string) => {
   const lower = `${id} ${name}`.toLowerCase();
@@ -96,20 +98,23 @@ import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
-type SubTab = 'overview' | 'sessions' | 'changes' | 'knowledge' | 'skills';
+type SubTab = 'overview' | 'plan' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills';
 
 interface TabDef {
   value: SubTab;
   label: string;
+  ariaLabel?: string;
   icon: LucideIcon;
 }
 
 const TABS: TabDef[] = [
-  { value: 'overview', label: 'Command Center', icon: LayoutDashboard },
-  { value: 'changes', label: 'Git Diff', icon: GitCompare },
-  { value: 'sessions', label: 'AI & Chat', icon: Bot },
-  { value: 'knowledge', label: 'Knowledge', icon: Brain },
-  { value: 'skills', label: 'Skills', icon: Puzzle },
+  { value: 'overview', label: 'Command Center', ariaLabel: 'Overview', icon: LayoutDashboard },
+  { value: 'plan', label: 'Plan', ariaLabel: 'Plan', icon: Calendar },
+  { value: 'changes', label: 'Git Diff', ariaLabel: 'Changes', icon: GitCompare },
+  { value: 'services', label: 'Services', ariaLabel: 'Services', icon: Zap },
+  { value: 'sessions', label: 'AI & Chat', ariaLabel: 'AI & Sessions', icon: Bot },
+  { value: 'knowledge', label: 'Knowledge', ariaLabel: 'Knowledge', icon: Brain },
+  { value: 'skills', label: 'Skills', ariaLabel: 'Skills', icon: Puzzle },
 ];
 
 interface WorkspacesPageProps {
@@ -711,6 +716,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <TabsTab
                     key={tab.value}
                     value={tab.value}
+                    aria-label={tab.ariaLabel || tab.label}
                     className={cn(
                       'flex shrink-0 items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer',
                       isActive
@@ -1275,6 +1281,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
+              {subTab === 'plan' && <ImplementationPlan workspaceId={selected.branchName} defaultViewMode="preview" {...planProps} />}
+              {subTab === 'services' && <ServiceConsole ws={selected} />}
             </TabsPanel>
           </Tabs>
         </div>

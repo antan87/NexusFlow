@@ -118,7 +118,9 @@ describe('Challenger 2 Empirical Verification: Workspace-Local Skills & Material
 
     const afterScript = await fs.readFile(scriptPath, 'utf-8');
     expect(sha256(afterScript)).toBe(originalScriptHash);
-    expect((await fs.stat(scriptPath)).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(scriptPath)).mode & 0o777).toBe(0o755);
+    }
 
     const afterRef = await fs.readFile(path.join(localSkillDir, 'references', 'rules.json'), 'utf-8');
     expect(sha256(afterRef)).toBe(originalRefHash);
@@ -194,7 +196,9 @@ describe('Challenger 2 Empirical Verification: Workspace-Local Skills & Material
     expect(await fs.readFile(path.join(localSkillDir, 'SKILL.md'), 'utf-8')).toBe(secretMd);
     expect(await fse.pathExists(path.join(localSkillDir, 'scripts', 'secret.sh'))).toBe(true);
     expect(await fs.readFile(path.join(localSkillDir, 'scripts', 'secret.sh'), 'utf-8')).toBe(secretScript);
-    expect((await fs.stat(path.join(localSkillDir, 'scripts', 'secret.sh'))).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(path.join(localSkillDir, 'scripts', 'secret.sh'))).mode & 0o777).toBe(0o755);
+    }
 
     // 5. Verify lockfile outputs are empty
     const lockPath = await resolveResourceLockPath(workspace);

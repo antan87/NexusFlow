@@ -168,7 +168,7 @@ function AppInner() {
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'sessions' | 'changes' | 'knowledge' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -770,7 +770,7 @@ function AppInner() {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       const tab = parts[2];
-      const valid = ['overview', 'sessions', 'changes', 'knowledge', 'skills'];
+      const valid = ['overview', 'plan', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
     } else {
       setActiveWsId(null);
@@ -868,9 +868,9 @@ function AppInner() {
     }
   }, [activeWsId, subTab]);
 
-  // Load plan when on overview or active workspace changes
+  // Load plan when on overview or plan or active workspace changes
   useEffect(() => {
-    if (activeWsId && subTab === 'overview') {
+    if (activeWsId && (subTab === 'overview' || subTab === 'plan')) {
       fetchPlan(activeWsId);
     }
   }, [activeWsId, subTab]);

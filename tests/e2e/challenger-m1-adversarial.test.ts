@@ -85,7 +85,9 @@ describe('Adversarial Challenger Suite: Workspace-Local Skills & Materializer Sa
 
     const actualLocalScript = await fs.readFile(scriptPath, 'utf-8');
     expect(actualLocalScript).toBe(originalScriptContent);
-    expect((await fs.stat(scriptPath)).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(scriptPath)).mode & 0o777).toBe(0o755);
+    }
 
     // 5. Assert mirroring across all target assistant adapter roots
     // Claude
@@ -96,7 +98,9 @@ describe('Adversarial Challenger Suite: Workspace-Local Skills & Materializer Sa
     expect(await fse.pathExists(claudeScript)).toBe(true);
     expect(await fse.pathExists(claudeRef)).toBe(true);
     expect(await fs.readFile(claudeSkill, 'utf-8')).toContain('AUTO-GENERATED');
-    expect((await fs.stat(claudeScript)).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(claudeScript)).mode & 0o777).toBe(0o755);
+    }
 
     // Cursor, Codex, Copilot read .agents/skills/ natively; no redundant projections
     const cursorSkill = path.join(workspace, '.cursor', 'skills', 'local-analyzer', 'SKILL.md');
@@ -387,7 +391,9 @@ describe('Adversarial Challenger Suite: Workspace-Local Skills & Materializer Sa
     const claudeDoc = path.join(workspace, '.claude', 'skills', 'nested-mode-skill', 'references', 'docs', 'spec.md');
     expect(await fse.pathExists(claudeScript)).toBe(true);
     expect(await fse.pathExists(claudeDoc)).toBe(true);
-    expect((await fs.stat(claudeScript)).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(claudeScript)).mode & 0o777).toBe(0o755);
+    }
 
     // Unmount and verify deep directories are removed from mirror, but kept in local
     await reconcileWorkspaceResources(workspace, assistants, [], []);

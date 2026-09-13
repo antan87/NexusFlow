@@ -423,7 +423,7 @@ describe('Skills Catalog & Frontmatter Utils', () => {
         expect(saved.id).toBe('workspace-local-helper');
         expect(saved.custom).toBe(true);
         expect(saved.scope).toBe('workspace');
-        expect(saved.path).toBe(path.join(ws, '.agents', 'skills', 'workspace-local-helper', 'SKILL.md'));
+        expect(await fs.realpath(saved.path)).toBe(await fs.realpath(path.join(ws, '.agents', 'skills', 'workspace-local-helper', 'SKILL.md')));
         expect(saved.skill.id).toBe('workspace-local-helper');
 
         // Verify file written to <ws>/.agents/skills/workspace-local-helper/SKILL.md
