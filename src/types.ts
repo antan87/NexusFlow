@@ -768,6 +768,8 @@ export interface SkillItem {
   references?: SkillSupportingFile[];
   /** Helper scripts inside `scripts/`. */
   scripts?: SkillSupportingFile[];
+  /** Static assets, schemas, templates, diagrams inside `assets/`. */
+  assets?: SkillSupportingFile[];
   /** Scope of the skill: 'workspace' for project-specific or 'global' for machine-wide catalog. */
   scope?: 'workspace' | 'global';
   /** Additional frontmatter metadata (custom properties, deeply nested configurations, etc.). */

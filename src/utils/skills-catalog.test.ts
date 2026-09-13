@@ -287,6 +287,37 @@ describe('Skills Catalog & Frontmatter Utils', () => {
         },
       });
     });
+
+    it('supports assets directory and Agent Skills standard metadata fallbacks', async () => {
+      const skillWithAssets = await saveSkill({
+        name: 'pdf-archiver',
+        description: 'Extract and archive PDF documents.',
+        license: 'MIT',
+        compatibility: 'Requires pdftotext CLI',
+        content: '# PDF Archiver\n\nArchive PDF docs.',
+        metadata: {
+          tags: ['pdf', 'archive'],
+          category: 'documents',
+          title: 'PDF Archiving Standard',
+        },
+        assets: [{ name: 'template.json', relativePath: 'assets/template.json', content: '{"version": 1}' }],
+      });
+
+      expect(skillWithAssets.id).toBe('pdf-archiver');
+      expect(skillWithAssets.assets).toBeDefined();
+      expect(skillWithAssets.assets?.length).toBe(1);
+      expect(skillWithAssets.assets?.[0].name).toBe('template.json');
+
+      const all = await getAllSkills();
+      const loaded = all.find((s) => s.id === 'pdf-archiver');
+      expect(loaded).toBeDefined();
+      expect(loaded?.title).toBe('PDF Archiving Standard');
+      expect(loaded?.category).toBe('documents');
+      expect(loaded?.tags).toEqual(['pdf', 'archive']);
+      expect(loaded?.assets?.length).toBe(1);
+
+      await deleteSkill('pdf-archiver');
+    });
   });
 
   describe('Workspace Skills Config', () => {

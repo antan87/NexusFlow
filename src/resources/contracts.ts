@@ -25,7 +25,7 @@ export const skillFrontmatterSchema = z
     name: resourceIdSchema,
     description: nonEmptyString.max(1024),
     license: z.string().trim().max(1024).optional(),
-    compatibility: z.string().trim().max(1024).optional(),
+    compatibility: z.string().trim().max(500).optional(),
     title: z.string().trim().max(120).optional(),
     category: resourceIdSchema.optional(),
     tags: z.array(nonEmptyString.max(64)).max(32).optional(),

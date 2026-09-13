@@ -369,23 +369,33 @@ async function loadSkillFromDir(
         metadataObj[LEGACY_RESOURCE_METADATA_KEY] !== null
         ? (metadataObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
         : {};
+  const rawMetaTitle = metadataObj && typeof metadataObj.title === 'string' ? metadataObj.title : undefined;
   const title =
     parsedMetadata.data.title ||
     (typeof brandMetadata.title === 'string' ? brandMetadata.title : undefined) ||
+    rawMetaTitle ||
     name
       .split('-')
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
+  const rawMetaCategory = metadataObj && typeof metadataObj.category === 'string' ? metadataObj.category : undefined;
   const category =
     parsedMetadata.data.category ||
     (typeof brandMetadata.category === 'string' ? brandMetadata.category : undefined) ||
+    rawMetaCategory ||
     'general';
   const description = parsedMetadata.data.description;
+  const rawMetaTags =
+    metadataObj && Array.isArray(metadataObj.tags)
+      ? metadataObj.tags.filter((t): t is string => typeof t === 'string')
+      : metadataObj && typeof metadataObj.tags === 'string'
+        ? metadataObj.tags.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
   const tags =
     parsedMetadata.data.tags ||
     (Array.isArray(brandMetadata.tags)
       ? brandMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
-      : []);
+      : rawMetaTags);
   const rawAllowedTools = parsedMetadata.data['allowed-tools'];
   const allowedTools = Array.isArray(rawAllowedTools)
     ? rawAllowedTools
@@ -393,12 +403,14 @@ async function loadSkillFromDir(
       ? rawAllowedTools.split(/\s+/).filter(Boolean)
       : [];
 
-  // Inspect references/ and scripts/ if present
+  // Inspect references/, scripts/, and assets/ if present (per Agent Skills spec)
   const referencesDir = path.join(skillDir, 'references');
   const scriptsDir = path.join(skillDir, 'scripts');
+  const assetsDir = path.join(skillDir, 'assets');
 
   const references: { name: string; relativePath: string }[] = [];
   const scripts: { name: string; relativePath: string }[] = [];
+  const assets: { name: string; relativePath: string }[] = [];
 
   if (await fse.pathExists(referencesDir)) {
     try {
@@ -430,6 +442,21 @@ async function loadSkillFromDir(
     }
   }
 
+  if (await fse.pathExists(assetsDir)) {
+    try {
+      await assertNoLinkedPathComponents(skillDir, assetsDir);
+      const files = await fs.readdir(assetsDir, { withFileTypes: true });
+      for (const file of files) {
+        if (file.isSymbolicLink()) throw new Error(`Linked skill files are not allowed: ${file.name}`);
+        if (file.isFile()) {
+          assets.push({ name: file.name, relativePath: path.join('assets', file.name) });
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Linked skill files')) throw error;
+    }
+  }
+
   const rawScope = parsedMetadata.data.scope ?? brandMetadata.scope;
   const scope: 'workspace' | 'global' | undefined =
     rawScope === 'workspace' || rawScope === 'global' ? rawScope : undefined;
@@ -447,6 +474,7 @@ async function loadSkillFromDir(
     sourcePath: skillDir,
     references: references.length > 0 ? references : undefined,
     scripts: scripts.length > 0 ? scripts : undefined,
+    assets: assets.length > 0 ? assets : undefined,
     scope,
     metadata: metadataObj,
     license: parsedMetadata.data.license,
@@ -473,6 +501,7 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
     : [
         path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
         path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
+        path.join(os.homedir(), '.agents', 'skills'),
       ];
   const activeSkillsDir = getUserSkillsDir();
   if (!candidateDirs.includes(activeSkillsDir)) {
@@ -680,12 +709,33 @@ export async function saveSkill(
             callerMetadata[LEGACY_RESOURCE_METADATA_KEY] !== null
             ? (callerMetadata[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
             : {};
+      const inferredTitle =
+        skill.title ||
+        (callerMetadata && typeof callerMetadata.title === 'string' ? callerMetadata.title : undefined) ||
+        (typeof existingBrandMetadata.title === 'string' ? existingBrandMetadata.title : undefined) ||
+        id;
+      const inferredCategory =
+        options.category ||
+        skill.category ||
+        (callerMetadata && typeof callerMetadata.category === 'string' ? callerMetadata.category : undefined) ||
+        (typeof existingBrandMetadata.category === 'string' ? existingBrandMetadata.category : undefined) ||
+        'general';
+      const callerMetaTags =
+        callerMetadata && Array.isArray(callerMetadata.tags)
+          ? callerMetadata.tags.filter((t): t is string => typeof t === 'string')
+          : undefined;
+      const existingBrandTags =
+        Array.isArray(existingBrandMetadata.tags)
+          ? existingBrandMetadata.tags.filter((t): t is string => typeof t === 'string')
+          : undefined;
+      const inferredTags = skill.tags || callerMetaTags || existingBrandTags || [];
+
       const metadataPayload = {
         ...existingBrandMetadata,
         ...callerBrandMetadata,
-        title: skill.title || id,
-        category: options.category || skill.category || 'general',
-        tags: skill.tags || [],
+        title: inferredTitle,
+        category: inferredCategory,
+        tags: inferredTags,
         scope,
       };
       const mergedCustomMetadata: Record<string, unknown> = {
@@ -700,10 +750,10 @@ export async function saveSkill(
 
       const metadata: Record<string, unknown> = {
         name: id,
-        title: skill.title || id,
-        category: options.category || skill.category || 'general',
+        title: inferredTitle,
+        category: inferredCategory,
         description,
-        tags: skill.tags || [],
+        tags: inferredTags,
         license: skill.license ?? existingFrontmatter?.license,
         compatibility: skill.compatibility ?? existingFrontmatter?.compatibility,
         scope,
@@ -726,6 +776,7 @@ export async function saveSkill(
       for (const [directory, files] of [
         ['references', skill.references],
         ['scripts', skill.scripts],
+        ['assets', skill.assets],
       ] as const) {
         if (files === undefined) continue;
         const supportDir = path.join(stagingDir, directory);
