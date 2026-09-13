@@ -815,10 +815,11 @@ export async function saveSkill(
       loaded.scope = scope;
       if (movedExisting) await fse.remove(backupDir).catch(() => {});
       const skillFilePath = path.join(targetDir, 'SKILL.md');
-      return Object.assign(loaded, {
+      return {
+        ...loaded,
         path: skillFilePath,
         skill: loaded,
-      });
+      };
     } catch (error) {
       await fse.remove(stagingDir).catch(() => {});
       if (installedStaging) await fse.remove(targetDir).catch(() => {});
@@ -832,7 +833,10 @@ export async function saveSkill(
   if (scope === 'workspace') {
     const canonicalWorkspace = await fs.realpath(options.workspacePath!).catch(() => path.resolve(options.workspacePath!));
     const workspaceSkillsDir = path.join(canonicalWorkspace, '.agents', 'skills');
-    return runWorkspaceConfigMutation(async () => executeSave(workspaceSkillsDir));
+    return runWorkspaceConfigMutation(async () => {
+      await assertNoLinkedPathComponents(canonicalWorkspace, workspaceSkillsDir);
+      return executeSave(workspaceSkillsDir);
+    });
   }
 
   return withCatalogLock(async () => executeSave(path.resolve(getUserSkillsDir())));
@@ -858,10 +862,12 @@ export async function deleteSkill(
     const wsPath = options.workspacePath;
     const canonicalWorkspace = await fs.realpath(wsPath).catch(() => path.resolve(wsPath));
     const workspaceSkillsDir = path.join(canonicalWorkspace, '.agents', 'skills');
-    const targetDir = assertPathWithin(workspaceSkillsDir, path.join(workspaceSkillsDir, id));
-    if (!(await fse.pathExists(targetDir))) throw new Error('Skill not found.');
-    await assertNoLinkedPathComponents(workspaceSkillsDir, targetDir);
-    await fse.remove(targetDir);
+    await runWorkspaceConfigMutation(async () => {
+      const targetDir = assertPathWithin(canonicalWorkspace, path.join(workspaceSkillsDir, id));
+      await assertNoLinkedPathComponents(canonicalWorkspace, targetDir);
+      if (!(await fse.pathExists(targetDir))) throw new Error('Skill not found.');
+      await fse.remove(targetDir);
+    });
     return;
   }
 

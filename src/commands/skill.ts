@@ -16,7 +16,7 @@ import { BRAND_NAME } from '../core/constants.js';
 export interface SkillListOptions {
   json?: boolean;
   scope?: 'all' | 'workspace' | 'global';
-  tag?: string;
+  tag?: string | string[];
 }
 
 export async function skillListCommand(workspaceArg?: string, options: SkillListOptions = {}): Promise<void> {
@@ -41,8 +41,8 @@ export async function skillListCommand(workspaceArg?: string, options: SkillList
     filtered = filtered.filter((s) => s.scope !== 'workspace');
   }
   if (options.tag) {
-    const tagLower = options.tag.toLowerCase().trim();
-    filtered = filtered.filter((s) => s.tags?.some((t) => t.toLowerCase() === tagLower));
+    const tags = (Array.isArray(options.tag) ? options.tag : [options.tag]).map((tag) => tag.toLowerCase().trim());
+    filtered = filtered.filter((s) => tags.every((tag) => s.tags?.some((t) => t.toLowerCase() === tag)));
   }
 
   if (options.json) {
@@ -91,6 +91,7 @@ export interface SkillCreateOptions {
   description?: string;
   content?: string;
   tags?: string[];
+  tag?: string[] | string;
   scope?: 'workspace' | 'global';
   file?: string;
 }
@@ -134,6 +135,7 @@ export async function skillCreateCommand(
   }
 
   try {
+    const tags = options.tag ?? options.tags ?? [];
     const saved = await saveSkill(
       {
         id: cleanId,
@@ -141,7 +143,7 @@ export async function skillCreateCommand(
         title,
         description,
         content,
-        tags: options.tags || [],
+        tags: Array.isArray(tags) ? tags : [tags],
       },
       {
         scope,

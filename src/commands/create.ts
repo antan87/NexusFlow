@@ -63,6 +63,9 @@ export interface CreateCommandOptions {
 }
 
 export async function createCommand(options: CreateCommandOptions = {}): Promise<void> {
+  if (options.flow && !['quick-fix', 'feature', 'epic'].includes(options.flow)) {
+    throw new Error('Flow must be quick-fix, feature, or epic.');
+  }
   console.log(
     chalk.bold.cyan(`\n🚀 ${BRAND_NAME} — Start Work\n`),
   );
@@ -316,6 +319,7 @@ export async function createCommand(options: CreateCommandOptions = {}): Promise
   const workspacePath = path.join(config.workspacesDir, workspaceId);
   const feature: Feature = {
     id: workspaceId,
+    flowType: isQuick ? 'quick' : isEpic ? 'epic' : options.flow === 'feature' ? 'feature' : undefined,
     mode,
     projectId: project?.id,
     branchName,

@@ -55,8 +55,8 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle`,
       );
       setLifecycle(data.lifecycle);
-    } catch {
-      // Best-effort
+    } catch (error) {
+      setVerifyMessage({ status: 'fail', text: error instanceof Error ? error.message : 'Unable to load lifecycle.' });
     } finally {
       setLifecycleLoading(false);
     }
@@ -84,7 +84,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       } else if (report.overallStatus === 'pass_dirty') {
         setVerifyMessage({
           status: 'pass_dirty',
-          text: `Verification Gate PASSED with uncommitted changes. Commit files to anchor SHA proof.`,
+          text: 'Tests passed with uncommitted changes. Commit them before advancing the verification gate.',
         });
       } else {
         setVerifyMessage({
@@ -112,8 +112,9 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         },
       );
       setLifecycle(data.lifecycle);
-    } catch {
-      // Best-effort
+    } catch (error) {
+      setVerifyMessage({ status: 'fail', text: error instanceof Error ? error.message : 'Unable to advance lifecycle.' });
+      await loadLifecycle();
     } finally {
       setActionLoading(null);
     }
@@ -242,6 +243,8 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
             <div className="grid gap-3">
               {lifecycle?.steps.map((step, idx) => {
                 const isCurrent = step.id === lifecycle.currentStepId;
+                const requiresVerification = step.requiresVerification || step.verificationCommand || step.lastVerificationStatus ||
+                  ['verify_and_ship', 'step_verification', 'epic_slice_4'].includes(step.id);
                 return (
                   <div
                     key={step.id}
@@ -328,15 +331,15 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {step.status === 'in_progress' && (
+                        {(step.status === 'in_progress' || step.status === 'verified') && (
                           <Button
                             size="xs"
                             variant="outline"
                             onClick={() => void handleStepAction(step.id, 'complete')}
-                            disabled={actionLoading === step.id}
+                            disabled={actionLoading !== null}
                             className="text-[11px] gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
                           >
-                            <Check size={12} /> Mark Complete
+                            <Check size={12} /> {actionLoading === step.id ? 'Working...' : requiresVerification ? 'Verify & Complete' : 'Mark Complete'}
                           </Button>
                         )}
                         {step.status === 'pending' && (
@@ -344,7 +347,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             size="xs"
                             variant="ghost"
                             onClick={() => void handleStepAction(step.id, 'start')}
-                            disabled={actionLoading === step.id}
+                            disabled={actionLoading !== null}
                             className="text-[11px] gap-1 text-primary hover:bg-primary/10"
                           >
                             <Play size={12} /> Start

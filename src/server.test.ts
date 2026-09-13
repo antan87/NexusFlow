@@ -28,6 +28,16 @@ vi.mock('node:fs/promises');
 vi.mock('execa');
 vi.mock('./core/workspace.js');
 vi.mock('./core/config.js');
+vi.mock('./core/domain-packs.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./core/domain-packs.js')>();
+  return {
+    ...actual,
+    saveDomainPack: async (pack: Parameters<typeof actual.registerCustomDomainPack>[0]) => actual.registerCustomDomainPack(pack),
+    saveOrganization: async (org: Parameters<typeof actual.registerCustomOrganization>[0]) => actual.registerCustomOrganization(org),
+    deleteDomainPack: async (id: string) => actual.unregisterCustomDomainPack(id),
+    deleteOrganization: async (id: string) => actual.unregisterCustomOrganization(id),
+  };
+});
 vi.mock('./utils/system-scanner.js');
 vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
@@ -1282,6 +1292,7 @@ describe('Server API Endpoints Unit Tests', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchName: 'test-ws-creation-no-pack',
+          flowType: 'epic',
           description: 'A test workspace',
           repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
           assistants: ['antigravity']
@@ -1296,7 +1307,7 @@ describe('Server API Endpoints Unit Tests', () => {
       // Wait a brief tick for the background job to execute
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(workspace.createWorkspace).toHaveBeenCalled();
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].flowType).toBe('epic');
       expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalled();
 

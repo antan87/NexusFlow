@@ -15,6 +15,7 @@ describe('feature manifest persistence (A1.6)', () => {
 
   const feature: Feature = {
     id: 'feat',
+    flowType: 'epic',
     branchName: 'feat',
     description: 'test',
     repos: [path.join(workspacePath, 'repo-1')],
@@ -39,6 +40,7 @@ describe('feature manifest persistence (A1.6)', () => {
     // Plain JSON — no YAML frontmatter that would break JSON.parse.
     expect(String(contents).trimStart().startsWith('{')).toBe(true);
     expect(JSON.parse(String(contents)).id).toBe('feat');
+    expect(JSON.parse(String(contents)).flowType).toBe('epic');
   });
 
   it('loads the manifest from the workspace root', async () => {
@@ -49,6 +51,7 @@ describe('feature manifest persistence (A1.6)', () => {
 
     const loaded = await loadFeatureConfig(workspacePath);
     expect(loaded?.id).toBe('feat');
+    expect(loaded?.flowType).toBe('epic');
   });
 
   it('loads legacy nexusflow.json when contextspace.json is absent', async () => {

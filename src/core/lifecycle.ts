@@ -10,9 +10,7 @@ import { execa } from 'execa';
 import type {
   BranchFleetMember,
   LifecycleStep,
-  LifecycleStepStatus,
   WorkspaceLifecycle,
-  WorkspaceState,
 } from '../types.js';
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
@@ -117,7 +115,7 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
 export function createDefaultSteps(
   flowType: 'quick' | 'feature' | 'epic',
   featureId: string,
-  branchName: string,
+  branchName?: string,
 ): LifecycleStep[] {
   if (flowType === 'quick') {
     return [
@@ -131,6 +129,7 @@ export function createDefaultSteps(
       },
       {
         id: 'verify_and_ship',
+        requiresVerification: true,
         title: 'Mechanical Verification Gate & Ship',
         description: 'Execute automated tests, anchor commit SHA proof, and publish PR.',
         branch: branchName,
@@ -147,35 +146,35 @@ export function createDefaultSteps(
         id: 'epic_slice_1',
         title: 'Foundation & Core Schema',
         description: 'Data models, domain types, and foundational migration contracts.',
-        branch: 'feat/schema',
-        owner: 'Backend Team',
-        status: 'completed',
-        completedAt: new Date().toISOString(),
+        branch: branchName,
+        owner: 'Developer',
+        status: 'in_progress',
       },
       {
         id: 'epic_slice_2',
         title: 'API & Business Logic Implementation',
         description: 'Service endpoints, business logic, and test coverage.',
         branch: branchName,
-        owner: 'AI Assistant',
-        status: 'in_progress',
+        owner: 'Developer',
+        status: 'pending',
         dependsOn: ['epic_slice_1'],
       },
       {
         id: 'epic_slice_3',
         title: 'UI Components & Frontend Integration',
         description: 'Client-side interface, forms, and interaction polish.',
-        branch: 'feat/ui',
-        owner: 'Frontend Team',
+        branch: branchName,
+        owner: 'Developer',
         status: 'pending',
         dependsOn: ['epic_slice_2'],
       },
       {
         id: 'epic_slice_4',
+        requiresVerification: true,
         title: 'Cross-Repo Integration & E2E Gate',
         description: 'End-to-end integration tests, mechanical verification, and milestone signoff.',
         branch: branchName,
-        owner: 'Team Lead',
+        owner: 'Developer',
         status: 'blocked',
         dependsOn: ['epic_slice_2', 'epic_slice_3'],
       },
@@ -190,8 +189,7 @@ export function createDefaultSteps(
       description: 'Survey relevant modules, inspect interfaces, and create verification skeleton.',
       branch: branchName,
       owner: 'Developer',
-      status: 'completed',
-      completedAt: new Date().toISOString(),
+      status: 'in_progress',
     },
     {
       id: 'step_implementation',
@@ -199,11 +197,12 @@ export function createDefaultSteps(
       description: 'Implement feature changes across affected workspace repositories.',
       branch: branchName,
       owner: 'Developer',
-      status: 'in_progress',
+      status: 'pending',
       dependsOn: ['step_discovery'],
     },
     {
       id: 'step_verification',
+      requiresVerification: true,
       title: 'Mechanical Verification Gate',
       description: 'Run automated test suites and anchor clean commit SHA proof in state.',
       branch: branchName,
@@ -241,22 +240,16 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   }
 
   // Determine flow type
-  let flowType: 'quick' | 'feature' | 'epic' = 'feature';
-  if (feature?.branchName.startsWith('fix/') || feature?.branchName.startsWith('quick/')) {
+  let flowType: 'quick' | 'feature' | 'epic' = feature?.flowType ?? 'feature';
+  if (!feature?.flowType && (feature?.branchName.startsWith('fix/') || feature?.branchName.startsWith('quick/'))) {
     flowType = 'quick';
-  } else if (
+  } else if (!feature?.flowType && (
     (feature?.repos.length ?? 0) > 2 ||
     feature?.branchName.startsWith('epic/') ||
     feature?.branchName.startsWith('flow/')
-  ) {
+  )) {
     flowType = 'epic';
   }
-
-  const steps = createDefaultSteps(
-    flowType,
-    feature?.id ?? 'workspace',
-    feature?.branchName ?? 'main',
-  );
 
   let fleet: BranchFleetMember[] = [];
   try {
@@ -264,6 +257,14 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   } catch {
     // Best-effort
   }
+
+  const branches = [...new Set(fleet.filter((member) => member.isCurrent).map((member) => member.branch))];
+  const branch = branches.length === 1 && branches[0] !== 'detached'
+    ? branches[0]
+    : !branches.length && feature?.mode !== 'in-place' && !feature?.repoBranches
+      ? feature?.branchName
+      : undefined;
+  const steps = createDefaultSteps(flowType, feature?.id ?? 'workspace', branch);
 
   const lifecycle: WorkspaceLifecycle = {
     workspaceId: feature?.id ?? 'workspace',
@@ -296,46 +297,57 @@ export async function advanceLifecycleStep(
 
   const step = lifecycle.steps[stepIndex]!;
 
+  if (!['start', 'verify', 'complete'].includes(action)) {
+    throw new Error(`Unknown lifecycle action "${action}".`);
+  }
+  const dependenciesComplete = (candidate: LifecycleStep) =>
+    (candidate.dependsOn ?? []).every((id) => lifecycle.steps.some((s) => s.id === id && s.status === 'completed'));
+  if (!dependenciesComplete(step)) {
+    throw new Error(`Complete dependencies before advancing step "${stepId}".`);
+  }
+  if (step.status === 'completed') {
+    throw new Error(`Step "${stepId}" is already completed.`);
+  }
+  if (action !== 'start' && step.status !== 'in_progress' && step.status !== 'verified') {
+    throw new Error(`Start step "${stepId}" before ${action}.`);
+  }
+
+  // Recognize gates in lifecycles saved before requiresVerification existed.
+  const requiresVerification = step.requiresVerification || Boolean(step.verificationCommand) || Boolean(step.lastVerificationStatus) ||
+    ['verify_and_ship', 'step_verification', 'epic_slice_4'].includes(step.id);
+  let gateFailed = false;
+  if (action === 'verify' || (action === 'complete' && requiresVerification)) {
+    const report = await verifyWorkspace(workspacePath, { command: step.verificationCommand });
+    step.lastVerificationStatus = report.overallStatus;
+    step.lastVerificationSha = report.repos[0]?.headSha;
+    gateFailed = !report.canProgress;
+    step.status = gateFailed ? 'in_progress' : 'verified';
+  }
+
   if (action === 'start') {
     step.status = 'in_progress';
     lifecycle.currentStepId = step.id;
-  } else if (action === 'verify') {
-    const report = await verifyWorkspace(workspacePath);
-    step.lastVerificationStatus = report.overallStatus;
-    step.lastVerificationSha = report.repos[0]?.headSha;
-    if (report.overallStatus === 'pass' || report.overallStatus === 'pass_dirty') {
-      step.status = 'verified';
-    }
-  } else if (action === 'complete') {
+  } else if (action === 'complete' && !gateFailed) {
     step.status = 'completed';
     step.completedAt = new Date().toISOString();
-
-    // Check if downstream dependent steps are now unblocked
-    const completedIds = new Set(
-      lifecycle.steps.filter((s) => s.status === 'completed').map((s) => s.id),
-    );
-
     for (const nextStep of lifecycle.steps) {
-      if (nextStep.status === 'blocked' && nextStep.dependsOn) {
-        const allSatisfied = nextStep.dependsOn.every((dep) => completedIds.has(dep));
-        if (allSatisfied) {
-          nextStep.status = 'pending';
-        }
+      if (nextStep.status === 'blocked' && dependenciesComplete(nextStep)) {
+        nextStep.status = 'pending';
       }
     }
-
-    // Set next pending step to in_progress
-    const nextPending = lifecycle.steps.find((s) => s.status === 'pending');
-    if (nextPending) {
-      nextPending.status = 'in_progress';
-      lifecycle.currentStepId = nextPending.id;
-    }
+    const active = lifecycle.steps.find((s) => s.status === 'in_progress' || s.status === 'verified');
+    const next = active ?? lifecycle.steps.find((s) => s.status === 'pending' && dependenciesComplete(s));
+    if (next && !active) next.status = 'in_progress';
+    lifecycle.currentStepId = next?.id;
   }
 
   lifecycle.updatedAt = new Date().toISOString();
   const state = await loadWorkspaceState(workspacePath);
   state.lifecycle = lifecycle;
   await saveWorkspaceState(state);
+  if (gateFailed && action === 'complete') {
+    throw new Error(`Verification did not permit progress for step "${stepId}" (${step.lastVerificationStatus}).`);
+  }
 
   return lifecycle;
 }

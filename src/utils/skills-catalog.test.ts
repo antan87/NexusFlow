@@ -46,6 +46,31 @@ describe('Skills Catalog & Frontmatter Utils', () => {
 
 
 
+  it('returns a JSON-serializable save result for API responses', async () => {
+    const saved = await saveSkill({ name: 'serializable', description: 'Probe', content: '# Probe' });
+    const response = JSON.parse(JSON.stringify({ success: true, skill: saved }));
+    expect(response.skill.id).toBe('serializable');
+    expect(response.skill.skill.id).toBe('serializable');
+    expect(await fs.readFile(saved.path, 'utf8')).toContain('# Probe');
+  });
+
+  it.each(['.agents', '.agents/skills'])('rejects workspace writes and deletes through linked %s', async (linked) => {
+    const workspace = path.join(tempHome, 'workspace');
+    const outside = path.join(tempHome, 'outside');
+    const linkPath = path.join(workspace, linked);
+    await fs.mkdir(path.dirname(linkPath), { recursive: true });
+    await fs.mkdir(outside);
+    await fs.symlink(outside, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const target = path.join(outside, linked === '.agents' ? 'skills' : '', 'probe');
+    await fs.mkdir(target, { recursive: true });
+    await fs.writeFile(path.join(target, 'SKILL.md'), 'original');
+    await expect(saveSkill({ name: 'probe', description: 'Probe', content: '# Changed' }, {
+      scope: 'workspace', workspacePath: workspace,
+    })).rejects.toThrow(/Linked/);
+    await expect(deleteSkill('probe', { scope: 'workspace', workspacePath: workspace })).rejects.toThrow(/Linked/);
+    expect(await fs.readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe('original');
+  });
+
   describe('parseSkillMarkdown & serializeSkillMarkdown', () => {
     it('should parse simple frontmatter, CRLF line endings, and markdown body', () => {
       const raw = `---\r\nname: test-skill\r\ntitle: Test Skill\r\ncategory: pull-requests\r\ndescription: "A test skill for testing."\r\ntags:\r\n  - git\r\n  - test\r\nallowed-tools:\r\n  - run_command\r\n  - view_file\r\n---\r\n\r\n# Test Playbook\r\n\r\nSome instructions here.`;

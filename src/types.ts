@@ -220,6 +220,8 @@ export interface IsolatedRepoInfo {
 
 /** A feature workspace that spans one or more repos. */
 export interface Feature {
+  /** Explicit lifecycle preset, preserved independently of branch naming. */
+  flowType?: 'quick' | 'feature' | 'epic';
   /** Unique identifier — the git branch name (worktree mode) or slugified workspace name (in-place mode). */
   id: string;
 
@@ -637,6 +639,7 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
   dependsOn?: string[];
   verificationCommand?: string;
+  requiresVerification?: boolean;
   lastVerificationSha?: string;
   lastVerificationStatus?: VerificationStatus;
   completedAt?: string;

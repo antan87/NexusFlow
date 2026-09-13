@@ -55,10 +55,10 @@ import {
   getDomainPack,
   matchDomainPacks,
   resolveActiveDomainRules,
-  registerCustomDomainPack,
-  unregisterCustomDomainPack,
-  registerCustomOrganization,
-  unregisterCustomOrganization,
+  saveDomainPack,
+  deleteDomainPack,
+  saveOrganization,
+  deleteOrganization,
 } from './core/domain-packs.js';
 
 import { detectAIAssistants } from './utils/detect-ai.js';
@@ -1208,6 +1208,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     const feature: Feature = {
       id: workspaceId,
       mode: inPlace ? 'in-place' : 'worktree',
+      flowType: body.flowType,
       projectId: body.projectId,
       // In-place features never create a branch; keeping branchName populated
       // (= id) avoids breaking every consumer of the non-optional field.
@@ -1303,6 +1304,7 @@ app.post('/api/workspace', async (c) => {
       enabledSkills?: string[];
       enabledAgents?: string[];
       enabledCategories?: string[];
+      flowType?: 'quick' | 'feature' | 'epic';
       domainPacks?: string[];
       organizationId?: string;
       teamworkInstructions?: string;
@@ -1314,6 +1316,9 @@ app.post('/api/workspace', async (c) => {
       };
     };
 
+    if (body.flowType !== undefined && !['quick', 'feature', 'epic'].includes(body.flowType)) {
+      return c.json({ error: 'flowType must be quick, feature, or epic.' }, 400);
+    }
     const inPlace = body.mode === 'in-place';
     if (inPlace && !body.name?.trim()) {
       return c.json({ error: 'In-place workspaces need a "name"' }, 400);
@@ -3333,7 +3338,7 @@ app.post('/api/enterprise/organizations', async (c) => {
     if (!body.id || !body.name || !Array.isArray(body.rules)) {
       return c.json({ error: 'id, name, and rules array are required for an organization.' }, 400);
     }
-    registerCustomOrganization(body);
+    await saveOrganization(body);
     return c.json({ success: true, organization: getOrganization(body.id) });
   } catch (error) {
     return errorResponse(c, error);
@@ -3341,9 +3346,9 @@ app.post('/api/enterprise/organizations', async (c) => {
 });
 
 // Unregister custom organization
-app.delete('/api/enterprise/organizations/:id', (c) => {
+app.delete('/api/enterprise/organizations/:id', async (c) => {
   const id = decodeURIComponent(c.req.param('id'));
-  const deleted = unregisterCustomOrganization(id);
+  const deleted = await deleteOrganization(id);
   return c.json({ success: deleted });
 });
 
@@ -3379,7 +3384,7 @@ app.post('/api/enterprise/domain-packs', async (c) => {
       tags,
       isTemplate: false,
     };
-    registerCustomDomainPack(packToRegister);
+    await saveDomainPack(packToRegister);
     return c.json({ success: true, domainPack: getDomainPack(normalizedId) });
   } catch (error) {
     return errorResponse(c, error);
@@ -3417,7 +3422,7 @@ app.put('/api/enterprise/domain-packs/:id', async (c) => {
       isTemplate: false,
     };
 
-    registerCustomDomainPack(updatedPack);
+    await saveDomainPack(updatedPack);
     return c.json({ success: true, domainPack: getDomainPack(id) });
   } catch (error) {
     return errorResponse(c, error);
@@ -3425,9 +3430,9 @@ app.put('/api/enterprise/domain-packs/:id', async (c) => {
 });
 
 // Unregister custom domain pack
-app.delete('/api/enterprise/domain-packs/:id', (c) => {
+app.delete('/api/enterprise/domain-packs/:id', async (c) => {
   const id = decodeURIComponent(c.req.param('id')).toLowerCase().trim();
-  const deleted = unregisterCustomDomainPack(id);
+  const deleted = await deleteDomainPack(id);
   return c.json({ success: deleted });
 });
 

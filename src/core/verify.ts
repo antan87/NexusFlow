@@ -26,6 +26,7 @@ export interface VerifyCommandSpec {
   command: string;
   args: string[];
   runner: string;
+  followingCommands?: VerifyCommandSpec[];
 }
 
 export interface VerifyRepoOptions {
@@ -53,6 +54,55 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+/** Parse literal arguments and && chains without invoking a shell. */
+function parseVerificationCommands(input: string): VerifyCommandSpec[] {
+  const commands: VerifyCommandSpec[] = [];
+  let args: string[] = [];
+  let token = '';
+  let started = false;
+  let quote: string | undefined;
+  const finishToken = () => {
+    if (started) args.push(token);
+    token = '';
+    started = false;
+  };
+  const finishCommand = () => {
+    finishToken();
+    if (!args.length || !args[0]) throw new Error('Empty verification command.');
+    commands.push({ command: args[0], args: args.slice(1), runner: 'custom' });
+    args = [];
+  };
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]!;
+    const next = input[i + 1];
+    if (char === '\\' && quote !== "'" && next &&
+      (next === '"' || next === '\\' || (!quote && /[\s'&]/.test(next)))) {
+      token += next;
+      started = true;
+      i++;
+    } else if (quote) {
+      if (char === quote) quote = undefined;
+      else token += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+    } else if (/\s/.test(char)) {
+      finishToken();
+    } else if (char === '&' && next === '&') {
+      finishCommand();
+      i++;
+    } else if (/[|;&<>]/.test(char)) {
+      throw new Error('Verification commands support literal arguments and &&; use a script for other shell operators.');
+    } else {
+      token += char;
+      started = true;
+    }
+  }
+  if (quote) throw new Error('Unterminated quote in verification command.');
+  finishCommand();
+  return commands;
+}
+
 /**
  * Detects the appropriate test command and runner for a repository path.
  */
@@ -61,12 +111,8 @@ export async function detectTestCommand(
   preferredCommand?: string,
 ): Promise<VerifyCommandSpec | null> {
   if (preferredCommand && preferredCommand.trim()) {
-    const parts = preferredCommand.trim().split(/\s+/);
-    return {
-      command: parts[0]!,
-      args: parts.slice(1),
-      runner: 'custom',
-    };
+    const [first, ...followingCommands] = parseVerificationCommands(preferredCommand.trim());
+    return followingCommands.length ? { ...first!, followingCommands } : first!;
   }
 
   // 1. Node.js / JavaScript / TypeScript
@@ -223,22 +269,33 @@ export async function verifyRepo(
     };
   }
 
-  const finalArgs = buildArgsWithFilter(spec, options.filter);
-  const fullCommandStr = `${spec.command} ${finalArgs.join(' ')}`.trim();
+  const commands = [spec, ...(spec.followingCommands ?? [])].map((command) => ({
+    ...command, args: buildArgsWithFilter(command, options.filter),
+  }));
+  const fullCommandStr = commands.map((command) => `${command.command} ${command.args.join(' ')}`.trim()).join(' && ');
   const startTime = Date.now();
   const timeoutMs = options.timeoutMs ?? 300_000;
 
   try {
-    const result = await execa(spec.command, finalArgs, {
-      cwd: repoPath,
-      reject: false,
-      timeout: timeoutMs,
-      env: {
-        ...process.env,
-        CI: 'true',
-        ...(options.env ?? {}),
-      },
-    });
+    let result: { exitCode?: number; timedOut?: boolean; stdout?: string; stderr?: string } = {};
+    let stdout = '';
+    let stderr = '';
+    for (const command of commands) {
+      const remainingMs = timeoutMs - (Date.now() - startTime);
+      if (remainingMs <= 0) {
+        result = { timedOut: true, exitCode: 124 };
+        break;
+      }
+      result = await execa(command.command, command.args, {
+        cwd: repoPath,
+        reject: false,
+        timeout: remainingMs,
+        env: { ...process.env, CI: 'true', ...(options.env ?? {}) },
+      });
+      stdout = [stdout, result.stdout].filter(Boolean).join('\n').slice(-10000);
+      stderr = [stderr, result.stderr].filter(Boolean).join('\n').slice(-10000);
+      if (result.timedOut || result.exitCode !== 0) break;
+    }
 
     const durationMs = Date.now() - startTime;
     const exitCode = result.exitCode ?? (result.timedOut ? 124 : 1);
@@ -262,8 +319,8 @@ export async function verifyRepo(
       clean,
       dirtyFiles: dirtyFiles.length > 0 ? dirtyFiles : undefined,
       durationMs,
-      stdout: result.stdout ? result.stdout.slice(-10000) : undefined,
-      stderr: result.stderr ? result.stderr.slice(-10000) : undefined,
+      stdout: stdout || undefined,
+      stderr: stderr || undefined,
       verifiedAt,
     };
   } catch (err: any) {

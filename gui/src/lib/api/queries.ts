@@ -72,6 +72,7 @@ export function useWorkspacesStatus(options: { enabled?: boolean; intervalMs?: n
 }
 
 export interface CreateWorkspacePayload {
+  flowType?: 'quick' | 'feature' | 'epic';
   mode?: WorkspaceMode;
   projectId?: string;
   /** Workspace name — required for in-place mode. */

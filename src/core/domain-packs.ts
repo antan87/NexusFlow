@@ -6,6 +6,7 @@
  */
 
 import type { DomainPack, OrganizationConventions, ResolvedCategoryRules } from '../types.js';
+import { readDomainCatalog, mutateDomainCatalog } from './domain-catalog.js';
 export type { ResolvedCategoryRules };
 
 /** Built-in enterprise organization conventions (clean slate by default; generic solution). */
@@ -163,10 +164,10 @@ export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
   },
 ];
 
-/** User-defined custom organizations registered at runtime or loaded from user config. */
+/** Process-local overrides for programmatic integrations and sample fixtures. */
 const customOrganizations = new Map<string, OrganizationConventions>();
 
-/** User-defined custom domain packs registered at runtime or loaded from user config. */
+/** Process-local overrides for programmatic integrations and sample fixtures. */
 const customDomainPacks = new Map<string, DomainPack>();
 
 /**
@@ -207,6 +208,43 @@ export function clearCustomDomainRegistrations(): void {
   customDomainPacks.clear();
 }
 
+/** Durable administration used by the GUI; runtime fixtures are never implicitly persisted. */
+export async function saveDomainPack(pack: DomainPack): Promise<void> {
+  const normalized = { ...pack, id: pack.id.toLowerCase().trim(), isTemplate: false };
+  await mutateDomainCatalog((catalog) => {
+    catalog.domainPacks = catalog.domainPacks.filter((p) => p.id !== normalized.id);
+    catalog.domainPacks.push(normalized);
+  });
+}
+
+export async function saveOrganization(org: OrganizationConventions): Promise<void> {
+  const normalized = { ...org, id: org.id.toLowerCase().trim(), isTemplate: false };
+  await mutateDomainCatalog((catalog) => {
+    catalog.organizations = catalog.organizations.filter((o) => o.id !== normalized.id);
+    catalog.organizations.push(normalized);
+  });
+}
+
+export async function deleteDomainPack(id: string): Promise<boolean> {
+  const normalized = id.toLowerCase().trim();
+  const deleted = await mutateDomainCatalog((catalog) => {
+    const exists = catalog.domainPacks.some((p) => p.id === normalized);
+    catalog.domainPacks = catalog.domainPacks.filter((p) => p.id !== normalized);
+    return exists;
+  });
+  return unregisterCustomDomainPack(normalized) || deleted;
+}
+
+export async function deleteOrganization(id: string): Promise<boolean> {
+  const normalized = id.toLowerCase().trim();
+  const deleted = await mutateDomainCatalog((catalog) => {
+    const exists = catalog.organizations.some((o) => o.id === normalized);
+    catalog.organizations = catalog.organizations.filter((o) => o.id !== normalized);
+    return exists;
+  });
+  return unregisterCustomOrganization(normalized) || deleted;
+}
+
 /**
  * Helper to seed sample domain packs and organizations (useful for tests or documentation).
  */
@@ -230,6 +268,7 @@ export function getAvailableOrganizations(): OrganizationConventions[] {
   for (const [id, org] of customOrganizations) {
     map.set(id, org);
   }
+  for (const org of readDomainCatalog().organizations) map.set(org.id, org);
   return Array.from(map.values());
 }
 
@@ -253,6 +292,9 @@ export function getAvailableDomainPacks(): DomainPack[] {
   }
   for (const [id, pack] of customDomainPacks) {
     map.set(id, { ...pack, builtin: builtinIds.has(id) });
+  }
+  for (const pack of readDomainCatalog().domainPacks) {
+    map.set(pack.id, { ...pack, builtin: builtinIds.has(pack.id) });
   }
   return Array.from(map.values());
 }

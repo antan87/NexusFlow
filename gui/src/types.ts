@@ -497,6 +497,7 @@ export type LifecycleStepStatus =
   | 'blocked';
 
 export interface LifecycleStep {
+  requiresVerification?: boolean;
   id: string;
   title: string;
   description?: string;

@@ -297,12 +297,13 @@ invalid: {broken yaml
       expect(steps[3].dependsOn).toContain('step_verification');
     });
 
-    it('F6-B.3: epic flow sets foundation slice completed and implementation in progress', () => {
+    it('F6-B.3: epic flow starts foundation work without claiming completed slices', () => {
       const steps = createDefaultSteps('epic', 'test-epic', 'feat/epic');
       expect(steps[0].id).toBe('epic_slice_1');
-      expect(steps[0].status).toBe('completed');
+      expect(steps[0].status).toBe('in_progress');
       expect(steps[1].id).toBe('epic_slice_2');
-      expect(steps[1].status).toBe('in_progress');
+      expect(steps[1].status).toBe('pending');
+      expect(steps.every((step) => !step.completedAt && step.branch === 'feat/epic')).toBe(true);
     });
 
     it('F6-B.4: empty repo list in workspace feature is handled safely in markdown generation', async () => {

@@ -115,6 +115,43 @@ describe('core/verify', () => {
     });
   });
 
+  describe('composed verification', () => {
+    beforeEach(() => {
+      vi.mocked(multiGit.getRepoStatus).mockResolvedValue({ hasChanges: false, files: [] } as any);
+      vi.mocked(execa).mockImplementation(async (cmd: any, args: any) => {
+        if (cmd === 'git') return { stdout: 'head-sha' } as any;
+        return { exitCode: args[0] === 'fail.mjs' ? 1 : 0, stdout: args[0] } as any;
+      });
+    });
+
+    it('executes subsequent commands and fails on a failing second gate', async () => {
+      const report = await verifyRepo('/repo', 'repo', { command: 'node pass.mjs && node fail.mjs && node skipped.mjs' });
+      expect(report.status).toBe('fail');
+      expect(report.stdout).toBe('pass.mjs\nfail.mjs');
+      const calls = vi.mocked(execa).mock.calls.filter(([cmd]) => cmd === 'node');
+      expect(calls.map((call) => call[1])).toEqual([['pass.mjs'], ['fail.mjs']]);
+    });
+
+    it('runs all passing commands and preserves quoted arguments including literal &&', async () => {
+      const report = await verifyRepo('/repo', 'repo', { command: 'node "first gate.mjs" && node second.mjs "a && b"' });
+      expect(report.status).toBe('pass');
+      const calls = vi.mocked(execa).mock.calls.filter(([cmd]) => cmd === 'node');
+      expect(calls.map((call) => call[1])).toEqual([['first gate.mjs'], ['second.mjs', 'a && b']]);
+    });
+
+    it('stops the chain on timeout', async () => {
+      vi.mocked(execa).mockImplementation(async (cmd: any) => cmd === 'git'
+        ? { stdout: 'head' } as any : { timedOut: true } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node slow.mjs && node skipped.mjs' });
+      expect(report.status).toBe('timeout');
+      expect(vi.mocked(execa).mock.calls.filter(([cmd]) => cmd === 'node')).toHaveLength(1);
+    });
+
+    it.each(['node a &&', 'node "unclosed', 'node a | node b'])('rejects malformed or unsupported command %s', async (command) => {
+      await expect(detectTestCommand('/repo', command)).rejects.toThrow();
+    });
+  });
+
   describe('verifyRepo', () => {
     it('returns no-tests report when no test runner is found', async () => {
       vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));

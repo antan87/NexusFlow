@@ -108,7 +108,7 @@ describe('skill CLI commands', () => {
         title: 'Invoice Calculator',
         description: 'Calculates invoices accurately',
         content: '# Invoice Calc\nRun math.',
-        tags: ['billing'],
+        tag: ['billing'],
         scope: 'workspace',
       });
 

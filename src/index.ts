@@ -370,7 +370,7 @@ skillCmd
   .description('List agent skills in current workspace and global catalog')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
-  .option('-t, --tag <tag>', 'Filter skills by tag')
+  .option('-t, --tag <tags...>', 'Filter skills by tags')
   .option('--json', 'Output in JSON format')
   .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
     const merged = resolveCliOptions(cmd, options);
@@ -421,7 +421,7 @@ skillCmd
 skillCmd
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
-  .option('-t, --tag <tag>', 'Filter skills by tag')
+  .option('-t, --tag <tags...>', 'Filter skills by tags')
   .option('--json', 'Output in JSON format')
   .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
     const merged = resolveCliOptions(cmd, options);
