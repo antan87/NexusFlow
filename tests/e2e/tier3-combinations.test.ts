@@ -98,7 +98,7 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
     expect(steps[0].id).toBe('epic_slice_1');
     expect(steps[3].id).toBe('epic_slice_4');
 
-    const resolved = resolveActiveDomainRules('hogia', ['hr', 'hr/payroll']);
+    const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll']);
     expect(resolved.compositeVerifyCommand).toContain('npm test -- hr');
     expect(resolved.compositeVerifyCommand).toContain('npm test -- payroll');
 
@@ -256,17 +256,17 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
     expect(updatedMd).toContain('Economy & Invoicing');
   });
 
-  // C10: Ad-hoc inception + organization conventions (Hogia) + custom verification commands
-  it('C10: Ad-hoc inception + organization conventions (Hogia) + composable verify commands', async () => {
+  // C10: Ad-hoc inception + organization conventions (Acme Corp) + custom verification commands
+  it('C10: Ad-hoc inception + organization conventions (Acme Corp) + composable verify commands', async () => {
     ws = await createTestWorkspace({
-      organizationId: 'hogia',
+      organizationId: 'acme',
       tags: ['economy'],
     });
 
     const agentsMd = await generateAgentsMd(ws.feature, ws.repos);
 
-    // Verify Hogia conventions
-    expect(agentsMd).toContain('Organization Conventions (Hogia)');
+    // Verify Acme conventions
+    expect(agentsMd).toContain('Organization Conventions (Acme Corp)');
     expect(agentsMd).toContain('feat(ECO-412)');
     expect(agentsMd).toContain('.github/pull_request_template.md');
 

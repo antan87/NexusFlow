@@ -2381,7 +2381,7 @@ describe('Server API Endpoints Unit Tests', () => {
       const response = await app.request('/api/enterprise/organizations');
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.organizations.some((o: any) => o.id === 'hogia')).toBe(true);
+      expect(data.organizations.some((o: any) => o.id === 'acme')).toBe(true);
     });
 
     it('GET /api/enterprise/domain-packs returns registered domain packs', async () => {
@@ -2415,7 +2415,7 @@ describe('Server API Endpoints Unit Tests', () => {
         id: 'enterprise-ws',
         branchName: 'enterprise-ws',
         description: 'Enterprise integration',
-        organizationId: 'hogia',
+        organizationId: 'acme',
         domainPacks: ['economy'],
         repos: [],
         assistants: ['claude'],
@@ -2426,9 +2426,9 @@ describe('Server API Endpoints Unit Tests', () => {
       const response = await app.request('/api/workspace/enterprise-ws/domain-packs');
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.organizationId).toBe('hogia');
+      expect(data.organizationId).toBe('acme');
       expect(data.assignedDomainPackIds).toEqual(['economy']);
-      expect(data.organization.name).toBe('Hogia');
+      expect(data.organization.name).toBe('Acme Corp');
       expect(data.allRules.some((r: string) => r.includes('Swedish VAT standard rates'))).toBe(true);
     });
 
@@ -2455,17 +2455,17 @@ describe('Server API Endpoints Unit Tests', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          organizationId: 'hogia',
+          organizationId: 'acme',
           domainPacks: ['economy', 'transport'],
         }),
       });
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.feature.organizationId).toBe('hogia');
+      expect(data.feature.organizationId).toBe('acme');
       expect(data.feature.domainPacks).toEqual(['economy', 'transport']);
       expect(workspace.saveFeatureConfig).toHaveBeenCalledWith(workspacePath, expect.objectContaining({
-        organizationId: 'hogia',
+        organizationId: 'acme',
         domainPacks: ['economy', 'transport'],
       }));
     });
@@ -2479,7 +2479,7 @@ describe('Server API Endpoints Unit Tests', () => {
         id: 'enterprise-ws',
         branchName: 'enterprise-ws',
         description: 'Original spec',
-        organizationId: 'hogia',
+        organizationId: 'acme',
         domainPacks: ['economy'],
         repos: [],
         assistants: ['claude'],
@@ -2674,6 +2674,24 @@ describe('Server API Endpoints Unit Tests', () => {
 
       findActive.mockRestore();
     });
+  });
+
+  it('returns the persisted verification details with the lifecycle', async () => {
+    const lifecycleCore = await import('./core/lifecycle.js');
+    const stateCore = await import('./core/workspace-state.js');
+    const lifecycle = { workspaceId: 'demo', flowType: 'feature', steps: [], updatedAt: '' };
+    const report = { overallStatus: 'fail', repos: [{ repoName: 'api', error: 'Repository changed', stdout: 'test output' }] };
+    vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+    const lifecycleSpy = vi.spyOn(lifecycleCore, 'loadWorkspaceLifecycle').mockResolvedValue(lifecycle as any);
+    const stateSpy = vi.spyOn(stateCore, 'loadWorkspaceState').mockResolvedValue({ lastVerification: report } as any);
+    try {
+      const response = await app.request('/api/workspace/demo/lifecycle');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ lifecycle, report });
+    } finally {
+      lifecycleSpy.mockRestore();
+      stateSpy.mockRestore();
+    }
   });
 
   describe('POST /api/workspace/:id/changes/revert', () => {

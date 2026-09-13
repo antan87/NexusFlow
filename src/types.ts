@@ -270,7 +270,7 @@ export interface Feature {
   /** Custom teamwork coordination instructions for the agent team. */
   teamworkInstructions?: string;
 
-  /** Optional organization/company identifier (e.g. 'hogia'). */
+  /** Optional organization/company identifier (e.g. 'acme'). */
   organizationId?: string;
 
   /** Active domain packs for this workspace (e.g. ['economy']). */
@@ -753,7 +753,7 @@ export interface SkillItem {
   description: string;
   /** Tags / Keywords for discovery. */
   tags?: string[];
-  /** Optional company / organization identifier (e.g. 'hogia'). */
+  /** Optional company / organization identifier (e.g. 'acme'). */
   organization?: string;
   /** Optional domain subsystem this skill belongs to (e.g. 'economy', 'hr'). */
   domain?: string;
@@ -833,9 +833,9 @@ export interface WorkspaceSkillsConfig {
   enabledCategories?: string[];
 }
 
-/** Universal conventions for a company / organization (e.g. Hogia). */
+/** Universal conventions for a company / organization (e.g. Acme). */
 export interface OrganizationConventions {
-  /** Unique slug (e.g. 'hogia'). */
+  /** Unique slug (e.g. 'acme'). */
   id: string;
   /** Human-readable company name. */
   name: string;

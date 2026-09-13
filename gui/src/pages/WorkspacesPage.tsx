@@ -281,7 +281,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          organizationId: selected.organizationId || 'hogia',
           domainPacks: nextPacks,
         }),
       });
@@ -446,7 +445,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              organizationId: selected.organizationId || 'hogia',
               domainPacks: updatedPacks,
             }),
           });

@@ -134,7 +134,7 @@ The `create` wizard walks you through:
 
 ## 📚 Projects
 
-A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with automatic fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name, so `Hogia Billing` becomes `hogia-billing`. Use either the `project` command group or its `proj` alias:
+A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with automatic fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name, so `Acme Billing` becomes `acme-billing`. Use either the `project` command group or its `proj` alias:
 
 | Command | Description |
 |:---|:---|

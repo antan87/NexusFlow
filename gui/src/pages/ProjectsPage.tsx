@@ -232,7 +232,7 @@ export function ProjectsPage() {
               <Input
                 value={form?.name ?? ''}
                 onChange={(e) => setForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
-                placeholder="e.g. Hogia Billing"
+                placeholder="e.g. Acme Billing"
                 autoFocus
               />
             </label>

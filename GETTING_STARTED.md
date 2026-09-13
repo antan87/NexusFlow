@@ -59,13 +59,13 @@ Via the `ctxspace create` CLI command:
 
 #### Projects
 
-A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name (`Hogia Billing` becomes `hogia-billing`), and the command group also has the `proj` alias.
+A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name (`Acme Billing` becomes `acme-billing`), and the command group also has the `proj` alias.
 
 ```bash
-ctxspace project add -n "Hogia Billing" -r ../api ../frontend -d "Billing repos"
+ctxspace project add -n "Acme Billing" -r ../api ../frontend -d "Billing repos"
 ctxspace project list      # alias: ls
-ctxspace project show hogia-billing
-ctxspace project remove hogia-billing -y  # alias: rm
+ctxspace project show acme-billing
+ctxspace project remove acme-billing -y  # alias: rm
 ```
 
 The add flags are `-n/--name`, `-r/--repos <paths...>`, and `-d/--description`; omit `--repos` to use the interactive repo picker. Removing a project only edits the registry — it never deletes repositories or workspaces on disk, and `remove` accepts `-y/--yes`. The HTTP API exposes the same registry at `GET/POST /api/projects` and `PUT/DELETE /api/projects/:id`.

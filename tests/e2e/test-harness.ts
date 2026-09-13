@@ -136,7 +136,7 @@ export async function createTestWorkspace(
   const inPlace = mode === 'in-place';
   const branchName = options.branchName || (inPlace ? id : `feat/${id}`);
   const description = options.description || 'E2E Developer Workflow Test Workspace';
-  const organizationId = options.organizationId || 'hogia';
+  const organizationId = options.organizationId;
   const domainPacks = options.tags || ['economy'];
 
   // Setup repo directories

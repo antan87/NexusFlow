@@ -399,10 +399,10 @@ describe('buildContextContent', () => {
   describe('enterprise conventions & domain rules', () => {
     it('injects organization conventions when organizationId is present', async () => {
       const content = await buildContextContent(
-        ctxFor({ organizationId: 'hogia' }),
+        ctxFor({ organizationId: 'acme' }),
       );
 
-      expect(content).toContain('## Organization Conventions (Hogia)');
+      expect(content).toContain('## Organization Conventions (Acme Corp)');
       expect(content).toContain('Commit Convention');
       expect(content).toContain('feat(ECO-412)');
       expect(content).toContain('All commit messages should follow conventional commits');
@@ -410,10 +410,10 @@ describe('buildContextContent', () => {
 
     it('injects active domain rules without polluting other domains', async () => {
       const content = await buildContextContent(
-        ctxFor({ organizationId: 'hogia', domainPacks: ['economy'] }),
+        ctxFor({ organizationId: 'acme', domainPacks: ['economy'] }),
       );
 
-      expect(content).toContain('## Organization Conventions (Hogia)');
+      expect(content).toContain('## Organization Conventions (Acme Corp)');
       expect(content).toContain('## Active Domain Rules (Economy & Invoicing)');
       expect(content).toContain('Swedish VAT standard rates');
       expect(content).toContain('Domain Verification');

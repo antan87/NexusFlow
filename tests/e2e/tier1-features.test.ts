@@ -392,7 +392,7 @@ This is the instructions content.`;
     });
 
     it('F5.3: resolveActiveDomainRules composes domain rules and verification commands', () => {
-      const resolved = resolveActiveDomainRules('hogia', ['economy', 'hr/payroll']);
+      const resolved = resolveActiveDomainRules('acme', ['economy', 'hr/payroll']);
       expect(resolved.allRules.length).toBeGreaterThan(0);
       expect(resolved.allRules.some((r) => r.toLowerCase().includes('vat'))).toBe(true);
       expect(resolved.compositeVerifyCommand).toContain('npm test -- economy');

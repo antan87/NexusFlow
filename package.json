@@ -50,7 +50,7 @@
     "cursor",
     "developer-tools"
   ],
-  "author": "MrPatronHogia",
+  "author": "Anton Patron",
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"

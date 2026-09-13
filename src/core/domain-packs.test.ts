@@ -36,15 +36,15 @@ describe('domain-packs', () => {
     it('returns registered organizations', () => {
       const orgs = getAvailableOrganizations();
       expect(orgs.length).toBeGreaterThan(0);
-      expect(orgs.some((o) => o.id === 'hogia')).toBe(true);
+      expect(orgs.some((o) => o.id === 'acme')).toBe(true);
     });
 
     it('retrieves organization by id case-insensitively', () => {
-      const hogia = getOrganization('HOGIA');
-      expect(hogia).not.toBeNull();
-      expect(hogia?.name).toBe('Hogia');
-      expect(hogia?.commitMessagePattern).toBeDefined();
-      expect(hogia?.rules.length).toBeGreaterThan(0);
+      const acme = getOrganization('ACME');
+      expect(acme).not.toBeNull();
+      expect(acme?.name).toBe('Acme Corp');
+      expect(acme?.commitMessagePattern).toBeDefined();
+      expect(acme?.rules.length).toBeGreaterThan(0);
     });
 
     it('returns null for unknown organization', () => {
@@ -121,11 +121,11 @@ describe('domain-packs', () => {
 
   describe('resolveActiveDomainRules', () => {
     it('aggregates universal company rules and scoped domain rules', () => {
-      const resolved = resolveActiveDomainRules('hogia', ['economy']);
-      expect(resolved.organization?.id).toBe('hogia');
+      const resolved = resolveActiveDomainRules('acme', ['economy']);
+      expect(resolved.organization?.id).toBe('acme');
       expect(resolved.domainPacks.map((p) => p.id)).toEqual(['economy']);
 
-      // Universal Hogia conventions
+      // Universal Acme conventions
       expect(resolved.allRules.some((r) => r.includes('conventional commits'))).toBe(true);
       expect(resolved.allRules.some((r) => r.includes('mechanical verification gate'))).toBe(true);
 
@@ -148,7 +148,7 @@ describe('domain-packs', () => {
 
     it('inherits parent category rules automatically when child is active', () => {
       // hr/payroll has parent: 'hr'
-      const resolved = resolveActiveDomainRules('hogia', ['hr/payroll']);
+      const resolved = resolveActiveDomainRules('acme', ['hr/payroll']);
       const packIds = resolved.domainPacks.map((p) => p.id);
       expect(packIds).toContain('hr/payroll');
       expect(packIds).toContain('hr'); // Parent inherited!
@@ -164,7 +164,7 @@ describe('domain-packs', () => {
 
     it('composes horizontal traits and aggregates composable verification gates', () => {
       // Vertical: economy, Trait: gdpr
-      const resolved = resolveActiveDomainRules('hogia', ['economy', 'gdpr']);
+      const resolved = resolveActiveDomainRules('acme', ['economy', 'gdpr']);
       expect(resolved.verticals.map((v) => v.id)).toContain('economy');
       expect(resolved.traits.map((t) => t.id)).toContain('gdpr');
 

@@ -47,6 +47,7 @@ describe('Tier 4: Real-World Application Scenarios', () => {
       description: 'Fix rounding error in Swedish reverse-charge VAT computation',
       flow: 'quick',
       mode: 'in-place',
+      organizationId: 'acme',
       tags: ['economy'],
       repos: [
         {
@@ -107,7 +108,7 @@ describe('Tier 4: Real-World Application Scenarios', () => {
     ]);
 
     // 3. Domain rules: Parent and sub-vertical rules composite cleanly
-    const resolved = resolveActiveDomainRules('hogia', ['hr', 'hr/payroll']);
+    const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll']);
     expect(resolved.compositeVerifyCommand).toContain('npm test -- hr');
     expect(resolved.compositeVerifyCommand).toContain('npm test -- payroll');
 
@@ -256,7 +257,7 @@ describe('Tier 4: Real-World Application Scenarios', () => {
     expect(steps[3].id).toBe('epic_slice_4');
 
     // 3. Composite verification across all vertical tags
-    const resolved = resolveActiveDomainRules('hogia', ['hr', 'hr/payroll', 'economy']);
+    const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll', 'economy']);
     expect(resolved.compositeVerifyCommand).toContain('npm test -- hr');
     expect(resolved.compositeVerifyCommand).toContain('npm test -- payroll');
     expect(resolved.compositeVerifyCommand).toContain('npm test -- economy');

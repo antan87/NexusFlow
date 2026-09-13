@@ -76,7 +76,7 @@ describe('commitCommand --no-push handling (A1.1)', () => {
       id: 'feature',
       branchName: 'feature-branch',
       description: 'test',
-      organizationId: 'hogia',
+      organizationId: 'acme',
       repos: [repoPath],
       assistants: ['claude'],
       workspacePath,
@@ -84,10 +84,10 @@ describe('commitCommand --no-push handling (A1.1)', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // 'wip' violates Hogia's '^(feat|fix|...)(...): ...' pattern
+    // 'wip' violates Acme Corp's '^(feat|fix|...)(...): ...' pattern
     await commitCommand('wip', workspacePath, { push: false });
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Commit message does not match Hogia convention'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Commit message does not match Acme Corp convention'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('feat(ECO-412)'));
   });
 
@@ -97,7 +97,7 @@ describe('commitCommand --no-push handling (A1.1)', () => {
       id: 'feature',
       branchName: 'feature-branch',
       description: 'test',
-      organizationId: 'hogia',
+      organizationId: 'acme',
       repos: [repoPath],
       assistants: ['claude'],
       workspacePath,
@@ -105,7 +105,7 @@ describe('commitCommand --no-push handling (A1.1)', () => {
 
     const report = await commitWorkspace(workspacePath, 'non-conforming commit', { noPush: true });
     expect(report.conventionWarning).toBeDefined();
-    expect(report.conventionWarning).toContain('violates Hogia convention');
+    expect(report.conventionWarning).toContain('violates Acme Corp convention');
   });
 });
 

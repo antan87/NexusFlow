@@ -66,7 +66,7 @@ describe('projects core module', () => {
 
   describe('slugifyProjectName', () => {
     it('lowercases and hyphenates', () => {
-      expect(slugifyProjectName('Hogia Billing')).toBe('hogia-billing');
+      expect(slugifyProjectName('Acme Billing')).toBe('acme-billing');
     });
 
     it('collapses consecutive separators and trims edges', () => {

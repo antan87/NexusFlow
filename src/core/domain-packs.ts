@@ -21,10 +21,10 @@ export const BUILTIN_DOMAIN_PACKS: DomainPack[] = [];
  */
 export const SAMPLE_ORGANIZATIONS: OrganizationConventions[] = [
   {
-    id: 'hogia',
-    name: 'Hogia',
+    id: 'acme',
+    name: 'Acme Corp',
     commitMessagePattern: '^(feat|fix|refactor|test|chore|docs|style|perf|build|ci)\\([A-Za-z0-9_.-]+\\): .+$',
-    commitExample: 'feat(ECO-412): add Swedish reverse charge VAT calculation',
+    commitExample: 'feat(ECO-412): add reverse charge calculation',
     prTemplate: '.github/pull_request_template.md',
     rules: [
       'All commit messages should follow conventional commits with a subsystem or ticket scope, e.g. feat(ECO-123): description.',
@@ -44,7 +44,7 @@ export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
     id: 'economy',
     name: 'Economy & Invoicing',
     description: 'Accounting rules, Swedish VAT/tax compliance, invoice schemas, and ledger APIs.',
-    organization: 'hogia',
+    organization: 'acme',
     categoryType: 'vertical',
     isTemplate: true,
     tags: [
@@ -75,7 +75,7 @@ export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
     id: 'hr',
     name: 'HR & Workforce',
     description: 'Employee records, workforce agreements, and personnel management.',
-    organization: 'hogia',
+    organization: 'acme',
     categoryType: 'vertical',
     isTemplate: true,
     tags: [
@@ -96,7 +96,7 @@ export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
     name: 'Payroll & Salaries',
     description: 'Payroll formulas, collective agreements, and social security deductions.',
     parent: 'hr',
-    organization: 'hogia',
+    organization: 'acme',
     categoryType: 'vertical',
     isTemplate: true,
     tags: [
@@ -119,7 +119,7 @@ export const SAMPLE_DOMAIN_PACKS: DomainPack[] = [
     id: 'transport',
     name: 'Transport & Logistics',
     description: 'Route planning, fleet dispatch, vehicle telemetry, and shipping carrier integrations.',
-    organization: 'hogia',
+    organization: 'acme',
     categoryType: 'vertical',
     isTemplate: true,
     tags: [

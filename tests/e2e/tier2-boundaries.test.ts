@@ -254,27 +254,27 @@ invalid: {broken yaml
       expect(withoutOrg.domainPacks.length).toBe(0);
       expect(withoutOrg.compositeVerifyCommand).toBeUndefined();
 
-      const withOrg = resolveActiveDomainRules('hogia', []);
+      const withOrg = resolveActiveDomainRules('acme', []);
       expect(withOrg.domainPacks.length).toBe(0);
       expect(withOrg.allRules.length).toBe(4); // Root organization conventions
       expect(withOrg.compositeVerifyCommand).toBeUndefined();
     });
 
     it('F5-B.3: duplicate tags in input are deduplicated without generating duplicate rules', () => {
-      const resolved = resolveActiveDomainRules('hogia', ['economy', 'economy', 'ECONOMY']);
+      const resolved = resolveActiveDomainRules('acme', ['economy', 'economy', 'ECONOMY']);
       const vatRules = resolved.allRules.filter((r) => r.toLowerCase().includes('vat'));
       expect(vatRules.length).toBe(1);
     });
 
     it('F5-B.4: case-insensitive tag input is normalized and resolved properly', () => {
-      const lower = resolveActiveDomainRules('hogia', ['economy']);
-      const upper = resolveActiveDomainRules('hogia', ['ECONOMY']);
+      const lower = resolveActiveDomainRules('acme', ['economy']);
+      const upper = resolveActiveDomainRules('acme', ['ECONOMY']);
       expect(lower.domainPacks.length).toBe(upper.domainPacks.length);
       expect(lower.allRules).toEqual(upper.allRules);
     });
 
     it('F5-B.5: unknown tags in mixed array are skipped without throwing error', () => {
-      const mixed = resolveActiveDomainRules('hogia', ['economy', 'unknown-tag-xyz']);
+      const mixed = resolveActiveDomainRules('acme', ['economy', 'unknown-tag-xyz']);
       expect(mixed.domainPacks.length).toBe(1);
       expect(mixed.domainPacks[0].id).toBe('economy');
     });

@@ -18,7 +18,7 @@ describe('tag CLI commands', () => {
     branchName: 'feat/payroll',
     description: 'Payroll Swedish collective agreement support',
     repos: ['/repo1'],
-    organizationId: 'hogia',
+    organizationId: 'acme',
     domainPacks: ['hr/payroll'],
     workspacePath: mockWsPath,
   };
