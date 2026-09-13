@@ -1392,6 +1392,12 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                       {(editingSkill?.content || '').split('\n').length} lines · {(editingSkill?.content || '').length} characters
                     </span>
                   </div>
+                  <p className="text-xs text-muted-foreground mb-2 leading-relaxed">
+                    Frontmatter (<code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">name</code>,{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">description</code>,{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">tags</code>) is managed in the Metadata panel on the left and auto-injected into{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">SKILL.md</code> on save.
+                  </p>
                   <Textarea
                     id="skill-content"
                     value={editingSkill?.content || ''}
@@ -1399,7 +1405,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                       setEditingSkill((prev) => (prev ? { ...prev, content: e.target.value } : null))
                     }
                     placeholder="# Playbook Title&#10;&#10;Detailed instructions for the AI assistant..."
-                    className="flex-1 w-full min-h-[360px] lg:min-h-full font-mono text-xs leading-relaxed resize-none p-4 bg-background/80 border border-border rounded-lg focus:ring-1 focus:ring-primary"
+                    className="flex-1 w-full min-h-[360px] lg:min-h-full font-mono text-xs leading-relaxed resize-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
               ) : (

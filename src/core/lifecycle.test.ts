@@ -220,5 +220,81 @@ describe('core/lifecycle', () => {
       expect(fleet[0]!.lastCommitMessage).toBe('feat(api): support JSON | YAML configs');
       expect(fleet[0]!.lastCommitAuthor).toBe('Alice');
     });
+
+    it('filters out symrefs, origin, origin/HEAD, HEAD, and currentBranch from fleet', async () => {
+      vi.mocked(workspaceCore.loadFeatureConfig).mockResolvedValue({
+        id: 'ws-fleet',
+        branchName: 'feat/fleet',
+        repos: ['repo1'],
+      } as any);
+      vi.mocked(workspaceCore.resolveRepoInfos).mockResolvedValue([
+        { name: 'repo1', path: '/ws/repo1', defaultBranch: 'main' },
+      ]);
+      vi.mocked(multiGit.getRepoBranch).mockResolvedValue('feat/fleet');
+      vi.mocked(multiGit.getAheadBehind).mockResolvedValue({ ahead: 1, behind: 0 } as any);
+
+      let passedArgs: string[] = [];
+      vi.mocked(execa).mockImplementation(async (_cmd: any, args: any) => {
+        if (args && args[0] === 'log') {
+          return { stdout: 'a1b2c3d\x1ffeat: test\x1fAlice\x1f1 hour ago' } as any;
+        }
+        if (args && args[0] === 'for-each-ref') {
+          passedArgs = args;
+          const outputLines = [
+            'origin\x1fsha1\x1fcommit 1\x1fAuthor 1\x1f1 day ago\x1frefs/remotes/origin/main',
+            'origin/HEAD\x1fsha2\x1fcommit 2\x1fAuthor 2\x1f1 day ago\x1frefs/remotes/origin/main',
+            'origin/feat/fleet\x1fsha3\x1fcommit 3\x1fAuthor 3\x1f1 day ago\x1f',
+            'origin/HEAD\x1fsha4\x1fcommit 4\x1fAuthor 4\x1f1 day ago\x1f',
+            'origin/dev\x1fsha5\x1ffeat: dev branch\x1fCharlie\x1f2 days ago\x1f',
+            'origin/main\x1fsha6\x1fchore: main branch\x1fDave\x1f3 days ago\x1f',
+          ];
+          return { stdout: outputLines.join('\n') } as any;
+        }
+        return { stdout: 'feat/fleet' } as any;
+      });
+
+      const fleet = await getBranchFleet('/ws');
+      expect(passedArgs).toContain(
+        '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(authordate:relative)\x1f%(symref)',
+      );
+
+      expect(fleet).toHaveLength(3);
+      expect(fleet[0]!.branch).toBe('feat/fleet');
+      expect(fleet[0]!.isCurrent).toBe(true);
+
+      const remoteBranches = fleet.slice(1).map((m) => m.branch);
+      expect(remoteBranches).toEqual(['origin/dev', 'origin/main']);
+    });
+
+    it('aggregates fleet across multiple repositories in workspace', async () => {
+      vi.mocked(workspaceCore.loadFeatureConfig).mockResolvedValue({
+        id: 'ws-multi',
+        branchName: 'feat/shared',
+        repos: ['repo1', 'repo2'],
+      } as any);
+      vi.mocked(workspaceCore.resolveRepoInfos).mockResolvedValue([
+        { name: 'repo1', path: '/ws/repo1', defaultBranch: 'main' },
+        { name: 'repo2', path: '/ws/repo2', defaultBranch: 'main' },
+      ]);
+      vi.mocked(multiGit.getRepoBranch).mockResolvedValue('feat/shared');
+      vi.mocked(multiGit.getAheadBehind).mockResolvedValue({ ahead: 0, behind: 0 } as any);
+
+      vi.mocked(execa).mockImplementation(async (_cmd: any, args: any) => {
+        if (args && args[0] === 'log') {
+          return { stdout: 'sha1\x1fcommit\x1fAuthor\x1f1 day ago' } as any;
+        }
+        if (args && args[0] === 'for-each-ref') {
+          return { stdout: 'origin/dev\x1fsha2\x1fdev commit\x1fAuthor\x1f2 days ago\x1f' } as any;
+        }
+        return { stdout: '' } as any;
+      });
+
+      const fleet = await getBranchFleet('/ws');
+      expect(fleet).toHaveLength(4);
+      expect(fleet[0]!.repoName).toBe('repo1');
+      expect(fleet[1]!.repoName).toBe('repo1');
+      expect(fleet[2]!.repoName).toBe('repo2');
+      expect(fleet[3]!.repoName).toBe('repo2');
+    });
   });
 });

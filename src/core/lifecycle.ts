@@ -73,16 +73,22 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
     try {
       const { stdout: refOut } = await execa(
         'git',
-        ['for-each-ref', '--sort=-committerdate', '--count=6', '--format=%(refname:short)%x1f%(objectname:short)%x1f%(subject)%x1f%(authorname)%x1f%(authordate:relative)', 'refs/remotes/origin/'],
+        [
+          'for-each-ref',
+          '--sort=-committerdate',
+          '--count=6',
+          '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(authordate:relative)\x1f%(symref)',
+          'refs/remotes/origin/',
+        ],
         { cwd: repo.path },
       );
 
       const lines = refOut.split('\n').map((l) => l.trim()).filter(Boolean);
       for (const line of lines) {
-        const [refShort, sha, subject, author, relDate] = line.split('\x1f');
+        const [refShort, sha, subject, author, relDate, symref] = line.split('\x1f');
         if (!refShort) continue;
         const branchName = refShort.replace(/^origin\//, '');
-        if (branchName === 'HEAD' || branchName === currentBranch) continue;
+        if (symref || refShort === 'origin' || refShort === 'origin/HEAD' || branchName === 'HEAD' || branchName === currentBranch) continue;
 
         fleet.push({
           branch: refShort,

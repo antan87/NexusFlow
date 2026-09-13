@@ -15,8 +15,11 @@ import {
   Workflow,
   Radio,
   User,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
+import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
 import type { WorkspaceLifecycle } from '../../types.js';
@@ -42,6 +45,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<{ status: string; text: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [isFleetExpanded, setIsFleetExpanded] = useState(false);
 
   const loadLifecycle = useCallback(async () => {
     if (!workspaceId) return;
@@ -373,63 +377,106 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           {lifecycle?.fleet && lifecycle.fleet.length > 0 && (
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  <Radio size={14} className="text-cyan-400" /> Sister Branch Fleet & Collaborator Radar
-                </div>
-                <span className="text-[11px] text-muted-foreground">
-                  Tracking origin remote references
-                </span>
-              </div>
-
-              <div className="grid gap-2">
-                {lifecycle.fleet.map((member) => (
-                  <div
-                    key={member.branch}
-                    className={`flex flex-wrap items-center justify-between p-3 rounded-lg border text-xs ${
-                      member.isCurrent
-                        ? 'border-primary/40 bg-primary/5'
-                        : 'border-border/60 bg-card/30'
-                    }`}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsFleetExpanded((prev) => !prev)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors uppercase tracking-wider cursor-pointer"
+                    aria-expanded={isFleetExpanded}
+                    aria-controls="sister-branch-fleet-list"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        className={`size-2 rounded-full shrink-0 ${
-                          member.isCurrent ? 'bg-emerald-400 ring-4 ring-emerald-400/20' : 'bg-cyan-400'
-                        }`}
-                      />
-                      <span className="font-mono font-semibold text-foreground">
-                        {member.branch}
-                      </span>
-                      {member.isCurrent && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-primary/20 text-primary">
-                          active worktree
-                        </span>
-                      )}
-                    </div>
+                    <Radio size={14} className="text-cyan-400" />
+                    <span>Sister Branch Fleet & Collaborator Radar</span>
+                  </button>
+                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 h-4.5">
+                    {lifecycle.fleet.length} {lifecycle.fleet.length === 1 ? 'branch' : 'branches'}
+                  </Badge>
+                </div>
 
-                    <div className="flex items-center gap-4 text-muted-foreground">
-                      <span className="font-mono text-[11px]">
-                        +{member.ahead} / -{member.behind}
-                      </span>
-                      {member.lastCommitAuthor && (
-                        <span className="text-[11px] text-foreground/80">
-                          {member.lastCommitAuthor}
-                          {member.lastCommitDate && (
-                            <span className="text-muted-foreground ml-1">
-                              ({member.lastCommitDate})
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      {member.lastCommitMessage && (
-                        <span className="truncate max-w-[240px] text-muted-foreground italic text-[11px]">
-                          "{member.lastCommitMessage}"
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                <div className="flex items-center gap-3">
+                  <span className="hidden sm:inline text-[11px] text-muted-foreground">
+                    Tracking origin remote references
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setIsFleetExpanded((prev) => !prev)}
+                    className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                    title={isFleetExpanded ? 'Collapse fleet' : 'Expand fleet'}
+                    aria-expanded={isFleetExpanded}
+                    aria-controls="sister-branch-fleet-list"
+                  >
+                    {isFleetExpanded ? (
+                      <>
+                        <ChevronDown size={13} />
+                        <span>Collapse</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronRight size={13} />
+                        <span>Expand</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
+
+              {isFleetExpanded && (
+                <div id="sister-branch-fleet-list" className="grid gap-2">
+                  {lifecycle.fleet.map((member) => (
+                    <div
+                      key={`${member.repoName}:${member.branch}`}
+                      className={`flex flex-wrap items-center justify-between p-3 rounded-lg border text-xs ${
+                        member.isCurrent
+                          ? 'border-primary/40 bg-primary/5'
+                          : 'border-border/60 bg-card/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`size-2 rounded-full shrink-0 ${
+                            member.isCurrent ? 'bg-emerald-400 ring-4 ring-emerald-400/20' : 'bg-cyan-400'
+                          }`}
+                        />
+                        <span className="font-mono font-semibold text-foreground">
+                          {member.branch}
+                        </span>
+                        {member.repoName && new Set(lifecycle?.fleet?.map((m) => m.repoName)).size > 1 && (
+                          <span className="text-[10px] text-muted-foreground font-mono bg-muted/60 px-1.5 py-0.2 rounded border border-border/40">
+                            {member.repoName}
+                          </span>
+                        )}
+                        {member.isCurrent && (
+                          <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-primary/20 text-primary">
+                            active worktree
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-4 text-muted-foreground">
+                        <span className="font-mono text-[11px]">
+                          +{member.ahead} / -{member.behind}
+                        </span>
+                        {member.lastCommitAuthor && (
+                          <span className="text-[11px] text-foreground/80">
+                            {member.lastCommitAuthor}
+                            {member.lastCommitDate && (
+                              <span className="text-muted-foreground ml-1">
+                                ({member.lastCommitDate})
+                              </span>
+                            )}
+                          </span>
+                        )}
+                        {member.lastCommitMessage && (
+                          <span className="truncate max-w-[240px] text-muted-foreground italic text-[11px]">
+                            "{member.lastCommitMessage}"
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
