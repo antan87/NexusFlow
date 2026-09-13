@@ -10,6 +10,9 @@
  */
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { acquireLock, createMutationQueue } from './locks.js';
+import { atomicWriteJson } from '../resources/fs-safety.js';
 
 import type { RepoSyncState, SyncStatus, WorkspaceState, WorkspaceVerificationReport } from '../types.js';
 import { resolveWorkspaceFilePath, resolveWorkspaceFilePathSync } from './constants.js';
@@ -23,12 +26,14 @@ export function getStatePath(workspacePath: string): string {
 
 /**
  * Loads the workspace state from disk, returning an empty skeleton when the
- * file does not exist or cannot be parsed.
+ * file does not exist or cannot be parsed. Mutations use strict reads to avoid
+ * overwriting unreadable or corrupt state.
  *
  * @param workspacePath - Absolute path to the workspace root.
  */
 export async function loadWorkspaceState(
   workspacePath: string,
+  options: { strict?: boolean } = {},
 ): Promise<WorkspaceState> {
   try {
     const resolved = await resolveWorkspaceFilePath(workspacePath, 'state');
@@ -40,7 +45,8 @@ export async function loadWorkspaceState(
     }
     state.workspacePath = workspacePath;
     return state;
-  } catch {
+  } catch (error) {
+    if (options.strict && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return {
       workspacePath,
       repos: {},
@@ -57,8 +63,32 @@ export async function loadWorkspaceState(
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
   const resolved = await resolveWorkspaceFilePath(state.workspacePath, 'state');
   const toWrite: WorkspaceState = { ...state, updatedAt: new Date().toISOString() };
-  const data = JSON.stringify(toWrite, null, 2) + '\n';
-  await fs.writeFile(resolved.path, data, 'utf-8');
+  await atomicWriteJson(resolved.path, toWrite);
+}
+
+const runWorkspaceConfigMutation = createMutationQueue();
+
+/** Mutate fresh state under a cross-process lock; keep callbacks short and synchronous. */
+export async function mutateWorkspaceState<T>(
+  workspacePath: string,
+  mutation: (state: WorkspaceState) => T,
+): Promise<T> {
+  return runWorkspaceConfigMutation(async () => {
+    const root = await fs.realpath(workspacePath);
+    const release = await acquireLock(path.join(root, '.contextspace-state.lock'), {
+      staleMs: 60_000,
+      timeoutMs: 10_000,
+      timeoutMessage: 'Workspace state is busy. Retry the operation.',
+    });
+    try {
+      const state = await loadWorkspaceState(root, { strict: true });
+      const result = mutation(state);
+      await saveWorkspaceState(state);
+      return result;
+    } finally {
+      await release();
+    }
+  });
 }
 
 /**
@@ -77,24 +107,24 @@ export async function recordRepoSync(
   repoName: string,
   result: { status: SyncStatus; message: string },
 ): Promise<RepoSyncState> {
-  const state = await loadWorkspaceState(workspacePath);
-  const existing = state.repos[repoName] ?? { repoName };
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const existing = state.repos[repoName] ?? { repoName };
 
-  const updated: RepoSyncState = {
-    ...existing,
-    repoName,
-    lastSyncedAt: new Date().toISOString(),
-    lastSyncStatus: result.status,
-    lastSyncMessage: result.message,
-    // New commits landed → the repo needs re-validation. Preserve an existing
-    // pending flag otherwise (a no-op sync doesn't clear prior pending work).
-    pendingValidation:
-      result.status === 'rebased' ? true : existing.pendingValidation ?? false,
-  };
+    const updated: RepoSyncState = {
+      ...existing,
+      repoName,
+      lastSyncedAt: new Date().toISOString(),
+      lastSyncStatus: result.status,
+      lastSyncMessage: result.message,
+      // New commits landed → the repo needs re-validation. Preserve an existing
+      // pending flag otherwise (a no-op sync doesn't clear prior pending work).
+      pendingValidation:
+        result.status === 'rebased' ? true : existing.pendingValidation ?? false,
+    };
 
-  state.repos[repoName] = updated;
-  await saveWorkspaceState(state);
-  return updated;
+    state.repos[repoName] = updated;
+    return updated;
+  });
 }
 
 /**
@@ -112,20 +142,20 @@ export async function markValidated(
   repoName: string,
   result: 'pass' | 'fail',
 ): Promise<RepoSyncState> {
-  const state = await loadWorkspaceState(workspacePath);
-  const existing = state.repos[repoName] ?? { repoName };
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const existing = state.repos[repoName] ?? { repoName };
 
-  const updated: RepoSyncState = {
-    ...existing,
-    repoName,
-    lastValidationResult: result,
-    lastValidatedAt: new Date().toISOString(),
-    pendingValidation: false,
-  };
+    const updated: RepoSyncState = {
+      ...existing,
+      repoName,
+      lastValidationResult: result,
+      lastValidatedAt: new Date().toISOString(),
+      pendingValidation: false,
+    };
 
-  state.repos[repoName] = updated;
-  await saveWorkspaceState(state);
-  return updated;
+    state.repos[repoName] = updated;
+    return updated;
+  });
 }
 
 /**
@@ -140,25 +170,25 @@ export async function recordVerificationReport(
   workspacePath: string,
   report: WorkspaceVerificationReport,
 ): Promise<WorkspaceState> {
-  const state = await loadWorkspaceState(workspacePath);
-  state.lastVerification = report;
+  return mutateWorkspaceState(workspacePath, (state) => {
+    state.lastVerification = report;
 
-  for (const repoReport of report.repos) {
-    const existing = state.repos[repoReport.repoName] ?? { repoName: repoReport.repoName };
-    const passed = repoReport.status === 'pass' || repoReport.status === 'pass_dirty';
+    for (const repoReport of report.repos) {
+      const existing = state.repos[repoReport.repoName] ?? { repoName: repoReport.repoName };
+      const passed = repoReport.status === 'pass' || repoReport.status === 'pass_dirty';
 
-    state.repos[repoReport.repoName] = {
-      ...existing,
-      repoName: repoReport.repoName,
-      lastValidationResult: passed ? 'pass' : repoReport.status === 'no-tests' ? (existing.lastValidationResult ?? null) : 'fail',
-      lastValidatedAt: repoReport.verifiedAt,
-      pendingValidation: passed ? false : existing.pendingValidation,
-      lastVerification: repoReport,
-    };
-  }
+      state.repos[repoReport.repoName] = {
+        ...existing,
+        repoName: repoReport.repoName,
+        lastValidationResult: passed ? 'pass' : repoReport.status === 'no-tests' ? (existing.lastValidationResult ?? null) : 'fail',
+        lastValidatedAt: repoReport.verifiedAt,
+        pendingValidation: passed ? false : existing.pendingValidation,
+        lastVerification: repoReport,
+      };
+    }
 
-  await saveWorkspaceState(state);
-  return state;
+    return state;
+  });
 }
 
 /**

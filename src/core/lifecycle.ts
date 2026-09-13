@@ -15,7 +15,7 @@ import type {
 import { loadFeatureConfig, resolveRepoInfos } from './workspace.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { getRepoBranch, getAheadBehind } from '../utils/multi-git.js';
-import { loadWorkspaceState, saveWorkspaceState } from './workspace-state.js';
+import { loadWorkspaceState, mutateWorkspaceState } from './workspace-state.js';
 import { verifyWorkspace } from './verify.js';
 
 /**
@@ -275,9 +275,15 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
     updatedAt: new Date().toISOString(),
   };
 
-  state.lifecycle = lifecycle;
-  await saveWorkspaceState(state);
-  return lifecycle;
+  return mutateWorkspaceState(workspacePath, (current) => {
+    // Another reader may have initialized or advanced it while fleet data loaded.
+    current.lifecycle ??= lifecycle;
+    return current.lifecycle;
+  });
+}
+
+function dependenciesAreComplete(steps: LifecycleStep[], candidate: LifecycleStep): boolean {
+  return (candidate.dependsOn ?? []).every((id) => steps.some((step) => step.id === id && step.status === 'completed'));
 }
 
 /**
@@ -295,14 +301,13 @@ export async function advanceLifecycleStep(
     throw new Error(`Step "${stepId}" not found in workspace lifecycle.`);
   }
 
-  const step = lifecycle.steps[stepIndex]!;
+  const step = structuredClone(lifecycle.steps[stepIndex]!);
+  const originalStep = JSON.stringify(step);
 
   if (!['start', 'verify', 'complete'].includes(action)) {
     throw new Error(`Unknown lifecycle action "${action}".`);
   }
-  const dependenciesComplete = (candidate: LifecycleStep) =>
-    (candidate.dependsOn ?? []).every((id) => lifecycle.steps.some((s) => s.id === id && s.status === 'completed'));
-  if (!dependenciesComplete(step)) {
+  if (!dependenciesAreComplete(lifecycle.steps, step)) {
     throw new Error(`Complete dependencies before advancing step "${stepId}".`);
   }
   if (step.status === 'completed') {
@@ -324,30 +329,39 @@ export async function advanceLifecycleStep(
     step.status = gateFailed ? 'in_progress' : 'verified';
   }
 
-  if (action === 'start') {
-    step.status = 'in_progress';
-    lifecycle.currentStepId = step.id;
-  } else if (action === 'complete' && !gateFailed) {
-    step.status = 'completed';
-    step.completedAt = new Date().toISOString();
-    for (const nextStep of lifecycle.steps) {
-      if (nextStep.status === 'blocked' && dependenciesComplete(nextStep)) {
-        nextStep.status = 'pending';
-      }
+  const updated = await mutateWorkspaceState(workspacePath, (state) => {
+    const lifecycle = state.lifecycle;
+    const currentStep = lifecycle?.steps.find((candidate) => candidate.id === stepId);
+    if (!lifecycle || !currentStep || JSON.stringify(currentStep) !== originalStep) {
+      throw new Error(`Step "${stepId}" changed during this operation. Reload the flow and retry.`);
     }
-    const active = lifecycle.steps.find((s) => s.status === 'in_progress' || s.status === 'verified');
-    const next = active ?? lifecycle.steps.find((s) => s.status === 'pending' && dependenciesComplete(s));
-    if (next && !active) next.status = 'in_progress';
-    lifecycle.currentStepId = next?.id;
-  }
+    if (!dependenciesAreComplete(lifecycle.steps, step)) {
+      throw new Error(`Dependencies changed for step "${stepId}". Reload the flow and retry.`);
+    }
+    Object.assign(currentStep, step);
+    if (action === 'start') {
+      currentStep.status = 'in_progress';
+      lifecycle.currentStepId = step.id;
+    } else if (action === 'complete' && !gateFailed) {
+      currentStep.status = 'completed';
+      currentStep.completedAt = new Date().toISOString();
+      for (const nextStep of lifecycle.steps) {
+        if (nextStep.status === 'blocked' && dependenciesAreComplete(lifecycle.steps, nextStep)) {
+          nextStep.status = 'pending';
+        }
+      }
+      const active = lifecycle.steps.find((s) => s.status === 'in_progress' || s.status === 'verified');
+      const next = active ?? lifecycle.steps.find((s) => s.status === 'pending' && dependenciesAreComplete(lifecycle.steps, s));
+      if (next && !active) next.status = 'in_progress';
+      lifecycle.currentStepId = next?.id;
+    }
 
-  lifecycle.updatedAt = new Date().toISOString();
-  const state = await loadWorkspaceState(workspacePath);
-  state.lifecycle = lifecycle;
-  await saveWorkspaceState(state);
+    lifecycle.updatedAt = new Date().toISOString();
+    return lifecycle;
+  });
   if (gateFailed && action === 'complete') {
     throw new Error(`Verification did not permit progress for step "${stepId}" (${step.lastVerificationStatus}).`);
   }
 
-  return lifecycle;
+  return updated;
 }

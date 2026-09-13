@@ -2475,7 +2475,8 @@ app.get('/api/workspace/:id/lifecycle', async (c) => {
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const { loadWorkspaceLifecycle } = await import('./core/lifecycle.js');
     const lifecycle = await loadWorkspaceLifecycle(workspacePath);
-    return c.json({ lifecycle });
+    const report = (await loadWorkspaceState(workspacePath)).lastVerification ?? null;
+    return c.json({ lifecycle, report });
   } catch (error) {
     return errorResponse(c, error);
   }

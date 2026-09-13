@@ -44,6 +44,12 @@ const AD_HOC = '__ad-hoc__';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 
+const FLOW_OPTIONS = [
+  { value: 'quick', title: 'Bug fix', body: 'Reproduce, fix, and verify a focused problem.' },
+  { value: 'feature', title: 'Feature', body: 'Plan, implement, verify, and review a feature.' },
+  { value: 'epic', title: 'Epic', body: 'Track a larger change through dependent milestones.' },
+] as const;
+
 const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }> = [
   {
     value: 'in-place',
@@ -143,6 +149,7 @@ export function StartWorkPage() {
   const creationJobId = searchParams.get('job');
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
+  const [flowType, setFlowType] = useState<'quick' | 'feature' | 'epic'>('feature');
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
   const [branchName, setBranchName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
@@ -320,6 +327,7 @@ export function StartWorkPage() {
     submittingRef.current = true;
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
+      flowType,
       mode,
       projectId: selectedProject?.id,
       ...(inPlace ? { name: workspaceName.trim() } : { branchName: branchName.trim() }),
@@ -600,6 +608,27 @@ export function StartWorkPage() {
             </p>
           )}
         </section>
+
+        <fieldset>
+          <legend className="mb-1.5 text-sm font-medium">What kind of work is this?</legend>
+          <p className="mb-3 text-xs text-muted-foreground">Choose the milestones for this workspace. Feature is the default.</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {FLOW_OPTIONS.map((option) => (
+              <label key={option.value} className={cn(
+                'cursor-pointer rounded-xl border p-4 focus-within:ring-2 focus-within:ring-ring',
+                flowType === option.value ? 'border-primary bg-primary/5' : 'border-border bg-card',
+              )}>
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="radio" name="flowType" value={option.value} checked={flowType === option.value}
+                    onChange={() => setFlowType(option.value)} aria-label={option.title} aria-describedby={`flow-${option.value}-description`}
+                    className="accent-primary" />
+                  {option.title}
+                </span>
+                <p id={`flow-${option.value}-description`} className="mt-2 text-xs text-muted-foreground">{option.body}</p>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         {/* 2. Mode */}
         <section>

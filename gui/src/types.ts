@@ -534,3 +534,19 @@ export interface WorkspaceLifecycle {
   updatedAt: string;
 }
 
+
+/** Verification output returned with the workspace lifecycle and by the verify action. */
+export interface WorkspaceVerificationReport {
+  overallStatus: 'pass' | 'pass_dirty' | 'fail' | 'timeout' | 'no-tests' | 'skipped';
+  canProgress: boolean;
+  durationMs: number;
+  repos: Array<{
+    repoName: string;
+    status: WorkspaceVerificationReport['overallStatus'];
+    command: string;
+    exitCode: number | null;
+    stdout?: string;
+    stderr?: string;
+    error?: string;
+  }>;
+}

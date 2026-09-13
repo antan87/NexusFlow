@@ -22,7 +22,7 @@ import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
-import type { WorkspaceLifecycle } from '../../types.js';
+import type { WorkspaceLifecycle, WorkspaceVerificationReport } from '../../types.js';
 
 interface ImplementationPlanProps {
   planContent: string;
@@ -46,6 +46,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<{ status: string; text: string } | null>(null);
+  const [verificationReport, setVerificationReport] = useState<WorkspaceVerificationReport | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isFleetExpanded, setIsFleetExpanded] = useState(false);
 
@@ -59,10 +60,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     if (!workspaceId) return;
     setLifecycleLoading(true);
     try {
-      const data = await apiFetch<{ lifecycle: WorkspaceLifecycle }>(
+      const data = await apiFetch<{ lifecycle: WorkspaceLifecycle; report?: WorkspaceVerificationReport | null }>(
         `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle`,
       );
       setLifecycle(data.lifecycle);
+      if (data.report !== undefined) setVerificationReport(data.report);
     } catch (error) {
       // Missing lifecycle state is normal for newly initialized or test workspaces.
       console.warn('Could not load workspace lifecycle:', error);
@@ -72,6 +74,8 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   }, [workspaceId]);
 
   useEffect(() => {
+    setVerificationReport(null);
+    setVerifyMessage(null);
     void loadLifecycle();
   }, [loadLifecycle]);
 
@@ -80,27 +84,23 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     setVerifying(true);
     setVerifyMessage(null);
     try {
-      const data = await apiFetch<{ report: any }>(
+      const data = await apiFetch<{ report: WorkspaceVerificationReport }>(
         `/api/workspace/${encodeURIComponent(workspaceId)}/verify`,
         { method: 'POST', body: JSON.stringify({}) },
       );
       const report = data.report;
-      if (report.overallStatus === 'pass') {
-        setVerifyMessage({
-          status: 'pass',
-          text: `Verification Gate PASSED! (${(report.durationMs / 1000).toFixed(1)}s, ${report.repos.length} repo(s))`,
-        });
-      } else if (report.overallStatus === 'pass_dirty') {
-        setVerifyMessage({
-          status: 'pass_dirty',
-          text: 'Tests passed with uncommitted changes. Commit them before advancing the verification gate.',
-        });
-      } else {
-        setVerifyMessage({
-          status: 'fail',
-          text: `Verification Gate FAILED with exit code non-zero. Check test errors.`,
-        });
-      }
+      setVerificationReport(report);
+      const messages: Record<WorkspaceVerificationReport['overallStatus'], string> = {
+        pass: `Tests passed (${(report.durationMs / 1000).toFixed(1)}s, ${report.repos.length} repositories). Use Verify & Complete on the active gate to advance.`,
+        pass_dirty: report.canProgress
+          ? 'Tests passed with uncommitted changes. Review the changes before continuing.'
+          : 'Tests passed with uncommitted changes. Commit them and rerun verification before advancing.',
+        'no-tests': 'No test command was found. Configure a verification command for this workspace and run it again.',
+        timeout: 'Verification timed out. Check the command and output below, then retry.',
+        fail: 'Verification failed. Review the repository details below, fix the problem, and retry.',
+        skipped: 'Verification was skipped. Run verification before relying on a test result.',
+      };
+      setVerifyMessage({ status: report.overallStatus, text: messages[report.overallStatus] });
       await loadLifecycle();
     } catch (err: any) {
       setVerifyMessage({ status: 'fail', text: `Verification failed: ${err.message}` });
@@ -112,6 +112,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const handleStepAction = async (stepId: string, action: 'start' | 'verify' | 'complete') => {
     if (!workspaceId) return;
     setActionLoading(stepId);
+    setVerifyMessage(null);
     try {
       const data = await apiFetch<{ lifecycle: WorkspaceLifecycle }>(
         `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle/step`,
@@ -121,6 +122,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         },
       );
       setLifecycle(data.lifecycle);
+      await loadLifecycle();
     } catch (error) {
       setVerifyMessage({ status: 'fail', text: error instanceof Error ? error.message : 'Unable to advance lifecycle.' });
       await loadLifecycle();
@@ -177,10 +179,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       {/* Verification Flash Message */}
       {verifyMessage && (
         <div
+          role="status"
           className={`mb-4 flex items-center justify-between p-3 rounded-lg text-xs font-medium border ${
             verifyMessage.status === 'pass'
               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              : verifyMessage.status === 'pass_dirty'
+              : ['pass_dirty', 'no-tests', 'skipped'].includes(verifyMessage.status)
               ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
               : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
           }`}
@@ -188,7 +191,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           <div className="flex items-center gap-2">
             {verifyMessage.status === 'pass' ? (
               <CheckCircle2 size={15} />
-            ) : verifyMessage.status === 'pass_dirty' ? (
+            ) : ['pass_dirty', 'no-tests', 'skipped'].includes(verifyMessage.status) ? (
               <AlertTriangle size={15} />
             ) : (
               <AlertTriangle size={15} />
@@ -204,6 +207,24 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
             Dismiss
           </Button>
         </div>
+      )}
+
+      {verificationReport && (
+        <details className="mb-4 rounded-lg border border-border p-3 text-xs" open={verificationReport.overallStatus !== 'pass'}>
+          <summary className="cursor-pointer font-medium">Verification details ({verificationReport.overallStatus.replaceAll('_', ' ')})</summary>
+          {verificationReport.repos.map((repo, index) => (
+            <div key={`${repo.repoName}-${index}`} className="mt-3 space-y-2 border-t border-border pt-3">
+              <p className="font-semibold">{repo.repoName}: {repo.status.replaceAll('_', ' ')}</p>
+              <p className="font-mono break-all">{repo.command}{repo.exitCode !== null ? ` — exit code ${repo.exitCode}` : ''}</p>
+              {repo.status === 'no-tests' && <p>No test command found. Configure a workspace verification command.</p>}
+              {repo.status === 'timeout' && <p>The command exceeded its time limit. Check for a stalled test or split the suite, then retry.</p>}
+              {repo.error && <p className="text-destructive">{repo.error}</p>}
+              {(repo.stdout || repo.stderr) && (
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3">{[repo.stdout, repo.stderr].filter(Boolean).join('\n')}</pre>
+              )}
+            </div>
+          ))}
+        </details>
       )}
 
       {/* Plan Load Error Alert */}
@@ -257,7 +278,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                 size="xs"
                 variant="default"
                 onClick={() => void handleVerify()}
-                disabled={verifying}
+                disabled={verifying || actionLoading !== null}
                 className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
               >
                 <ShieldCheck size={14} className={verifying ? 'animate-spin' : ''} />
@@ -349,7 +370,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                           )}
 
                           {step.lastVerificationStatus && (
-                            <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                            <div className={`mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded border ${step.lastVerificationStatus === 'pass' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
                               <ShieldCheck size={12} />
                               <span>Gate: {step.lastVerificationStatus.toUpperCase()}</span>
                               {step.lastVerificationSha && (
@@ -368,7 +389,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             size="xs"
                             variant="outline"
                             onClick={() => void handleStepAction(step.id, 'complete')}
-                            disabled={actionLoading !== null}
+                            disabled={verifying || actionLoading !== null}
                             className="text-[11px] gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
                           >
                             <Check size={12} /> {actionLoading === step.id ? 'Working...' : requiresVerification ? 'Verify & Complete' : 'Mark Complete'}
@@ -379,7 +400,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             size="xs"
                             variant="ghost"
                             onClick={() => void handleStepAction(step.id, 'start')}
-                            disabled={actionLoading !== null}
+                            disabled={verifying || actionLoading !== null}
                             className="text-[11px] gap-1 text-primary hover:bg-primary/10"
                           >
                             <Play size={12} /> Start

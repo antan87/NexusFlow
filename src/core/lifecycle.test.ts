@@ -21,6 +21,7 @@ vi.mock('./verify.js');
 describe('core/lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(workspaceState.mutateWorkspaceState).mockImplementation(async (workspacePath, mutation) => mutation(await workspaceState.loadWorkspaceState(workspacePath)));
   });
 
   describe('createDefaultSteps', () => {
@@ -93,7 +94,7 @@ describe('core/lifecycle', () => {
       const lifecycle = await loadWorkspaceLifecycle('/ws');
       expect(lifecycle.workspaceId).toBe('ws-new');
       expect(lifecycle.steps.length).toBeGreaterThan(0);
-      expect(workspaceState.saveWorkspaceState).toHaveBeenCalled();
+      expect(workspaceState.mutateWorkspaceState).toHaveBeenCalled();
     });
   });
 
@@ -203,7 +204,7 @@ describe('core/lifecycle', () => {
 
     it.each(['start', 'verify', 'complete'] as const)('rejects %s when dependencies are unfinished', async (action) => {
       await expect(advanceLifecycleStep('/ws', 'verify_and_ship', action)).rejects.toThrow(/dependencies/);
-      expect(workspaceState.saveWorkspaceState).not.toHaveBeenCalled();
+      expect(workspaceState.mutateWorkspaceState).not.toHaveBeenCalled();
     });
 
     it('rejects unknown actions', async () => {

@@ -9,6 +9,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execa } from 'execa';
 
 import type {
@@ -225,6 +226,28 @@ function buildArgsWithFilter(spec: VerifyCommandSpec, filter?: string): string[]
   }
 }
 
+interface RepositorySnapshot {
+  headSha: string;
+  clean: boolean;
+  dirtyFiles: string[];
+  fingerprint: string;
+}
+
+async function captureRepositorySnapshot(repoPath: string): Promise<RepositorySnapshot> {
+  const { stdout } = await execa('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+  const headSha = stdout.trim();
+  if (!headSha) throw new Error('Cannot determine the repository HEAD.');
+  const status = await getRepoStatus(repoPath);
+  // getRepoStatus intentionally returns a fallback for display callers. A gate must fail closed.
+  if (status.summary?.startsWith('Error:')) throw new Error(status.summary);
+  const { stdout: diff } = await execa('git', ['diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--'], { cwd: repoPath });
+  const hash = createHash('sha256').update(diff).update(JSON.stringify(status.files));
+  for (const file of status.files.filter((file) => file.code === '??')) {
+    hash.update(file.path).update(await fs.readFile(path.join(repoPath, file.path)));
+  }
+  return { headSha, clean: !status.hasChanges, dirtyFiles: status.files.map((file) => file.path), fingerprint: hash.digest('hex') };
+}
+
 /**
  * Runs mechanical verification for a single repository.
  */
@@ -238,19 +261,14 @@ export async function verifyRepo(
   let clean = true;
   let dirtyFiles: string[] = [];
 
+  let before: RepositorySnapshot | undefined;
+  let snapshotError: string | undefined;
   try {
-    const { stdout: shaOut } = await execa('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
-    headSha = shaOut.trim();
-  } catch {
-    // Graceful fallback for non-git directories
-  }
-
-  try {
-    const repoStatus = await getRepoStatus(repoPath);
-    clean = !repoStatus.hasChanges;
-    dirtyFiles = repoStatus.files.map((f) => f.path);
-  } catch {
-    // Graceful fallback
+    before = await captureRepositorySnapshot(repoPath);
+    ({ headSha, clean, dirtyFiles } = before);
+  } catch (error) {
+    clean = false;
+    snapshotError = `Cannot verify repository state: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   const spec = await detectTestCommand(repoPath, options.command);
@@ -297,6 +315,19 @@ export async function verifyRepo(
       if (result.timedOut || result.exitCode !== 0) break;
     }
 
+    let proofError = snapshotError;
+    try {
+      const after = await captureRepositorySnapshot(repoPath);
+      clean = after.clean;
+      dirtyFiles = after.dirtyFiles;
+      if (before && (after.headSha !== before.headSha || after.fingerprint !== before.fingerprint)) {
+        proofError = 'Repository changed while tests were running. Review the changes and rerun verification.';
+      }
+    } catch (error) {
+      clean = false;
+      proofError = `Cannot confirm repository state after tests: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
     const durationMs = Date.now() - startTime;
     const exitCode = result.exitCode ?? (result.timedOut ? 124 : 1);
 
@@ -304,7 +335,7 @@ export async function verifyRepo(
     if (result.timedOut) {
       status = 'timeout';
     } else if (exitCode === 0) {
-      status = clean ? 'pass' : 'pass_dirty';
+      status = proofError ? 'fail' : clean ? 'pass' : 'pass_dirty';
     } else {
       status = 'fail';
     }
@@ -319,6 +350,7 @@ export async function verifyRepo(
       clean,
       dirtyFiles: dirtyFiles.length > 0 ? dirtyFiles : undefined,
       durationMs,
+      error: proofError,
       stdout: stdout || undefined,
       stderr: stderr || undefined,
       verifiedAt,

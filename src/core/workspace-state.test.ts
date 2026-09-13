@@ -10,6 +10,10 @@ import {
 import type { WorkspaceState, WorkspaceVerificationReport } from '../types.js';
 
 vi.mock('node:fs/promises');
+vi.mock('./locks.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./locks.js')>(),
+  acquireLock: vi.fn(async () => async () => {}),
+}));
 
 /** Parses the JSON written by the most recent writeFile call. */
 function lastWritten(): WorkspaceState {
@@ -21,12 +25,13 @@ function lastWritten(): WorkspaceState {
 describe('workspace-state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fs.realpath).mockImplementation(async (p) => String(p));
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
   });
 
   describe('loadWorkspaceState', () => {
     it('returns an empty skeleton when the file is absent', async () => {
-      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
 
       const state = await loadWorkspaceState('/ws');
 
@@ -50,7 +55,7 @@ describe('workspace-state', () => {
 
   describe('recordRepoSync', () => {
     beforeEach(() => {
-      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     });
 
     it('sets pendingValidation when a repo was rebased', async () => {
@@ -153,7 +158,7 @@ describe('workspace-state', () => {
 
   describe('getLastVerificationReport', () => {
     it('returns null when no verification was recorded', async () => {
-      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
       const report = await getLastVerificationReport('/ws');
       expect(report).toBeNull();
     });

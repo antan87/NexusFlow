@@ -196,7 +196,7 @@ describe('core/verify', () => {
       vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ scripts: { test: 'vitest run' } }) as any);
       vi.mocked(multiGit.getRepoStatus).mockResolvedValue({
         hasChanges: true,
-        files: [{ path: 'src/index.ts', index: 'M', workingTree: ' ' }],
+        files: [{ path: 'src/index.ts', code: 'M ' }],
       } as any);
       vi.mocked(execa).mockImplementation(async (cmd: any) => {
         if (cmd === 'git') return { stdout: 'commit-sha-456' } as any;
@@ -226,6 +226,58 @@ describe('core/verify', () => {
 
       expect(report.status).toBe('fail');
       expect(report.exitCode).toBe(1);
+    });
+
+    it('rejects a successful test run that changed tracked files', async () => {
+      vi.mocked(multiGit.getRepoStatus)
+        .mockResolvedValueOnce({ hasChanges: false, files: [] } as any)
+        .mockResolvedValueOnce({ hasChanges: true, files: [{ path: 'source.ts', code: ' M' }] } as any);
+      vi.mocked(execa).mockImplementation(async (cmd: any) => cmd === 'git'
+        ? { stdout: 'same-head' } as any : { exitCode: 0 } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs', allowDirty: true });
+      expect(report).toMatchObject({ status: 'fail', exitCode: 0, clean: false, dirtyFiles: ['source.ts'] });
+      expect(report.error).toContain('changed while tests');
+    });
+
+    it('rejects a HEAD change even if the final working tree is clean', async () => {
+      vi.mocked(multiGit.getRepoStatus).mockResolvedValue({ hasChanges: false, files: [] } as any);
+      let headReads = 0;
+      vi.mocked(execa).mockImplementation(async (cmd: any, args: any) => cmd === 'git'
+        ? { stdout: args[0] === 'rev-parse' ? (++headReads === 1 ? 'old-head' : 'new-head') : '' } as any
+        : { exitCode: 0 } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs' });
+      expect(report).toMatchObject({ status: 'fail', headSha: 'old-head' });
+      expect(report.error).toContain('changed while tests');
+    });
+
+    it('detects changes to already-dirty content despite identical status entries', async () => {
+      vi.mocked(multiGit.getRepoStatus).mockResolvedValue({ hasChanges: true, files: [{ path: 'a.ts', code: 'M ' }] } as any);
+      let diffReads = 0;
+      vi.mocked(execa).mockImplementation(async (cmd: any, args: any) => cmd === 'git'
+        ? { stdout: args[0] === 'diff' ? `diff-${++diffReads}` : 'head' } as any
+        : { exitCode: 0 } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs', allowDirty: true });
+      expect(report.status).toBe('fail');
+    });
+
+    it('detects changes to an untracked file even when its name and status stay the same', async () => {
+      vi.mocked(multiGit.getRepoStatus).mockResolvedValue({ hasChanges: true, files: [{ path: 'new.ts', code: '??' }] } as any);
+      vi.mocked(fs.readFile).mockResolvedValueOnce('before' as any).mockResolvedValueOnce('after' as any);
+      vi.mocked(execa).mockImplementation(async (cmd: any) => cmd === 'git'
+        ? { stdout: 'head' } as any : { exitCode: 0 } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs', allowDirty: true });
+      expect(report.status).toBe('fail');
+    });
+
+    it('fails closed when Git status cannot be read after tests', async () => {
+      vi.mocked(multiGit.getRepoStatus)
+        .mockResolvedValueOnce({ hasChanges: false, files: [] } as any)
+        .mockResolvedValueOnce({ hasChanges: false, files: [], summary: 'Error: Git unavailable' } as any);
+      vi.mocked(execa).mockImplementation(async (cmd: any) => cmd === 'git'
+        ? { stdout: 'head' } as any : { exitCode: 0 } as any);
+      const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs' });
+      expect(report.status).toBe('fail');
+      expect(report.error).toContain('Cannot confirm repository state');
     });
 
     it('passes filter through to test runner', async () => {
