@@ -95,6 +95,7 @@ export const managedOutputSchema = z.discriminatedUnion('kind', [
     adapter: z.enum([
       'agent-skill-v1',
       'claude-skill-v1',
+      // Legacy adapters retained for backward compatibility and clean lock pruning
       'codex-skill-v1',
       'copilot-skill-v1',
       'cursor-skill-v1',

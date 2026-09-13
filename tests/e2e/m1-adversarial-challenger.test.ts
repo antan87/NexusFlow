@@ -464,7 +464,7 @@ constructor:
 
       expect(await fse.pathExists(agentTarget)).toBe(true);
       expect(await fse.pathExists(claudeTarget)).toBe(true);
-      expect(await fse.pathExists(cursorTarget)).toBe(true);
+      expect(await fse.pathExists(cursorTarget)).toBe(false);
       expect(await fs.readFile(agentTarget, 'utf-8')).toContain('Run global eslint check.');
 
       // Check resources.lock.json has ownership of .agents/skills/enterprise-linter
@@ -513,9 +513,9 @@ constructor:
 
       // Local source must remain untouched and containing custom content
       expect(await fs.readFile(agentTarget, 'utf-8')).toContain('Run custom project biome check.');
-      // Claude & Cursor must receive the updated workspace content
+      // Claude must receive the updated workspace content; Cursor natively consumes .agents/skills/
       expect(await fs.readFile(claudeTarget, 'utf-8')).toContain('Run custom project biome check.');
-      expect(await fs.readFile(cursorTarget, 'utf-8')).toContain('Run custom project biome check.');
+      expect(await fse.pathExists(cursorTarget)).toBe(false);
 
       // Check resources.lock.json does NOT manage .agents/skills/enterprise-linter anymore
       const lockData2 = await fse.readJson(lockPath);

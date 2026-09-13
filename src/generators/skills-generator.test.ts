@@ -75,17 +75,13 @@ describe('skills-generator', () => {
     expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
     expect(await fse.pathExists(path.join(tempWorkspace, '.claude', 'skills', 'verifier-workspace', 'SKILL.md'))).toBe(true);
 
-    // 2. Antigravity: .agents/skills/<skillName>/SKILL.md
+    // 2. Canonical Agent Skills: .agents/skills/<skillName>/SKILL.md (for Antigravity, Codex, Cursor, Copilot)
     expect(await fse.pathExists(path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
 
-    // 3. Codex: .codex/skills/<skillName>/SKILL.md
-    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
-
-    // 4. Copilot: .github/skills/<skillName>/SKILL.md
-    expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
-
-    // 5. Cursor: .cursor/skills/<skillName>/SKILL.md
-    expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(true);
+    // 3. Redundant projections eliminated: Codex, Copilot, Cursor read .agents/skills/ natively
+    expect(await fse.pathExists(path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.github', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'skills', 'pr-review-toolkit', 'SKILL.md'))).toBe(false);
 
     // No lossy rules/instructions copies
     expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);

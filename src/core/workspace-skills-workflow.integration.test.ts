@@ -146,15 +146,15 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     expect(await fse.pathExists(claudeSkill)).toBe(true);
     expect(await fse.pathExists(path.join(tempWorkspace, 'CLAUDE.md'))).toBe(true);
 
-    // 4. Verify harness-native skill packages for Codex, Copilot, and Cursor
+    // 4. Verify Codex, Copilot, and Cursor natively read canonical .agents/skills/ without redundant projections
     const codexSkill = path.join(tempWorkspace, '.codex', 'skills', 'pr-review-toolkit', 'SKILL.md');
-    expect(await fse.pathExists(codexSkill)).toBe(true);
+    expect(await fse.pathExists(codexSkill)).toBe(false);
 
     const copilotSkill = path.join(tempWorkspace, '.github', 'skills', 'pr-review-toolkit', 'SKILL.md');
-    expect(await fse.pathExists(copilotSkill)).toBe(true);
+    expect(await fse.pathExists(copilotSkill)).toBe(false);
 
     const cursorSkill = path.join(tempWorkspace, '.cursor', 'skills', 'pr-review-toolkit', 'SKILL.md');
-    expect(await fse.pathExists(cursorSkill)).toBe(true);
+    expect(await fse.pathExists(cursorSkill)).toBe(false);
 
     // Verify lossy rules or instruction-file conversions are not generated
     expect(await fse.pathExists(path.join(tempWorkspace, '.cursor', 'rules', 'pr-review-toolkit.mdc'))).toBe(false);
@@ -216,9 +216,9 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     const claudeK8sRef = path.join(tempWorkspace, '.claude', 'skills', 'k8s-deployer', 'references', 'values-local.yaml');
     expect(await fse.pathExists(claudeK8sRef)).toBe(true);
 
-    // Codex
+    // Codex (consumes canonical .agents/skills/, no redundant .codex/skills/ projection)
     const codexK8sRef = path.join(tempWorkspace, '.codex', 'skills', 'k8s-deployer', 'references', 'values-local.yaml');
-    expect(await fse.pathExists(codexK8sRef)).toBe(true);
+    expect(await fse.pathExists(codexK8sRef)).toBe(false);
 
     // Verify un-enabled template skill was NOT deployed
     const unEnabledSkill = path.join(tempWorkspace, '.agents', 'skills', 'pr-review-toolkit');

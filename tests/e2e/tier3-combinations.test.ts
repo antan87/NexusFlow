@@ -224,10 +224,11 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
     const agentSkills = await listMaterializedSkills(ws.workspacePath);
     expect(agentSkills).toContain('multi-assistant-skill');
 
-    // Verify .cursor/skills/ mirror exists
+    // Verify .cursor/skills/ and .github/skills/ redundant projections do not exist
     const cursorSkillPath = path.join(ws.workspacePath, '.cursor', 'skills', 'multi-assistant-skill', 'SKILL.md');
-    const cursorExists = await fse.pathExists(cursorSkillPath);
-    expect(cursorExists).toBe(true);
+    expect(await fse.pathExists(cursorSkillPath)).toBe(false);
+    const copilotSkillPath = path.join(ws.workspacePath, '.github', 'skills', 'multi-assistant-skill', 'SKILL.md');
+    expect(await fse.pathExists(copilotSkillPath)).toBe(false);
   });
 
   // C9: Mid-flight description refinement + tag addition + refresh concurrency

@@ -98,19 +98,19 @@ describe('Adversarial Challenger Suite: Workspace-Local Skills & Materializer Sa
     expect(await fs.readFile(claudeSkill, 'utf-8')).toContain('AUTO-GENERATED');
     expect((await fs.stat(claudeScript)).mode & 0o777).toBe(0o755);
 
-    // Cursor
+    // Cursor, Codex, Copilot read .agents/skills/ natively; no redundant projections
     const cursorSkill = path.join(workspace, '.cursor', 'skills', 'local-analyzer', 'SKILL.md');
-    expect(await fse.pathExists(cursorSkill)).toBe(true);
-    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'local-analyzer', 'scripts', 'analyze.sh'))).toBe(true);
+    expect(await fse.pathExists(cursorSkill)).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'local-analyzer', 'scripts', 'analyze.sh'))).toBe(false);
 
     // Codex
     const codexSkill = path.join(workspace, '.codex', 'skills', 'local-analyzer', 'SKILL.md');
-    expect(await fse.pathExists(codexSkill)).toBe(true);
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'local-analyzer', 'references', 'config.json'))).toBe(true);
+    expect(await fse.pathExists(codexSkill)).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'local-analyzer', 'references', 'config.json'))).toBe(false);
 
     // Copilot (.github/skills/)
     const copilotSkill = path.join(workspace, '.github', 'skills', 'local-analyzer', 'SKILL.md');
-    expect(await fse.pathExists(copilotSkill)).toBe(true);
+    expect(await fse.pathExists(copilotSkill)).toBe(false);
 
     // Lock file check: Lock MUST NOT claim ownership of .agents/skills/local-analyzer
     const lockPath = await resolveResourceLockPath(workspace);
@@ -118,7 +118,9 @@ describe('Adversarial Challenger Suite: Workspace-Local Skills & Materializer Sa
     const ownedPaths: string[] = lock.outputs.map((o: { path: string }) => o.path);
     expect(ownedPaths.some((p) => p.startsWith('.agents/skills/local-analyzer'))).toBe(false);
     expect(ownedPaths).toContain('.claude/skills/local-analyzer/SKILL.md');
-    expect(ownedPaths).toContain('.cursor/skills/local-analyzer/SKILL.md');
+    expect(ownedPaths).not.toContain('.cursor/skills/local-analyzer/SKILL.md');
+    expect(ownedPaths).not.toContain('.codex/skills/local-analyzer/SKILL.md');
+    expect(ownedPaths).not.toContain('.github/skills/local-analyzer/SKILL.md');
   });
 
   it('empirically guarantees that unmounting or disabling a local skill NEVER deletes or touches .agents/skills/<id>', async () => {

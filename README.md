@@ -167,14 +167,13 @@ In isolated worktree mode:
 ├── CLAUDE.md                         # Context for Claude Code
 ├── AGENTS.md                         # Canonical context for Antigravity, Codex & agents
 ├── .agents/
-│   └── skills/                       # Skills for Google Antigravity (SKILL.md + assets)
+│   └── skills/                       # Canonical skills for Antigravity, Codex, Cursor, Copilot (SKILL.md + assets)
 ├── .claude/
 │   └── skills/                       # Skills for Claude Code (SKILL.md + assets)
 ├── .codex/
-│   └── skills/                       # Skills for OpenAI Codex (SKILL.md + assets)
+│   └── agents/                       # Custom agent personas for OpenAI Codex (.toml)
 ├── .github/
-│   ├── copilot-instructions.md       # Context for GitHub Copilot
-│   └── instructions/                 # Scoped skill instructions for Copilot
+│   └── copilot-instructions.md       # Context for GitHub Copilot
 ├── .cursor/
 │   └── rules/                        # Context & rules for Cursor (.mdc)
 ├── contextspace.json                 # Feature config (branch, repos, etc.)
@@ -514,7 +513,7 @@ ContextSpace/
 │   │   ├── codex.ts          #   Codex AGENTS.md generator
 │   │   ├── copilot.ts        #   copilot-instructions.md generator
 │   │   ├── cursor.ts         #   contextspace.mdc generator
-│   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude, .cursor, .codex)
+│   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude)
 │   ├── orchestration/        # Service start/stop/log management
 │   └── utils/                # Helper utilities
 │       ├── skills-catalog.ts #   Skills & Categories catalog manager (~/.contextspace/)

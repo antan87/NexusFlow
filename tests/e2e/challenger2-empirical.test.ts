@@ -5,7 +5,7 @@
  * Requirements tested:
  * 1. Materializer safety and conflict prevention for workspace-local skills (NO ResourceConflictError).
  * 2. Local user code in .agents/skills/<id> is NEVER overwritten or deleted during unmount or disable.
- * 3. Complete mirroring across assistant adapters (.claude/skills, .cursor/skills, .codex/skills, .github/skills).
+ * 3. Skill projection to .claude/skills for Claude Code and canonical .agents/skills.
  * 4. Asymmetric cleanup during unmount: managed global skills removed from .agents, local skills preserved.
  * 5. In-place shadowing and transition from global to workspace-local.
  * 6. Edge cases: symlinks, BOM/CRLF, executable script permissions, deep subdirectories.
@@ -137,15 +137,11 @@ describe('Challenger 2 Empirical Verification: Workspace-Local Skills & Material
     expect(await fse.pathExists(path.join(workspace, '.claude', 'skills', 'domain-validator', 'references', 'rules.json'))).toBe(true);
     expect(await fse.pathExists(path.join(workspace, '.claude', 'skills', 'domain-validator', 'assets', 'icon.png'))).toBe(true);
 
-    // Cursor (.cursor/skills/)
-    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'domain-validator', 'SKILL.md'))).toBe(true);
-    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'domain-validator', 'scripts', 'validate.sh'))).toBe(true);
-
-    // Codex (.codex/skills/)
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'domain-validator', 'SKILL.md'))).toBe(true);
-
-    // Copilot (.github/skills/)
-    expect(await fse.pathExists(path.join(workspace, '.github', 'skills', 'domain-validator', 'SKILL.md'))).toBe(true);
+    // Cursor, Codex, Copilot read .agents/skills/ natively; no redundant projections
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'domain-validator', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'domain-validator', 'scripts', 'validate.sh'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'domain-validator', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.github', 'skills', 'domain-validator', 'SKILL.md'))).toBe(false);
 
     // 6. Verify lockfile does NOT include .agents/skills/domain-validator
     const lockPath = await resolveResourceLockPath(workspace);
@@ -154,11 +150,11 @@ describe('Challenger 2 Empirical Verification: Workspace-Local Skills & Material
     const localLocked = lockedPaths.filter((p) => p.startsWith('.agents/skills/domain-validator'));
     expect(localLocked).toHaveLength(0);
 
-    // But DOES include the assistant adapter files
+    // But DOES include the Claude assistant adapter files, and NOT redundant projections
     expect(lockedPaths).toContain('.claude/skills/domain-validator/SKILL.md');
-    expect(lockedPaths).toContain('.cursor/skills/domain-validator/SKILL.md');
-    expect(lockedPaths).toContain('.codex/skills/domain-validator/SKILL.md');
-    expect(lockedPaths).toContain('.github/skills/domain-validator/SKILL.md');
+    expect(lockedPaths).not.toContain('.cursor/skills/domain-validator/SKILL.md');
+    expect(lockedPaths).not.toContain('.codex/skills/domain-validator/SKILL.md');
+    expect(lockedPaths).not.toContain('.github/skills/domain-validator/SKILL.md');
   });
 
   it('Test 2: Unmounting or disabling local skill NEVER overwrites or deletes local user code in .agents/skills/<id>', async () => {
@@ -178,9 +174,9 @@ describe('Challenger 2 Empirical Verification: Workspace-Local Skills & Material
     const skills = await getAllSkills(workspace);
     await reconcileWorkspaceResources(workspace, assistants, skills, []);
 
-    // Verify mirrors created
+    // Verify mirrors created (.claude for Claude Code; Cursor reads .agents natively)
     expect(await fse.pathExists(path.join(workspace, '.claude', 'skills', 'proprietary-algo'))).toBe(true);
-    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'proprietary-algo'))).toBe(true);
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'proprietary-algo'))).toBe(false);
 
     // 2. Unmount by reconciling with empty skills array
     const unmountResult = await reconcileWorkspaceResources(workspace, assistants, [], []);
