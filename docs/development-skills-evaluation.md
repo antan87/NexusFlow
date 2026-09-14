@@ -1,5 +1,10 @@
 # Development skill evaluation — 2026-09-14
 
+This report covers the skill sources carried from the v2.12.0 branch, before the
+post-release fixes for #253 and #254. The later local-launcher and authored-delivery-note
+guidance received structural checks and manual review, not a repeat independent
+scenario evaluation.
+
 The three source skills were evaluated by an independent agent given only the
 skill files, relevant references, and scenario prompts. The evaluator did not see
 the expected rubrics or this implementation conversation. Responses were compared
