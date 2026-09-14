@@ -97,6 +97,7 @@ test.describe('Workspace resource diagnostics', () => {
   test.use({ workspacesData: [workspace] });
   test('shows invalid local packages and saves explicit local skill selection', async ({ page }) => {
     let selected: string[] = [];
+    await page.route('**/api/agents', (route) => route.fulfill({ json: { agents: [] } }));
     await page.route('**/api/skills**', async (route) => {
       const pathname = new URL(route.request().url()).pathname;
       if (pathname === '/api/skills/categories') return route.fulfill({ json: { categories: [] } });
