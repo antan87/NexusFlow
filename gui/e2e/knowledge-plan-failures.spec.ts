@@ -55,7 +55,9 @@ test.describe('Knowledge and Plan failure recovery', () => {
 
     // Returning to the tab starts a second load without clearing the editor.
     await page.getByRole('tab', { name: 'Plan', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Plan', exact: true })).toBeVisible();
     await page.getByRole('tab', { name: 'Knowledge', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Knowledge', exact: true })).toBeVisible();
     await expect(page.getByRole('alert')).toContainText('Existing content and your draft were kept.');
     await expect(page.getByRole('alert')).not.toContainText('secret backend details');
     await expect(editor).toHaveValue('# Unsaved draft');
@@ -102,10 +104,14 @@ test.describe('Knowledge and Plan failure recovery', () => {
     });
 
     await page.goto('/#/workspaces/demo/plan');
+    await page.getByRole('button', { name: 'Markdown Plan', exact: true }).click();
     await expect(page.getByText('Keep this plan.')).toBeVisible();
 
     await page.getByRole('tab', { name: 'Knowledge', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Knowledge', exact: true })).toBeVisible();
     await page.getByRole('tab', { name: 'Plan', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Plan', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Markdown Plan', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('Existing content was kept.');
     await expect(page.getByRole('alert')).not.toContainText('private response dump');
     await expect(page.getByText('Keep this plan.')).toBeVisible();
@@ -191,7 +197,9 @@ test.describe('Knowledge and Plan failure recovery', () => {
       request.url().includes('/demo/knowledge') && request.method() === 'GET' && knowledgeGets >= 1,
     );
     await page.getByRole('tab', { name: 'Plan', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Plan', exact: true })).toBeVisible();
     await page.getByRole('tab', { name: 'Knowledge', exact: true }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Knowledge', exact: true })).toBeVisible();
     await delayedReload;
 
     await page.getByRole('button', { name: 'Save', exact: true }).click();

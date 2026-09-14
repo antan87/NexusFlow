@@ -367,7 +367,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page).toHaveURL(/#\/workspaces\/demo-worktree/);
   });
 
-  for (const [label, flowType] of [['Bug fix', 'quick'], ['Epic', 'epic']] as const) {
+  for (const [label, flowType] of [['Small task', 'quick'], ['Epic', 'epic']] as const) {
     test(`persists the selected ${label} flow when creating a workspace`, async ({ page }) => {
       await mockRunningCreationStream(page);
       let payload: any;
@@ -377,13 +377,15 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       });
       await page.goto('/#/new');
       await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
-      await expect(page.getByRole('radio', { name: 'Feature', exact: true })).toBeChecked();
+      await expect(page.getByRole('radio', { name: 'Standard change', exact: true })).toBeChecked();
       await page.getByRole('radio', { name: label, exact: true }).check();
+      await page.getByLabel('Work type', { exact: true }).selectOption('performance');
       await page.getByLabel('Workspace name').fill('Selected flow');
       await page.getByLabel('What are you building?').fill('Validate explicit flow choice');
       await page.getByRole('button', { name: 'Start working' }).click();
       await expect.poll(() => payload?.flowType).toBe(flowType);
       expect(payload.mode).toBe('in-place');
+      expect(payload.workType).toBe('performance');
     });
   }
 

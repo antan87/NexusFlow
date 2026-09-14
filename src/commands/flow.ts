@@ -5,7 +5,8 @@
  */
 
 import chalk from 'chalk';
-import { loadWorkspaceLifecycle, advanceLifecycleStep } from '../core/lifecycle.js';
+import { getWorkContext } from '../core/work-guidance.js';
+import { loadWorkspaceLifecycle, advanceLifecycleStep, renderLifecyclePlan } from '../core/lifecycle.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { BRAND_NAME } from '../core/constants.js';
 
@@ -13,6 +14,7 @@ export interface FlowCommandOptions {
   step?: string;
   action?: 'start' | 'verify' | 'complete';
   json?: boolean;
+  assignment?: boolean;
 }
 
 export async function flowCommand(
@@ -21,6 +23,14 @@ export async function flowCommand(
 ): Promise<void> {
   const workspacePath = await resolveWorkspaceInteractive(workspaceArg, 'Select a workspace to view flow:');
   if (!workspacePath) return;
+
+  if (options.assignment) {
+    await loadWorkspaceLifecycle(workspacePath);
+    const context = await getWorkContext(workspacePath);
+    console.log(options.json ? JSON.stringify(context, null, 2)
+      : context.assignment + (context.lifecycle ? '\n' + renderLifecyclePlan(context.lifecycle) : ''));
+    return;
+  }
 
   if (options.step && options.action) {
     console.log(chalk.cyan(`\nAdvancing step "${options.step}" (${options.action})...`));

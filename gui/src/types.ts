@@ -526,6 +526,7 @@ export interface BranchFleetMember {
 }
 
 export interface WorkspaceLifecycle {
+  revision?: number;
   workspaceId: string;
   flowType: 'quick' | 'feature' | 'epic';
   currentStepId?: string;
@@ -549,4 +550,32 @@ export interface WorkspaceVerificationReport {
     stderr?: string;
     error?: string;
   }>;
+}
+
+export interface WorkDocument {
+  id: string;
+  title: string;
+  role: 'requirements' | 'design' | 'evidence' | 'reference';
+  status: 'draft' | 'approved' | 'superseded';
+  scope: { milestoneId?: string; project?: boolean };
+  summary: string;
+  filename?: string;
+  url?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkGuidance {
+  version: 1;
+  revision: number;
+  workType: 'bug' | 'feature' | 'performance' | 'refactor' | 'rewrite';
+  size: 'small' | 'standard' | 'epic';
+  assignment: {
+    stage: 'investigate' | 'design' | 'implement' | 'verify' | 'review' | 'release';
+    objective: string;
+    expectedOutput: string;
+    stopCondition: string;
+    milestoneId?: string;
+  };
+  documents: WorkDocument[];
 }

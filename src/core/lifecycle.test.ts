@@ -45,7 +45,7 @@ describe('core/lifecycle', () => {
     it('creates vertical slices for epic flow', () => {
       const steps = createDefaultSteps('epic', 'ws-epic', 'epic/redesign');
       expect(steps).toHaveLength(4);
-      expect(steps[0]!.title).toContain('Core Schema');
+      expect(steps[0]!.title).toContain('Outcomes');
       expect(steps[3]!.status).toBe('blocked');
     });
   });

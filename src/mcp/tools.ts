@@ -27,6 +27,7 @@ import { commitWorkspace } from '../core/commit.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { runDoctor } from '../core/doctor.js';
 import { finishWorkspace } from '../core/finish.js';
+import { getWorkContext, readWorkDocument } from '../core/work-guidance.js';
 import { verifyWorkspace } from '../core/verify.js';
 import { getAllSkills, saveSkill } from '../utils/skills-catalog.js';
 import {
@@ -110,6 +111,30 @@ async function requireWorkspace(ctx: ToolContext): Promise<void> {
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 export const tools: NexusFlowTool[] = [
+  {
+    name: 'get_work_context',
+    description: 'Read the current owner-defined AI assignment, work type, size, stage, scoped document roles/statuses, and live milestone plan. Read this before starting work or advancing stages.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
+    handler: async (_args, ctx) => {
+      try {
+        const context = await getWorkContext(ctx.workspacePath);
+        return json({ assignment: context.assignment, lifecycle: context.lifecycle });
+      }
+      catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+    },
+  },
+  {
+    name: 'read_work_document',
+    description: 'Read an attached text document or obtain its source link and owner-defined role, approval status, and scope. Drafts are proposals; superseded documents are historical.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp, documentId: { type: 'string' } }, required: ['documentId'] },
+    handler: async (args, ctx) => {
+      try { return json(await readWorkDocument(ctx.workspacePath, String(args.documentId))); }
+      catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+    },
+  },
+
   {
     name: 'search_workspace',
     description:

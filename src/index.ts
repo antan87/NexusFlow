@@ -218,6 +218,7 @@ program
   .description('Visualize lifecycle milestone pipeline, step progress, and sister branch fleet')
   .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
   .option('--step <id>', 'Target a specific lifecycle step ID')
+  .option('--assignment', 'Read the current AI assignment, source documents, and milestone plan')
   .option('--action <action>', 'Transition action: start, verify, or complete')
   .option('--json', 'Output lifecycle in JSON format')
   .action(runAction(async (workspace: string | undefined, options: any) => {

@@ -95,6 +95,7 @@ import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
+import { WorkspaceWorkPanel } from '../features/work-guidance/WorkspaceWorkPanel.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
@@ -159,6 +160,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     planProps,
   } = props;
 
+  const [planVersion, setPlanVersion] = useState(0);
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openFloatingChat } = useFloatingChat();
@@ -819,7 +821,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                     {/* PRIMARY COLUMN (7 cols): FLOW PIPELINE & IMPLEMENTATION PLAN */}
                     <div className="lg:col-span-7 space-y-6">
-                      <ImplementationPlan workspaceId={selected.branchName} {...planProps} />
+                      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+                        <h3 className="font-semibold">Plan, assignment & source documents</h3>
+                        <p className="text-sm text-muted-foreground">Set the current AI stage, attach requirements, and manage milestone progress in one place.</p>
+                        <Button onClick={() => onSelectTab(selected.branchName, 'plan')}>Open plan & sources</Button>
+                      </div>
                     </div>
 
                     {/* CONTEXT & OPERATIONS COLUMN (5 cols) */}
@@ -894,7 +900,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <div className="flex items-center gap-2">
                             <Zap size={14} className="text-primary" />
                             <h4 className="text-xs font-extrabold uppercase tracking-wider text-foreground">
-                              Feature Specification & Context
+                              Task brief & category rules
                             </h4>
                           </div>
                           {!editingSpec ? (
@@ -908,7 +914,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                               className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
                             >
                               <Edit3 size={11} />
-                              <span>Edit Spec</span>
+                              <span>Edit brief</span>
                             </Button>
                           ) : (
                             <div className="flex items-center gap-1.5">
@@ -1155,7 +1161,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                               value={specInput}
                               onChange={(e) => setSpecInput(e.target.value)}
                               rows={5}
-                              placeholder="Enter or paste feature specifications, user stories, acceptance criteria, or implementation notes..."
+                              placeholder="Describe the intended outcome and acceptance criteria. Attach detailed source documents in Plan."
                               className="w-full text-xs font-mono p-3 rounded-lg border border-border/80 bg-background/80 text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y"
                             />
                             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -1172,7 +1178,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                               <ChatMarkdown content={selected.description} />
                             ) : (
                               <div className="text-muted-foreground italic py-2">
-                                No specification recorded. Click "Edit Spec" to attach PO requirements or bug notes.
+                                No task brief yet. Add a short outcome here and attach detailed sources in Plan.
                               </div>
                             )}
                           </div>
@@ -1279,7 +1285,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
-              {subTab === 'plan' && <ImplementationPlan workspaceId={selected.branchName} defaultViewMode="preview" {...planProps} />}
+              {subTab === 'plan' && <>
+                <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} onPlanChanged={() => {
+                  setPlanVersion((version) => version + 1);
+                  void planProps.handleRetryPlan(selected.branchName);
+                }} />
+                <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} />
+              </>}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
             </TabsPanel>
           </Tabs>

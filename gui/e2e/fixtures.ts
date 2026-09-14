@@ -108,6 +108,11 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     );
     await page.route('**/api/workspace/*/services/logs/*', json({ logs: 'backfill line\n', size: 14 }));
     await page.route('**/api/workspace/*/services', json(servicesData));
+    await page.route('**/api/workspace/*/work', json({
+      guidance: { version: 1, revision: 0, workType: 'feature', size: 'standard',
+        assignment: { stage: 'investigate', objective: '', expectedOutput: '', stopCondition: '' }, documents: [] },
+      lifecycle: null, assignment: '', sharedDocuments: [],
+    }));
     await page.route('**/api/workspace/*/changes', json({ changes: [] }));
 
     await use();

@@ -36,7 +36,7 @@ import {
 } from '../lib/api/queries.js';
 import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
-import type { RepoInfo, RepoFreshness, WorkspaceMode } from '../types.js';
+import type { RepoInfo, RepoFreshness, WorkspaceMode, WorkGuidance } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
@@ -45,8 +45,8 @@ const AD_HOC = '__ad-hoc__';
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 
 const FLOW_OPTIONS = [
-  { value: 'quick', title: 'Bug fix', body: 'Reproduce, fix, and verify a focused problem.' },
-  { value: 'feature', title: 'Feature', body: 'Plan, implement, verify, and review a feature.' },
+  { value: 'quick', title: 'Small task', body: 'Make and verify a focused change.' },
+  { value: 'feature', title: 'Standard change', body: 'Plan, implement, verify, and review a feature.' },
   { value: 'epic', title: 'Epic', body: 'Track a larger change through dependent milestones.' },
 ] as const;
 
@@ -149,6 +149,7 @@ export function StartWorkPage() {
   const creationJobId = searchParams.get('job');
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
+  const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');
   const [flowType, setFlowType] = useState<'quick' | 'feature' | 'epic'>('feature');
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
   const [branchName, setBranchName] = useState('');
@@ -328,6 +329,7 @@ export function StartWorkPage() {
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
       flowType,
+      workType,
       mode,
       projectId: selectedProject?.id,
       ...(inPlace ? { name: workspaceName.trim() } : { branchName: branchName.trim() }),
@@ -611,7 +613,12 @@ export function StartWorkPage() {
 
         <fieldset>
           <legend className="mb-1.5 text-sm font-medium">What kind of work is this?</legend>
-          <p className="mb-3 text-xs text-muted-foreground">Choose the milestones for this workspace. Feature is the default.</p>
+          <label className="mb-3 block text-sm">Work type
+            <select aria-label="Work type" className="mt-1 block w-full rounded-md border border-border bg-background p-2" value={workType} onChange={(event) => setWorkType(event.target.value as WorkGuidance['workType'])}>
+              <option value="bug">Bug fix</option><option value="feature">Feature</option><option value="performance">Performance</option><option value="refactor">Refactor</option><option value="rewrite">Rewrite</option>
+            </select>
+          </label>
+          <p className="mb-3 text-xs text-muted-foreground">Choose a starting size and milestone preset. You can edit milestones in Plan.</p>
           <div className="grid gap-3 sm:grid-cols-3">
             {FLOW_OPTIONS.map((option) => (
               <label key={option.value} className={cn(

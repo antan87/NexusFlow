@@ -42,6 +42,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   defaultViewMode = 'flow',
 }) => {
   const [viewMode, setViewMode] = useState<'flow' | 'preview' | 'raw'>(defaultViewMode);
+  const [milestoneMarkdown, setMilestoneMarkdown] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<WorkspaceLifecycle | null>(null);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -60,10 +61,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     if (!workspaceId) return;
     setLifecycleLoading(true);
     try {
-      const data = await apiFetch<{ lifecycle: WorkspaceLifecycle; report?: WorkspaceVerificationReport | null }>(
+      const data = await apiFetch<{ lifecycle: WorkspaceLifecycle; report?: WorkspaceVerificationReport | null; plan?: string }>(
         `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle`,
       );
       setLifecycle(data.lifecycle);
+      if (data.plan !== undefined) setMilestoneMarkdown(data.plan);
       if (data.report !== undefined) setVerificationReport(data.report);
     } catch (error) {
       // Missing lifecycle state is normal for newly initialized or test workspaces.
@@ -74,6 +76,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   }, [workspaceId]);
 
   useEffect(() => {
+    setMilestoneMarkdown(null);
     setVerificationReport(null);
     setVerifyMessage(null);
     void loadLifecycle();
@@ -130,6 +133,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       setActionLoading(null);
     }
   };
+
+  const milestoneMarker = /<!-- CONTEXTSPACE:MILESTONES:START -->[\s\S]*?<!-- CONTEXTSPACE:MILESTONES:END -->/;
+  const currentPlanContent = milestoneMarkdown
+    ? milestoneMarker.test(planContent) ? planContent.replace(milestoneMarker, () => milestoneMarkdown) : `${milestoneMarkdown}\n\n${planContent}`
+    : planContent;
 
   return (
     <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
@@ -539,21 +547,21 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       ) : (
         /* MARKDOWN / RAW PREVIEW MODE */
         <div>
-          {planLoading && !planContent ? (
+          {planLoading && !currentPlanContent ? (
             <div className="flex justify-center py-10">
               <RefreshCw className="animate-spin text-primary" size={20} />
             </div>
-          ) : !planContent ? (
+          ) : !currentPlanContent ? (
             <div className="rounded-md border border-dashed border-border/80 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               No implementation plan generated yet.
             </div>
           ) : viewMode === 'preview' ? (
             <div className="max-h-[550px] overflow-auto rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4">
-              <ChatMarkdown content={planContent} />
+              <ChatMarkdown content={currentPlanContent} />
             </div>
           ) : (
             <div className="max-h-[550px] overflow-auto whitespace-pre-wrap rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4 font-mono text-xs leading-relaxed text-muted-foreground">
-              {planContent}
+              {currentPlanContent}
             </div>
           )}
         </div>

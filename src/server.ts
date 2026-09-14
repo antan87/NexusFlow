@@ -1,3 +1,4 @@
+import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -1209,6 +1210,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       id: workspaceId,
       mode: inPlace ? 'in-place' : 'worktree',
       flowType: body.flowType,
+      workType: body.workType,
       projectId: body.projectId,
       // In-place features never create a branch; keeping branchName populated
       // (= id) avoids breaking every consumer of the non-optional field.
@@ -1305,6 +1307,7 @@ app.post('/api/workspace', async (c) => {
       enabledAgents?: string[];
       enabledCategories?: string[];
       flowType?: 'quick' | 'feature' | 'epic';
+      workType?: Feature['workType'];
       domainPacks?: string[];
       organizationId?: string;
       teamworkInstructions?: string;
@@ -1316,6 +1319,9 @@ app.post('/api/workspace', async (c) => {
       };
     };
 
+    if (body.workType !== undefined && !['bug', 'feature', 'performance', 'refactor', 'rewrite'].includes(body.workType)) {
+      return c.json({ error: 'Choose a valid work type.' }, 400);
+    }
     if (body.flowType !== undefined && !['quick', 'feature', 'epic'].includes(body.flowType)) {
       return c.json({ error: 'flowType must be quick, feature, or epic.' }, 400);
     }
@@ -2461,10 +2467,22 @@ app.get('/api/workspace/:id/plan', async (c) => {
       }
     }
 
+    const state = await loadWorkspaceState(workspacePath);
+    if (state.lifecycle) {
+      const { renderLifecyclePlan } = await import('./core/lifecycle.js');
+      const milestones = renderLifecyclePlan(state.lifecycle);
+      const marker = /<!-- CONTEXTSPACE:MILESTONES:START -->[\s\S]*?<!-- CONTEXTSPACE:MILESTONES:END -->/;
+      content = marker.test(content) ? content.replace(marker, () => milestones) : `${milestones}\n\n${content}`;
+    }
     return c.json({ content });
   } catch (error) {
     return errorResponse(c, error);
   }
+});
+
+registerWorkGuidanceRoutes(app, async (id) => {
+  const config = await loadConfig();
+  return resolveExactWorkspaceById(config.workspacesDir, id);
 });
 
 // 13c-1. Get active workspace lifecycle and sister branch fleet
@@ -2473,10 +2491,10 @@ app.get('/api/workspace/:id/lifecycle', async (c) => {
     const id = c.req.param('id');
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
-    const { loadWorkspaceLifecycle } = await import('./core/lifecycle.js');
+    const { loadWorkspaceLifecycle, renderLifecyclePlan } = await import('./core/lifecycle.js');
     const lifecycle = await loadWorkspaceLifecycle(workspacePath);
     const report = (await loadWorkspaceState(workspacePath)).lastVerification ?? null;
-    return c.json({ lifecycle, report });
+    return c.json({ lifecycle, report, plan: renderLifecyclePlan(lifecycle) });
   } catch (error) {
     return errorResponse(c, error);
   }
