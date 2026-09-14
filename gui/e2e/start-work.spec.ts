@@ -342,6 +342,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.route('**/api/workspace', async (route, request) => {
       workspaceBody = request.postDataJSON();
       expect(workspaceBody.mode).toBe('worktree');
+      expect(workspaceBody.flowType).toBe('feature');
       expect(workspaceBody.branchName).toBe('feature/demo-work');
       expect(workspaceBody.projectId).toBe('demo');
       await route.fulfill({
@@ -365,6 +366,28 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('button', { name: 'Open workspace' }).click();
     await expect(page).toHaveURL(/#\/workspaces\/demo-worktree/);
   });
+
+  for (const [label, flowType] of [['Small task', 'quick'], ['Epic', 'epic']] as const) {
+    test(`persists the selected ${label} flow when creating a workspace`, async ({ page }) => {
+      await mockRunningCreationStream(page);
+      let payload: any;
+      await page.route('**/api/workspace', async (route) => {
+        payload = route.request().postDataJSON();
+        await route.fulfill({ json: { success: true, jobId: 'selected-flow' } });
+      });
+      await page.goto('/#/new');
+      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+      await expect(page.getByRole('radio', { name: 'Standard change', exact: true })).toBeChecked();
+      await page.getByRole('radio', { name: label, exact: true }).check();
+      await page.getByLabel('Work type', { exact: true }).selectOption('performance');
+      await page.getByLabel('Workspace name').fill('Selected flow');
+      await page.getByLabel('What are you building?').fill('Validate explicit flow choice');
+      await page.getByRole('button', { name: 'Start working' }).click();
+      await expect.poll(() => payload?.flowType).toBe(flowType);
+      expect(payload.mode).toBe('in-place');
+      expect(payload.workType).toBe('performance');
+    });
+  }
 
   test('keeps the setup screen visible after a creation-page reload', async ({ page }) => {
     await mockRunningCreationStream(page);

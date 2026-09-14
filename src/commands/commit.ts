@@ -11,6 +11,7 @@ import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
 import { getWorkspaceRepos, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
 import { BRAND_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
+import { getOrganization } from '../core/domain-packs.js';
 
 interface CommitOptions {
   /**
@@ -57,6 +58,21 @@ export async function commitCommand(
   if (!feature) {
     console.error(chalk.red('✖ Failed to load workspace configuration.'));
     return;
+  }
+
+  if (feature.organizationId) {
+    const org = getOrganization(feature.organizationId);
+    if (org?.commitMessagePattern) {
+      const regex = new RegExp(org.commitMessagePattern);
+      if (!regex.test(message)) {
+        console.warn(chalk.yellow(`⚠️  Commit message does not match ${org.name} convention:`));
+        console.warn(chalk.dim(`   Required pattern: ${org.commitMessagePattern}`));
+        if (org.commitExample) {
+          console.warn(chalk.dim(`   Example:          ${chalk.green(org.commitExample)}`));
+        }
+        console.warn(chalk.yellow(`   Your message:     "${message}"\n`));
+      }
+    }
   }
 
   let repos = await getWorkspaceRepos(workspacePath);

@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { generateImplementationPlan } from './plan-generator.js';
+import { saveWorkspaceState } from '../core/workspace-state.js';
 import type { Feature, ProjectAnalysis, RepoInfo, WorkspaceContext } from '../types.js';
 
 import { PRIMARY_PLAN_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
@@ -97,6 +98,20 @@ describe('generateImplementationPlan', () => {
   }
 
   describe('when no repo depends on another', () => {
+    it('exports saved milestone definitions without copying volatile progress', async () => {
+      await saveWorkspaceState({ workspacePath: dir, repos: {}, updatedAt: '', lifecycle: {
+        workspaceId: 'feat', flowType: 'epic', fleet: [], updatedAt: '',
+        steps: [{ id: 'measure', title: 'Measure latency', status: 'in_progress', branch: 'performance/baseline' },
+          { id: 'improve', title: 'Improve lookup', status: 'pending', dependsOn: ['measure'] }],
+      } });
+      const content = await planFor(...unrelated());
+      expect(content).toContain('Measure latency');
+      expect(content).toContain('Depends on: Measure latency');
+      expect(content).toContain('performance/baseline');
+      expect(content).not.toContain('in progress');
+      expect(content).not.toContain('Recommended Lifecycle Phases');
+    });
+
     it('says so once instead of five times', async () => {
       const content = await planFor(...unrelated());
 

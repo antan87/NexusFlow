@@ -40,11 +40,20 @@ import {
   atomicWriteJson,
 } from '../resources/fs-safety.js';
 import type {
+  SaveSkillOptions,
   SkillCategory,
   SkillItem,
   SkillParameter,
   WorkspaceSkillsConfig,
 } from '../types.js';
+
+export type {
+  SaveSkillOptions,
+  SkillCategory,
+  SkillItem,
+  SkillParameter,
+  WorkspaceSkillsConfig,
+};
 
 // ─── Frontmatter Helper ───────────────────────────────────────────────────
 
@@ -64,11 +73,11 @@ export interface ParsedFrontmatter {
 }
 
 /**
- * Parses YAML frontmatter delimited by `---`, handling CRLF line endings.
+ * Parses YAML frontmatter delimited by `---`, handling CRLF line endings and UTF-8 BOM.
  */
 export function parseSkillMarkdown(raw: string): { metadata: ParsedFrontmatter; content: string } {
-  // Normalize CRLF to LF
-  const normalized = raw.replace(/\r\n/g, '\n').trim();
+  // Strip UTF-8 BOM and normalize CRLF to LF
+  const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trim();
   if (!normalized.startsWith('---')) {
     return { metadata: {}, content: raw };
   }
@@ -143,322 +152,8 @@ async function withCatalogLock<T>(operation: () => Promise<T>): Promise<T> {
 
 // ─── Default Template Categories & Skills ─────────────────────────────────
 
-export const DEFAULT_CATEGORIES: SkillCategory[] = [
-  {
-    id: 'pull-requests',
-    name: 'Pull Requests & Review',
-    description: 'Workflows for authoring, analyzing, and reviewing pull requests and merge readiness.',
-    icon: 'git-pull-request',
-    color: '#3b82f6',
-    custom: false,
-    isTemplate: true,
-    skills: ['pr-review-toolkit', 'pr-description-gen', 'merge-conflict-resolver'],
-  },
-  {
-    id: 'testing-qa',
-    name: 'Testing & Quality Assurance',
-    description: 'Test automation, coverage verification, and local runtime verifier recipes.',
-    icon: 'flask-conical',
-    color: '#10b981',
-    custom: false,
-    isTemplate: true,
-    skills: ['verifier-workspace', 'e2e-runner', 'unit-test-coverage'],
-  },
-  {
-    id: 'cross-repo-release',
-    name: 'Cross-Repo & Release Ordering',
-    description: 'Managing multi-repo dependency loops, package packing, and merge ordering.',
-    icon: 'package',
-    color: '#8b5cf6',
-    custom: false,
-    isTemplate: true,
-    skills: ['nexusflow-local-package-loop', 'nexusflow-release-ordering'],
-  },
-  {
-    id: 'database-migrations',
-    name: 'Database & Migrations',
-    description: 'Safe schema migrations, rollback procedures, and SQL performance checks.',
-    icon: 'database',
-    color: '#f59e0b',
-    custom: false,
-    isTemplate: true,
-    skills: ['schema-migration-validator', 'sql-fluff-linter'],
-  },
-  {
-    id: 'security-auditing',
-    name: 'Security & Auditing',
-    description: 'OWASP vulnerability scanning, secret leak detection, and compliance auditing.',
-    icon: 'shield-check',
-    color: '#ef4444',
-    custom: false,
-    isTemplate: true,
-    skills: ['secret-scanner', 'security-auditor'],
-  },
-];
-
-export const DEFAULT_SKILLS: SkillItem[] = [
-  {
-    id: 'pr-review-toolkit',
-    name: 'pr-review-toolkit',
-    title: 'Pull Request Review Toolkit',
-    category: 'pull-requests',
-    description:
-      'Reviews pull requests for breaking changes, code style, edge cases, and test coverage. Use when user asks to "review PR", "audit changes", or "check diff".',
-    tags: ['git', 'pr', 'review', 'quality'],
-    allowedTools: ['run_command', 'view_file', 'grep_search'],
-    custom: false,
-    content: `# Pull Request Review Toolkit
-
-This skill guides the AI assistant through a structured, multi-file pull request review.
-
-## Review Steps
-1. **Analyze Diff Scope**:
-   - Inspect uncommitted changes or branch diff using \`git diff origin/main...HEAD\`.
-   - Identify affected modules, interfaces, and public API boundaries.
-2. **Contract & Regression Check**:
-   - Verify that existing function signatures and data contracts remain backwards-compatible.
-   - Check error handling, boundary conditions, and null safety.
-3. **Test Coverage & Verification**:
-   - Confirm unit or integration tests exist for newly added logic.
-   - Run verification commands (\`npm test\`, \`dotnet test\`, or project test runner).
-4. **Structured Feedback**:
-   - Return findings organized by Severity (Critical, High, Medium, Minor) with exact line references and remediation suggestions.
-`,
-  },
-  {
-    id: 'pr-description-gen',
-    name: 'pr-description-gen',
-    title: 'PR Description Generator',
-    category: 'pull-requests',
-    description:
-      'Generates conventional, well-structured Pull Request descriptions with summaries, diff breakdowns, and test checklists.',
-    tags: ['git', 'pr', 'documentation'],
-    allowedTools: ['run_command'],
-    custom: false,
-    content: `# Pull Request Description Generator
-
-Automatically writes standardized, clear PR descriptions based on git history and repository changes.
-
-## Procedure
-1. Extract commit messages on the feature branch via \`git log origin/main..HEAD --oneline\`.
-2. Inspect the file change stats via \`git diff --stat origin/main..HEAD\`.
-3. Format output with:
-   - **Summary**: 2-3 sentences explaining the "why" and "what".
-   - **Key Changes**: Bulleted list of architectural and implementation updates.
-   - **Testing Plan**: Exact verification commands run and outcomes.
-   - **Breaking Changes**: Explicit flag if public APIs or database schemas were altered.
-`,
-  },
-  {
-    id: 'merge-conflict-resolver',
-    name: 'merge-conflict-resolver',
-    title: 'Merge Conflict Resolver',
-    category: 'pull-requests',
-    description:
-      'Guides step-by-step resolution of git merge conflicts, ensuring neither upstream updates nor local feature intent are lost.',
-    tags: ['git', 'merge', 'conflict'],
-    allowedTools: ['run_command', 'view_file', 'replace_file_content'],
-    custom: false,
-    content: `# Merge Conflict Resolver
-
-Guidelines for resolving complex git merge and rebase conflicts across workspace repositories.
-
-## Workflow
-1. Run \`git status\` to locate unmerged paths (\`UU\` status).
-2. For each conflicted file, inspect both the incoming (HEAD) and current versions.
-3. Identify semantic intent of both sides before removing conflict markers (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`).
-4. Re-run project tests and type-checks to verify resolution.
-`,
-  },
-  {
-    id: 'verifier-workspace',
-    name: 'verifier-workspace',
-    title: 'Local Runtime Verifier',
-    category: 'testing-qa',
-    description:
-      'Guidelines and recipes to safely launch, mock, and verify services locally across workspace repositories.',
-    tags: ['testing', 'runtime', 'verifier', 'ports'],
-    allowedTools: ['run_command'],
-    custom: false,
-    content: `# Local Runtime Verifier
-
-Guidelines to safely launch, mock, and verify services locally in this workspace.
-
-## Verification Recipe
-1. **Check local ports**: Ensure target ports do not conflict with running services.
-2. **Run mocks**: Spin up local databases/caches before starting services.
-3. **Watch out for shared staging environment**: Never publish messages or write data to staging infrastructure while testing locally unless explicitly requested.
-`,
-  },
-  {
-    id: 'e2e-runner',
-    name: 'e2e-runner',
-    title: 'End-to-End Test Runner',
-    category: 'testing-qa',
-    description:
-      'Orchestrates end-to-end testing (Playwright, Cypress) with failure triage and trace analysis.',
-    tags: ['e2e', 'playwright', 'testing'],
-    allowedTools: ['run_command', 'view_file'],
-    custom: false,
-    content: `# End-to-End Test Runner
-
-Guides executing and debugging end-to-end browser and API tests.
-
-## Instructions
-1. Run headless test suite: \`npx playwright test\` or \`npm run test:e2e\`.
-2. On failure, inspect generated screenshots, videos, or trace logs in the test results directory.
-3. Fix underlying selector mismatches, timing issues, or backend regressions.
-`,
-  },
-  {
-    id: 'unit-test-coverage',
-    name: 'unit-test-coverage',
-    title: 'Unit Test Coverage & TDD',
-    category: 'testing-qa',
-    description:
-      'Implements comprehensive unit tests for new or modified modules, adhering to test-driven development best practices.',
-    tags: ['unit-test', 'tdd', 'coverage'],
-    allowedTools: ['run_command', 'view_file', 'write_to_file', 'replace_file_content'],
-    custom: false,
-    content: `# Unit Test Coverage & TDD
-
-Guides writing high-coverage, maintainable unit tests.
-
-## Guidelines
-- Test behavior, not implementation details.
-- Mock external network calls, database connections, and file system I/O.
-- Verify edge cases: empty collections, null inputs, unexpected exceptions, timeouts.
-- Target >80% statement and branch coverage on critical business logic.
-`,
-  },
-  {
-    id: 'nexusflow-local-package-loop',
-    name: 'nexusflow-local-package-loop',
-    title: 'Local Package Development Loop',
-    category: 'cross-repo-release',
-    description:
-      'Guides testing cross-repo package dependencies locally without publishing to external registries.',
-    tags: ['cross-repo', 'npm', 'nuget', 'packages'],
-    allowedTools: ['run_command', 'view_file'],
-    custom: false,
-    content: `# Local Package Development Loop
-
-This skill guides the AI assistant through local package testing across repositories in this workspace.
-
-## Workflow
-When modifying a shared package in one repository, you must test its effect on downstream consumer repositories before pushing.
-
-### npm / JS/TS:
-1. Run \`npm pack\` inside the producing package directory.
-2. Copy the generated \`.tgz\` file to \`local-packages/\`.
-3. Reference the local tarball in consumer \`package.json\`.
-
-### NuGet / .NET:
-1. Run \`dotnet pack -c Release -o ./local-packages\` in producer.
-2. Reference local package version in consumer \`.csproj\`.
-`,
-  },
-  {
-    id: 'nexusflow-release-ordering',
-    name: 'nexusflow-release-ordering',
-    title: 'Release & Merge Ordering',
-    category: 'cross-repo-release',
-    description:
-      'Computes and explains the correct topological merge and release order when cross-repo dependencies change.',
-    tags: ['release', 'dependencies', 'ordering'],
-    allowedTools: ['view_file'],
-    custom: false,
-    content: `# Release and Merge Ordering Guidelines
-
-Answers what repositories must be merged and released in what order when cross-repo dependencies are modified.
-
-## Principles
-1. **Producer First**: Repositories producing shared packages must be merged, tagged, and published first.
-2. **Consumer Bump**: Downstream consumer repositories must update their version reference and be merged next.
-3. **Reversion Check**: Ensure all temporary local package references are reverted before merging consumer branches.
-`,
-  },
-  {
-    id: 'schema-migration-validator',
-    name: 'schema-migration-validator',
-    title: 'Schema Migration Validator',
-    category: 'database-migrations',
-    description:
-      'Validates database schema migrations for safety, lock contention risks, and backwards compatibility.',
-    tags: ['database', 'migrations', 'sql', 'prisma'],
-    allowedTools: ['run_command', 'view_file'],
-    custom: false,
-    content: `# Database Schema Migration Validator
-
-Guidelines for evaluating database migrations before running them against shared environments.
-
-## Checklist
-- **No Table Locks**: Avoid adding non-null columns without default values to large existing tables.
-- **Index Creation**: Use concurrent index creation (e.g. \`CREATE INDEX CONCURRENTLY\`) on production databases.
-- **Rollback Safety**: Verify a corresponding down/revert migration script exists and works.
-`,
-  },
-  {
-    id: 'sql-fluff-linter',
-    name: 'sql-fluff-linter',
-    title: 'SQL Quality & Linter',
-    category: 'database-migrations',
-    description:
-      'Lints SQL queries and migration scripts for formatting, performance traps, and ANSI SQL standards.',
-    tags: ['sql', 'lint', 'database'],
-    allowedTools: ['run_command', 'view_file'],
-    custom: false,
-    content: `# SQL Quality & Linter
-
-Enforces clean, performant SQL syntax across migrations and query templates.
-
-## Rules
-- Use explicit column names in SELECT queries (avoid \`SELECT *\`).
-- Ensure all JOIN conditions use indexed foreign keys.
-- Uppercase SQL keywords (\`SELECT\`, \`WHERE\`, \`GROUP BY\`, \`ORDER BY\`).
-`,
-  },
-  {
-    id: 'secret-scanner',
-    name: 'secret-scanner',
-    title: 'Secret & Credential Scanner',
-    category: 'security-auditing',
-    description:
-      'Scans source files, commit history, and configuration files for exposed API keys, private certificates, and secrets.',
-    tags: ['security', 'secrets', 'credentials'],
-    allowedTools: ['grep_search', 'view_file'],
-    custom: false,
-    content: `# Secret & Credential Scanner
-
-Proactively prevents committing confidential credentials to version control.
-
-## High-Risk Patterns
-- AWS access keys (\`AKIA...\`), GitHub PATs (\`ghp_...\`), OpenAI keys (\`sk-...\`).
-- RSA / SSH private keys (\`-----BEGIN PRIVATE KEY-----\`).
-- Hardcoded connection strings with passwords in source code.
-`,
-  },
-  {
-    id: 'security-auditor',
-    name: 'security-auditor',
-    title: 'Security Audit Playbook',
-    category: 'security-auditing',
-    description:
-      'Use when auditing code for OWASP Top 10 vulnerabilities, access-control gaps, injection, or cryptographic failures.',
-    tags: ['security', 'audit', 'owasp'],
-    allowedTools: ['view_file', 'grep_search'],
-    custom: false,
-    content: `# Security Audit Playbook
-
-Instructions for conducting deep application security audits.
-
-## Focus Areas
-1. **Injection Vectors**: SQL, Command, LDAP, and XSS vulnerabilities.
-2. **Broken Access Control**: Missing authorization checks on sensitive REST / RPC routes.
-3. **Cryptographic Failures**: Deprecated hashing algorithms (MD5/SHA1) or unencrypted tokens.
-`,
-  },
-];
+export const DEFAULT_CATEGORIES: SkillCategory[] = [];
+export const DEFAULT_SKILLS: SkillItem[] = [];
 
 // ─── Categories Management ────────────────────────────────────────────────
 
@@ -531,11 +226,15 @@ export async function getSkillCategories(): Promise<SkillCategory[]> {
     categoryMap.set(cat.id, { ...cat });
   }
 
-  // 2. Load user categories (legacy fallback then primary)
-  const candidateFiles: string[] = [
-    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'categories.json'),
-    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'categories.json'),
-  ];
+  // 2. Load user categories (legacy fallback then primary, or isolated custom home)
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+  const candidateFiles: string[] = (csHome || nfHome)
+    ? [getUserCategoriesPath()]
+    : [
+        path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'categories.json'),
+        path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'categories.json'),
+      ];
   const userPath = getUserCategoriesPath();
   if (!candidateFiles.includes(userPath)) {
     candidateFiles.push(userPath);
@@ -670,23 +369,33 @@ async function loadSkillFromDir(
         metadataObj[LEGACY_RESOURCE_METADATA_KEY] !== null
         ? (metadataObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
         : {};
+  const rawMetaTitle = metadataObj && typeof metadataObj.title === 'string' ? metadataObj.title : undefined;
   const title =
     parsedMetadata.data.title ||
     (typeof brandMetadata.title === 'string' ? brandMetadata.title : undefined) ||
+    rawMetaTitle ||
     name
       .split('-')
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
+  const rawMetaCategory = metadataObj && typeof metadataObj.category === 'string' ? metadataObj.category : undefined;
   const category =
     parsedMetadata.data.category ||
     (typeof brandMetadata.category === 'string' ? brandMetadata.category : undefined) ||
+    rawMetaCategory ||
     'general';
   const description = parsedMetadata.data.description;
+  const rawMetaTags =
+    metadataObj && Array.isArray(metadataObj.tags)
+      ? metadataObj.tags.filter((t): t is string => typeof t === 'string')
+      : metadataObj && typeof metadataObj.tags === 'string'
+        ? metadataObj.tags.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
   const tags =
     parsedMetadata.data.tags ||
     (Array.isArray(brandMetadata.tags)
       ? brandMetadata.tags.filter((tag): tag is string => typeof tag === 'string')
-      : []);
+      : rawMetaTags);
   const rawAllowedTools = parsedMetadata.data['allowed-tools'];
   const allowedTools = Array.isArray(rawAllowedTools)
     ? rawAllowedTools
@@ -694,12 +403,14 @@ async function loadSkillFromDir(
       ? rawAllowedTools.split(/\s+/).filter(Boolean)
       : [];
 
-  // Inspect references/ and scripts/ if present
+  // Inspect references/, scripts/, and assets/ if present (per Agent Skills spec)
   const referencesDir = path.join(skillDir, 'references');
   const scriptsDir = path.join(skillDir, 'scripts');
+  const assetsDir = path.join(skillDir, 'assets');
 
   const references: { name: string; relativePath: string }[] = [];
   const scripts: { name: string; relativePath: string }[] = [];
+  const assets: { name: string; relativePath: string }[] = [];
 
   if (await fse.pathExists(referencesDir)) {
     try {
@@ -731,6 +442,25 @@ async function loadSkillFromDir(
     }
   }
 
+  if (await fse.pathExists(assetsDir)) {
+    try {
+      await assertNoLinkedPathComponents(skillDir, assetsDir);
+      const files = await fs.readdir(assetsDir, { withFileTypes: true });
+      for (const file of files) {
+        if (file.isSymbolicLink()) throw new Error(`Linked skill files are not allowed: ${file.name}`);
+        if (file.isFile()) {
+          assets.push({ name: file.name, relativePath: path.join('assets', file.name) });
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Linked skill files')) throw error;
+    }
+  }
+
+  const rawScope = parsedMetadata.data.scope ?? brandMetadata.scope;
+  const scope: 'workspace' | 'global' | undefined =
+    rawScope === 'workspace' || rawScope === 'global' ? rawScope : undefined;
+
   return {
     id,
     name,
@@ -744,25 +474,35 @@ async function loadSkillFromDir(
     sourcePath: skillDir,
     references: references.length > 0 ? references : undefined,
     scripts: scripts.length > 0 ? scripts : undefined,
+    assets: assets.length > 0 ? assets : undefined,
+    scope,
+    metadata: metadataObj,
+    license: parsedMetadata.data.license,
+    compatibility: parsedMetadata.data.compatibility,
   };
 }
 
 /**
  * Retrieves all available skills (built-in templates + user directory + optional workspace directory).
  */
-export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]> {
+export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]> {
   const skillMap = new Map<string, SkillItem>();
 
   // 1. Built-in template skills
   for (const s of DEFAULT_SKILLS) {
-    skillMap.set(s.id, { ...s });
+    skillMap.set(s.id, { ...s, scope: 'global' });
   }
 
-  // 2. User directory (~/.nexusflow/skills/ and ~/.contextspace/skills/)
-  const candidateDirs: string[] = [
-    path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
-    path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
-  ];
+  // 2. User directory (~/.nexusflow/skills/ and ~/.contextspace/skills/, or isolated custom home)
+  const csHome = process.env.CONTEXTSPACE_HOME?.trim();
+  const nfHome = process.env.NEXUSFLOW_HOME?.trim();
+  const candidateDirs: string[] = (csHome || nfHome)
+    ? [getUserSkillsDir()]
+    : [
+        path.join(os.homedir(), LEGACY_CONFIG_DIR_NAME, 'skills'),
+        path.join(os.homedir(), PRIMARY_CONFIG_DIR_NAME, 'skills'),
+        path.join(os.homedir(), '.agents', 'skills'),
+      ];
   const activeSkillsDir = getUserSkillsDir();
   if (!candidateDirs.includes(activeSkillsDir)) {
     candidateDirs.push(activeSkillsDir);
@@ -785,6 +525,7 @@ export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]
                   if (isBuiltIn) {
                     throw new Error(`A resource named "${loaded.id}" already exists in the built-in catalog.`);
                   }
+                  loaded.scope = loaded.scope || 'global';
                   skillMap.set(loaded.id, loaded);
                 }
               } catch (error) {
@@ -800,6 +541,85 @@ export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]
     }
   }
 
+  // 3. Workspace-local skills (<workspace>/.agents/skills/)
+  if (workspacePath) {
+    try {
+      const canonicalWorkspace = await fs.realpath(workspacePath).catch(() => path.resolve(workspacePath));
+      const workspaceSkillsDir = path.join(canonicalWorkspace, '.agents', 'skills');
+      if (await fse.pathExists(workspaceSkillsDir)) {
+        await assertPathIsNotLink(workspaceSkillsDir);
+
+        const materializedGlobalSkillIds = new Set<string>();
+        const lockPathPrimary = path.join(canonicalWorkspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
+        const lockPathLegacy = path.join(canonicalWorkspace, LEGACY_CONFIG_DIR_NAME, 'resources.lock.json');
+        const lockPath = (await fse.pathExists(lockPathPrimary))
+          ? lockPathPrimary
+          : (await fse.pathExists(lockPathLegacy))
+            ? lockPathLegacy
+            : null;
+
+        if (lockPath) {
+          try {
+            const lockJson = await fse.readJson(lockPath);
+            const outputs = Array.isArray(lockJson?.outputs)
+              ? lockJson.outputs
+              : Array.isArray(lockJson?.managedFiles)
+                ? lockJson.managedFiles
+                : [];
+            for (const out of outputs) {
+              if (out && out.kind === 'skill') {
+                const outPath = typeof out.path === 'string' ? out.path.replaceAll('\\', '/') : '';
+                if (out.adapter === 'agent-skill-v1' || outPath.startsWith('.agents/skills/')) {
+                  if (typeof out.resourceId === 'string') {
+                    materializedGlobalSkillIds.add(out.resourceId);
+                  }
+                }
+              }
+            }
+          } catch {
+            // Ignore unreadable or corrupt lock file
+          }
+        }
+
+        const entries = await fs.readdir(workspaceSkillsDir, { withFileTypes: true });
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            const isDir = typeof entry === 'string' ? true : entry.isDirectory ? entry.isDirectory() : true;
+            const entryName = typeof entry === 'string' ? entry : entry.name;
+            if (isDir) {
+              try {
+                const skillDir = path.join(workspaceSkillsDir, entryName);
+                const loaded = await loadSkillFromDir(skillDir, true, workspaceSkillsDir);
+                if (loaded) {
+                  const isMaterializedGlobal =
+                    loaded.scope === 'global' ||
+                    (loaded.scope !== 'workspace' && materializedGlobalSkillIds.has(loaded.id));
+
+                  if (isMaterializedGlobal) {
+                    // Materialized global skill: do NOT mark its scope as 'workspace'.
+                    // If its global counterpart was deleted machine-wide, do NOT resurrect it as an active workspace skill.
+                    if (skillMap.has(loaded.id)) {
+                      const globalSkill = skillMap.get(loaded.id)!;
+                      globalSkill.scope = 'global';
+                    }
+                  } else {
+                    loaded.scope = 'workspace';
+                    skillMap.set(loaded.id, loaded);
+                  }
+                }
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.warn(`Skipping invalid workspace skill "${entryName}": ${message}`);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load workspace skills from', workspacePath, err);
+    }
+  }
+
   return Array.from(skillMap.values());
 }
 
@@ -808,11 +628,13 @@ export async function getAllSkills(_workspacePath?: string): Promise<SkillItem[]
  */
 export async function saveSkill(
   skill: Partial<SkillItem> & { name: string; content: string },
-  options: {
-    readonly beforeCommit?: () => Promise<void>;
-    readonly supportFileModes?: Readonly<Record<string, number>>;
-  } = {},
-): Promise<SkillItem> {
+  options: SaveSkillOptions = {},
+): Promise<SkillItem & { path: string; skill: SkillItem }> {
+  const scope = options.scope ?? 'global';
+  if (scope === 'workspace' && !options.workspacePath) {
+    throw new Error('workspacePath is required when saving a workspace-scoped skill.');
+  }
+
   const rawId = skill.id || skill.name;
   const idResult = resourceIdSchema.safeParse(rawId);
   if (!idResult.success) {
@@ -831,21 +653,20 @@ export async function saveSkill(
   if (!description) throw new Error('Skill description is required.');
   if (!skill.content.trim()) throw new Error('Skill content is required.');
 
-  return withCatalogLock(async () => {
-    const userSkillsDir = path.resolve(getUserSkillsDir());
-    await fse.ensureDir(userSkillsDir);
-    await assertPathIsNotLink(userSkillsDir);
-    const targetDir = assertPathWithin(userSkillsDir, path.join(userSkillsDir, id));
-    await assertNoLinkedPathComponents(userSkillsDir, targetDir);
+  const executeSave = async (skillsBaseDir: string) => {
+    await fse.ensureDir(skillsBaseDir);
+    await assertPathIsNotLink(skillsBaseDir);
+    const targetDir = assertPathWithin(skillsBaseDir, path.join(skillsBaseDir, id));
+    await assertNoLinkedPathComponents(skillsBaseDir, targetDir);
 
-    const stagingDir = await fs.mkdtemp(path.join(userSkillsDir, `.staging-${id}-`));
-    const backupDir = path.join(userSkillsDir, `.backup-${id}-${randomUUID()}`);
+    const stagingDir = await fs.mkdtemp(path.join(skillsBaseDir, `.staging-${id}-`));
+    const backupDir = path.join(skillsBaseDir, `.backup-${id}-${randomUUID()}`);
     let movedExisting = false;
     let installedStaging = false;
     try {
       let existingFrontmatter: ReturnType<typeof skillFrontmatterSchema.parse> | undefined;
       if (await fse.pathExists(targetDir)) {
-        await assertNoLinkedPathComponents(userSkillsDir, targetDir);
+        await assertNoLinkedPathComponents(skillsBaseDir, targetDir);
         for (const entry of await fs.readdir(targetDir, { withFileTypes: true })) {
           if (entry.isSymbolicLink()) {
             throw new Error(`Linked skill package entries are not allowed: ${entry.name}`);
@@ -864,29 +685,80 @@ export async function saveSkill(
       }
 
       const existingMetaObj = existingFrontmatter?.metadata;
+      const callerMetadata =
+        skill.metadata && typeof skill.metadata === 'object' && !Array.isArray(skill.metadata)
+          ? (skill.metadata as Record<string, unknown>)
+          : undefined;
       const existingBrandMetadata =
         existingMetaObj &&
         typeof existingMetaObj[RESOURCE_METADATA_KEY] === 'object' &&
         existingMetaObj[RESOURCE_METADATA_KEY] !== null
-          ? existingMetaObj[RESOURCE_METADATA_KEY] as Record<string, unknown>
+          ? (existingMetaObj[RESOURCE_METADATA_KEY] as Record<string, unknown>)
           : existingMetaObj &&
             typeof existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
             existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] !== null
-            ? existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>
+            ? (existingMetaObj[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
             : {};
+      const callerBrandMetadata =
+        callerMetadata &&
+        typeof callerMetadata[RESOURCE_METADATA_KEY] === 'object' &&
+        callerMetadata[RESOURCE_METADATA_KEY] !== null
+          ? (callerMetadata[RESOURCE_METADATA_KEY] as Record<string, unknown>)
+          : callerMetadata &&
+            typeof callerMetadata[LEGACY_RESOURCE_METADATA_KEY] === 'object' &&
+            callerMetadata[LEGACY_RESOURCE_METADATA_KEY] !== null
+            ? (callerMetadata[LEGACY_RESOURCE_METADATA_KEY] as Record<string, unknown>)
+            : {};
+      const inferredTitle =
+        skill.title ||
+        (callerMetadata && typeof callerMetadata.title === 'string' ? callerMetadata.title : undefined) ||
+        (typeof existingBrandMetadata.title === 'string' ? existingBrandMetadata.title : undefined) ||
+        id;
+      const inferredCategory =
+        options.category ||
+        skill.category ||
+        (callerMetadata && typeof callerMetadata.category === 'string' ? callerMetadata.category : undefined) ||
+        (typeof existingBrandMetadata.category === 'string' ? existingBrandMetadata.category : undefined) ||
+        'general';
+      const callerMetaTags =
+        callerMetadata && Array.isArray(callerMetadata.tags)
+          ? callerMetadata.tags.filter((t): t is string => typeof t === 'string')
+          : undefined;
+      const existingBrandTags =
+        Array.isArray(existingBrandMetadata.tags)
+          ? existingBrandMetadata.tags.filter((t): t is string => typeof t === 'string')
+          : undefined;
+      const inferredTags = skill.tags || callerMetaTags || existingBrandTags || [];
+
       const metadataPayload = {
         ...existingBrandMetadata,
-        title: skill.title || id,
-        category: skill.category || 'general',
-        tags: skill.tags || [],
+        ...callerBrandMetadata,
+        title: inferredTitle,
+        category: inferredCategory,
+        tags: inferredTags,
+        scope,
       };
+      const mergedCustomMetadata: Record<string, unknown> = {
+        ...(existingFrontmatter?.metadata ?? {}),
+        ...(callerMetadata ?? {}),
+      };
+      delete mergedCustomMetadata[RESOURCE_METADATA_KEY];
+      delete mergedCustomMetadata[LEGACY_RESOURCE_METADATA_KEY];
+      delete mergedCustomMetadata['__proto__'];
+      delete mergedCustomMetadata['constructor'];
+      delete mergedCustomMetadata['prototype'];
+
       const metadata: Record<string, unknown> = {
         name: id,
+        title: inferredTitle,
+        category: inferredCategory,
         description,
-        license: existingFrontmatter?.license,
-        compatibility: existingFrontmatter?.compatibility,
+        tags: inferredTags,
+        license: skill.license ?? existingFrontmatter?.license,
+        compatibility: skill.compatibility ?? existingFrontmatter?.compatibility,
+        scope,
         metadata: {
-          ...(existingFrontmatter?.metadata ?? {}),
+          ...mergedCustomMetadata,
           [RESOURCE_METADATA_KEY]: metadataPayload,
           [LEGACY_RESOURCE_METADATA_KEY]: metadataPayload,
         },
@@ -904,6 +776,7 @@ export async function saveSkill(
       for (const [directory, files] of [
         ['references', skill.references],
         ['scripts', skill.scripts],
+        ['assets', skill.assets],
       ] as const) {
         if (files === undefined) continue;
         const supportDir = path.join(stagingDir, directory);
@@ -931,16 +804,22 @@ export async function saveSkill(
       await options.beforeCommit?.();
 
       if (await fse.pathExists(targetDir)) {
-        await assertNoLinkedPathComponents(userSkillsDir, targetDir);
+        await assertNoLinkedPathComponents(skillsBaseDir, targetDir);
         await fs.rename(targetDir, backupDir);
         movedExisting = true;
       }
       await fs.rename(stagingDir, targetDir);
       installedStaging = true;
-      const loaded = await loadSkillFromDir(targetDir, true, userSkillsDir);
+      const loaded = await loadSkillFromDir(targetDir, true, skillsBaseDir);
       if (!loaded) throw new Error('Saved skill could not be loaded.');
+      loaded.scope = scope;
       if (movedExisting) await fse.remove(backupDir).catch(() => {});
-      return loaded;
+      const skillFilePath = path.join(targetDir, 'SKILL.md');
+      return {
+        ...loaded,
+        path: skillFilePath,
+        skill: loaded,
+      };
     } catch (error) {
       await fse.remove(stagingDir).catch(() => {});
       if (installedStaging) await fse.remove(targetDir).catch(() => {});
@@ -949,17 +828,49 @@ export async function saveSkill(
       }
       throw error;
     }
-  });
+  };
+
+  if (scope === 'workspace') {
+    const canonicalWorkspace = await fs.realpath(options.workspacePath!).catch(() => path.resolve(options.workspacePath!));
+    const workspaceSkillsDir = path.join(canonicalWorkspace, '.agents', 'skills');
+    return runWorkspaceConfigMutation(async () => {
+      await assertNoLinkedPathComponents(canonicalWorkspace, workspaceSkillsDir);
+      return executeSave(workspaceSkillsDir);
+    });
+  }
+
+  return withCatalogLock(async () => executeSave(path.resolve(getUserSkillsDir())));
 }
 
 /**
- * Deletes a user custom skill safely.
+ * Deletes a skill safely from the global or workspace catalog.
  */
-export async function deleteSkill(id: string): Promise<void> {
+export async function deleteSkill(
+  id: string,
+  options?: { scope?: 'workspace' | 'global'; workspacePath?: string },
+): Promise<void> {
   const idResult = resourceIdSchema.safeParse(id);
   if (!idResult.success || idResult.data !== id) {
     throw new Error('Invalid skill ID format.');
   }
+
+  const scope = options?.scope ?? 'global';
+  if (scope === 'workspace') {
+    if (!options?.workspacePath) {
+      throw new Error('workspacePath is required when deleting a workspace-scoped skill.');
+    }
+    const wsPath = options.workspacePath;
+    const canonicalWorkspace = await fs.realpath(wsPath).catch(() => path.resolve(wsPath));
+    const workspaceSkillsDir = path.join(canonicalWorkspace, '.agents', 'skills');
+    await runWorkspaceConfigMutation(async () => {
+      const targetDir = assertPathWithin(canonicalWorkspace, path.join(workspaceSkillsDir, id));
+      await assertNoLinkedPathComponents(canonicalWorkspace, targetDir);
+      if (!(await fse.pathExists(targetDir))) throw new Error('Skill not found.');
+      await fse.remove(targetDir);
+    });
+    return;
+  }
+
   await withCatalogLock(async () => {
     const userSkillsDir = path.resolve(getUserSkillsDir());
     await fse.ensureDir(userSkillsDir);

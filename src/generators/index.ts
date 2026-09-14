@@ -8,6 +8,7 @@ import { generateCodexConfig } from './codex.js';
 import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
+import { getWorkContext, WORK_GUIDANCE_FILE, WORK_ASSIGNMENT_FILE } from '../core/work-guidance.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
 import { resolveResourceLockPath } from '../resources/materializer.js';
@@ -278,6 +279,10 @@ export async function generateContextFiles(
       `Failed to generate implementation plan: ${message}`,
     );
     throw error;
+  }
+
+  if (await workspaceFileExists(workspacePath, ctx.feature.id, WORK_GUIDANCE_FILE)) {
+    await writeWorkspaceFile(workspacePath, ctx.feature.id, WORK_ASSIGNMENT_FILE, (await getWorkContext(workspacePath)).assignment);
   }
 
   // Resource materialization

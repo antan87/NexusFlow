@@ -21,13 +21,28 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Eye,
+  Plus,
+  Edit2,
+  Code2,
+  BookOpen,
 } from 'lucide-react';
 
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
 import { Input } from '../../components/ui/input.js';
+import { Label } from '../../components/ui/label.js';
+import { Textarea } from '../../components/ui/textarea.js';
 import { Spinner } from '../../components/ui/spinner.js';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../../components/ui/empty.js';
 import { cn } from '../../lib/utils.js';
 import {
@@ -37,9 +52,10 @@ import {
   useWorkspaceSkills,
   useAssignWorkspaceSkills,
   useRefreshWorkspace,
+  useSaveSkill,
 } from '../../lib/api/queries.js';
 import { CONFIG_DIR } from '../../brand.js';
-import type { Feature, SkillItem } from '../../types.js';
+import type { Feature, SkillCategory, SkillItem } from '../../types.js';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   'git-pull-request': GitPullRequest,
@@ -66,6 +82,13 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
   const [draftAgents, setDraftAgents] = useState<string[] | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
 
+  // Inspection & Editing Modals
+  const [previewSkill, setPreviewSkill] = useState<SkillItem | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<Partial<SkillItem> | null>(null);
+  const [editingScope, setEditingScope] = useState<'workspace' | 'global'>('workspace');
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+
   const { data: categories = [], isLoading: loadingCategories } = useSkillCategories();
   const { data: skills = [], isLoading: loadingSkills } = useSkills(ws.branchName);
   const { data: agents = [], isLoading: loadingAgents } = useAgents();
@@ -77,6 +100,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
 
   const assignSkillsMutation = useAssignWorkspaceSkills();
   const refreshWorkspaceMutation = useRefreshWorkspace();
+  const saveSkillMutation = useSaveSkill();
 
   const enabledSkillSet = useMemo(
     () => new Set(draftSkills ?? workspaceSkillsConfig?.enabledSkills ?? []),
@@ -196,13 +220,128 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
     );
   }, [agents, searchQuery]);
 
+  // Merge registered categories with auto-discovered categories from skills
+  const { displayCategories, uncategorizedSkills } = useMemo(() => {
+    const knownCategoryIds = new Set(categories.map((c) => c.id));
+    const mergedCategories = [...categories];
+
+    const extraCategoryMap = new Map<string, SkillCategory>();
+    for (const skill of filteredSkills) {
+      if (skill.category && !knownCategoryIds.has(skill.category)) {
+        if (!extraCategoryMap.has(skill.category)) {
+          const formattedName = skill.category
+            .split(/[-_]/)
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          extraCategoryMap.set(skill.category, {
+            id: skill.category,
+            name: formattedName,
+            description: `Skills categorized under ${formattedName}`,
+            color: '#3b82f6',
+            icon: 'boxes',
+          });
+        }
+      }
+    }
+
+    mergedCategories.push(...Array.from(extraCategoryMap.values()));
+    const allCatIds = new Set(mergedCategories.map((c) => c.id));
+    const uncategorized = filteredSkills.filter((s) => !s.category || !allCatIds.has(s.category));
+
+    return {
+      displayCategories: mergedCategories,
+      uncategorizedSkills: uncategorized,
+    };
+  }, [categories, filteredSkills]);
+
   const skillsByCategory = useMemo(() => {
     const acc: Record<string, SkillItem[]> = {};
-    for (const cat of categories) {
+    for (const cat of displayCategories) {
       acc[cat.id] = filteredSkills.filter((s) => s.category === cat.id);
     }
     return acc;
-  }, [categories, filteredSkills]);
+  }, [displayCategories, filteredSkills]);
+
+  // Handlers for Modals
+  const handleOpenPreview = (skill: SkillItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPreviewSkill(skill);
+  };
+
+  const handleOpenEdit = (skill: SkillItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSkill({ ...skill });
+    setEditingScope(skill.scope === 'workspace' ? 'workspace' : 'global');
+    setSlugManuallyEdited(true);
+    setEditModalOpen(true);
+  };
+
+  const handleOpenCreateSkill = () => {
+    setEditingSkill({
+      name: '',
+      title: '',
+      category: displayCategories[0]?.id || 'general',
+      description: '',
+      tags: [],
+      content: '# Skill Title\n\nProcedural playbook instructions for AI assistants...',
+      allowedTools: [],
+    });
+    setEditingScope('workspace');
+    setSlugManuallyEdited(false);
+    setEditModalOpen(true);
+  };
+
+  const handleTitleChange = (val: string) => {
+    const next = { ...(editingSkill || {}), title: val };
+    if (!editingSkill?.id && !slugManuallyEdited) {
+      next.name = val
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+    setEditingSkill(next);
+  };
+
+  const handleSaveSkill = async () => {
+    if (
+      !editingSkill ||
+      !editingSkill.name?.trim() ||
+      !editingSkill.description?.trim() ||
+      !editingSkill.content?.trim()
+    ) {
+      showToast?.('Skill name, trigger description, and playbook markdown are required', 'error');
+      return;
+    }
+    try {
+      await saveSkillMutation.mutateAsync({
+        id: editingSkill.id,
+        name: editingSkill.name.trim(),
+        title: editingSkill.title || editingSkill.name,
+        category: editingSkill.category || 'general',
+        description: editingSkill.description || '',
+        tags: editingSkill.tags || [],
+        allowedTools: editingSkill.allowedTools || [],
+        content: editingSkill.content,
+        scope: editingScope,
+        workspaceId: editingScope === 'workspace' ? ws.branchName : undefined,
+      });
+
+      if (draftSkills !== null && !draftSkills.includes(editingSkill.name.trim())) {
+        setDraftSkills([...draftSkills, editingSkill.name.trim()]);
+      }
+
+      showToast?.(
+        editingScope === 'workspace'
+          ? `Workspace skill '${editingSkill.name}' saved to .agents/skills/`
+          : `Global skill '${editingSkill.name}' saved to catalog`,
+        'success',
+      );
+      setEditModalOpen(false);
+      setEditingSkill(null);
+    } catch (err) {
+      showToast?.(err instanceof Error ? err.message : 'Failed to save skill', 'error');
+    }
+  };
 
   const isLoading = loadingCategories || loadingSkills || loadingAgents || loadingWorkspaceConfig;
 
@@ -226,6 +365,98 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
     );
   }
 
+  const renderSkillCard = (skill: SkillItem) => {
+    const isEnabled = enabledSkillSet.has(skill.id);
+    return (
+      <div
+        key={skill.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => handleToggleSkill(skill.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleToggleSkill(skill.id);
+          }
+        }}
+        className={cn(
+          'p-3 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between select-none shadow-2xs group',
+          isEnabled
+            ? 'border-primary/60 bg-primary/5 text-foreground'
+            : 'border-border bg-card/70 text-muted-foreground hover:border-foreground/20 hover:text-foreground',
+        )}
+      >
+        <div>
+          <div className="flex items-start justify-between gap-2 mb-1.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={cn(
+                  'grid size-4 shrink-0 place-items-center rounded border transition-colors',
+                  isEnabled
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-muted-foreground/40 bg-transparent',
+                )}
+              >
+                {isEnabled && <Check className="size-3 stroke-[3]" />}
+              </span>
+              <span className="font-mono text-xs font-semibold truncate">
+                {skill.title || skill.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <Badge
+                variant={skill.scope === 'workspace' ? 'default' : 'outline'}
+                className="text-[9px] px-1 py-0 font-mono"
+                title={
+                  skill.scope === 'workspace'
+                    ? 'Local to this workspace (.agents/skills/)'
+                    : 'From global catalog (~/.contextspace/skills/)'
+                }
+              >
+                {skill.scope === 'workspace' ? 'Workspace' : 'Global'}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={(e) => handleOpenPreview(skill, e)}
+                title="Inspect Playbook Instructions"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <Eye className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={(e) => handleOpenEdit(skill, e)}
+                title="Edit Skill Playbook"
+                className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <Edit2 className="size-3" />
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed pl-6">
+            {skill.description || 'No description provided.'}
+          </p>
+
+          {skill.tags && skill.tags.length > 0 && (
+            <div className="mt-2 pl-6 flex items-center gap-1 flex-wrap">
+              {skill.tags.slice(0, 4).map((tag) => (
+                <span
+                  key={tag}
+                  className="text-[9px] font-mono text-muted-foreground bg-muted/60 px-1 py-0.2 rounded"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* Top Banner / Actions Bar */}
@@ -247,25 +478,41 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Choose which reusable Agent Skills and Codex Agents to deploy into this workspace.
+              Active skills and procedural playbooks available to coding assistants in this workspace.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleOpenCreateSkill}
+            className="flex items-center gap-1.5 shadow-xs text-xs"
+          >
+            <Plus className="size-3.5" />
+            <span>New Skill</span>
+          </Button>
+
           <Button
             size="sm"
             onClick={handleSaveAndDeploy}
             disabled={isDeploying || (!hasUnsavedChanges && enabledSkillSet.size === 0 && enabledAgentSet.size === 0)}
-            className="flex items-center gap-1.5 shadow-sm"
+            className="flex items-center gap-1.5 shadow-sm text-xs"
           >
             {isDeploying ? <Spinner className="size-3.5" /> : <Sparkles className="size-3.5" />}
             <span>{isDeploying ? 'Deploying…' : hasUnsavedChanges ? 'Save & Deploy Changes' : 'Re-Deploy to Workspace'}</span>
           </Button>
 
-          <Button render={<Link to="/skills" />} variant="outline" size="sm" className="flex items-center gap-1.5">
+          <Button
+            render={<Link to="/skills" />}
+            variant="ghost"
+            size="sm"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            title="Open Global Enterprise Catalog"
+          >
             <ExternalLink className="size-3.5" />
-            <span>Resource Library</span>
+            <span>Global Library</span>
           </Button>
         </div>
       </Card>
@@ -276,7 +523,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
         <Input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Filter skills & agents by keyword..."
+          placeholder="Filter skills & agents by keyword or tag..."
           className="pl-9 pr-8 h-8 text-xs bg-card"
         />
         {searchQuery && (
@@ -291,10 +538,10 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
 
       {/* Categorized Skills Accordions */}
       <div className="space-y-3">
-        {categories.map((category) => {
+        {displayCategories.map((category) => {
           const IconComp = ICON_MAP[category.icon || 'boxes'] || Boxes;
           const catSkills = skillsByCategory[category.id] || [];
-          if (searchQuery && catSkills.length === 0) return null;
+          if (catSkills.length === 0) return null;
 
           const isCollapsed = !!collapsedCategories[category.id];
           const allCatEnabled = catSkills.length > 0 && catSkills.every((s) => enabledSkillSet.has(s.id));
@@ -328,7 +575,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-xs text-foreground">{category.name}</h4>
-                      <Badge variant="outline" className="text-[9px] px-1 py-0">
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
                         {catSkills.filter((s) => enabledSkillSet.has(s.id)).length}/{catSkills.length} active
                       </Badge>
                     </div>
@@ -360,75 +607,88 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
               {/* Skills Grid */}
               {!isCollapsed && (
                 <div className="p-3 border-t border-border/40 bg-background/50">
-                  {catSkills.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-2 text-center">No skills in this category.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                      {catSkills.map((skill) => {
-                        const isEnabled = enabledSkillSet.has(skill.id);
-                        return (
-                          <div
-                            key={skill.id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => handleToggleSkill(skill.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                handleToggleSkill(skill.id);
-                              }
-                            }}
-                            className={cn(
-                              'p-3 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between select-none shadow-2xs',
-                              isEnabled
-                                ? 'border-primary/60 bg-primary/5 text-foreground'
-                                : 'border-border bg-card/70 text-muted-foreground hover:border-foreground/20 hover:text-foreground',
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-2 mb-1.5">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span
-                                  className={cn(
-                                    'grid size-4 shrink-0 place-items-center rounded border transition-colors',
-                                    isEnabled
-                                      ? 'border-primary bg-primary text-primary-foreground'
-                                      : 'border-muted-foreground/40 bg-transparent',
-                                  )}
-                                >
-                                  {isEnabled && <Check className="size-3 stroke-[3]" />}
-                                </span>
-                                <span className="font-mono text-xs font-semibold truncate">
-                                  {skill.title || skill.name}
-                                </span>
-                              </div>
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
-                                {skill.custom ? 'Custom' : 'Template'}
-                              </Badge>
-                            </div>
-
-                            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed pl-6">
-                              {skill.description || 'No description provided.'}
-                            </p>
-
-                            {skill.tags && skill.tags.length > 0 && (
-                              <div className="mt-2 pl-6 flex items-center gap-1 flex-wrap">
-                                {skill.tags.slice(0, 3).map((tag) => (
-                                  <span key={tag} className="text-[9px] font-mono text-muted-foreground bg-muted/60 px-1 py-0.2 rounded">
-                                    #{tag}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {catSkills.map((skill) => renderSkillCard(skill))}
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
+
+        {/* Uncategorized Skills Section */}
+        {uncategorizedSkills.length > 0 && (
+          <div className="border border-border rounded-xl overflow-hidden bg-card/60 transition-colors">
+            <div
+              role="button"
+              tabIndex={0}
+              aria-expanded={!collapsedCategories['__uncategorized']}
+              onClick={() => toggleCategoryCollapse('__uncategorized')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleCategoryCollapse('__uncategorized');
+                }
+              }}
+              className="p-3 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors select-none"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-md bg-muted text-muted-foreground shadow-xs flex items-center justify-center">
+                  <Boxes className="h-3.5 w-3.5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-semibold text-xs text-foreground">Workspace & Custom Skills</h4>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+                      {uncategorizedSkills.filter((s) => enabledSkillSet.has(s.id)).length}/{uncategorizedSkills.length} active
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() =>
+                    handleToggleCategory(
+                      '__uncategorized',
+                      !uncategorizedSkills.every((s) => enabledSkillSet.has(s.id)),
+                      uncategorizedSkills,
+                    )
+                  }
+                  className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                >
+                  {uncategorizedSkills.every((s) => enabledSkillSet.has(s.id)) ? (
+                    <CheckSquare className="h-3 w-3 mr-1 text-primary" />
+                  ) : (
+                    <Square className="h-3 w-3 mr-1" />
+                  )}
+                  <span>
+                    {uncategorizedSkills.every((s) => enabledSkillSet.has(s.id))
+                      ? 'Deselect All'
+                      : 'Select All'}
+                  </span>
+                </Button>
+                <div className="p-0.5 text-muted-foreground">
+                  {collapsedCategories['__uncategorized'] ? (
+                    <ChevronRight className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {!collapsedCategories['__uncategorized'] && (
+              <div className="p-3 border-t border-border/40 bg-background/50">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {uncategorizedSkills.map((skill) => renderSkillCard(skill))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Custom Codex Agents Section */}
         {filteredAgents.length > 0 && (
@@ -501,11 +761,283 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
             </div>
           </div>
         )}
+
+        {/* Empty state if nothing matches */}
+        {displayCategories.every((c) => (skillsByCategory[c.id] || []).length === 0) &&
+          uncategorizedSkills.length === 0 &&
+          filteredAgents.length === 0 && (
+            <Empty className="py-12 border border-dashed rounded-xl">
+              <EmptyHeader>
+                <EmptyTitle>No skills found</EmptyTitle>
+                <EmptyDescription>
+                  {searchQuery
+                    ? `No skills match the filter "${searchQuery}".`
+                    : 'No skills configured in this workspace yet. Click "+ New Skill" to create a playbook or attach one from the catalog.'}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Saving & deploying will write to <code className="font-mono text-xs text-foreground">{CONFIG_DIR}/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, <code className="font-mono text-xs text-foreground">.codex/skills/</code>, <code className="font-mono text-xs text-foreground">.github/skills/</code>, <code className="font-mono text-xs text-foreground">.cursor/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
+        Saving & deploying will write to <code className="font-mono text-xs text-foreground">{CONFIG_DIR}/skills.json</code> and materialize files into <code className="font-mono text-xs text-foreground">.agents/skills/</code>, <code className="font-mono text-xs text-foreground">.claude/skills/</code>, and <code className="font-mono text-xs text-foreground">.codex/agents/</code>.
       </p>
+
+      {/* ─── Skill Playbook Inspection Modal ───────────────────────────────── */}
+      <Dialog open={!!previewSkill} onOpenChange={(open) => !open && setPreviewSkill(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-6">
+          <DialogHeader className="pb-3 border-b border-border/70 shrink-0">
+            <div className="flex items-center justify-between pr-6">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-primary" />
+                <DialogTitle className="text-base font-bold">
+                  {previewSkill?.title || previewSkill?.name}
+                </DialogTitle>
+              </div>
+              <Badge variant="outline" className="font-mono text-[10px]">
+                {previewSkill?.scope === 'workspace' ? 'Workspace (.agents/skills/)' : 'Global Catalog'}
+              </Badge>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground mt-1">
+              {previewSkill?.description || 'No description provided.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto py-4 space-y-4">
+            {previewSkill?.tags && previewSkill.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-[11px] font-semibold text-muted-foreground mr-1">Tags:</span>
+                {previewSkill.tags.map((t) => (
+                  <Badge key={t} variant="secondary" className="text-[10px] font-mono">
+                    #{t}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {previewSkill?.allowedTools && previewSkill.allowedTools.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-[11px] font-semibold text-muted-foreground mr-1">Allowed Tools:</span>
+                {previewSkill.allowedTools.map((tool) => (
+                  <code key={tool} className="text-[10px] font-mono bg-muted/60 px-1.5 py-0.5 rounded text-foreground">
+                    {tool}
+                  </code>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Code2 className="h-3.5 w-3.5 text-primary" />
+                  <span>SKILL.md Playbook Instructions</span>
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {(previewSkill?.content || '').split('\n').length} lines
+                </span>
+              </div>
+              <div className="p-4 rounded-lg border border-border bg-card/60 overflow-x-auto">
+                <pre className="text-xs whitespace-pre-wrap font-sans leading-relaxed text-foreground/90">
+                  {previewSkill?.content || '*(Empty playbook)*'}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t border-border/70 pt-3 flex items-center justify-between sm:justify-between w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (previewSkill) {
+                  handleToggleSkill(previewSkill.id);
+                }
+              }}
+              className="text-xs"
+            >
+              {previewSkill && enabledSkillSet.has(previewSkill.id) ? (
+                <>
+                  <X className="size-3.5 mr-1 text-destructive" />
+                  Deactivate for Workspace
+                </>
+              ) : (
+                <>
+                  <Check className="size-3.5 mr-1 text-primary" />
+                  Activate for Workspace
+                </>
+              )}
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  if (previewSkill) {
+                    const s = previewSkill;
+                    setPreviewSkill(null);
+                    handleOpenEdit(s, e);
+                  }
+                }}
+                className="text-xs gap-1.5"
+              >
+                <Edit2 className="size-3" />
+                <span>Edit Playbook</span>
+              </Button>
+              <Button size="sm" onClick={() => setPreviewSkill(null)}>
+                Close
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Skill Create / Edit Dialog ────────────────────────────────────── */}
+      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-6">
+          <DialogHeader className="pb-3 border-b border-border/70 shrink-0">
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span>{editingSkill?.id ? 'Edit Skill Playbook' : 'Create New Skill'}</span>
+              </DialogTitle>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground font-medium">Scope:</span>
+                <span className="font-mono text-xs px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                  {editingScope === 'workspace' ? `Workspace (${ws.branchName})` : 'Global Catalog'}
+                </span>
+              </div>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+              Configure SKILL.md metadata triggers and markdown instructions.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto py-3 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ws-skill-title" className="text-xs font-medium">
+                  Display Title
+                </Label>
+                <Input
+                  id="ws-skill-title"
+                  value={editingSkill?.title || ''}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  placeholder="e.g. NexusFlow Dev Playbook"
+                  className="mt-1 text-xs"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ws-skill-name" className="text-xs font-medium">
+                  Identifier (Slug)
+                </Label>
+                <Input
+                  id="ws-skill-name"
+                  value={editingSkill?.name || ''}
+                  disabled={!!editingSkill?.id}
+                  onChange={(e) => {
+                    setSlugManuallyEdited(true);
+                    setEditingSkill((prev) => (prev ? { ...prev, name: e.target.value } : null));
+                  }}
+                  placeholder="e.g. nexusflow-dev"
+                  className="mt-1 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ws-skill-category" className="text-xs font-medium">
+                  Category
+                </Label>
+                <Input
+                  id="ws-skill-category"
+                  value={editingSkill?.category || ''}
+                  onChange={(e) =>
+                    setEditingSkill((prev) => (prev ? { ...prev, category: e.target.value } : null))
+                  }
+                  placeholder="e.g. dev-standards or workflows"
+                  className="mt-1 text-xs"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ws-skill-tags" className="text-xs font-medium">
+                  Tags (comma separated)
+                </Label>
+                <Input
+                  id="ws-skill-tags"
+                  value={editingSkill?.tags?.join(', ') || ''}
+                  onChange={(e) =>
+                    setEditingSkill((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            tags: e.target.value
+                              .split(',')
+                              .map((t) => t.trim())
+                              .filter(Boolean),
+                          }
+                        : null,
+                    )
+                  }
+                  placeholder="e.g. nexusflow, testing, cli"
+                  className="mt-1 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="ws-skill-desc" className="text-xs font-medium">
+                Trigger Description (When should the assistant use this skill?)
+              </Label>
+              <Textarea
+                id="ws-skill-desc"
+                rows={2}
+                value={editingSkill?.description || ''}
+                onChange={(e) =>
+                  setEditingSkill((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                }
+                placeholder="e.g. Use when developing, debugging, refactoring, or maintaining NexusFlow code..."
+                className="mt-1 text-xs leading-relaxed resize-none"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="ws-skill-content" className="text-xs font-semibold flex items-center gap-1.5">
+                  <Code2 className="h-3.5 w-3.5 text-primary" />
+                  <span>Playbook Instructions (Markdown)</span>
+                </Label>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {(editingSkill?.content || '').split('\n').length} lines
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Frontmatter (<code className="font-mono text-[10px] bg-muted/60 px-1 py-0.2 rounded text-foreground">name</code>, <code className="font-mono text-[10px] bg-muted/60 px-1 py-0.2 rounded text-foreground">description</code>, <code className="font-mono text-[10px] bg-muted/60 px-1 py-0.2 rounded text-foreground">tags</code>) is auto-injected into <code className="font-mono text-[10px] bg-muted/60 px-1 py-0.2 rounded text-foreground">SKILL.md</code> on save.
+              </p>
+              <Textarea
+                id="ws-skill-content"
+                rows={12}
+                value={editingSkill?.content || ''}
+                onChange={(e) =>
+                  setEditingSkill((prev) => (prev ? { ...prev, content: e.target.value } : null))
+                }
+                placeholder="# Playbook Title&#10;&#10;Detailed instructions for the AI assistant..."
+                className="font-mono text-xs leading-relaxed resize-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="pt-3 border-t flex items-center justify-between sm:justify-between w-full">
+            <Button variant="outline" size="sm" onClick={() => setEditModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveSkill} className="gap-1.5">
+              <Sparkles className="size-3.5" />
+              <span>Save Skill</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

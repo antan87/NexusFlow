@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import fse from 'fs-extra';
 
 import { saveAgent } from './agents-catalog.js';
+import { saveSkill } from '../utils/skills-catalog.js';
 import {
   ResourceSelectionError,
   validateResourceSelections,
@@ -27,6 +28,14 @@ describe('resource administration service', () => {
   });
 
   it('rejects missing selections and accepts existing underscore-style agents', async () => {
+    await saveSkill({
+      name: 'pr-review-toolkit',
+      title: 'Pull Request Review Toolkit',
+      category: 'general',
+      description: 'Reviews pull requests.',
+      content: '# Review',
+    });
+
     await saveAgent({
       name: 'docs_researcher',
       category: 'general',

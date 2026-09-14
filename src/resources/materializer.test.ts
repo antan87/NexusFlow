@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import fse from 'fs-extra';
 
 import type { CodexAgentItem, SkillItem } from '../types.js';
@@ -43,17 +44,21 @@ describe('workspace resource materializer', () => {
     const first = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
     expect(first.installed).toContain('.agents/skills/portable-skill/SKILL.md');
     expect(first.installed).toContain('.claude/skills/portable-skill/SKILL.md');
-    expect(first.installed).toContain('.codex/skills/portable-skill/SKILL.md');
-    expect(first.installed).toContain('.github/skills/portable-skill/SKILL.md');
-    expect(first.installed).toContain('.cursor/skills/portable-skill/SKILL.md');
+    expect(first.installed).not.toContain('.codex/skills/portable-skill/SKILL.md');
+    expect(first.installed).not.toContain('.github/skills/portable-skill/SKILL.md');
+    expect(first.installed).not.toContain('.cursor/skills/portable-skill/SKILL.md');
     expect(first.installed).toContain('.codex/agents/code_reviewer.toml');
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(workspace, '.claude', 'skills', 'portable-skill', 'SKILL.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.github', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
     expect(await fs.readFile(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'), 'utf-8')).toContain('developer_instructions');
 
     const second = await reconcileWorkspaceResources(workspace, ['codex', 'claude', 'cursor', 'copilot'], [skill], [agent]);
     expect(second.installed).toEqual([]);
     expect(second.updated).toEqual([]);
-    expect(second.unchanged).toHaveLength(6);
+    expect(second.unchanged).toHaveLength(3);
   });
 
   it('removes only unchanged owned packages and permits reassignment', async () => {
@@ -61,21 +66,79 @@ describe('workspace resource materializer', () => {
     const result = await reconcileWorkspaceResources(workspace, ['codex'], [], []);
     expect(result.removed).toEqual(expect.arrayContaining([
       '.agents/skills/portable-skill/SKILL.md',
-      '.codex/skills/portable-skill/SKILL.md',
       '.codex/agents/code_reviewer.toml',
     ]));
     expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
     expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill'))).toBe(false);
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'))).toBe(false);
-    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill'))).toBe(false);
     expect(await fse.pathExists(path.join(workspace, '.codex', 'agents', 'code_reviewer.toml'))).toBe(false);
 
     const reassigned = await reconcileWorkspaceResources(workspace, ['codex'], [skill], [agent]);
     expect(reassigned.installed).toEqual(expect.arrayContaining([
       '.agents/skills/portable-skill/SKILL.md',
-      '.codex/skills/portable-skill/SKILL.md',
       '.codex/agents/code_reviewer.toml',
     ]));
+  });
+
+  it('gracefully prunes legacy .codex/skills, .cursor/skills, and .github/skills projections from older locks', async () => {
+    const legacyFiles = [
+      path.join(workspace, '.codex', 'skills', 'portable-skill', 'SKILL.md'),
+      path.join(workspace, '.github', 'skills', 'portable-skill', 'SKILL.md'),
+      path.join(workspace, '.cursor', 'skills', 'portable-skill', 'SKILL.md'),
+    ];
+    for (const file of legacyFiles) {
+      await fse.ensureDir(path.dirname(file));
+      await fs.writeFile(file, '# legacy\n', 'utf-8');
+    }
+    const hash = createHash('sha256').update('# legacy\n').digest('hex');
+    const lockPath = path.join(workspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
+    await fse.ensureDir(path.dirname(lockPath));
+    await fs.writeFile(lockPath, JSON.stringify({
+      schemaVersion: 1,
+      outputs: [
+        { kind: 'skill', resourceId: 'portable-skill', adapter: 'codex-skill-v1', path: '.codex/skills/portable-skill/SKILL.md', hash },
+        { kind: 'skill', resourceId: 'portable-skill', adapter: 'copilot-skill-v1', path: '.github/skills/portable-skill/SKILL.md', hash },
+        { kind: 'skill', resourceId: 'portable-skill', adapter: 'cursor-skill-v1', path: '.cursor/skills/portable-skill/SKILL.md', hash },
+      ],
+    }, null, 2), 'utf-8');
+
+    const result = await reconcileWorkspaceResources(workspace, ['codex'], [skill], []);
+    expect(result.removed).toContain('.codex/skills/portable-skill/SKILL.md');
+    expect(result.removed).toContain('.github/skills/portable-skill/SKILL.md');
+    expect(result.removed).toContain('.cursor/skills/portable-skill/SKILL.md');
+    expect(await fse.pathExists(path.join(workspace, '.codex', 'skills', 'portable-skill'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.github', 'skills', 'portable-skill'))).toBe(false);
+    expect(await fse.pathExists(path.join(workspace, '.cursor', 'skills', 'portable-skill'))).toBe(false);
+    expect(result.installed).toContain('.agents/skills/portable-skill/SKILL.md');
+    expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill', 'SKILL.md'))).toBe(true);
+
+    const updatedLock = JSON.parse(await fs.readFile(lockPath, 'utf-8'));
+    expect(updatedLock.outputs).toHaveLength(1);
+    expect(updatedLock.outputs[0].adapter).toBe('agent-skill-v1');
+    expect(updatedLock.outputs[0].path).toBe('.agents/skills/portable-skill/SKILL.md');
+  });
+
+  it('detects user modifications to legacy projections and aborts without mutating anything', async () => {
+    const legacyFile = path.join(workspace, '.cursor', 'skills', 'portable-skill', 'SKILL.md');
+    await fse.ensureDir(path.dirname(legacyFile));
+    await fs.writeFile(legacyFile, '# user customized legacy skill\n', 'utf-8');
+    const originalHash = createHash('sha256').update('# original legacy\n').digest('hex');
+    const lockPath = path.join(workspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json');
+    await fse.ensureDir(path.dirname(lockPath));
+    await fs.writeFile(lockPath, JSON.stringify({
+      schemaVersion: 1,
+      outputs: [
+        { kind: 'skill', resourceId: 'portable-skill', adapter: 'cursor-skill-v1', path: '.cursor/skills/portable-skill/SKILL.md', hash: originalHash },
+      ],
+    }, null, 2), 'utf-8');
+
+    await expect(
+      reconcileWorkspaceResources(workspace, ['cursor'], [skill], []),
+    ).rejects.toBeInstanceOf(ResourceConflictError);
+
+    // Legacy file remains completely untouched
+    expect(await fs.readFile(legacyFile, 'utf-8')).toBe('# user customized legacy skill\n');
+    // Canonical file was NOT installed due to preflight abort
+    expect(await fse.pathExists(path.join(workspace, '.agents', 'skills', 'portable-skill'))).toBe(false);
   });
 
   it('preserves modified managed files and reports drift before mutating anything', async () => {

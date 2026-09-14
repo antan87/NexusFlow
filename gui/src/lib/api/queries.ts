@@ -13,6 +13,7 @@ import type {
   DetectedEditor,
   Feature,
   ContextSpaceConfig,
+  DomainPack,
   OrchestrationDetection,
   Project,
   RepoInfo,
@@ -71,6 +72,8 @@ export function useWorkspacesStatus(options: { enabled?: boolean; intervalMs?: n
 }
 
 export interface CreateWorkspacePayload {
+  flowType?: 'quick' | 'feature' | 'epic';
+  workType?: 'bug' | 'feature' | 'performance' | 'refactor' | 'rewrite';
   mode?: WorkspaceMode;
   projectId?: string;
   /** Workspace name — required for in-place mode. */
@@ -84,6 +87,62 @@ export interface CreateWorkspacePayload {
   enabledSkills?: string[];
   enabledAgents?: string[];
   enabledCategories?: string[];
+  domainPacks?: string[];
+  organizationId?: string;
+}
+
+export function useDomainPacks() {
+  return useQuery({
+    queryKey: ['domain-packs'],
+    queryFn: async () => {
+      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
+      return res?.domainPacks ?? [];
+    },
+  });
+}
+
+export function useCreateDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pack: DomainPack) =>
+      apiFetch<{ success: boolean; domainPack: DomainPack }>('/api/enterprise/domain-packs', {
+        method: 'POST',
+        body: JSON.stringify(pack),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
+}
+
+export function useSaveDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pack: Partial<DomainPack> & { id: string; name: string }) =>
+      apiFetch<{ success: boolean; domainPack: DomainPack }>(`/api/enterprise/domain-packs/${encodeURIComponent(pack.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(pack),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
+}
+
+export function useDeleteDomainPack() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ success: boolean }>(`/api/enterprise/domain-packs/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-packs'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-domain-packs'] });
+    },
+  });
 }
 
 export function useCreateWorkspace() {
@@ -399,7 +458,7 @@ export function useSkills(workspaceId?: string) {
 export function useSaveSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (skill: Partial<SkillItem> & { name: string; content: string }) =>
+    mutationFn: (skill: Partial<SkillItem> & { name: string; content: string; workspaceId?: string; workspace?: string; scope?: 'global' | 'workspace' }) =>
       apiFetch<{ success: boolean; skill: SkillItem }>('/api/skills', {
         method: 'POST',
         body: JSON.stringify(skill),
@@ -407,6 +466,7 @@ export function useSaveSkill() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skills'] });
       queryClient.invalidateQueries({ queryKey: ['skill-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-skills'] });
     },
   });
 }
@@ -414,12 +474,19 @@ export function useSaveSkill() {
 export function useDeleteSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ success: boolean }>(`/api/skills/${encodeURIComponent(id)}`, {
+    mutationFn: (arg: string | { id: string; workspaceId?: string }) => {
+      const id = typeof arg === 'string' ? arg : arg.id;
+      const ws = typeof arg === 'string' ? undefined : arg.workspaceId;
+      const url = ws
+        ? `/api/skills/${encodeURIComponent(id)}?workspace=${encodeURIComponent(ws)}`
+        : `/api/skills/${encodeURIComponent(id)}`;
+      return apiFetch<{ success: boolean }>(url, {
         method: 'DELETE',
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['skills'] });
+      queryClient.invalidateQueries({ queryKey: ['workspace-skills'] });
     },
   });
 }

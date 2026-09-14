@@ -18,8 +18,13 @@ ContextSpace combines multiple Git repositories into a single feature workspace 
 
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories
 - **Project registry** — save named, persistent repo groups in `~/.contextspace/projects.json` and reuse them from the CLI or API
+- **Dynamic lifecycle flow selection** — choose tailored development flow presets (`quick` for single-step bug fixes, `feature` for standard feature branches, and `epic` for multi-milestone initiatives) with milestone dependency gating and live fleet tracking
 - **The full feature loop** — `create` opens a workspace, `finish` closes it: commit + push every repo, open PRs (or print compare links), promote learnings, and optionally clean up
 - **Knowledge that accumulates durably** — titled, scoped decisions and gotchas are auto-committed to the workspace artifact repository, then reusable entries can be promoted into per-repo memory
+- **Mechanical verification gates** — sequential test runners (`ctxspace verify`) enforce clean git commits, test-suite passing criteria, and cryptographic proof anchoring before advancing lifecycle milestones or completing features
+- **Generic enterprise domain packs & categories** — model enterprise taxonomies through Root Organization Conventions (commit patterns, PR templates, compliance rules), Subsystem Verticals (domain-specific rules and verification gates), and Horizontal Traits (cross-cutting architectural invariants), persisted safely in `domain-catalog.json` with concurrency locks and full GUI administration
+- **Open agentskills.io standard alignment** — portable agent skills deploy canonically to `.agents/skills/` with YAML frontmatter, execution playbooks, and auxiliary runbooks/scripts; streamlined projections for Claude Code (`.claude/skills/`) and native Codex custom agent personas (`.codex/agents/*.toml`)
+- **Start Work GUI improvements** — launch workspaces from the GUI with instant skill selection, in-page tag and category creation, and visual flow pipeline configuration
 - **Provenance-checked AI context** — `contextspace.lock` records repo fingerprints and generated-view hashes; `ctxspace refresh --check` and `doctor` expose stale or modified context loudly
 - **Single-source AI context generation** — `AGENTS.md` is canonical; stamped Claude, Copilot, Cursor, and skill views are generated artifacts
 - **Drive it from your assistant** — an MCP server exposes the whole loop (status, diff, commit, sync, refresh, doctor, knowledge, finish) so your AI can run it without leaving the session
@@ -134,7 +139,7 @@ The `create` wizard walks you through:
 
 ## 📚 Projects
 
-A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with automatic fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name, so `Hogia Billing` becomes `hogia-billing`. Use either the `project` command group or its `proj` alias:
+A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with automatic fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name, so `Acme Billing` becomes `acme-billing`. Use either the `project` command group or its `proj` alias:
 
 | Command | Description |
 |:---|:---|
@@ -167,14 +172,13 @@ In isolated worktree mode:
 ├── CLAUDE.md                         # Context for Claude Code
 ├── AGENTS.md                         # Canonical context for Antigravity, Codex & agents
 ├── .agents/
-│   └── skills/                       # Skills for Google Antigravity (SKILL.md + assets)
+│   └── skills/                       # Canonical skills for Antigravity, Codex, Cursor, Copilot (SKILL.md + assets)
 ├── .claude/
 │   └── skills/                       # Skills for Claude Code (SKILL.md + assets)
 ├── .codex/
-│   └── skills/                       # Skills for OpenAI Codex (SKILL.md + assets)
+│   └── agents/                       # Custom agent personas for OpenAI Codex (.toml)
 ├── .github/
-│   ├── copilot-instructions.md       # Context for GitHub Copilot
-│   └── instructions/                 # Scoped skill instructions for Copilot
+│   └── copilot-instructions.md       # Context for GitHub Copilot
 ├── .cursor/
 │   └── rules/                        # Context & rules for Cursor (.mdc)
 ├── contextspace.json                 # Feature config (branch, repos, etc.)
@@ -186,6 +190,12 @@ In isolated worktree mode:
 
 In-place workspaces keep the manifest, skills, and generated AI context files in the workspace directory while the code stays in the source repositories.
 
+ContextSpace adheres strictly to the open **[agentskills.io](https://agentskills.io)** standard:
+- `.agents/skills/` is the canonical open directory for portable agent skills (`SKILL.md` frontmatter + execution playbook, `references/`, `scripts/`).
+- `.claude/skills/` is maintained as a dedicated projection exclusively for Claude Code.
+- `.codex/agents/*.toml` houses native custom agent personas for OpenAI Codex.
+- Redundant mirror folders (`.codex/skills/`, `.cursor/skills/`) are retired in favor of universal discovery via `.agents/skills/`.
+
 Open this folder in your editor → your AI assistant picks up the context and skills → it understands *all* your repos.
 
 ## 🖥️ Commands
@@ -193,6 +203,7 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | Command | Description |
 |:---|:---|
 | `ctxspace create` | Interactive wizard to create a new worktree or in-place workspace |
+| `ctxspace quick` | Fast-track instant workspace creation tailored for quick bug fixes |
 | `ctxspace list` | List all existing workspaces, tagging in-place ones with `[in-place]` (alias: `ls`) |
 | `ctxspace open` | Re-open a workspace in your editor |
 | `ctxspace init` | Configure ContextSpace settings |
@@ -202,6 +213,8 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace start` | Start all services in a workspace (auto-detected) |
 | `ctxspace stop` | Stop all running services |
 | `ctxspace status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
+| `ctxspace flow` | Visualize active lifecycle steps, milestone gates, and multi-branch sister fleet (`--step`, `--action`, `--assignment`) |
+| `ctxspace verify` | Execute mechanical verification gates and record cryptographic proof in workspace state (`--repo`, `--tag`, `--filter`, `--timeout`, `--allow-dirty`) |
 | `ctxspace progress` | Derive implementation progress from live branch, push, and available PR state |
 | `ctxspace logs` | Tail aggregated logs from all services |
 | `ctxspace ui` | Start the dashboard server — the backend the desktop app embeds (`--port`, `--open`, `--strict-port`) |
@@ -212,6 +225,8 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
 | `ctxspace finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
 | `ctxspace review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
+| `ctxspace tag` | Manage enterprise categories, vertical subsystems, and cross-cutting traits (`list`, `add`, `remove`, `show`) (alias: `category`) |
+| `ctxspace skill` | Manage portable agent skills from CLI (`list`, `create`, `show`, `delete`) |
 | `ctxspace knowledge` | Capture titled decisions/gotchas/assumptions/questions with optional `--scope` and `--evidence`; `show`, `promote` into per-repo base knowledge |
 | `ctxspace refresh`| Regenerate plan and AI context files; use `--check` for a non-regenerating CI/pre-commit freshness gate |
 | `ctxspace remote` | Add, push, or pull the workspace artifact repository remote without touching child repo remotes |
@@ -260,6 +275,71 @@ ContextSpace is built around a single loop:
    ctxspace finish --dry-run        # preview what would happen
    ctxspace finish -m "Ship feature" --cleanup
    ```
+
+## 🌊 Dynamic Lifecycle Flows & Milestone Radar
+
+ContextSpace provides dynamic development lifecycles (`flowType`), allowing developers and autonomous agents to right-size milestone pipelines, dependency gating, and multi-branch coordination:
+
+| Flow Preset | Best For | Default Pipeline |
+|:---|:---|:---|
+| **`quick`** | Bug fixes, single-repo patches, typo fixes | Reproduce failure → Implement fix → Mechanical verify & commit |
+| **`feature`** | Standard features, enhancements, new APIs | Foundation / Prereqs → Core feature slice → Integration, docs & verify → Finish |
+| **`epic`** | Complex multi-repo initiatives, modular migrations | Architecture & Contracts → Milestone Slices (with dependency graph) → Cross-repo integration → Comprehensive release gate |
+
+Select a flow preset during workspace creation (`ctxspace create` or `ctxspace quick`), or choose it directly in the Start Work GUI.
+
+### Inspecting Flow & Advancing Milestones
+
+Use `ctxspace flow` to inspect your active milestone pipeline, the current active deliverable, and live status:
+
+```bash
+# View active lifecycle pipeline and sister branch fleet in the terminal
+ctxspace flow
+
+# Output structured JSON for automation or scripting
+ctxspace flow --json
+
+# Read live AI assignment, source documents, and stage guidance
+ctxspace flow --assignment
+ctxspace flow --assignment --json
+
+# Transition milestones through the state machine (start -> verify -> complete)
+ctxspace flow --step milestone-1 --action start
+ctxspace flow --step milestone-1 --action complete
+```
+
+### Sister Branch Fleet & Collaborator Radar
+
+When coordinating across multiple repositories and developers, `ctxspace flow` surfaces the **Sister Branch Fleet**:
+- **Non-destructive remote inspection**: Safely queries `refs/remotes/origin/*` across all repositories in the workspace without mutating local working trees.
+- **Collision & Desync Detection**: Highlights ahead/behind commit deltas, unpushed local changes, and remote branch tracking state.
+- **Collaborator Visibility**: Reports recent commit authors, commit messages, and relative commit timestamps across repositories so agents and developers avoid stomping on active teammate work.
+
+## 🧪 Mechanical Verification Gates
+
+To prevent advancing unverified code, broken builds, or uncommitted modifications, ContextSpace provides automated **Mechanical Verification Gates** via `ctxspace verify`.
+
+```bash
+# Execute verification commands across all repositories
+ctxspace verify
+
+# Target a specific repository or test tag
+ctxspace verify --repo my-api
+ctxspace verify --tag backend
+
+# Specify a custom verification command or timeout
+ctxspace verify --command "npm test" --timeout 120
+
+# Run in CI or pre-commit scripts (exits with code 1 on failure or timeout)
+ctxspace verify --json
+```
+
+### Verification Invariants & Security
+- **Strict Sequential Execution**: Tests are executed sequentially per repository to prevent resource starvation and test harness interference.
+- **Dangerous Operator Rejection**: Command strings containing shell operators (`&&`, `||`, `;`, `|`, `` ` ``, `$()`) are rejected to eliminate command injection risks and ensure deterministic status reporting.
+- **Cryptographic SHA Anchoring**: Results are pinned to the exact Git commit SHA of each repository.
+- **Dirty Tree Detection (`pass_dirty`)**: If tests pass but uncommitted changes remain in the repository working tree, ContextSpace reports `pass_dirty` with warnings to commit before finishing, ensuring that verification proof is anchored to immutable Git history.
+- **Durable State Recording**: Test results, timings, commands, and SHA fingerprints are persisted in `.contextspace-state.json`. Subsequent checks or agents can inspect recorded verification evidence without redundant test re-runs.
 
 ## 🔌 MCP Server & Tools
 
@@ -355,15 +435,22 @@ Jobs are stored in `~/.contextspace/schedules.json` (fallback: `~/.nexusflow/sch
 
 Scheduled runs are **token-efficient by design**: they use the same analysis cache as `ctxspace refresh`, so only repos whose content changed are re-analyzed, and unchanged context files are left byte-identical (no git churn, no invalidated AI prompt caches). The dashboard API exposes the same functionality under `/api/schedules`.
 
-## 🧩 Resource Library
+## 🧩 Resource Library & Open AgentSkills Standard
 
-ContextSpace provides separate libraries for portable Agent Skills and Codex-native custom agents. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
+ContextSpace provides first-class support for portable Agent Skills and Codex-native custom agents, aligned directly with the open **[agentskills.io](https://agentskills.io)** standard. Skills are complete directories; agents are validated native TOML definitions rather than skills disguised as personas.
 
 Skills bundle metadata triggers (for AI autonomous discovery) with full Markdown execution playbooks, auxiliary reference runbooks (`references/`), and automation scripts (`scripts/`).
 
+### Start Work GUI: Direct Selection & In-Page Creation
+
+Starting work in the Web Dashboard or Desktop App includes streamlined skill and category management:
+- **Direct Skills Selection**: Select specific skills via checkboxes directly on the Start Work page when configuring a feature workspace.
+- **In-Page Tag & Category Creation**: Author and assign new categories, vertical subsystems, or traits on the fly without navigating away to administrative settings.
+- **Inline Playbook Preview**: Inspect skill playbooks and reference markdown directly before assigning them.
+
 ### Category Boxes & Visual Drag-and-Drop
 
-Skills are grouped into clear visual accordion boxes by category. You can drag and drop skill cards between category boxes to re-categorize them, or use the quick menu on touch and mobile devices.
+In the **Skills & Agents** hub, skills are grouped into clear visual accordion boxes by category. You can drag and drop skill cards between category boxes to re-categorize them, or use the quick menu on touch and mobile devices.
 
 #### Built-in Category Templates & Skills:
 - 🔀 **Pull Requests & Review**: `pr-review-toolkit`, `pr-description-gen`, `merge-conflict-resolver`
@@ -382,17 +469,59 @@ The Codex Agent Library supports creating, editing, importing, and deleting basi
 
 ### Cross-Harness Deployment
 
-When a workspace is refreshed, ContextSpace reconciles enabled resources through `.contextspace/resources.lock.json` (fallback: `.nexusflow/resources.lock.json`). It refuses unmanaged target collisions, removes only unchanged ContextSpace-owned outputs, and reports modified-file conflicts instead of overwriting them.
+When a workspace is refreshed, ContextSpace reconciles enabled resources through `.contextspace/resources.lock.json` (fallback: `.nexusflow/resources.lock.json`). It refuses unmanaged target collisions, removes only unchanged ContextSpace-owned outputs, and reports modified-file conflicts instead of overwriting them. Redundant `.codex/skills/` and `.cursor/skills/` mirror directories are retired in favor of universal discovery under `.agents/skills/`.
 
 | Assistant Harness | Deployment Path | Format |
 |:---|:---|:---|
-| **Google Antigravity** | `.agents/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
-| **Claude Code** | `.claude/skills/<name>/SKILL.md` | YAML frontmatter + Markdown body + `references/` + `scripts/` |
+| **Google Antigravity** | `.agents/skills/<name>/SKILL.md` | Universal `agentskills.io` standard (playbook + `references/` + `scripts/`) |
+| **Claude Code** | `.claude/skills/<name>/SKILL.md` | Compatibility projection for Claude Code |
 | **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
 | **Cursor** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
 | **GitHub Copilot** | `.agents/skills/<name>/SKILL.md` | Complete portable Agent Skill directory |
 
 Codex custom agents are separate resources and deploy to `.codex/agents/<name>.toml`.
+
+## 🏷️ Enterprise Categories & Domain Packs
+
+Large enterprise codebases suffer from AI context bloat when company-wide standards and domain-specific rules are mixed together. ContextSpace solves this with a generic 3-tier hierarchy:
+
+1. **Root Organization Conventions** (`OrganizationConventions`): Universal company guardrails applied across all repositories in the workspace:
+   - Conventional commit message regex patterns (e.g. `^(feat|fix|refactor|test|chore|docs)\([A-Za-z0-9_.-]+\): .+$`).
+   - Pull request templates and code-review compliance checklists.
+   - Root compliance rules (e.g. GDPR, secrets hygiene, architectural invariants).
+2. **Subsystem Verticals** (`categoryType: 'vertical'`): Isolated business domain rules (e.g. Invoicing, Billing, Identity) with dedicated verification test gates and microservice associations. Verticals support nested parent/child hierarchies.
+3. **Horizontal Traits** (`categoryType: 'trait'`): Cross-cutting invariants (e.g. security audits, GDPR data privacy, accessibility, performance thresholds) that apply across any business domain.
+
+### Concurrency & Catalog Persistence
+
+Enterprise categories and domain packs are durably persisted in `~/.contextspace/domain-catalog.json` (with automatic fallback to `~/.nexusflow/domain-catalog.json`).
+- **Concurrency Locks**: Multi-process mutex locking (`acquireLock`) ensures CLI processes and running GUI servers never conflict or overwrite concurrent edits.
+- **Atomic Writes**: Persistent JSON updates use atomic write semantics (`atomicWriteJson`) to prevent data corruption.
+
+### CLI Management
+
+Manage categories and domain packs with `ctxspace tag` (alias `ctxspace category`):
+
+```bash
+# List active categories, vertical hierarchy, and horizontal traits
+ctxspace tag list
+
+# Add a domain pack or category to the current workspace
+ctxspace tag add economy
+
+# Inspect rules, verification gates, and microservices for a tag
+ctxspace tag show economy
+
+# Remove a domain pack from the workspace
+ctxspace tag remove economy
+```
+
+### Full GUI Administration
+
+The **Skills & Agents** page and the **Start Work** wizard provide complete GUI administration:
+- **Create & Edit**: Define new categories and domain packs with custom labels, descriptions, icons, verification commands, and rule lists.
+- **Hierarchical Nesting**: Assign parent verticals to build clear domain trees.
+- **Reset & Revert**: Revert customizations to factory defaults or delete custom packs with confirmation safety.
 
 ## 👥 Teamwork Strategy Workflows
 
@@ -492,11 +621,20 @@ ContextSpace/
 │   │   ├── start.ts          #   ctxspace start
 │   │   ├── stop.ts           #   ctxspace stop
 │   │   ├── status.ts         #   ctxspace status
+│   │   ├── flow.ts           #   ctxspace flow (milestones & fleet radar)
+│   │   ├── verify.ts         #   ctxspace verify (mechanical test gates)
+│   │   ├── tag.ts            #   ctxspace tag / category (enterprise domains)
+│   │   ├── skill.ts          #   ctxspace skill (portable skills)
 │   │   ├── logs.ts           #   ctxspace logs
 │   │   └── ui.ts             #   ctxspace ui
 │   ├── core/                 # Core workspace logic
 │   │   ├── constants.ts      #   Brand, manifest & lockfile constants
 │   │   ├── config.ts         #   Config management (~/.contextspace/)
+│   │   ├── domain-catalog.ts #   Enterprise catalog persistence & locks
+│   │   ├── domain-packs.ts   #   Organization conventions, verticals & traits
+│   │   ├── lifecycle.ts      #   Milestone state machine & fleet radar
+│   │   ├── verify.ts         #   Sequential verification runner & SHA anchoring
+│   │   ├── work-guidance.ts  #   Source docs & active AI assignments
 │   │   ├── scanner.ts        #   Git repo scanner
 │   │   ├── worktree.ts       #   Git worktree operations
 │   │   └── workspace.ts      #   Workspace CRUD
@@ -514,7 +652,7 @@ ContextSpace/
 │   │   ├── codex.ts          #   Codex AGENTS.md generator
 │   │   ├── copilot.ts        #   copilot-instructions.md generator
 │   │   ├── cursor.ts         #   contextspace.mdc generator
-│   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude, .cursor, .codex)
+│   │   └── skills-generator.ts # Cross-harness skill deployment (.agents, .claude)
 │   ├── orchestration/        # Service start/stop/log management
 │   └── utils/                # Helper utilities
 │       ├── skills-catalog.ts #   Skills & Categories catalog manager (~/.contextspace/)
@@ -527,6 +665,7 @@ ContextSpace/
 │   └── src/
 │       ├── pages/
 │       │   ├── WorkspacesPage.tsx # Workspaces & launch targets
+│       │   ├── StartWorkPage.tsx  # Interactive creation with skills & tags
 │       │   ├── SkillsPage.tsx     # Skills & Agents categorized drag-and-drop hub
 │       │   └── StrategiesPage.tsx # Teamwork strategy inspector
 │       └── App.tsx           # Main application routing & layout

@@ -37,7 +37,7 @@ import {
 import { createNewRepo } from '../core/new-repo.js';
 import { loadProjects, slugifyProjectName } from '../core/projects.js';
 import { getAllSkills, saveWorkspaceSkillsConfig } from '../utils/skills-catalog.js';
-import type { Feature, Project, RepoSelection, WorkspaceContext, WorkspaceMode } from '../types.js';
+import type { AIAssistant, Feature, Project, RepoSelection, WorkspaceContext, WorkspaceMode } from '../types.js';
 import { suggestWorkflow } from '../utils/workflow-advisor.js';
 import { getWorkflowTemplates, saveWorkflowTemplate } from '../utils/workflows.js';
 import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
@@ -53,12 +53,26 @@ import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
  * 7. Generate AI context files
  * 8. Optionally open in editor
  */
-export async function createCommand(): Promise<void> {
+export interface CreateCommandOptions {
+  quick?: boolean;
+  flow?: 'quick-fix' | 'feature' | 'epic';
+  mode?: WorkspaceMode;
+  strategy?: string;
+  tag?: string[] | string;
+  org?: string;
+}
+
+export async function createCommand(options: CreateCommandOptions = {}): Promise<void> {
+  if (options.flow && !['quick-fix', 'feature', 'epic'].includes(options.flow)) {
+    throw new Error('Flow must be quick-fix, feature, or epic.');
+  }
   console.log(
     chalk.bold.cyan(`\n🚀 ${BRAND_NAME} — Start Work\n`),
   );
 
   const config = await loadConfig();
+  const isQuick = Boolean(options.quick || options.flow === 'quick-fix');
+  const isEpic = options.flow === 'epic';
 
   // ── 0. Project selection (when a registry exists) ───────────────────
   const projects = await loadProjects({ quiet: true });
@@ -78,19 +92,19 @@ export async function createCommand(): Promise<void> {
   }
 
   // ── 1. Work mode ─────────────────────────────────────────────────────
-  const mode: WorkspaceMode = await select({
+  const mode: WorkspaceMode = options.mode ?? (isQuick ? 'in-place' : isEpic ? 'worktree' : await select({
     message: 'How do you want to work?',
     choices: [
       {
-        name: 'In-place — directly in the source repos (no branches, fastest start)',
+        name: 'In-place — directly in the source repos (fastest start; ideal for bug fixes and quick tweaks)',
         value: 'in-place' as WorkspaceMode,
       },
       {
-        name: 'Isolated worktrees — a feature branch and worktree per repo',
+        name: 'Isolated worktrees — a feature branch and worktree per repo (ideal for isolated features & epics)',
         value: 'worktree' as WorkspaceMode,
       },
     ],
-  });
+  }));
   const inPlace = mode === 'in-place';
 
   // ── 2. Identity: feature branch, or a plain name for in-place ───────
@@ -110,7 +124,7 @@ export async function createCommand(): Promise<void> {
   }
 
   // ── 2.1. Feature description ─────────────────────────────────────────
-  const description = await promptDescription();
+  const description = isQuick ? 'Quick bug fix or tweak' : await promptDescription();
 
   // ── 3-4. Repos: from the project, or scanned and picked ad hoc ───────
   let selectedRepos: RepoSelection[];
@@ -236,11 +250,23 @@ export async function createCommand(): Promise<void> {
 
   // ── 5. Detect and select AI assistants ──────────────────────────────
   const detectedAI = await detectAIAssistants();
-  const selectedAI = await promptSelectAI(detectedAI);
+  const selectedAI = (isQuick && config.defaultAssistant)
+    ? [config.defaultAssistant as AIAssistant]
+    : await promptSelectAI(detectedAI);
 
   // ── 5.5. Suggest workflow strategy ───────────────────────────────
   const templates = await getWorkflowTemplates();
-  const selectedStrategyId = await promptSelectStrategy(templates);
+  let selectedStrategyId = options.strategy;
+
+  if (!selectedStrategyId) {
+    if (isQuick) {
+      selectedStrategyId = 'solo-developer';
+    } else if (isEpic) {
+      selectedStrategyId = 'epic-multi-slice';
+    } else {
+      selectedStrategyId = await promptSelectStrategy(templates);
+    }
+  }
 
   let teamworkInstructions = '';
 
@@ -274,16 +300,26 @@ export async function createCommand(): Promise<void> {
   }
 
   // ── 5.6. Select Agent Skills to deploy ──────────────────────────────
-  const catalogSkills = await getAllSkills();
-  const selectedSkills = await promptSelectSkills(catalogSkills);
-  if (selectedSkills.length > 0) {
-    console.log(chalk.green(`  ✔ Selected ${selectedSkills.length} skill(s) to deploy: ${selectedSkills.join(', ')}`));
+  let selectedSkills: string[] = [];
+  if (!isQuick) {
+    const catalogSkills = await getAllSkills();
+    selectedSkills = await promptSelectSkills(catalogSkills);
+    if (selectedSkills.length > 0) {
+      console.log(chalk.green(`  ✔ Selected ${selectedSkills.length} skill(s) to deploy: ${selectedSkills.join(', ')}`));
+    }
   }
 
   // ── 6. Create workspace ─────────────────────────────────────────────
+  const explicitTags: string[] = options.tag
+    ? (Array.isArray(options.tag) ? options.tag : [options.tag])
+        .map((t) => String(t).trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+
   const workspacePath = path.join(config.workspacesDir, workspaceId);
   const feature: Feature = {
     id: workspaceId,
+    flowType: isQuick ? 'quick' : isEpic ? 'epic' : options.flow === 'feature' ? 'feature' : undefined,
     mode,
     projectId: project?.id,
     branchName,
@@ -297,7 +333,13 @@ export async function createCommand(): Promise<void> {
     workspacePath,
     createdAt: new Date().toISOString(),
     teamworkInstructions,
+    organizationId: options.org || undefined,
+    domainPacks: explicitTags.length > 0 ? explicitTags : undefined,
   };
+
+  if (explicitTags.length > 0) {
+    console.log(chalk.green(`  ✔ Attached domain tags: ${explicitTags.map((t) => '#' + t).join(', ')}`));
+  }
 
   const wsSpinner = ora(
     inPlace ? 'Registering workspace...' : 'Creating workspace with git worktrees...',

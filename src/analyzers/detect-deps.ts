@@ -234,7 +234,7 @@ export function findInterRepoDependencies(
     if (a.produces) {
       for (const product of a.produces) {
         packageToRepo.set(product.name.toLowerCase(), thisName);
-        // Also map basename (e.g. Hogia.EmploymentService.Client -> Client)
+        // Also map basename (e.g. Acme.EmploymentService.Client -> Client)
         const base = product.name.split('.').pop() ?? product.name;
         if (base && base.length > 3) {
           packageToRepo.set(base.toLowerCase(), thisName);

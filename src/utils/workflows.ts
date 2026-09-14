@@ -82,11 +82,13 @@ function parseMarkdownTemplate(id: string, content: string): Omit<WorkflowTempla
   // Fallbacks for built-in templates if none extracted
   if (!description) {
     if (id === 'plan-implement-review') {
-      description = 'Lead planner designs, Code Implementer subagent writes edits, and Code Reviewer subagent tests & reviews in a loop.';
+      description = 'Plan, implement, and review one cohesive change using the current assignment and milestone plan.';
     } else if (id === 'research-verify') {
-      description = 'Research specialist subagent analyzes codebase, followed by test-driven developer subagent implementation.';
+      description = 'Investigate uncertainty and return evidence within the current assignment stage and stopping point.';
     } else if (id === 'solo-developer') {
       description = 'Direct coding and verification by the primary agent without subagent delegation overhead.';
+    } else if (id === 'epic-multi-slice') {
+      description = 'Decompose large epics or multi-PR modules into independently reviewable vertical slices with persistent contracts.';
     } else {
       description = 'Custom user-defined teamwork strategy.';
     }

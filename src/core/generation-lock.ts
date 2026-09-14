@@ -132,9 +132,7 @@ export function renderFreshnessBanner(
   snapshot: GenerationSnapshot,
   drift: GenerationDrift[] = [],
 ): string {
-  const repoSummary = Object.entries(snapshot.repos)
-    .map(([name, state]) => `${name}@${state.sha.slice(0, 12)}`)
-    .join(', ');
+  const repoSummary = Object.keys(snapshot.repos).join(', ');
   const unverifiable = Object.entries(snapshot.repos)
     .filter(([, state]) => state.fingerprint.startsWith(UNCACHEABLE_FINGERPRINT_PREFIX))
     .map(([name]) => name);

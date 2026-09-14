@@ -10,7 +10,8 @@ import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import { isInPlace } from '../utils/feature.js';
 import { getConventionalTestCommands } from '../utils/test-command.js';
 import { renderFreshnessBanner } from '../core/generation-lock.js';
-import { PRIMARY_KNOWLEDGE_FILE, CLI_NAME } from '../core/constants.js';
+import { PRIMARY_KNOWLEDGE_FILE, PRIMARY_PLAN_FILE, CLI_NAME } from '../core/constants.js';
+import { resolveActiveDomainRules } from '../core/domain-packs.js';
 
 /** How a repo relates to its siblings in this workspace. */
 export interface RepoRelations {
@@ -213,6 +214,42 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     ? `\n## Commands recorded for this workspace\n\nThese were entered by hand and are not derivable from any manifest.\n\n${custom.join('\n')}\n`
     : '';
 
+  // Enterprise organization conventions and domain subsystem rules
+  let enterpriseSection = '';
+  if (feature.organizationId || (feature.domainPacks && feature.domainPacks.length > 0)) {
+    const { organization, domainPacks } = resolveActiveDomainRules(feature.organizationId, feature.domainPacks);
+    const parts: string[] = [];
+
+    if (organization) {
+      const orgLines = [
+        `## Organization Conventions (${organization.name})`,
+        '',
+        organization.commitMessagePattern ? `- **Commit Convention**: Commit messages must follow regex \`${organization.commitMessagePattern}\` (e.g. \`${organization.commitExample ?? ''}\`).` : '',
+        organization.prTemplate ? `- **PR Template**: \`${organization.prTemplate}\`` : '',
+        ...organization.rules.map((r) => `- ${r}`),
+      ].filter(Boolean);
+      parts.push(orgLines.join('\n'));
+    }
+
+    if (domainPacks.length > 0) {
+      const domainSections = domainPacks.map((pack) => {
+        const pLines = [
+          `### ${pack.name}`,
+          pack.description,
+          '',
+          ...(pack.rules ?? []).map((r) => `- ${r}`),
+          pack.verifyCommand ? `- **Domain Verification**: \`${pack.verifyCommand}\`` : '',
+        ].filter(Boolean);
+        return pLines.join('\n');
+      });
+      parts.push(`## Active Domain Rules (${domainPacks.map((d) => d.name).join(', ')})\n\n${domainSections.join('\n\n')}`);
+    }
+
+    if (parts.length > 0) {
+      enterpriseSection = `\n\n${parts.join('\n\n')}`;
+    }
+  }
+
   // A table header over no rows, followed by "Each repo above is a separate git
   // worktree", describes nothing. `create` should never produce this, but the
   // writer had no guard, so say the true thing instead.
@@ -237,7 +274,8 @@ ${reposSection}
 ## Where to look
 
 - \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup (or read \`${PRIMARY_KNOWLEDGE_FILE}\` directly if the MCP server is not connected; inspect headings and read only those entries, not the whole file). Add with \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\` (or append a \`### <YYYY-MM-DD> — <Title>\` heading directly to \`${PRIMARY_KNOWLEDGE_FILE}\` if the CLI is not on PATH), keeping each entry to a rule and its reason. Prefer facts that cannot be recovered from the code or git history: environment quirks, contradictions in a spec, decisions and the reason behind them, things that cost you time to discover. Avoid restating structure the code already shows.
-- \`contextspace-plan.md\` — cross-repo package merge order only; runtime and intra-repo contracts are represented by scoped knowledge entries
-- \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.codex/skills/\`, \`.claude/skills/\`, \`.github/skills/\`, \`.cursor/skills/\` where supported)
-${ownInstructions}${customCommands}${teamwork}`;
+- \`${PRIMARY_PLAN_FILE}\` — milestones and cross-repo merge order
+- \`contextspace-work.json\` — assignment and sources. Read live guidance with \`ctxspace flow --assignment\` or MCP \`get_work_context\`.
+- \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.claude/skills/\` where supported)
+${ownInstructions}${customCommands}${teamwork}${enterpriseSection}`;
 }

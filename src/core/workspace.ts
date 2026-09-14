@@ -550,6 +550,13 @@ export async function deleteWorkspace(
   }
 
   const feature = await loadFeatureConfig(workspacePath);
+  if (feature?.projectId) {
+    const { loadWorkGuidance } = await import('./work-guidance.js');
+    const guidance = await loadWorkGuidance(workspacePath);
+    if (guidance.documents.some((doc) => doc.scope.project && doc.status !== 'superseded')) {
+      throw new Error('This workspace owns active project documents shared with other workspaces. Keep it as the project source workspace, or copy the sources to another workspace and supersede the originals before deleting it.');
+    }
+  }
   if (feature) {
     try {
       await deleteWorkspaceFiles(workspacePath, feature.id);
@@ -842,4 +849,3 @@ export async function excludeNexusFlowFiles(workspacePath: string, feature: Feat
 }
 
 export { isolateWorkspaceRepo, type IsolateRepoOptions, type IsolateRepoResult } from './isolate.js';
-

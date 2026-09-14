@@ -27,6 +27,9 @@ import { commitWorkspace } from '../core/commit.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { runDoctor } from '../core/doctor.js';
 import { finishWorkspace } from '../core/finish.js';
+import { getWorkContext, readWorkDocument } from '../core/work-guidance.js';
+import { verifyWorkspace } from '../core/verify.js';
+import { getAllSkills, saveSkill } from '../utils/skills-catalog.js';
 import {
   addWorkspaceKnowledge,
   addBaseKnowledge,
@@ -108,6 +111,30 @@ async function requireWorkspace(ctx: ToolContext): Promise<void> {
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 export const tools: NexusFlowTool[] = [
+  {
+    name: 'get_work_context',
+    description: 'Read the current owner-defined AI assignment, work type, size, stage, scoped document roles/statuses, and live milestone plan. Read this before starting work or advancing stages.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
+    handler: async (_args, ctx) => {
+      try {
+        const context = await getWorkContext(ctx.workspacePath);
+        return json({ assignment: context.assignment, lifecycle: context.lifecycle });
+      }
+      catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+    },
+  },
+  {
+    name: 'read_work_document',
+    description: 'Read an attached text document or obtain its source link and owner-defined role, approval status, and scope. Drafts are proposals; superseded documents are historical.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp, documentId: { type: 'string' } }, required: ['documentId'] },
+    handler: async (args, ctx) => {
+      try { return json(await readWorkDocument(ctx.workspacePath, String(args.documentId))); }
+      catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+    },
+  },
+
   {
     name: 'search_workspace',
     description:
@@ -960,6 +987,157 @@ export const tools: NexusFlowTool[] = [
       }
     },
   },
+  {
+    name: 'verify_workspace',
+    description:
+      'Run mechanical verification gates (tests, builds, lints) across workspace repositories and record cryptographic proof in workspace state. Returns structured pass/fail status, process exit codes, execution duration, and Git commit SHAs.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repoName: { type: 'string', description: 'Optional name of a specific repository to verify. Omit to verify all workspace repos.' },
+        filter: { type: 'string', description: 'Optional filter or test pattern passed to the test runner (e.g. test name or file path).' },
+        command: { type: 'string', description: 'Optional explicit verification command override.' },
+        allowDirty: { type: 'boolean', description: 'If true, permits progression even when working tree has uncommitted edits (defaults to false).' },
+        timeoutSeconds: { type: 'number', description: 'Optional timeout in seconds (defaults to 300).' },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const report = await verifyWorkspace(ctx.workspacePath, {
+          repoName: args.repoName ? String(args.repoName).trim() : undefined,
+          filter: args.filter ? String(args.filter).trim() : undefined,
+          command: args.command ? String(args.command).trim() : undefined,
+          allowDirty: Boolean(args.allowDirty),
+          timeoutMs: typeof args.timeoutSeconds === 'number' ? args.timeoutSeconds * 1000 : undefined,
+        });
+        return json(report);
+      } catch (error: any) {
+        return errorResult(`Error verifying workspace: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'create_skill',
+    description:
+      'Create or update an agent skill that can be reused across workspaces or scoped exclusively to the current workspace. AI agents can use this to persist workflows, domain logic, or procedures they discovered.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique slug for the skill (e.g. vat-calculator, jira-pbi-creator).' },
+        name: { type: 'string', description: 'Unique slug for the skill (alias for id).' },
+        title: { type: 'string', description: 'Human-readable title for the skill.' },
+        description: { type: 'string', description: 'Clear explanation of what the skill does and when the agent should use it.' },
+        content: { type: 'string', description: 'Full Markdown content and instructions for the skill.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Keywords/tags associated with the skill (e.g. ["git", "billing"]).' },
+        category: { type: 'string', description: 'Optional category (e.g. "pull-requests", "testing-qa", "general").' },
+        scope: { type: 'string', enum: ['workspace', 'global'], description: 'Whether the skill is scoped exclusively to this workspace or stored globally in the user catalog (defaults to "workspace").' },
+        allowedTools: { type: 'array', items: { type: 'string' }, description: 'Optional tool names allowed for this skill.' },
+        ...workspaceIdProp,
+      },
+      required: ['title', 'description', 'content'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        const id = String(args.id || args.name || '').trim();
+        if (!id) {
+          return errorResult('Skill ID or name is required.');
+        }
+        const title = String(args.title || '').trim();
+        const description = String(args.description || '').trim();
+        const content = String(args.content || '').trim();
+        const scope = (args.scope === 'global' ? 'global' : 'workspace') as 'workspace' | 'global';
+        const tags = Array.isArray(args.tags) ? args.tags.map(String) : [];
+        const category = args.category ? String(args.category).trim() : undefined;
+        const allowedTools = Array.isArray(args.allowedTools) ? args.allowedTools.map(String) : undefined;
+
+        if (scope === 'workspace') {
+          await requireWorkspace(ctx);
+        }
+
+        const saved = await saveSkill(
+          {
+            id,
+            name: id,
+            title,
+            description,
+            content,
+            tags,
+            category,
+            allowedTools,
+          },
+          {
+            scope,
+            workspacePath: scope === 'workspace' ? ctx.workspacePath : undefined,
+            category,
+          },
+        );
+
+        if (scope === 'workspace' && ctx.workspacePath) {
+          await refreshWorkspace(ctx.workspacePath, { force: true }).catch(() => {});
+        }
+
+        return json({
+          success: true,
+          skill: {
+            id: saved.id,
+            title: saved.title,
+            scope: saved.scope,
+            description: saved.description,
+            tags: saved.tags,
+            path: (saved as any).path,
+          },
+          message: `Skill "${saved.title || saved.id}" created successfully (${scope} scope).`,
+        });
+      } catch (error: any) {
+        return errorResult(`Error creating skill: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'list_skills',
+    description:
+      'List all available skills, including global skills and project-specific skills in the current workspace.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['all', 'workspace', 'global'], description: 'Filter by skill scope (default: "all").' },
+        tag: { type: 'string', description: 'Filter skills by tag keyword.' },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        const skills = await getAllSkills(ctx.workspacePath || undefined);
+        let filtered = skills;
+        if (args.scope === 'workspace') {
+          filtered = filtered.filter((s) => s.scope === 'workspace');
+        } else if (args.scope === 'global') {
+          filtered = filtered.filter((s) => s.scope !== 'workspace');
+        }
+        if (args.tag && typeof args.tag === 'string') {
+          const tagLower = args.tag.toLowerCase().trim();
+          filtered = filtered.filter((s) => s.tags?.some((t) => t.toLowerCase() === tagLower));
+        }
+        return json({
+          skills: filtered.map((s) => ({
+            id: s.id,
+            title: s.title,
+            description: s.description,
+            tags: s.tags,
+            scope: s.scope ?? 'global',
+            category: s.category,
+          })),
+        });
+      } catch (error: any) {
+        return errorResult(`Error listing skills: ${error.message}`);
+      }
+    },
+  },
 ];
 
 /** Agent execution role for scoped tool surfaces. */
@@ -983,6 +1161,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',
+    'verify_workspace',
+    'list_skills',
   ],
   review: [
     'search_workspace',
@@ -995,6 +1175,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',
+    'verify_workspace',
+    'list_skills',
   ],
   ci: [
     'search_workspace',
@@ -1007,6 +1189,8 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'sync_workspace',
     'search_knowledge',
     'read_workroom_stream',
+    'verify_workspace',
+    'list_skills',
   ],
   developer: ['*'],
   interactive: ['*'],

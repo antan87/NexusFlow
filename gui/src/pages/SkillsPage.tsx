@@ -52,6 +52,7 @@ import {
   useWorkspaceSkills,
   useAssignWorkspaceSkills,
   useWorkspaces,
+  useDomainPacks,
 } from '../lib/api/queries.js';
 import type { SkillCategory, SkillItem } from '../types.js';
 
@@ -102,6 +103,8 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
   const [editingSkill, setEditingSkill] = useState<Partial<SkillItem> | null>(null);
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [skillModalTab, setSkillModalTab] = useState<'edit' | 'preview'>('edit');
+  const [editingSkillScope, setEditingSkillScope] = useState<'global' | 'workspace'>('global');
+  const [editingSkillWorkspaceId, setEditingSkillWorkspaceId] = useState<string>('');
 
   // Move-To Menu Modal State
   const [moveSkillModalOpen, setMoveSkillModalOpen] = useState(false);
@@ -109,7 +112,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
   // Delete Confirmation Modal State
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'category' | 'skill'; id: string; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'category' | 'skill'; id: string; title: string; workspaceId?: string } | null>(null);
 
   // Drag and Drop state
   const [draggingSkillId, setDraggingSkillId] = useState<string | null>(null);
@@ -121,6 +124,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
     selectedWorkspace !== 'global' ? selectedWorkspace : undefined,
   );
   const { data: workspaces = [] } = useWorkspaces();
+  const { data: domainPacks = [] } = useDomainPacks();
   const {
     data: workspaceSkillsConfig,
     isLoading: loadingWorkspaceConfig,
@@ -129,6 +133,16 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
     selectedWorkspace !== 'global' ? selectedWorkspace : '',
   );
   const [draftEnabledSkills, setDraftEnabledSkills] = useState<string[] | null>(null);
+
+  // Distinct domain and keyword tags available for skills assignment
+  const availableSkillTags = Array.from(
+    new Set(
+      domainPacks
+        .flatMap((p) => [p.id, ...(p.tags || [])])
+        .concat(['git', 'pr', 'testing', 'security', 'performance', 'database', 'ci-cd', 'frontend', 'backend'])
+        .filter(Boolean),
+    ),
+  ).slice(0, 24);
 
   const saveCategoryMutation = useSaveSkillCategory();
   const deleteCategoryMutation = useDeleteSkillCategory();
@@ -219,6 +233,11 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
   // ─── Skill CRUD ───────────────────────────────────────────────────────────
 
   const handleOpenSkillModal = (skill?: SkillItem, defaultCatId?: string) => {
+    const defaultScope = skill?.scope ?? (isWorkspaceView ? 'workspace' : 'global');
+    setEditingSkillScope(defaultScope);
+    setEditingSkillWorkspaceId(
+      isWorkspaceView ? selectedWorkspace : (workspaces[0]?.id || ''),
+    );
     setEditingSkill(
       skill || {
         name: '',
@@ -229,12 +248,19 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         allowedTools: [],
         content: '# Skill Title\n\nInstructions and playbook for the AI assistant.\n',
         custom: true,
+        scope: defaultScope,
       },
     );
     setSlugManuallyEdited(!!skill);
     setSkillModalTab('edit');
     setSkillModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!editingSkillWorkspaceId && workspaces.length > 0) {
+      setEditingSkillWorkspaceId(workspaces[0].id);
+    }
+  }, [workspaces, editingSkillWorkspaceId]);
 
   const handleTitleChange = (newTitle: string) => {
     if (!editingSkill) return;
@@ -258,6 +284,10 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
       showToast?.('Skill name, trigger description, and content are required', 'error');
       return;
     }
+    if (editingSkillScope === 'workspace' && !editingSkillWorkspaceId) {
+      showToast?.('Please select a target workspace for workspace-local skill', 'error');
+      return;
+    }
     try {
       await saveSkillMutation.mutateAsync({
         id: editingSkill.id,
@@ -268,19 +298,29 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         tags: editingSkill.tags || [],
         allowedTools: editingSkill.allowedTools || [],
         content: editingSkill.content,
+        scope: editingSkillScope,
+        workspaceId: editingSkillScope === 'workspace' ? editingSkillWorkspaceId : undefined,
       });
-      showToast?.('Skill package saved successfully', 'success');
+      showToast?.(
+        editingSkillScope === 'workspace'
+          ? 'Workspace skill saved successfully in .agents/skills/'
+          : 'Global skill package saved successfully',
+        'success',
+      );
       setSkillModalOpen(false);
       setEditingSkill(null);
-    } catch (err) {
-      showToast?.('Failed to save skill', 'error');
+    } catch (err: any) {
+      showToast?.(err?.message || 'Failed to save skill', 'error');
       console.error(err);
     }
   };
 
   const confirmDeleteSkill = (skill: SkillItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    setDeleteTarget({ type: 'skill', id: skill.id, title: skill.title || skill.name });
+    const wsId = (skill.scope === 'workspace' || editingSkillScope === 'workspace')
+      ? (selectedWorkspace !== 'global' ? selectedWorkspace : (editingSkillWorkspaceId || undefined))
+      : undefined;
+    setDeleteTarget({ type: 'skill', id: skill.id, title: skill.title || skill.name, workspaceId: wsId });
     setDeleteConfirmModalOpen(true);
   };
 
@@ -291,13 +331,16 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         await deleteCategoryMutation.mutateAsync(deleteTarget.id);
         showToast?.('Category deleted', 'info');
       } else {
-        await deleteSkillMutation.mutateAsync(deleteTarget.id);
+        await deleteSkillMutation.mutateAsync({
+          id: deleteTarget.id,
+          workspaceId: deleteTarget.workspaceId,
+        });
         showToast?.('Skill package deleted', 'info');
       }
       setDeleteConfirmModalOpen(false);
       setDeleteTarget(null);
-    } catch (err) {
-      showToast?.('Failed to delete item', 'error');
+    } catch (err: any) {
+      showToast?.(err?.message || 'Failed to delete item', 'error');
       console.error(err);
     }
   };
@@ -476,6 +519,18 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             </select>
           </div>
 
+          {!isWorkspaceView && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleOpenCategoryModal()}
+              className="flex items-center gap-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>New Category</span>
+            </Button>
+          )}
+
           {isWorkspaceView && (
             <Button
               size="sm"
@@ -486,29 +541,15 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             </Button>
           )}
 
-          {!isWorkspaceView && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenCategoryModal()}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>New Category</span>
-              </Button>
-
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => handleOpenSkillModal()}
-                className="flex items-center gap-1.5"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>New Skill</span>
-              </Button>
-            </>
-          )}
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => handleOpenSkillModal()}
+            className="flex items-center gap-1.5"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>New Skill</span>
+          </Button>
         </div>
       </div>
 
@@ -754,29 +795,55 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                       </span>
                                     </div>
 
-                                    {/* Workspace Active Checkbox */}
+                                    {/* Workspace Active Checkbox & Badges */}
                                     {isWorkspaceView ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleWorkspaceSkill(skill.id);
-                                        }}
-                                        disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
-                                        className={cn(
-                                          'h-5 px-2 rounded-md flex items-center gap-1 text-[10px] font-semibold transition-colors',
-                                          isEnabledInWs
-                                            ? 'bg-primary text-primary-foreground'
-                                            : 'bg-muted text-muted-foreground hover:bg-muted/80',
-                                        )}
-                                      >
-                                        <Check className={cn('h-3 w-3', !isEnabledInWs && 'opacity-0')} />
-                                        <span>{isEnabledInWs ? 'Enabled' : 'Disabled'}</span>
-                                      </button>
+                                      <div className="flex items-center gap-1">
+                                        <Badge
+                                          variant="outline"
+                                          className={cn(
+                                            'text-[9px] font-mono px-1 py-0.2 uppercase',
+                                            skill.scope === 'workspace'
+                                              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                              : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
+                                          )}
+                                        >
+                                          {skill.scope === 'workspace' ? 'Workspace' : 'Global'}
+                                        </Badge>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleToggleWorkspaceSkill(skill.id);
+                                          }}
+                                          disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
+                                          className={cn(
+                                            'h-5 px-2 rounded-md flex items-center gap-1 text-[10px] font-semibold transition-colors',
+                                            isEnabledInWs
+                                              ? 'bg-primary text-primary-foreground'
+                                              : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                                          )}
+                                        >
+                                          <Check className={cn('h-3 w-3', !isEnabledInWs && 'opacity-0')} />
+                                          <span>{isEnabledInWs ? 'Enabled' : 'Disabled'}</span>
+                                        </button>
+                                      </div>
                                     ) : (
-                                      <Badge variant="outline" className="text-[10px] font-mono">
-                                        {skill.custom ? 'Custom' : 'Template'}
-                                      </Badge>
+                                      <div className="flex items-center gap-1">
+                                        <Badge
+                                          variant="outline"
+                                          className={cn(
+                                            'text-[9px] font-mono px-1 py-0.2 uppercase',
+                                            skill.scope === 'workspace'
+                                              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                              : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
+                                          )}
+                                        >
+                                          {skill.scope === 'workspace' ? 'Workspace' : 'Global'}
+                                        </Badge>
+                                        <Badge variant="outline" className="text-[10px] font-mono">
+                                          {skill.custom ? 'Custom' : 'Template'}
+                                        </Badge>
+                                      </div>
                                     )}
                                   </div>
 
@@ -789,7 +856,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                 {/* Card Bottom: Tags & Quick Menu */}
                                 <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">
-                                    {skill.tags?.slice(0, 2).map((tag) => (
+                                    {skill.tags?.slice(0, 3).map((tag) => (
                                       <span
                                         key={tag}
                                         className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground"
@@ -819,13 +886,13 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                       </Button>
                                     )}
 
-                                    {!isWorkspaceView && skill.custom && (
+                                    {skill.custom && (
                                       <Button
                                         variant="ghost"
                                         size="icon-xs"
                                         onClick={(e) => confirmDeleteSkill(skill, e)}
                                         title="Delete skill"
-                                        className="h-6 w-6 text-destructive hover:text-destructive"
+                                        className="h-6 w-6 text-destructive hover:text-destructive cursor-pointer"
                                       >
                                         <Trash2 className="h-3 w-3" />
                                       </Button>
@@ -868,25 +935,74 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                           handleOpenSkillModal(skill);
                         }
                       }}
-                      className="p-3.5 cursor-pointer hover:border-primary/60"
+                      className="p-3.5 cursor-pointer hover:border-primary/60 flex flex-col justify-between"
                     >
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <div className="font-mono text-xs font-bold">{skill.title || skill.name}</div>
-                        {isWorkspaceView && (
-                          <Button
-                            size="xs"
-                            variant={enabledSkillIds.has(skill.id) ? 'default' : 'outline'}
-                            disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleToggleWorkspaceSkill(skill.id);
-                            }}
-                          >
-                            {enabledSkillIds.has(skill.id) ? 'Enabled' : 'Disabled'}
-                          </Button>
+                      <div>
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <div className="font-mono text-xs font-bold">{skill.title || skill.name}</div>
+                          <div className="flex items-center gap-1">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'text-[9px] font-mono px-1 py-0.2 uppercase',
+                                skill.scope === 'workspace'
+                                  ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                  : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
+                              )}
+                            >
+                              {skill.scope === 'workspace' ? 'Workspace' : 'Global'}
+                            </Badge>
+                            {isWorkspaceView && (
+                              <Button
+                                size="xs"
+                                variant={enabledSkillIds.has(skill.id) ? 'default' : 'outline'}
+                                disabled={!workspaceAssignmentReady || assignSkillsMutation.isPending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleToggleWorkspaceSkill(skill.id);
+                                }}
+                              >
+                                {enabledSkillIds.has(skill.id) ? 'Enabled' : 'Disabled'}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2">{skill.description}</p>
+                      </div>
+                      {/* Card Bottom: Tags & Quick Menu */}
+                      <div className="pt-2 mt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap overflow-hidden">
+                          {skill.tags && skill.tags.length > 0 ? (
+                            skill.tags.slice(0, 3).map((tag) => (
+                              <span key={tag} className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                                #{tag}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground italic">No tags</span>
+                          )}
+                          {skill.allowedTools && skill.allowedTools.length > 0 && (
+                            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 font-mono">
+                              <Wrench className="h-2.5 w-2.5" />
+                              {skill.allowedTools.length}
+                            </span>
+                          )}
+                        </div>
+
+                        {skill.custom && (
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={(e) => confirmDeleteSkill(skill, e)}
+                              title="Delete skill"
+                              className="h-6 w-6 text-destructive hover:text-destructive cursor-pointer"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{skill.description}</p>
                     </Card>
                   ))}
                 </div>
@@ -1013,12 +1129,15 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
 
       {/* ─── Skill Playbook Editor Modal ───────────────────────────────────── */}
       <Dialog open={skillModalOpen} onOpenChange={setSkillModalOpen}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <div className="flex items-center justify-between pr-6">
+        <DialogContent className="max-w-[96vw] sm:max-w-5xl lg:max-w-6xl xl:max-w-7xl h-[90vh] max-h-[92vh] flex flex-col p-6">
+          <DialogHeader className="pb-3 border-b border-border/70 shrink-0">
+            <div className="flex items-center justify-between pr-8">
               <div>
-                <DialogTitle>{editingSkill?.id ? 'Edit Skill Package' : 'Create New Skill'}</DialogTitle>
-                <DialogDescription>
+                <DialogTitle className="text-base font-bold flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span>{editingSkill?.id ? 'Edit Skill Package' : 'Create New Skill'}</span>
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   Configure SKILL.md metadata triggers and markdown playbook instructions.
                 </DialogDescription>
               </div>
@@ -1027,9 +1146,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                   type="button"
                   onClick={() => setSkillModalTab('edit')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md flex items-center gap-1 font-medium transition-colors',
+                    'px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors cursor-pointer',
                     skillModalTab === 'edit'
-                      ? 'bg-background text-foreground shadow-sm'
+                      ? 'bg-background text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -1040,9 +1159,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                   type="button"
                   onClick={() => setSkillModalTab('preview')}
                   className={cn(
-                    'px-2.5 py-1 rounded-md flex items-center gap-1 font-medium transition-colors',
+                    'px-3 py-1.5 rounded-md flex items-center gap-1.5 font-medium transition-colors cursor-pointer',
                     skillModalTab === 'preview'
-                      ? 'bg-background text-foreground shadow-sm'
+                      ? 'bg-background text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -1053,149 +1172,312 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
             </div>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 pr-4 py-2">
-            {skillModalTab === 'edit' ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="skill-title" className="text-xs font-medium">
-                      Display Title
-                    </Label>
-                    <Input
-                      id="skill-title"
-                      value={editingSkill?.title || ''}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="e.g. Pull Request Reviewer"
-                      className="mt-1 text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="skill-name" className="text-xs font-medium">
-                      Identifier (Slug)
-                    </Label>
-                    <Input
-                      id="skill-name"
-                      value={editingSkill?.name || ''}
-                      disabled={!!editingSkill?.id}
-                      onChange={(e) => {
-                        setSlugManuallyEdited(true);
-                        setEditingSkill((prev) => (prev ? { ...prev, name: e.target.value } : null));
-                      }}
-                      placeholder="e.g. pr-review-toolkit"
-                      className="mt-1 text-xs font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="skill-cat" className="text-xs font-medium">
-                      Category Box
-                    </Label>
-                    <select
-                      id="skill-cat"
-                      value={editingSkill?.category || ''}
-                      onChange={(e) =>
-                        setEditingSkill((prev) => (prev ? { ...prev, category: e.target.value } : null))
-                      }
-                      className="mt-1 w-full bg-background border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="skill-tags" className="text-xs font-medium">
-                      Tags (comma separated)
-                    </Label>
-                    <Input
-                      id="skill-tags"
-                      value={editingSkill?.tags?.join(', ') || ''}
-                      onChange={(e) =>
-                        setEditingSkill((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                tags: e.target.value
-                                  .split(',')
-                                  .map((t) => t.trim())
-                                  .filter(Boolean),
-                              }
-                            : null,
-                        )
-                      }
-                      placeholder="e.g. git, pr, quality"
-                      className="mt-1 text-xs font-mono"
-                    />
-                  </div>
-                </div>
-
+          {/* Modal Main Body - 2-Column Responsive Layout */}
+          <div className="flex-1 min-h-0 py-4 flex flex-col lg:flex-row gap-6 overflow-hidden">
+            {/* Left Column: Metadata & Scopes */}
+            <div className="lg:w-[420px] xl:w-[460px] shrink-0 flex flex-col gap-4 overflow-y-auto pr-2 pb-2">
+              <div className="space-y-3">
                 <div>
-                  <Label htmlFor="skill-desc" className="text-xs font-medium">
-                    Trigger Description (for AI Autonomous Discovery)
+                  <Label htmlFor="skill-title" className="text-xs font-medium">
+                    Display Title
                   </Label>
                   <Input
-                    id="skill-desc"
-                    value={editingSkill?.description || ''}
-                    onChange={(e) =>
-                      setEditingSkill((prev) => (prev ? { ...prev, description: e.target.value } : null))
-                    }
-                    placeholder="e.g. Use when reviewing PR diffs or when user asks for a PR audit..."
+                    id="skill-title"
+                    value={editingSkill?.title || ''}
+                    onChange={(e) => handleTitleChange(e.target.value)}
+                    placeholder="e.g. Pull Request Reviewer"
                     className="mt-1 text-xs"
                   />
                 </div>
 
-                {/* SKILL.md Playbook Content */}
                 <div>
-                  <Label htmlFor="skill-content" className="text-xs font-medium">
-                    Playbook Instructions (Markdown)
+                  <Label htmlFor="skill-name" className="text-xs font-medium">
+                    Identifier (Slug)
                   </Label>
+                  <Input
+                    id="skill-name"
+                    value={editingSkill?.name || ''}
+                    disabled={!!editingSkill?.id}
+                    onChange={(e) => {
+                      setSlugManuallyEdited(true);
+                      setEditingSkill((prev) => (prev ? { ...prev, name: e.target.value } : null));
+                    }}
+                    placeholder="e.g. pr-review-toolkit"
+                    className="mt-1 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Scope Selector: Global vs Workspace-Local */}
+              <div className="p-3 rounded-lg border border-border/80 bg-muted/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Boxes className="h-3.5 w-3.5 text-primary" />
+                    <span>Skill Scope</span>
+                  </Label>
+                  <span className="text-[10px] text-muted-foreground">
+                    {editingSkillScope === 'global' ? 'Machine-wide catalog' : 'Project-specific (.agents/skills/)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingSkillScope('global')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
+                      editingSkillScope === 'global'
+                        ? 'border-blue-500/50 bg-blue-500/15 text-blue-300 font-semibold shadow-xs'
+                        : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <span>🌐 Global Catalog</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingSkillScope('workspace')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
+                      editingSkillScope === 'workspace'
+                        ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 font-semibold shadow-xs'
+                        : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <span>📁 Workspace-Local</span>
+                  </button>
+                </div>
+
+                {editingSkillScope === 'workspace' && (
+                  <div className="pt-1">
+                    <Label htmlFor="target-ws" className="text-[11px] font-medium text-muted-foreground">
+                      Target Workspace:
+                    </Label>
+                    {workspaces.length > 0 ? (
+                      <select
+                        id="target-ws"
+                        value={editingSkillWorkspaceId}
+                        onChange={(e) => setEditingSkillWorkspaceId(e.target.value)}
+                        className="mt-1 w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                      >
+                        {workspaces.map((ws) => (
+                          <option key={ws.id} value={ws.id}>
+                            📁 {ws.id} ({ws.branchName})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="mt-1 text-xs text-destructive italic">
+                        No active workspaces found. Please create a workspace first.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Category & Tags */}
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="skill-cat" className="text-xs font-medium">
+                    Category Box
+                  </Label>
+                  <select
+                    id="skill-cat"
+                    value={editingSkill?.category || ''}
+                    onChange={(e) =>
+                      setEditingSkill((prev) => (prev ? { ...prev, category: e.target.value } : null))
+                    }
+                    className="mt-1 w-full bg-background border border-border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="skill-tags" className="text-xs font-medium">
+                      Tags & Domain Categories
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground">Click chips below to toggle</span>
+                  </div>
+                  <Input
+                    id="skill-tags"
+                    value={editingSkill?.tags?.join(', ') || ''}
+                    onChange={(e) =>
+                      setEditingSkill((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              tags: e.target.value
+                                .split(',')
+                                .map((t) => t.trim())
+                                .filter(Boolean),
+                            }
+                          : null,
+                      )
+                    }
+                    placeholder="e.g. nexusflow, core, cli, testing"
+                    className="mt-1 text-xs font-mono"
+                  />
+                </div>
+
+                {/* Interactive Tag Chips */}
+                {availableSkillTags.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Quick Tag Assignment:</span>
+                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                      {availableSkillTags.map((tag) => {
+                        const isAssigned = editingSkill?.tags?.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => {
+                              setEditingSkill((prev) => {
+                                if (!prev) return null;
+                                const currentTags = prev.tags || [];
+                                const nextTags = isAssigned
+                                  ? currentTags.filter((t) => t !== tag)
+                                  : [...currentTags, tag];
+                                return { ...prev, tags: nextTags };
+                              });
+                            }}
+                            className={cn(
+                              'px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors cursor-pointer border',
+                              isAssigned
+                                ? 'bg-primary/20 text-primary border-primary/40 font-semibold shadow-xs'
+                                : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground',
+                            )}
+                          >
+                            #{tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Trigger Description */}
+              <div>
+                <Label htmlFor="skill-desc" className="text-xs font-medium">
+                  Trigger Description (for AI Autonomous Discovery)
+                </Label>
+                <Textarea
+                  id="skill-desc"
+                  rows={3}
+                  value={editingSkill?.description || ''}
+                  onChange={(e) =>
+                    setEditingSkill((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                  }
+                  placeholder="e.g. Use when reviewing PR diffs or when user asks for a PR audit..."
+                  className="mt-1 text-xs leading-relaxed resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Right Column: Playbook Editor or Preview */}
+            <div className="flex-1 min-w-0 flex flex-col min-h-[380px] lg:min-h-0 border-t lg:border-t-0 lg:border-l border-border/70 pt-4 lg:pt-0 lg:pl-6">
+              {skillModalTab === 'edit' ? (
+                <div className="flex flex-col flex-1 min-h-0 h-full">
+                  <div className="flex items-center justify-between pb-2 shrink-0">
+                    <Label htmlFor="skill-content" className="text-xs font-semibold flex items-center gap-1.5">
+                      <Code2 className="h-3.5 w-3.5 text-primary" />
+                      <span>Playbook Instructions (Markdown)</span>
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {(editingSkill?.content || '').split('\n').length} lines · {(editingSkill?.content || '').length} characters
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2 leading-relaxed">
+                    Frontmatter (<code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">name</code>,{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">description</code>,{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">tags</code>) is managed in the Metadata panel on the left and auto-injected into{' '}
+                    <code className="font-mono text-[11px] bg-muted/60 px-1 py-0.5 rounded text-foreground">SKILL.md</code> on save.
+                  </p>
                   <Textarea
                     id="skill-content"
                     value={editingSkill?.content || ''}
                     onChange={(e) =>
                       setEditingSkill((prev) => (prev ? { ...prev, content: e.target.value } : null))
                     }
-                    rows={12}
                     placeholder="# Playbook Title&#10;&#10;Detailed instructions for the AI assistant..."
-                    className="mt-1 font-mono text-xs leading-relaxed"
+                    className="flex-1 w-full min-h-[360px] lg:min-h-full font-mono text-xs leading-relaxed resize-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
-              </div>
-            ) : (
-              <div className="p-4 border rounded-xl bg-card/40 prose prose-sm dark:prose-invert max-w-none">
-                <div className="mb-4 pb-3 border-b">
-                  <h2 className="text-lg font-bold m-0">{editingSkill?.title || editingSkill?.name}</h2>
-                  <p className="text-xs text-muted-foreground m-0 mt-1">{editingSkill?.description}</p>
+              ) : (
+                <div className="flex flex-col flex-1 min-h-0 h-full">
+                  <div className="flex items-center justify-between pb-2 shrink-0">
+                    <span className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                      <Eye className="h-3.5 w-3.5 text-primary" />
+                      <span>Documentation Preview</span>
+                    </span>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      SKILL.md
+                    </Badge>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5 border rounded-lg bg-card/40 prose prose-sm dark:prose-invert max-w-none">
+                    <div className="mb-4 pb-3 border-b border-border/70">
+                      <h2 className="text-lg font-bold m-0 text-foreground">{editingSkill?.title || editingSkill?.name}</h2>
+                      <p className="text-xs text-muted-foreground m-0 mt-1">{editingSkill?.description}</p>
+                      {editingSkill?.tags && editingSkill.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2.5">
+                          {editingSkill.tags.map((t) => (
+                            <span key={t} className="px-2 py-0.5 rounded bg-muted text-[11px] font-mono text-muted-foreground">
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <pre className="text-xs whitespace-pre-wrap font-sans bg-transparent p-0 border-0 leading-relaxed">
+                      {editingSkill?.content || '*(No playbook markdown provided)*'}
+                    </pre>
+                  </div>
                 </div>
-                <pre className="text-xs whitespace-pre-wrap font-sans bg-transparent p-0 border-0">
-                  {editingSkill?.content || '*(No playbook markdown provided)*'}
-                </pre>
-              </div>
-            )}
-          </ScrollArea>
+              )}
+            </div>
+          </div>
 
-          <DialogFooter className="mt-4 pt-3 border-t">
-            <Button variant="outline" size="sm" onClick={() => setSkillModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={editingSkill?.custom === false ? handleCopyBuiltInSkill : handleSaveSkill}
-              disabled={
-                !editingSkill?.name?.trim() ||
-                !editingSkill?.description?.trim() ||
-                !editingSkill?.content?.trim()
-              }
-            >
-              {editingSkill?.custom === false ? 'Create editable copy' : 'Save Skill'}
-            </Button>
+          <DialogFooter className="mt-4 pt-3 border-t flex items-center justify-between sm:justify-between w-full">
+            <div>
+              {editingSkill?.id && editingSkill?.custom && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    const skillToDelete = editingSkill as SkillItem;
+                    setSkillModalOpen(false);
+                    confirmDeleteSkill(skillToDelete, e);
+                  }}
+                  className="text-destructive hover:bg-destructive/10 border-destructive/30 text-xs gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Delete Skill</span>
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSkillModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={editingSkill?.custom === false ? handleCopyBuiltInSkill : handleSaveSkill}
+                disabled={
+                  !editingSkill?.name?.trim() ||
+                  !editingSkill?.description?.trim() ||
+                  !editingSkill?.content?.trim()
+                }
+              >
+                {editingSkill?.custom === false ? 'Create editable copy' : 'Save Skill'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1259,10 +1541,10 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-destructive">
-              Delete {deleteTarget?.type === 'category' ? 'Category' : 'Skill'}
+              Delete {deleteTarget?.type === 'category' ? 'Category' : (deleteTarget?.workspaceId ? 'Workspace Skill' : 'Global Skill')}
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{deleteTarget?.title}"? This action cannot be undone.
+              Are you sure you want to delete "{deleteTarget?.title}"{deleteTarget?.workspaceId ? ` from workspace "${deleteTarget.workspaceId}"` : ''}? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 

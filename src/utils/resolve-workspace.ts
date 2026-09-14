@@ -27,18 +27,26 @@ import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE } from '../core/constants.j
  */
 export async function resolveWorkspaceQuiet(workspaceArg?: string): Promise<string | null> {
   if (workspaceArg) {
-    const absolutePath = path.resolve(workspaceArg);
-    try {
-      await fs.access(path.join(absolutePath, PRIMARY_MANIFEST_FILE));
-      return absolutePath;
-    } catch {
+    const config = await loadConfig();
+    const candidatePaths = [
+      path.resolve(workspaceArg),
+      ...(config.workspacesDir ? [path.join(config.workspacesDir, workspaceArg)] : []),
+    ];
+
+    for (const absolutePath of candidatePaths) {
       try {
-        await fs.access(path.join(absolutePath, LEGACY_MANIFEST_FILE));
+        await fs.access(path.join(absolutePath, PRIMARY_MANIFEST_FILE));
         return absolutePath;
       } catch {
-        throw new Error(`Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${absolutePath}`);
+        try {
+          await fs.access(path.join(absolutePath, LEGACY_MANIFEST_FILE));
+          return absolutePath;
+        } catch {
+          // Continue to next candidate
+        }
       }
     }
+    throw new Error(`Invalid workspace: No ${PRIMARY_MANIFEST_FILE} found at ${workspaceArg}`);
   }
 
   const cwdFeature = await loadFeatureConfig(process.cwd());

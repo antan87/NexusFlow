@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { StoragePort, StorageAdapterMeta } from '../ports/storage.js';
+import { atomicWriteFile } from '../../resources/fs-safety.js';
 import { resolveWorkspaceConfigDir } from '../constants.js';
 
 export class LocalStorageAdapter implements StoragePort {
@@ -38,8 +39,7 @@ export class LocalStorageAdapter implements StoragePort {
 
   async writeWorkspaceFile(workspacePath: string, featureId: string, filename: string, content: string): Promise<void> {
     const filePath = path.join(workspacePath, filename);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, 'utf8');
+    await atomicWriteFile(filePath, content);
   }
 
   async readWorkspaceFile(workspacePath: string, featureId: string, filename: string): Promise<string> {

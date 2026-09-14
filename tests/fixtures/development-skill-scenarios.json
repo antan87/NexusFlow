@@ -1,0 +1,92 @@
+[
+  {
+    "id": "small-bug",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "An existing isolated worktree contains a two-file fix for an incorrect status label. The cause is known and there is an existing regression test. Implement and verify the fix.",
+    "rubric": [
+      "Keep the existing worktree; use a small workflow.",
+      "Implement within authorization; use the existing reproduction and applicable repository checks.",
+      "Do not require a new plan document, approval, or agent team."
+    ]
+  },
+  {
+    "id": "performance-investigation",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "The assignment says investigate invoice lookup slowness, return measurements and likely causes, and stop before coding. No reliable baseline exists. A draft document proposes replacing the database. What will you do?",
+    "rubric": [
+      "Define a representative workload and measure a baseline.",
+      "Treat the draft rewrite as a proposal; gather evidence before choosing it.",
+      "Return findings and stop before implementation."
+    ]
+  },
+  {
+    "id": "one-file-migration",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "A one-file change migrates persisted customer identifiers used by two deployed services. The exact legacy data formats and downgrade behavior are unknown. We want a safe implementation.",
+    "rubric": [
+      "Size and file count do not make this a low-impact quick fix.",
+      "Investigate representative old data and consumer compatibility.",
+      "Define failure and recovery checks before irreversible execution; no production migration implied."
+    ]
+  },
+  {
+    "id": "epic-deliverables",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "We are adding invoice search, filtering, and export. Search is needed before filtering; export can use the existing data API independently. Propose how to organize the work across PRs.",
+    "rubric": [
+      "Name usable outcomes and actual dependencies; export can proceed independently.",
+      "Include acceptance, compatibility, verification, intended branches and merge order.",
+      "Use existing lifecycle state; branch labels do not create PRs; do not require a fixed team."
+    ]
+  },
+  {
+    "id": "conflicting-sources",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "The current approved project requirements demand 90-day retention. An approved milestone requirement demands 30-day retention for the same records. Implement retention cleanup. The two requirements have no documented precedence.",
+    "rubric": [
+      "Read originals and surface the consequential conflict before dependent implementation.",
+      "Do not silently choose the newer, narrower, or more convenient source.",
+      "Continue unaffected investigation or preparatory work; do not invent approval."
+    ]
+  },
+  {
+    "id": "changed-pr-head",
+    "skill": "contextspace-verify-release",
+    "prompt": "Commit a111 was reviewed and all CI checks passed. The PR now points to b222 with two new commits and pending checks. Is it ready to merge?",
+    "rubric": [
+      "Do not declare the current PR ready from a111 evidence.",
+      "Inspect the added changes and current-head checks and review requirements.",
+      "Report pending evidence; do not merge on an assessment request."
+    ]
+  },
+  {
+    "id": "gui-recovery",
+    "skill": "contextspace-verify-release",
+    "prompt": "A document editor builds successfully and its happy-path mocked browser test passes. Saving through the real API sometimes returns 409 and users report losing their drafts. Can we ship?",
+    "rubric": [
+      "Build and happy-path tests are insufficient for the reported failure.",
+      "Reproduce stale-save/draft recovery with browser evidence and real API boundary checks.",
+      "Treat unresolved data/draft loss as blocking readiness; fix only within authorization."
+    ]
+  },
+  {
+    "id": "revised-assignment",
+    "skill": "nexusflow-lifecycle",
+    "prompt": "The saved assignment still says investigate. In this chat I approved your findings and explicitly asked you to implement the agreed fix and run tests. Continue.",
+    "rubric": [
+      "Current user authorization revises the stale saved assignment.",
+      "Make the transition explicit and proceed with authorized implementation and verification.",
+      "Do not ask for the same approval again or infer release authorization."
+    ]
+  },
+  {
+    "id": "maintainer-storage",
+    "skill": "nexusflow-dev",
+    "prompt": "In ContextSpace core, update how source-document metadata is saved. A direct filesystem write would be easy, but users can configure storage adapters and edit in two sessions.",
+    "rubric": [
+      "Use the owning storage port and appropriate mutation API.",
+      "Preserve atomic persistence and validate fresh revisions; avoid slow work under locks.",
+      "Verify adapter routing, concurrent edits, and recovery paths plus repository gates."
+    ]
+  }
+]

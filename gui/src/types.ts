@@ -147,6 +147,8 @@ export interface Project {
   updatedAt: string;
 }
 
+export type FlowPreset = 'quick' | 'quick-fix' | 'feature' | 'epic';
+
 /** How a feature attaches to its repos (mirrors src/types.ts). */
 export type WorkspaceMode = 'worktree' | 'in-place';
 
@@ -162,6 +164,62 @@ export interface Feature {
   assistants: string[];
   workspacePath: string;
   createdAt: string;
+  workflow?: string;
+  flowType?: FlowPreset;
+  organizationId?: string;
+  domainPacks?: string[];
+}
+
+export interface OrganizationConventions {
+  id: string;
+  name: string;
+  commitMessagePattern?: string;
+  commitExample?: string;
+  prTemplate?: string;
+  rules: string[];
+  isTemplate?: boolean;
+}
+
+export type CategoryType = 'vertical' | 'trait';
+
+export interface CategoryRepoBinding {
+  name: string;
+  target?: 'edit' | 'reference';
+  description?: string;
+  suggestedTestCommand?: string;
+}
+
+export interface DomainPack {
+  id: string;
+  name: string;
+  description: string;
+  parent?: string;
+  categoryType?: CategoryType;
+  organization?: string;
+  tags: string[];
+  skills?: string[];
+  contextFiles?: string[];
+  verifyCommand?: string;
+  rules?: string[];
+  defaultRepos?: string[];
+  microservices?: CategoryRepoBinding[];
+  isTemplate?: boolean;
+  builtin?: boolean;
+}
+
+export type CategoryTagPack = DomainPack;
+
+export interface ResolvedCategoryRules {
+  organizationId?: string;
+  assignedDomainPackIds?: string[];
+  organization: OrganizationConventions | null;
+  domainPacks: DomainPack[];
+  verticals: DomainPack[];
+  traits: DomainPack[];
+  allRules: string[];
+  compositeVerifyCommand?: string;
+  editRepos: string[];
+  referenceRepos: string[];
 }
 
 
@@ -264,6 +322,9 @@ export interface SkillItem {
   sourcePath?: string;
   references?: SkillSupportingFile[];
   scripts?: SkillSupportingFile[];
+  scope?: 'workspace' | 'global';
+  organization?: string;
+  domain?: string;
 }
 
 export interface CodexAgentItem {
@@ -428,3 +489,93 @@ export interface WorkspaceStreamResponse {
   ledgerPath?: string;
 }
 
+export type LifecycleStepStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'verified'
+  | 'completed'
+  | 'blocked';
+
+export interface LifecycleStep {
+  requiresVerification?: boolean;
+  id: string;
+  title: string;
+  description?: string;
+  branch?: string;
+  owner?: string;
+  status: LifecycleStepStatus;
+  dependsOn?: string[];
+  verificationCommand?: string;
+  lastVerificationSha?: string;
+  lastVerificationStatus?: string;
+  completedAt?: string;
+}
+
+export interface BranchFleetMember {
+  branch: string;
+  repoName: string;
+  owner?: string;
+  isCurrent: boolean;
+  headSha?: string;
+  ahead: number;
+  behind: number;
+  lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitDate?: string;
+  remoteTracked: boolean;
+}
+
+export interface WorkspaceLifecycle {
+  revision?: number;
+  workspaceId: string;
+  flowType: 'quick' | 'feature' | 'epic';
+  currentStepId?: string;
+  steps: LifecycleStep[];
+  fleet?: BranchFleetMember[];
+  updatedAt: string;
+}
+
+
+/** Verification output returned with the workspace lifecycle and by the verify action. */
+export interface WorkspaceVerificationReport {
+  overallStatus: 'pass' | 'pass_dirty' | 'fail' | 'timeout' | 'no-tests' | 'skipped';
+  canProgress: boolean;
+  durationMs: number;
+  repos: Array<{
+    repoName: string;
+    status: WorkspaceVerificationReport['overallStatus'];
+    command: string;
+    exitCode: number | null;
+    stdout?: string;
+    stderr?: string;
+    error?: string;
+  }>;
+}
+
+export interface WorkDocument {
+  id: string;
+  title: string;
+  role: 'requirements' | 'design' | 'evidence' | 'reference';
+  status: 'draft' | 'approved' | 'superseded';
+  scope: { milestoneId?: string; project?: boolean };
+  summary: string;
+  filename?: string;
+  url?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkGuidance {
+  version: 1;
+  revision: number;
+  workType: 'bug' | 'feature' | 'performance' | 'refactor' | 'rewrite';
+  size: 'small' | 'standard' | 'epic';
+  assignment: {
+    stage: 'investigate' | 'design' | 'implement' | 'verify' | 'review' | 'release';
+    objective: string;
+    expectedOutput: string;
+    stopCondition: string;
+    milestoneId?: string;
+  };
+  documents: WorkDocument[];
+}

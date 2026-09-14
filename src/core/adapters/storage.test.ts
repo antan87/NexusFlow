@@ -36,10 +36,10 @@ describe('Storage Adapters', () => {
 
       expect(fs.mkdir).toHaveBeenCalledWith(expect.stringContaining(path.normalize('/ws/path')), { recursive: true });
       expect(fs.writeFile).toHaveBeenCalledWith(
-        path.normalize('/ws/path/test.txt'),
-        'hello',
-        'utf8'
+        expect.stringContaining(path.normalize('/ws/path/test.txt.tmp-')),
+        'hello'
       );
+      expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining('test.txt.tmp-'), path.normalize('/ws/path/test.txt'));
     });
 
     it('should resolve local workspace paths', () => {

@@ -14,6 +14,7 @@ import * as skillsCatalog from './utils/skills-catalog.js';
 import * as agentsCatalog from './resources/agents-catalog.js';
 import * as resourceService from './resources/service.js';
 import * as detectAi from './utils/detect-ai.js';
+import { clearCustomDomainRegistrations, registerSampleDomainPacks } from './core/domain-packs.js';
 
 import * as newRepo from './core/new-repo.js';
 import * as orchestration from './orchestration/index.js';
@@ -27,6 +28,16 @@ vi.mock('node:fs/promises');
 vi.mock('execa');
 vi.mock('./core/workspace.js');
 vi.mock('./core/config.js');
+vi.mock('./core/domain-packs.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./core/domain-packs.js')>();
+  return {
+    ...actual,
+    saveDomainPack: async (pack: Parameters<typeof actual.registerCustomDomainPack>[0]) => actual.registerCustomDomainPack(pack),
+    saveOrganization: async (org: Parameters<typeof actual.registerCustomOrganization>[0]) => actual.registerCustomOrganization(org),
+    deleteDomainPack: async (id: string) => actual.unregisterCustomDomainPack(id),
+    deleteOrganization: async (id: string) => actual.unregisterCustomOrganization(id),
+  };
+});
 vi.mock('./utils/system-scanner.js');
 vi.mock('./utils/update-check.js');
 vi.mock('./analyzers/index.js');
@@ -1281,6 +1292,7 @@ describe('Server API Endpoints Unit Tests', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchName: 'test-ws-creation-no-pack',
+          flowType: 'epic',
           description: 'A test workspace',
           repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
           assistants: ['antigravity']
@@ -1295,7 +1307,7 @@ describe('Server API Endpoints Unit Tests', () => {
       // Wait a brief tick for the background job to execute
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(workspace.createWorkspace).toHaveBeenCalled();
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].flowType).toBe('epic');
       expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalled();
 
@@ -2158,6 +2170,46 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(data.skill.custom).toBe(true);
     });
 
+    it('POST /api/skills validates workspace-local scope parameters', async () => {
+      // workspace scope without workspaceId returns 400
+      const noWsRes = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'local-test',
+          content: '# Local Test',
+          scope: 'workspace',
+        }),
+      });
+      expect(noWsRes.status).toBe(400);
+
+      // workspace scope with unknown workspace returns 404
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([]);
+
+      const unknownWsRes = await app.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'local-test',
+          content: '# Local Test',
+          scope: 'workspace',
+          workspaceId: 'non-existent-ws',
+        }),
+      });
+      expect(unknownWsRes.status).toBe(404);
+    });
+
+    it('DELETE /api/skills/:id?workspace=non-existent returns 404', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue([]);
+
+      const response = await app.request('/api/skills/local-test?workspace=non-existent-ws', {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(404);
+    });
+
     it('GET and POST /api/agents administer Codex-native agents', async () => {
       const agent = {
         id: 'reviewer',
@@ -2312,6 +2364,275 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('Enterprise & Modular Domain Packs Endpoints', () => {
+    it('GET /api/enterprise/domain-packs returns empty array when clean slate (generic default)', async () => {
+      clearCustomDomainRegistrations();
+      try {
+        const response = await app.request('/api/enterprise/domain-packs');
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.domainPacks).toEqual([]);
+      } finally {
+        registerSampleDomainPacks();
+      }
+    });
+
+    it('GET /api/enterprise/organizations returns registered organizations', async () => {
+      const response = await app.request('/api/enterprise/organizations');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.organizations.some((o: any) => o.id === 'acme')).toBe(true);
+    });
+
+    it('GET /api/enterprise/domain-packs returns registered domain packs', async () => {
+      const response = await app.request('/api/enterprise/domain-packs');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      const ids = data.domainPacks.map((p: any) => p.id);
+      expect(ids).toContain('economy');
+      expect(ids).toContain('hr');
+      expect(ids).toContain('transport');
+    });
+
+    it('POST /api/enterprise/match-domains matches domain packs from text spec', async () => {
+      const response = await app.request('/api/enterprise/match-domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: 'Calculate Swedish VAT and export customer invoice' }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.matched.length).toBeGreaterThan(0);
+      expect(data.matched[0].id).toBe('economy');
+    });
+
+    it('GET /api/workspace/:id/domain-packs returns resolved domain rules for workspace', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Enterprise integration',
+        organizationId: 'acme',
+        domainPacks: ['economy'],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      } as any);
+
+      const response = await app.request('/api/workspace/enterprise-ws/domain-packs');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.organizationId).toBe('acme');
+      expect(data.assignedDomainPackIds).toEqual(['economy']);
+      expect(data.organization.name).toBe('Acme Corp');
+      expect(data.allRules.some((r: string) => r.includes('Swedish VAT standard rates'))).toBe(true);
+    });
+
+    it('POST /api/workspace/:id/domain-packs updates workspace domains and rules', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      const featureMock = {
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Enterprise integration',
+        organizationId: undefined,
+        domainPacks: [],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      };
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue(featureMock as any);
+      vi.mocked(workspace.saveFeatureConfig).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/enterprise-ws/domain-packs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: 'acme',
+          domainPacks: ['economy', 'transport'],
+        }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.feature.organizationId).toBe('acme');
+      expect(data.feature.domainPacks).toEqual(['economy', 'transport']);
+      expect(workspace.saveFeatureConfig).toHaveBeenCalledWith(workspacePath, expect.objectContaining({
+        organizationId: 'acme',
+        domainPacks: ['economy', 'transport'],
+      }));
+    });
+
+    it('POST /api/workspace/:id/update-spec updates specification and auto-matches domain packs', async () => {
+      const workspacePath = path.resolve('/workspaces/enterprise-ws');
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: path.resolve('/workspaces') } as any);
+      vi.mocked(fs.realpath).mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.mocked(workspace.loadWorkspaceManifest).mockResolvedValue({ workspacePath } as any);
+      const featureMock = {
+        id: 'enterprise-ws',
+        branchName: 'enterprise-ws',
+        description: 'Original spec',
+        organizationId: 'acme',
+        domainPacks: ['economy'],
+        repos: [],
+        assistants: ['claude'],
+        workspacePath,
+        createdAt: '2026-07-17T00:00:00.000Z',
+      };
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue(featureMock as any);
+      vi.mocked(workspace.saveFeatureConfig).mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace/enterprise-ws/update-spec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: 'Updated PO requirements: calculate employee payroll deductions and kollektivavtal benefits',
+          autoMatchDomains: true,
+        }),
+      });
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+      expect(data.newlyMatched).toContain('hr');
+      expect(data.feature.domainPacks).toContain('economy');
+      expect(data.feature.domainPacks).toContain('hr');
+    });
+
+    it('POST, GET, PUT, and DELETE /api/enterprise/domain-packs manages custom domain packs', async () => {
+      const postRes = await app.request('/api/enterprise/domain-packs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'custom-fintech',
+          name: 'Fintech & Payments',
+          description: 'Payment gateway integrations and settlement reconciliations.',
+          tags: ['fintech', 'payment', 'stripe', 'pci'],
+          rules: ['Zero plain-text credit card storage (PCI-DSS).'],
+          verifyCommand: 'npm test -- fintech',
+        }),
+      });
+      expect(postRes.status).toBe(200);
+      const postData = await postRes.json();
+      expect(postData.success).toBe(true);
+      expect(postData.domainPack.id).toBe('custom-fintech');
+      expect(postData.domainPack.isTemplate).toBe(false);
+
+      // GET by id
+      const getRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
+      expect(getRes.status).toBe(200);
+      const getData = await getRes.json();
+      expect(getData.domainPack.id).toBe('custom-fintech');
+      expect(getData.domainPack.verifyCommand).toBe('npm test -- fintech');
+
+      // GET non-existent returns 404
+      const missingRes = await app.request('/api/enterprise/domain-packs/non-existent-pack');
+      expect(missingRes.status).toBe(404);
+
+      // PUT non-existent returns 404
+      const missingPutRes = await app.request('/api/enterprise/domain-packs/non-existent-pack', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Non Existent' }),
+      });
+      expect(missingPutRes.status).toBe(404);
+
+      // PUT update
+      const putRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Fintech, Payments & Crypto',
+          rules: ['Zero plain-text credit card storage (PCI-DSS).', 'All crypto ledger transactions require signature.'],
+          verifyCommand: 'npm test -- fintech-crypto',
+        }),
+      });
+      expect(putRes.status).toBe(200);
+      const putData = await putRes.json();
+      expect(putData.success).toBe(true);
+      expect(putData.domainPack.name).toBe('Fintech, Payments & Crypto');
+      expect(putData.domainPack.rules).toHaveLength(2);
+      expect(putData.domainPack.verifyCommand).toBe('npm test -- fintech-crypto');
+
+      // PUT update clearing rules and verifyCommand
+      const clearPutRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rules: [],
+          verifyCommand: '',
+        }),
+      });
+      expect(clearPutRes.status).toBe(200);
+      const clearPutData = await clearPutRes.json();
+      expect(clearPutData.domainPack.rules).toHaveLength(0);
+      expect(clearPutData.domainPack.verifyCommand).toBeUndefined();
+
+      const delRes = await app.request('/api/enterprise/domain-packs/custom-fintech', {
+        method: 'DELETE',
+      });
+      expect(delRes.status).toBe(200);
+      const delData = await delRes.json();
+      expect(delData.success).toBe(true);
+
+      const afterDelRes = await app.request('/api/enterprise/domain-packs/custom-fintech');
+      expect(afterDelRes.status).toBe(404);
+
+      // Customizing registered domain pack and deleting it
+      const overrideBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Overridden Economy',
+          rules: ['Strict bespoke invoice rules'],
+        }),
+      });
+      expect(overrideBuiltin.status).toBe(200);
+      const overrideData = await overrideBuiltin.json();
+      expect(overrideData.domainPack.name).toBe('Overridden Economy');
+      expect(overrideData.domainPack.isTemplate).toBe(false);
+
+      // Reset / unregister via DELETE
+      const resetBuiltin = await app.request('/api/enterprise/domain-packs/economy', {
+        method: 'DELETE',
+      });
+      expect(resetBuiltin.status).toBe(200);
+
+      const restoredBuiltin = await app.request('/api/enterprise/domain-packs/economy');
+      expect(restoredBuiltin.status).toBe(404);
+    });
+
+    it('POST and DELETE /api/enterprise/organizations registers and unregisters custom organizations', async () => {
+      const postRes = await app.request('/api/enterprise/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'spotify',
+          name: 'Spotify',
+          commitMessagePattern: '^SPOT-[0-9]+: .+$',
+          rules: ['Squad ownership tags required in PR.'],
+        }),
+      });
+      expect(postRes.status).toBe(200);
+      const postData = await postRes.json();
+      expect(postData.success).toBe(true);
+      expect(postData.organization.id).toBe('spotify');
+
+      const delRes = await app.request('/api/enterprise/organizations/spotify', {
+        method: 'DELETE',
+      });
+      expect(delRes.status).toBe(200);
+      const delData = await delRes.json();
+      expect(delData.success).toBe(true);
+    });
+  });
+
   describe('GET /api/workspaces/status', () => {
     it('returns workspace statuses including active AI assistants', async () => {
       vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
@@ -2353,6 +2674,24 @@ describe('Server API Endpoints Unit Tests', () => {
 
       findActive.mockRestore();
     });
+  });
+
+  it('returns the persisted verification details with the lifecycle', async () => {
+    const lifecycleCore = await import('./core/lifecycle.js');
+    const stateCore = await import('./core/workspace-state.js');
+    const lifecycle = { workspaceId: 'demo', flowType: 'feature', steps: [], updatedAt: '' };
+    const report = { overallStatus: 'fail', repos: [{ repoName: 'api', error: 'Repository changed', stdout: 'test output' }] };
+    vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+    const lifecycleSpy = vi.spyOn(lifecycleCore, 'loadWorkspaceLifecycle').mockResolvedValue(lifecycle as any);
+    const stateSpy = vi.spyOn(stateCore, 'loadWorkspaceState').mockResolvedValue({ lastVerification: report } as any);
+    try {
+      const response = await app.request('/api/workspace/demo/lifecycle');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ lifecycle, report, plan: expect.stringContaining('Milestone plan') });
+    } finally {
+      lifecycleSpy.mockRestore();
+      stateSpy.mockRestore();
+    }
   });
 
   describe('POST /api/workspace/:id/changes/revert', () => {

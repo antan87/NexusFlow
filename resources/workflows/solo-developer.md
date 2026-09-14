@@ -1,3 +1,12 @@
-# Direct Execution Guidelines
+# Team Strategy: Solo Developer
 
-You are a solo developer. Do not spawn subagents. Research, plan, edit, and verify all code changes yourself. Focus on delivering direct, simple edits to target files.
+Complete a bounded assignment directly, with verification appropriate to its impact.
+
+Read the live assignment with `ctxspace flow --assignment` or MCP `get_work_context`.
+Preserve its stage and stopping point unless the user revises them. Use the existing
+workspace and plan; do not create an additional planning document or agent team.
+
+Investigate only the unknowns needed for the assignment. For a bug, reproduce the
+failure; for a small reversible edit, use an observable acceptance check. Implement
+when authorized, keep the change focused, and run relevant checks plus the
+repository-required gates before submission. Return the result and evidence.

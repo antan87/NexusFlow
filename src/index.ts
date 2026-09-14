@@ -20,6 +20,8 @@ import { startCommand } from './commands/start.js';
 import { stopCommand } from './commands/stop.js';
 import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
+import { verifyCommand } from './commands/verify.js';
+import { flowCommand } from './commands/flow.js';
 import { uiCommand } from './commands/ui.js';
 import { tuiCommand } from './commands/tui.js';
 import { syncCommand } from './commands/sync.js';
@@ -33,7 +35,8 @@ import { addRepoCommand } from './commands/add-repo.js';
 import { isolateCommand } from './commands/isolate.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
-
+import { tagListCommand, tagAddCommand, tagRemoveCommand, tagShowCommand } from './commands/tag.js';
+import { skillListCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './commands/skill.js';
 import { refreshCommand } from './commands/refresh.js';
 import { progressCommand } from './commands/progress.js';
 import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
@@ -125,7 +128,21 @@ program
   .description(
     'Create a new feature workspace — pick repos, pick AI assistants, generate context',
   )
+  .option('-q, --quick', 'Fast-track flow for quick bug fixes or small tweaks (in-place, solo-developer)')
+  .option('--flow <type>', 'Development flow preset: quick-fix, feature, or epic')
+  .option('-m, --mode <mode>', 'Workspace mode: worktree or in-place')
+  .option('-s, --strategy <strategy>', 'Teamwork strategy ID')
+  .option('-t, --tag <tags...>', 'Category or domain tags to attach (mounts associated skill bundles)')
+  .option('--org <orgId>', 'Organization profile to inherit company standards from')
   .action(runAction(createCommand));
+
+program
+  .command('quick')
+  .description('Quick-fix fast lane — start a localized bug fix or tweak with minimal ceremony')
+  .option('-m, --mode <mode>', 'Workspace mode: in-place (default) or worktree', 'in-place')
+  .option('-t, --tag <tags...>', 'Category or domain tags to attach (mounts associated skill bundles)')
+  .option('--org <orgId>', 'Organization profile to inherit company standards from')
+  .action(runAction((options: any) => createCommand({ quick: true, ...options })));
 
 program
   .command('list')
@@ -177,6 +194,35 @@ program
   .option('--json', 'Output in JSON format')
   .action(runAction(async (workspace: string | undefined, options: { json?: boolean }) => {
     await statusCommand(workspace, options);
+  }));
+
+program
+  .command('verify')
+  .alias('test')
+  .description('Run mechanical verification gates across workspace repositories')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('-r, --repo <name>', 'Verify a specific repository only')
+  .option('-t, --tag <name>', 'Run verification gate for a specific category or tag pack')
+  .option('-f, --filter <pattern>', 'Filter pattern passed to underlying test runner')
+  .option('-c, --command <cmd>', 'Override verification command to execute')
+  .option('--timeout <seconds>', 'Watchdog timeout per test run in seconds', '300')
+  .option('--allow-dirty', 'Permit progress even if working tree has uncommitted edits')
+  .option('--json', 'Output report in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any) => {
+    await verifyCommand(workspace, options);
+  }));
+
+program
+  .command('flow')
+  .alias('fleet')
+  .description('Visualize lifecycle milestone pipeline, step progress, and sister branch fleet')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--step <id>', 'Target a specific lifecycle step ID')
+  .option('--assignment', 'Read the current AI assignment, source documents, and milestone plan')
+  .option('--action <action>', 'Transition action: start, verify, or complete')
+  .option('--json', 'Output lifecycle in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any) => {
+    await flowCommand(workspace, options);
   }));
 
 program
@@ -246,8 +292,142 @@ program
   .action(runAction(async (workspace: string | undefined, options: { repo?: string[]; json?: boolean }) => {
     await diffCommand(workspace, options);
   }));
+const tagCmd = program
+  .command('tag')
+  .alias('category')
+  .description('Inspect and manage enterprise categories, verticals, and traits');
 
-// Pack command removed.
+tagCmd
+  .command('list')
+  .alias('ls')
+  .description('List all available categories, vertical subsystems, and horizontal traits')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any) => {
+    await tagListCommand(workspace, options);
+  }));
+
+tagCmd
+  .command('add <id>')
+  .description('Attach a category or trait tag to the workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(runAction(async (id: string, workspace: string | undefined) => {
+    await tagAddCommand(id, workspace);
+  }));
+
+tagCmd
+  .command('remove <id>')
+  .alias('rm')
+  .description('Detach a category or trait tag from the workspace')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .action(runAction(async (id: string, workspace: string | undefined) => {
+    await tagRemoveCommand(id, workspace);
+  }));
+
+tagCmd
+  .command('show <id>')
+  .description('Show details, parent tree, microservices, and rules for a category or trait')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (id: string, options: any, cmd: any) => {
+    const merged = cmd?.optsWithGlobals ? { ...cmd.optsWithGlobals(), ...options } : options;
+    await tagShowCommand(id, merged);
+  }));
+
+// Default action for `ctxspace tag` without subcommands runs `tag list`
+tagCmd
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = cmd?.optsWithGlobals ? { ...cmd.optsWithGlobals(), ...options } : options;
+    await tagListCommand(workspace, merged);
+  }));
+
+function resolveCliOptions(cmd: any, options: any): any {
+  const result: Record<string, any> = { ...options };
+  if (!cmd) return result;
+  const parent = cmd.parent;
+  if (parent) {
+    for (const [key, val] of Object.entries(parent.opts() || {})) {
+      if (parent.getOptionValueSource?.(key) === 'cli') {
+        result[key] = val;
+      }
+    }
+  }
+  for (const [key, val] of Object.entries(cmd.opts() || {})) {
+    if (cmd.getOptionValueSource?.(key) === 'cli') {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
+const skillCmd = program
+  .command('skill')
+  .description('Manage agent skills (workspace-local and global company standards)');
+
+skillCmd
+  .command('list')
+  .alias('ls')
+  .description('List agent skills in current workspace and global catalog')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
+  .option('-t, --tag <tags...>', 'Filter skills by tags')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillListCommand(workspace, merged);
+  }));
+
+skillCmd
+  .command('create')
+  .description('Create a new agent skill (workspace-local or global)')
+  .argument('<id>', 'Skill identifier (e.g. commit-rules or vat-calc)')
+  .argument('[workspace]', 'Path to workspace (required if workspace scope)')
+  .option('--title <title>', 'Human-readable title')
+  .option('-d, --description <desc>', 'Skill description')
+  .option('-c, --content <content>', 'Markdown content/instructions for the skill')
+  .option('-f, --file <path>', 'File path to read skill markdown instructions from')
+  .option('-t, --tag <tags...>', 'Tags to attach to the skill')
+  .option('--scope <scope>', 'Skill scope: workspace (local) or global', 'workspace')
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillCreateCommand(id, workspace, merged);
+  }));
+
+skillCmd
+  .command('show')
+  .alias('info')
+  .description('Show instructions, metadata, and references for an agent skill')
+  .argument('<id>', 'Skill identifier to inspect')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillShowCommand(id, workspace, merged);
+  }));
+
+skillCmd
+  .command('delete')
+  .alias('rm')
+  .description('Delete an agent skill')
+  .argument('<id>', 'Skill identifier to remove')
+  .argument('[workspace]', 'Path to workspace')
+  .option('--scope <scope>', 'Scope to delete from: workspace or global')
+  .action(runAction(async (id: string, workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillDeleteCommand(id, workspace, merged);
+  }));
+
+// Default action for `ctxspace skill` without subcommands runs `skill list`
+skillCmd
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--scope <scope>', 'Filter by scope: workspace, global, or all', 'all')
+  .option('-t, --tag <tags...>', 'Filter skills by tags')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillListCommand(workspace, merged);
+  }));
 
 program
   .command('remove')

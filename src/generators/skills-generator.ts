@@ -8,9 +8,11 @@ import type { AIAssistant, WorkspaceContext, ProjectAnalysis, SkillItem } from '
 import {
   getAllSkills,
   getWorkspaceSkillsConfig,
+  getSkillCategories,
 } from '../utils/skills-catalog.js';
 import { getAllAgents } from '../resources/agents-catalog.js';
 import { reconcileWorkspaceResources } from '../resources/materializer.js';
+import { resolveActiveDomainRules } from '../core/domain-packs.js';
 
 /**
  * Checks if the workspace has cross-repo package dependencies.
@@ -201,7 +203,11 @@ export async function generateSkills(
 
   // 1. Get enabled skills config and catalog
   const wsConfig = await getWorkspaceSkillsConfig(workspacePath);
-  const [catalogSkills, catalogAgents] = await Promise.all([getAllSkills(), getAllAgents()]);
+  const [catalogSkills, catalogAgents, categories] = await Promise.all([
+    getAllSkills(workspacePath),
+    getAllAgents(),
+    getSkillCategories(),
+  ]);
   const skillMap = new Map<string, SkillItem>();
 
   for (const s of catalogSkills) {
@@ -260,6 +266,33 @@ export async function generateSkills(
     }
   }
 
+  // 2.5 Auto-mount skills bundled in active category tags or enabledCategories
+  const categorySkillIds: string[] = [];
+  const catMap = new Map(categories.map((c) => [c.id, c]));
+  for (const catId of wsConfig.enabledCategories ?? []) {
+    const cat = catMap.get(catId);
+    if (cat?.skills) {
+      for (const sId of cat.skills) {
+        if (skillMap.has(sId)) {
+          categorySkillIds.push(sId);
+        }
+      }
+    }
+  }
+
+  if (ctx.feature?.domainPacks && ctx.feature.domainPacks.length > 0) {
+    const { domainPacks } = resolveActiveDomainRules(ctx.feature.organizationId, ctx.feature.domainPacks);
+    for (const pack of domainPacks) {
+      if (pack.skills) {
+        for (const sId of pack.skills) {
+          if (skillMap.has(sId)) {
+            categorySkillIds.push(sId);
+          }
+        }
+      }
+    }
+  }
+
   // 3. Determine which skills to deploy:
   // - In fresh workspaces (revision === 0, not opted out), automatically recommend dynamic skills.
   // - Once a user has saved an explicit configuration (revision > 0) or marked skills as disabled,
@@ -270,8 +303,12 @@ export async function generateSkills(
     ? dynamicSkillIds.filter((id) => !disabledSet.has(id))
     : [];
 
+  const workspaceLocalSkillIds = catalogSkills
+    .filter((s) => s.scope === 'workspace')
+    .map((s) => s.id);
+
   const enabledSet = new Set(
-    [...wsConfig.enabledSkills, ...autoSkills].filter((id) => !disabledSet.has(id)),
+    [...wsConfig.enabledSkills, ...autoSkills, ...categorySkillIds, ...workspaceLocalSkillIds].filter((id) => !disabledSet.has(id)),
   );
   const missingSkills = [...enabledSet].filter((id) => !skillMap.has(id));
   if (missingSkills.length) {

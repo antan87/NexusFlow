@@ -49,23 +49,25 @@ This starts the local backend server on port `3000` and automatically opens the 
 ---
 
 ### 3. Create a Feature Workspace
-Via the `ctxspace create` CLI command:
+Via the `ctxspace create` CLI command (or `ctxspace quick` for rapid bug fixes):
 1. **Repo Source**: Choose a registered project or continue with ad-hoc repo scanning.
 2. **Work Mode**: Pick **Isolated worktrees** or **In-place**.
-3. **Branch or Workspace Name**: Enter a feature branch for worktree mode (e.g. `feature/user-profiles`) or a workspace name for in-place mode.
-4. **Description**: Describe the feature you are building. The AI assistant will read this to compile the plan.
-5. **Assistant Selection**: Select which AI coding assistants you plan to use (Claude Code, Antigravity, Cursor, etc.).
-6. **Finish the Wizard**: ContextSpace runs tech analyses and writes context configurations. In isolated worktree mode it also fetches origin updates, creates local branches, and spins up git worktrees under `workspaces/feature/user-profiles`.
+3. **Lifecycle Flow Preset**: Choose **Quick Bug Fix** (`quick`), **Standard Feature** (`feature`), or **Multi-Milestone Epic** (`epic`).
+4. **Branch or Workspace Name**: Enter a feature branch for worktree mode (e.g. `feature/user-profiles`) or a workspace name for in-place mode.
+5. **Description**: Describe what you are building. The AI assistant will read this to compile the plan.
+6. **Skills & Enterprise Tags**: Equip portable skills and enterprise categories/traits directly in the wizard.
+7. **Assistant Selection**: Select which AI coding assistants you plan to use (Claude Code, Antigravity, Cursor, etc.).
+8. **Finish the Wizard**: ContextSpace runs tech analyses and writes context configurations. In isolated worktree mode it also fetches origin updates, creates local branches, and spins up git worktrees under `workspaces/feature/user-profiles`.
 
 #### Projects
 
-A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name (`Hogia Billing` becomes `hogia-billing`), and the command group also has the `proj` alias.
+A project is a named, persistent group of source repositories stored centrally in `~/.contextspace/projects.json` (with fallback to `~/.nexusflow/projects.json`). Project ids are slugified from the name (`Acme Billing` becomes `acme-billing`), and the command group also has the `proj` alias.
 
 ```bash
-ctxspace project add -n "Hogia Billing" -r ../api ../frontend -d "Billing repos"
+ctxspace project add -n "Acme Billing" -r ../api ../frontend -d "Billing repos"
 ctxspace project list      # alias: ls
-ctxspace project show hogia-billing
-ctxspace project remove hogia-billing -y  # alias: rm
+ctxspace project show acme-billing
+ctxspace project remove acme-billing -y  # alias: rm
 ```
 
 The add flags are `-n/--name`, `-r/--repos <paths...>`, and `-d/--description`; omit `--repos` to use the interactive repo picker. Removing a project only edits the registry — it never deletes repositories or workspaces on disk, and `remove` accepts `-y/--yes`. The HTTP API exposes the same registry at `GET/POST /api/projects` and `PUT/DELETE /api/projects/:id`.
@@ -129,7 +131,14 @@ ctxspace knowledge add -t gotcha --title "worker redis requirement" --scope "rep
 ```
 Entries are filed under the right section of `contextspace-knowledge.md` automatically. Your AI assistant can do the same through the `add_knowledge` MCP tool.
 
-### 8. Finish the Feature
+### 8. Run Mechanical Verification Gates
+Before completing a feature or advancing a milestone, run the mechanical verification runner:
+```bash
+ctxspace verify
+```
+This runs each repository's test runner sequentially, confirms the working tree is clean, and records SHA-anchored proof of success in workspace state. Use `ctxspace flow` to inspect milestone progress and your multi-branch sister fleet.
+
+### 9. Finish the Feature
 When the work is done, close the loop in one command:
 ```bash
 ctxspace finish --dry-run          # preview: what will be committed / pushed
@@ -148,12 +157,15 @@ Here is a summary of the command-line interface:
 | :--- | :--- | :--- |
 | **`ctxspace ui`** | `ctxspace ui [-p <port>]` | Starts the backend Hono API server and opens the GUI Dashboard. |
 | **`ctxspace create`** | `ctxspace create` | Launches the interactive wizard to build a worktree or in-place workspace. |
+| **`ctxspace quick`** | `ctxspace quick` | Fast-tracks instant workspace creation for quick bug fixes. |
 | **`ctxspace list`** | `ctxspace list` / `ctxspace ls` | Lists all active feature workspaces, tagging in-place ones with `[in-place]`. |
 | **`ctxspace open`** | `ctxspace open` | Prompts you to pick an active workspace and opens it in your editor. |
 | **`ctxspace start`** | `ctxspace start [path]` | Starts background processes for all projects in the workspace. |
 | **`ctxspace stop`** | `ctxspace stop [path]` | Kills all running processes for the workspace. |
 | **`ctxspace logs`** | `ctxspace logs [path] [-n <lines>]` | Tails output log files for all service processes in the workspace. |
 | **`ctxspace status`** | `ctxspace status [path]` | Displays live repo state, context freshness, and service status. |
+| **`ctxspace flow`** | `ctxspace flow [path] [--step <id>] [--action ...]` | Visualizes active lifecycle steps, milestone gates, and sister branch fleet. |
+| **`ctxspace verify`** | `ctxspace verify [path] [--repo ...] [--tag ...]` | Executes mechanical verification gates and records cryptographic proof. |
 | **`ctxspace progress`** | `ctxspace progress [path]` | Derives expected-branch alignment, push, and available PR progress from live state; push/PR state is omitted on the wrong branch. |
 | **`ctxspace init`** | `ctxspace init` / `ctxspace init --workspace [path]` | Edits global config or adopts an existing workspace as a git-backed artifact. |
 | **`ctxspace project`** | `ctxspace project add` / `list` / `show` / `remove` | Manages registered repo groups (alias: `proj`). |
@@ -161,6 +173,8 @@ Here is a summary of the command-line interface:
 | **`ctxspace commit`** | `ctxspace commit` | Automates cross-repository git commit and branch pushes in the workspace. |
 | **`ctxspace sync`** | `ctxspace sync` | Rebases worktree-mode repos and reconciles generated views; in-place mode skips repo mutation. |
 | **`ctxspace finish`** | `ctxspace finish [-m <msg>] [--cleanup] [--dry-run]` | Closes out a feature: commits & pushes all repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
+| **`ctxspace tag`** | `ctxspace tag list` / `add <id>` / `remove <id>` | Manages enterprise categories, vertical subsystems, and cross-cutting traits (alias: `category`). |
+| **`ctxspace skill`** | `ctxspace skill list` / `create` / `show` / `delete` | Manages portable agent skills aligned with the open `agentskills.io` standard. |
 | **`ctxspace knowledge`** | `ctxspace knowledge add -t <type> --title <title> -m <msg> [--scope ...]` / `show` / `promote` | Captures searchable scoped learnings; identical retries do not duplicate entries, and local Git commit failures are reported separately from successful storage writes. |
 | **`ctxspace refresh`**| `ctxspace refresh [--check]` | Regenerates context or checks `contextspace.lock` and generated-view drift. |
 | **`ctxspace remote`** | `ctxspace remote add|push|pull` | Synchronizes the workspace artifact repository without touching child repo remotes. |

@@ -70,4 +70,42 @@ describe('commitCommand --no-push handling (A1.1)', () => {
 
     expect(multiGit.commitAndPush).not.toHaveBeenCalled();
   });
+
+  it('warns when commit message violates organization conventions', async () => {
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: 'feature',
+      branchName: 'feature-branch',
+      description: 'test',
+      organizationId: 'acme',
+      repos: [repoPath],
+      assistants: ['claude'],
+      workspacePath,
+    } as any);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // 'wip' violates Acme Corp's '^(feat|fix|...)(...): ...' pattern
+    await commitCommand('wip', workspacePath, { push: false });
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Commit message does not match Acme Corp convention'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('feat(ECO-412)'));
+  });
+
+  it('populates conventionWarning in commitWorkspace report when organization convention is violated', async () => {
+    const { commitWorkspace } = await import('../core/commit.js');
+    vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({
+      id: 'feature',
+      branchName: 'feature-branch',
+      description: 'test',
+      organizationId: 'acme',
+      repos: [repoPath],
+      assistants: ['claude'],
+      workspacePath,
+    } as any);
+
+    const report = await commitWorkspace(workspacePath, 'non-conforming commit', { noPush: true });
+    expect(report.conventionWarning).toBeDefined();
+    expect(report.conventionWarning).toContain('violates Acme Corp convention');
+  });
 });
+

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
@@ -110,7 +111,7 @@ export async function atomicWriteFile(
   beforeCommit?: () => Promise<void>,
 ): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const tempPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
   try {
     await fs.writeFile(tempPath, data);
     await beforeCommit?.();
