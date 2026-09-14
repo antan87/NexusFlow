@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { PlanningNotesPanel } from './PlanningNotesPanel.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
@@ -15,7 +16,8 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
   const [context, setContext] = useState<WorkContext | null>(null);
   const [draft, setDraft] = useState<WorkGuidance | null>(null);
   const [steps, setSteps] = useState<LifecycleStep[]>([]);
-  const [panel, setPanel] = useState<'assignment' | 'documents' | 'milestones'>('assignment');
+  const [panel, setPanel] = useState<'assignment' | 'documents' | 'milestones' | 'notes'>('assignment');
+  const [notesOpened, setNotesOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -81,8 +83,9 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
     {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
     {!context || !draft ? <p className="text-sm">{error ? 'Work brief unavailable.' : 'Loading work brief…'}</p> : <>
       <div className="flex flex-wrap gap-2" aria-label="Brief sections">
-        {(['assignment', 'documents', 'milestones'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => setPanel(item)}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : 'Edit milestones'}</Button>)}
+        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? 'Edit milestones' : 'Delivery notes & questions'}</Button>)}
       </div>
+      {notesOpened && <div hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} /></div>}
       {panel === 'assignment' && <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="text-sm">Work type<select aria-label="Work type" className={selectClass} value={draft.workType} onChange={(event) => setDraft({ ...draft, workType: event.target.value as WorkGuidance['workType'] })}>
@@ -176,6 +179,9 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           <label className="block text-sm">Milestone {index + 1} title<Input value={step.title} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, title: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} outcome<Textarea value={step.description ?? ''} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} branch (optional)<Input value={step.branch ?? ''} placeholder="feature/invoice-calculation" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, branch: event.target.value } : item))} /></label>
+          <label className="block text-sm">Milestone {index + 1} repository (optional)<Input value={step.repo ?? ''} placeholder="billing-api" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, repo: event.target.value } : item))} /></label>
+          <label className="block text-sm">Milestone {index + 1} work item / PR (optional)<Input value={step.workItem ?? ''} placeholder="PBI ID or URL" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, workItem: event.target.value } : item))} /></label>
+          <label className="block text-sm">Milestone {index + 1} unblock condition (optional)<Input value={step.unblockCondition ?? ''} placeholder="Dependency or decision needed before starting" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, unblockCondition: event.target.value } : item))} /></label>
           <fieldset className="space-y-2"><legend className="mb-2 text-sm">Milestone {index + 1} dependencies</legend>
             {steps.filter((item) => item.id !== step.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={Boolean(step.dependsOn?.includes(item.id))} onChange={(event) => setSteps(steps.map((candidate) => candidate.id === step.id ? {

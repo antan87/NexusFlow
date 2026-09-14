@@ -48,6 +48,7 @@ import { cn } from '../../lib/utils.js';
 import {
   useSkillCategories,
   useSkills,
+  useSkillDiagnostics,
   useAgents,
   useWorkspaceSkills,
   useAssignWorkspaceSkills,
@@ -76,6 +77,7 @@ export interface WorkspaceSkillsTabProps {
 }
 
 export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
+  const { data: diagnostics = [] } = useSkillDiagnostics(ws.branchName);
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const [draftSkills, setDraftSkills] = useState<string[] | null>(null);
@@ -223,11 +225,11 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
   // Merge registered categories with auto-discovered categories from skills
   const { displayCategories, uncategorizedSkills } = useMemo(() => {
     const knownCategoryIds = new Set(categories.map((c) => c.id));
-    const mergedCategories = [...categories];
+    const mergedCategories = categories.filter((category) => category.id !== 'general');
 
     const extraCategoryMap = new Map<string, SkillCategory>();
     for (const skill of filteredSkills) {
-      if (skill.category && !knownCategoryIds.has(skill.category)) {
+      if (skill.category && skill.category !== 'general' && !knownCategoryIds.has(skill.category)) {
         if (!extraCategoryMap.has(skill.category)) {
           const formattedName = skill.category
             .split(/[-_]/)
@@ -459,6 +461,10 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {diagnostics.length > 0 && <div role="status" className="rounded-lg border border-amber-500/40 p-4 text-sm">
+        <h4 className="font-semibold">Skill discovery notices</h4>
+        <ul className="mt-2 space-y-2">{diagnostics.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.id}</strong> ({item.scope}): {item.message}</li>)}</ul>
+      </div>}
       {/* Top Banner / Actions Bar */}
       <Card className="p-5 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -478,7 +484,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Active skills and procedural playbooks available to coding assistants in this workspace.
+              Select skills to deploy to this workspace. Authored .agents/skills files remain discoverable by assistants even when deselected.
             </p>
           </div>
         </div>
@@ -638,7 +644,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-semibold text-xs text-foreground">Workspace & Custom Skills</h4>
+                    <h4 className="font-semibold text-xs text-foreground">Uncategorized Skills</h4>
                     <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
                       {uncategorizedSkills.filter((s) => enabledSkillSet.has(s.id)).length}/{uncategorizedSkills.length} active
                     </Badge>

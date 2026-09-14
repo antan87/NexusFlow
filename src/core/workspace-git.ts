@@ -17,6 +17,7 @@ const CORE_ARTIFACTS = [
   'contextspace.lock',
   'contextspace-knowledge.md',
   'contextspace-plan.md',
+  'contextspace-milestones.md',
   '.contextspace/resources.json',
   '.contextspace/resources.lock.json',
   'nexusflow.json',

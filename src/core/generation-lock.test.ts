@@ -90,6 +90,21 @@ describe('generation lock', () => {
     }
   });
 
+  it('reports an unverifiable same-revision snapshot without claiming known staleness', async () => {
+    await createLock();
+    const lockPath = path.join(workspacePath, PRIMARY_LOCK_FILE);
+    const lock = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+    lock.repos.repo.fingerprint = 'uncacheable:platform';
+    await fs.writeFile(lockPath, JSON.stringify(lock));
+    const result = await checkGenerationLock(workspacePath, { markDocuments: true });
+    expect(result.fresh).toBe(false);
+    expect(result.drift).toContainEqual(expect.objectContaining({ kind: 'unverified', name: 'repo' }));
+    const banner = await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf8');
+    expect(banner).toContain('CANNOT BE VERIFIED');
+    expect(banner).not.toContain('STALE');
+    expect(banner).not.toContain('Run `ctxspace refresh` before');
+  });
+
   it('detects edits outside the mutable freshness banner', async () => {
     await createLock();
     await fs.appendFile(path.join(workspacePath, 'AGENTS.md'), 'manual edit\n');

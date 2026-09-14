@@ -95,10 +95,13 @@ test('adds a dependent milestone without resetting existing progress', async ({ 
   await page.getByRole('button', { name: 'Add milestone', exact: true }).click();
   await page.getByLabel('Milestone 3 title').fill('Roll out gradually');
   await page.getByLabel('Milestone 3 outcome').fill('Compare production timings');
+  await page.getByLabel('Milestone 3 repository (optional)').fill('billing-api');
+  await page.getByLabel('Milestone 3 work item / PR (optional)').fill('PBI-123');
+  await page.getByLabel('Milestone 3 unblock condition (optional)').fill('Package published');
   await page.getByRole('button', { name: 'Save milestones', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Milestones saved');
   expect(state.lifecycle().steps[0].status).toBe('in_progress');
-  expect(state.lifecycle().steps[2]).toMatchObject({ title: 'Roll out gradually', dependsOn: ['improve'], status: 'pending' });
+  expect(state.lifecycle().steps[2]).toMatchObject({ title: 'Roll out gradually', repo: 'billing-api', workItem: 'PBI-123', unblockCondition: 'Package published', dependsOn: ['improve'], status: 'pending' });
   await expect(page.getByText('Roll out gradually', { exact: true }).last()).toBeVisible();
 });
 
@@ -109,4 +112,36 @@ test('keeps the assignment draft when another session changed the saved revision
   await page.getByRole('button', { name: 'Save AI assignment' }).click();
   await expect(page.getByRole('alert')).toContainText('another session');
   await expect(page.getByLabel('Current objective')).toHaveValue('My unsaved objective');
+});
+
+test('keeps delivery notes through section switches and save conflicts, then reloads and saves', async ({ page }) => {
+  await setupWork(page);
+  let saved = { content: '# Delivery order\nProducer, publish, consumer.', revision: 'a'.repeat(64) };
+  let conflict = true;
+  await page.route('**/api/workspace/demo/planning-notes', async (route) => {
+    if (route.request().method() === 'PUT') {
+      if (conflict) return route.fulfill({ status: 409, json: { error: 'Planning notes changed in another session. Reload before saving.' } });
+      expect(route.request().postDataJSON().revision).toBe(saved.revision);
+      saved = { content: route.request().postDataJSON().content, revision: 'b'.repeat(64) };
+    }
+    return route.fulfill({ json: saved });
+  });
+  await page.getByRole('button', { name: 'Delivery notes & questions' }).click();
+  await expect(page.getByLabel('Delivery notes', { exact: true })).toHaveValue(saved.content);
+  await page.getByLabel('Delivery notes', { exact: true }).fill('# My draft');
+  await page.getByRole('button', { name: 'AI assignment', exact: true }).click();
+  await page.getByRole('button', { name: 'Delivery notes & questions' }).click();
+  await expect(page.getByLabel('Delivery notes', { exact: true })).toHaveValue('# My draft');
+  await page.getByRole('button', { name: 'Save delivery notes' }).click();
+  await expect(page.getByRole('alert')).toContainText('Your draft is kept');
+  await expect(page.getByLabel('Delivery notes', { exact: true })).toHaveValue('# My draft');
+  await page.getByRole('button', { name: 'Reload delivery notes' }).click();
+  await expect(page.getByLabel('Delivery notes', { exact: true })).toHaveValue(saved.content);
+  conflict = false;
+  await page.getByLabel('Delivery notes', { exact: true }).fill('# Agreed delivery order');
+  await page.getByRole('button', { name: 'Save delivery notes' }).click();
+  await expect(page.getByRole('status')).toContainText('Delivery notes saved');
+  expect(saved.content).toBe('# Agreed delivery order');
+  await page.getByRole('heading', { name: 'Work brief & sources' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '/tmp/contextspace-delivery-notes.png', fullPage: true });
 });

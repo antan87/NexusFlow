@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import fse from 'fs-extra';
 
 import { saveAgent } from './agents-catalog.js';
-import { saveSkill } from '../utils/skills-catalog.js';
+import { saveSkill, getAllSkills, type SkillDiagnostic } from '../utils/skills-catalog.js';
 import {
   ResourceSelectionError,
   validateResourceSelections,
@@ -73,5 +73,32 @@ describe('resource administration service', () => {
     releaseFirst();
     await Promise.all([first, second]);
     expect(events).toEqual(['first-start', 'first-end', 'second-start', 'second-end']);
+  });
+
+  it('validates local skills only in their owning workspace', async () => {
+    const workspace = path.join(tempHome, 'workspace');
+    await fs.mkdir(workspace);
+    await saveSkill({ name: 'local-check', description: 'Local check', content: 'Check local behavior' }, { scope: 'workspace', workspacePath: workspace });
+    await expect(validateResourceSelections(['local-check'], [], workspace)).resolves.toBeUndefined();
+    await expect(validateResourceSelections(['local-check'], [])).rejects.toMatchObject({ missingSkills: ['local-check'] });
+    await expect(validateResourceSelections(['local-check'], [], path.join(tempHome, 'other'))).rejects.toMatchObject({ missingSkills: ['local-check'] });
+  });
+
+  it('reports invalid, orphaned global, and shadowing workspace packages to callers', async () => {
+    const workspace = path.join(tempHome, 'workspace');
+    const put = async (id: string, name: string, scope: string) => {
+      const dir = path.join(workspace, '.agents', 'skills', id);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: Example\nscope: ${scope}\n---\nExample`);
+    };
+    await saveSkill({ name: 'shadowed', description: 'Global', content: 'Global' });
+    await put('shadowed', 'shadowed', 'workspace');
+    await put('orphan', 'orphan', 'global');
+    await put('mismatch', 'different', 'workspace');
+    const diagnostics: SkillDiagnostic[] = [];
+    const skills = await getAllSkills(workspace, diagnostics);
+    expect(skills.find((skill) => skill.id === 'shadowed')?.scope).toBe('workspace');
+    expect(skills.some((skill) => skill.id === 'orphan')).toBe(false);
+    expect(diagnostics.map((item) => item.id).sort()).toEqual(['mismatch', 'orphan', 'shadowed']);
   });
 });

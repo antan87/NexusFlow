@@ -3158,8 +3158,7 @@ app.delete('/api/skills/categories/:id', async (c) => {
   }
 });
 
-// Get authoritative skills (built-ins + personal catalog). Workspace
-// materializations are deliberately never treated as catalog sources.
+// Include authored workspace packages; generated global copies still resolve to their catalog source.
 app.get('/api/skills', async (c) => {
   try {
     const config = await loadConfig();
@@ -3167,9 +3166,11 @@ app.get('/api/skills', async (c) => {
     let wsPath: string | undefined;
     if (wsParam && wsParam !== 'global') {
       wsPath = (await resolveExactWorkspaceById(config.workspacesDir, wsParam)) || undefined;
+      if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
     }
-    const skills = await getAllSkills(wsPath);
-    return c.json({ skills });
+    const diagnostics: import('./utils/skills-catalog.js').SkillDiagnostic[] = [];
+    const skills = await getAllSkills(wsPath, diagnostics);
+    return c.json({ skills, diagnostics });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -3326,7 +3327,7 @@ app.post('/api/skills/workspace/:id/assign', async (c) => {
     const wsPath = await resolveExactWorkspaceById(config.workspacesDir, id);
     if (!wsPath) return c.json({ error: 'Workspace not found.' }, 404);
     const saved = await withResourceAdministrationLock(async () => {
-      await validateResourceSelections(body.enabledSkills, body.enabledAgents);
+      await validateResourceSelections(body.enabledSkills, body.enabledAgents, wsPath);
       return saveWorkspaceSkillsConfig(
         wsPath,
         {

@@ -303,7 +303,7 @@ export async function generateSkills(
     ? dynamicSkillIds.filter((id) => !disabledSet.has(id))
     : [];
 
-  const workspaceLocalSkillIds = catalogSkills
+  const workspaceLocalSkillIds = (isDefaultConfig ? catalogSkills : [])
     .filter((s) => s.scope === 'workspace')
     .map((s) => s.id);
 

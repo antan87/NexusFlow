@@ -305,6 +305,8 @@ describe('core/lifecycle', () => {
             'origin/HEAD\x1fsha2\x1fcommit 2\x1fAuthor 2\x1f1 day ago\x1frefs/remotes/origin/main',
             'origin/feat/fleet\x1fsha3\x1fcommit 3\x1fAuthor 3\x1f1 day ago\x1f',
             'origin/HEAD\x1fsha4\x1fcommit 4\x1fAuthor 4\x1f1 day ago\x1f',
+            'origin/renovate/deps\x1fsha7\x1fchore: deps\x1fBot\x1f2026-09-14T09:00:00Z\x1f',
+            'origin/dependabot/npm/foo\x1fsha8\x1fchore: deps\x1fBot\x1f2026-09-14T09:00:00Z\x1f',
             'origin/dev\x1fsha5\x1ffeat: dev branch\x1fCharlie\x1f2 days ago\x1f',
             'origin/main\x1fsha6\x1fchore: main branch\x1fDave\x1f3 days ago\x1f',
           ];
@@ -315,7 +317,7 @@ describe('core/lifecycle', () => {
 
       const fleet = await getBranchFleet('/ws');
       expect(passedArgs).toContain(
-        '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(authordate:relative)\x1f%(symref)',
+        '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(committerdate:iso-strict)\x1f%(symref)',
       );
 
       expect(fleet).toHaveLength(3);

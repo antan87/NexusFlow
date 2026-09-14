@@ -20,3 +20,17 @@ Preserve milestone IDs referenced by documents and assignments. The current edit
 can add/edit milestones but does not delete existing ones. Record canceled outcomes
 explicitly rather than marking unimplemented behavior as delivered; if restructuring
 requires unsupported operations, explain the limitation and agree a supported plan.
+
+Before replanning, inventory existing work with repo, branch/PR/commit, status
+(merged, on branch, or no change needed), and evidence. Record the remaining work
+in `contextspace-milestones.md`. Keep questions with their owner, blocking impact,
+open/resolved status, and resolution; distinguish flag-only findings from authorized
+implementation. Use applicable enabled skill templates for explicitly requested
+PBI/spec drafts, save them as source documents, and link them to milestone IDs.
+Enabling a skill does not generate or approve those documents automatically.
+
+Circular package dependencies can be valid service relationships. Record an authored
+release sequence: build the changed producer against compatible published clients,
+publish the package, then bump and verify consumers. Plan a compatible transition
+for breaking contracts. Package topology alone cannot determine that sequence;
+lifecycle milestone dependencies must still form an executable, acyclic plan.
