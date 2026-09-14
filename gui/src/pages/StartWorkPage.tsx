@@ -10,6 +10,15 @@ import { Checkbox } from '../components/ui/checkbox.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import {
+  Dialog,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogPanel,
+  DialogFooter,
+} from '../components/ui/dialog.js';
+import {
   Select,
   SelectItem,
   SelectPopup,
@@ -24,6 +33,7 @@ import {
   useAiDetect,
   useCreateWorkspace,
   useDomainPacks,
+  useCreateDomainPack,
   useProjects,
   useRepoBranches,
   useRepos,
@@ -171,6 +181,70 @@ export function StartWorkPage() {
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Tag creation modal state
+  const [showCreateTagModal, setShowCreateTagModal] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagId, setNewTagId] = useState('');
+  const [newTagDescription, setNewTagDescription] = useState('');
+  const [newTagType, setNewTagType] = useState<'vertical' | 'trait'>('vertical');
+  const [newTagVerifyCmd, setNewTagVerifyCmd] = useState('');
+  const [savingNewTag, setSavingNewTag] = useState(false);
+
+  const createDomainPackMutation = useCreateDomainPack();
+
+  const handleCreateNewTag = async () => {
+    if (!newTagName.trim() || !newTagId.trim()) return;
+    setSavingNewTag(true);
+    try {
+      const id = newTagId.trim().toLowerCase();
+      await createDomainPackMutation.mutateAsync({
+        id,
+        name: newTagName.trim(),
+        description: newTagDescription.trim() || newTagName.trim(),
+        categoryType: newTagType,
+        verifyCommand: newTagVerifyCmd.trim() || undefined,
+        tags: [id, ...newTagName.trim().toLowerCase().split(/\s+/).filter(Boolean)],
+      });
+      setSelectedTags((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      setShowCreateTagModal(false);
+      setNewTagName('');
+      setNewTagId('');
+      setNewTagDescription('');
+      setNewTagVerifyCmd('');
+    } catch {
+      // Handled
+    } finally {
+      setSavingNewTag(false);
+    }
+  };
+
+  /** Keyword-based auto-suggestions from what the developer types in description */
+  const suggestedMatches = useMemo(() => {
+    if (!description.trim() || description.trim().length < 3) return [];
+    const text = description.toLowerCase();
+    const suggestions: Array<{ id: string; title: string; type: 'tag' | 'skill' }> = [];
+
+    // Match tags
+    for (const pack of domainPacksQuery.data ?? []) {
+      if (selectedTags.includes(pack.id)) continue;
+      const terms = [pack.id, pack.name, ...(pack.tags ?? [])];
+      if (terms.some((term) => term && text.includes(term.toLowerCase()))) {
+        suggestions.push({ id: pack.id, title: `#${pack.id}`, type: 'tag' });
+      }
+    }
+
+    // Match skills
+    for (const skill of skillsQuery.data ?? []) {
+      if (enabledSkills.includes(skill.id)) continue;
+      const terms = [skill.id, skill.name, skill.title, ...(skill.tags ?? [])];
+      if (terms.some((term) => term && term.length > 2 && text.includes(term.toLowerCase()))) {
+        suggestions.push({ id: skill.id, title: skill.title || skill.name, type: 'skill' });
+      }
+    }
+
+    return suggestions.slice(0, 6);
+  }, [description, domainPacksQuery.data, skillsQuery.data, selectedTags, enabledSkills]);
 
   useEffect(() => {
     if (creationJobId) {
@@ -748,6 +822,32 @@ export function StartWorkPage() {
               rows={3}
             />
           </label>
+          {suggestedMatches.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+              <span className="text-primary font-medium flex items-center gap-1 text-[11px]">
+                <Sparkles className="size-3" /> Suggested for this task:
+              </span>
+              {suggestedMatches.map((item) => (
+                <button
+                  key={`${item.type}-${item.id}`}
+                  type="button"
+                  onClick={() => {
+                    if (item.type === 'tag') {
+                      setSelectedTags((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+                    } else {
+                      setEnabledSkills((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-card border border-primary/30 text-[11px] font-mono hover:bg-primary/10 transition-colors text-foreground"
+                >
+                  <span>+{item.title}</span>
+                  <Badge variant="outline" className="text-[8px] px-0.5 py-0 uppercase">
+                    {item.type}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* 5. Category & Domain Tags (Skill Bundles) */}
@@ -762,9 +862,21 @@ export function StartWorkPage() {
                 </span>
               )}
             </span>
-            <span className="text-xs text-muted-foreground">
-              Tags attach curated skill bundles & standards
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground hidden sm:inline">
+                Tags attach curated skill bundles & standards
+              </span>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => setShowCreateTagModal(true)}
+                className="h-6 text-xs gap-1 px-2 border-primary/40 text-primary hover:bg-primary/10"
+              >
+                <Tag className="size-3" />
+                + New Tag
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -774,9 +886,26 @@ export function StartWorkPage() {
                 Loading category tags...
               </div>
             ) : (domainPacksQuery.data ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground p-3 border border-border rounded-lg bg-card/40">
-                No tags defined yet. You can attach tags anytime with <code className="font-mono text-primary">ctxspace tag add &lt;id&gt;</code>.
-              </p>
+              <div className="p-3.5 border border-border rounded-xl bg-card/40 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">No domain tags defined yet</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Tags are optional bundles that package skills, rules, and test commands for a domain. You can create a tag now, or select skills directly below.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    onClick={() => setShowCreateTagModal(true)}
+                    className="text-xs gap-1.5 h-7 shrink-0 text-primary border-primary/40 hover:bg-primary/10"
+                  >
+                    <Tag className="size-3 text-primary" />
+                    + Create Tag
+                  </Button>
+                </div>
+              </div>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
                 {(domainPacksQuery.data ?? []).map((pack) => {
@@ -832,6 +961,111 @@ export function StartWorkPage() {
                             </span>
                           )}
                         </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Direct Agent Skills Selection */}
+          <div className="mt-4 pt-4 border-t border-border/60">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <Boxes className="size-4 text-primary" />
+                Direct Agent Skills
+                {enabledSkills.length > 0 && (
+                  <span className="text-xs text-muted-foreground font-normal">
+                    ({enabledSkills.length} selected)
+                  </span>
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                {(skillsQuery.data ?? []).length > 0 && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      const all = (skillsQuery.data ?? []).map((s) => s.id);
+                      setEnabledSkills(enabledSkills.length === all.length ? [] : all);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground h-6 px-2"
+                  >
+                    {enabledSkills.length === (skillsQuery.data ?? []).length && (skillsQuery.data ?? []).length > 0
+                      ? 'Deselect All'
+                      : 'Select All'}
+                  </Button>
+                )}
+                <Link
+                  to="/skills"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  Skill Library →
+                </Link>
+              </div>
+            </div>
+
+            {skillsQuery.isLoading ? (
+              <div className="flex items-center justify-center p-3 gap-2 text-xs text-muted-foreground rounded-lg border border-border">
+                <Spinner className="size-3" />
+                Loading skills...
+              </div>
+            ) : (skillsQuery.data ?? []).length === 0 ? (
+              <div className="p-3 border border-dashed border-border rounded-lg bg-card/20 text-center">
+                <p className="text-xs text-muted-foreground">
+                  No skills in your catalog yet. You can create skills in the{' '}
+                  <Link to="/skills" className="text-primary underline">
+                    Skill Library
+                  </Link>{' '}
+                  or let AI agents create them during development.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(skillsQuery.data ?? []).map((skill) => {
+                  const isChecked = enabledSkills.includes(skill.id);
+                  return (
+                    <div
+                      key={skill.id}
+                      onClick={() =>
+                        setEnabledSkills((prev) =>
+                          prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
+                        )
+                      }
+                      className={cn(
+                        'flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors select-none text-left',
+                        isChecked
+                          ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40 text-foreground'
+                          : 'border-border bg-card hover:border-foreground/20 text-muted-foreground',
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={() =>
+                            setEnabledSkills((prev) =>
+                              prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
+                            )
+                          }
+                          aria-label={`Select ${skill.title || skill.name}`}
+                        />
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs font-medium truncate text-foreground">
+                            {skill.title || skill.name}
+                          </p>
+                          {skill.description && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-1">
+                              {skill.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {skill.category && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 capitalize">
+                          {skill.category}
+                        </Badge>
                       )}
                     </div>
                   );
@@ -918,68 +1152,7 @@ export function StartWorkPage() {
                 />
               </div>
 
-              <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-sm font-medium flex items-center gap-1.5">
-                    <Boxes className="size-4 text-primary" />
-                    Agent Skills ({enabledSkills.length} selected)
-                  </span>
-                  {(skillsQuery.data ?? []).length > 0 && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => {
-                        const all = (skillsQuery.data ?? []).map((s) => s.id);
-                        setEnabledSkills(enabledSkills.length === all.length ? [] : all);
-                      }}
-                      className="text-xs text-muted-foreground hover:text-foreground h-6 px-2"
-                    >
-                      {enabledSkills.length === (skillsQuery.data ?? []).length && (skillsQuery.data ?? []).length > 0
-                        ? 'Deselect All'
-                        : 'Select All'}
-                    </Button>
-                  )}
-                </div>
-                <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-card/50 p-2 space-y-1.5">
-                  {skillsQuery.isLoading ? (
-                    <div className="flex items-center justify-center p-4 gap-2 text-xs text-muted-foreground">
-                      <Spinner className="size-3" />
-                      Loading skills...
-                    </div>
-                  ) : (skillsQuery.data ?? []).length === 0 ? (
-                    <p className="text-xs text-muted-foreground p-2 text-center">No skills available in catalog.</p>
-                  ) : (
-                    (skillsQuery.data ?? []).map((skill) => {
-                      const isChecked = enabledSkills.includes(skill.id);
-                      return (
-                        <label
-                          key={skill.id}
-                          className={cn(
-                            'flex items-center justify-between gap-2 rounded-md p-2 text-xs cursor-pointer border transition-colors',
-                            isChecked ? 'border-primary/50 bg-primary/5 text-foreground' : 'border-transparent hover:bg-muted/50 text-muted-foreground'
-                          )}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Checkbox
-                              checked={isChecked}
-                              onCheckedChange={() =>
-                                setEnabledSkills((prev) =>
-                                  prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id]
-                                )
-                              }
-                            />
-                            <span className="font-mono font-medium truncate">{skill.title || skill.name}</span>
-                          </div>
-                          <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
-                            {skill.category}
-                          </Badge>
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+
 
               {(agentsQuery.data ?? []).length > 0 && (
                 <div>
@@ -1033,6 +1206,95 @@ export function StartWorkPage() {
           </Button>
         </div>
       </div>
+
+      {/* MODAL: CREATE NEW CATEGORY / TRAIT */}
+      <Dialog open={showCreateTagModal} onOpenChange={setShowCreateTagModal}>
+        <DialogPopup className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag size={16} className="text-primary" />
+              <span>Create Category Tag</span>
+            </DialogTitle>
+            <DialogDescription>
+              Tags bundle reusable skills, rules, and test verification commands for a domain.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-3 py-2">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Tag Name</label>
+              <Input
+                value={newTagName}
+                onChange={(e) => {
+                  setNewTagName(e.target.value);
+                  if (!newTagId || newTagId === newTagName.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)) {
+                    setNewTagId(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30));
+                  }
+                }}
+                placeholder="e.g. Invoicing & Billing"
+                size="sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Tag ID / Slug</label>
+              <Input
+                value={newTagId}
+                onChange={(e) => setNewTagId(e.target.value)}
+                placeholder="e.g. billing"
+                size="sm"
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Type</label>
+              <select
+                value={newTagType}
+                onChange={(e) => setNewTagType(e.target.value as 'vertical' | 'trait')}
+                className="w-full h-7.5 px-2 text-xs rounded-md border border-border bg-background text-foreground"
+              >
+                <option value="vertical">Vertical Subsystem</option>
+                <option value="trait">Horizontal Trait</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Description (optional)</label>
+              <Input
+                value={newTagDescription}
+                onChange={(e) => setNewTagDescription(e.target.value)}
+                placeholder="What this domain covers..."
+                size="sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-foreground">Verification Command (optional)</label>
+              <Input
+                value={newTagVerifyCmd}
+                onChange={(e) => setNewTagVerifyCmd(e.target.value)}
+                placeholder="e.g. npm test -- billing"
+                size="sm"
+                className="font-mono"
+              />
+            </div>
+          </DialogPanel>
+          <DialogFooter className="flex items-center justify-end gap-2 pt-2 border-t">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowCreateTagModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!newTagName.trim() || !newTagId.trim() || savingNewTag}
+              onClick={() => void handleCreateNewTag()}
+            >
+              {savingNewTag ? 'Creating...' : 'Create & Attach Tag'}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </div>
   );
 }
