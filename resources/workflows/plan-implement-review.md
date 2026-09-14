@@ -1,8 +1,19 @@
 # Team Strategy: Plan, Implement, Review
 
-You are the lead developer. You must coordinate a Plan-Implement-Review loop to complete the task:
+Deliver one cohesive change through a bounded plan, implementation, and review.
 
-1. **Research & Plan**: Research the requirements and codebase first. Create a plan (`implementation_plan.md`) describing the proposed changes.
-2. **Implement**: Define a `Code_Implementer` subagent equipped with code editing and terminal tools. Send them the plan and instruct them to write the changes.
-3. **Review**: Once implemented, define a `Code_Reviewer` subagent to run verification tests and review the changes for correctness.
-4. **Loop**: If the reviewer finds bugs or test failures, send the feedback back to the implementer and repeat the cycle until the changes are approved.
+1. Read the current assignment and relevant approved sources. Resolve important
+   unknowns and define observable acceptance criteria in the existing milestone
+   plan. In ContextSpace, edit the lifecycle source through the Plan editor;
+   `contextspace-plan.md` is its generated view. Do not create a second plan.
+2. If the assignment is investigation or design, return that stage's output and
+   stop. Proceed to implementation only when the current user authorization covers it.
+3. Implement the assigned outcome and test relevant behavior, including concrete
+   failure and recovery paths. Preserve compatibility with existing consumers.
+4. Review correctness, scope, usability where relevant, and verification evidence.
+   Fix in-scope findings, rerun affected checks, and report remaining limitations.
+
+One developer or agent can perform this loop. Use independent review or bounded
+parallel work when available, authorized, and useful; a fixed agent topology is
+not required. Reuse the same sources and milestone state across handoffs.
+Read the current PR head and checks before declaring merge readiness.

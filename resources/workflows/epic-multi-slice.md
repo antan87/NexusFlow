@@ -1,10 +1,21 @@
 # Team Strategy: Epic & Multi-PR Slices
 
-This strategy coordinates large features, multi-PR modules, and epics requiring multiple branches or releases.
+Deliver large changes as independently reviewable outcomes with explicit dependencies.
 
-## Guidelines & Lifecycle
-
-1. **Vertical Slice Decomposition**: Do not attempt to deliver the entire epic in a single monolithic branch or PR. Decompose the feature into atomic, reviewable slices (e.g. Slice 1: Schema/core types, Slice 2: Service/API implementation, Slice 3: UI/client integration, Slice 4: End-to-end verification).
-2. **Independent Reviewability**: Every slice must build cleanly and pass its test gate (\`verify\` command) independently before opening the next branch or slice.
-3. **Cumulative Knowledge & Contracts**: Record architectural decisions (ADRs) and cross-slice contracts in \`contextspace-knowledge.md\`. Slices must not introduce breaking changes to completed preceding slices without updating recorded contracts.
-4. **Milestone Handoffs**: Complete and verify each slice before advancing to the next. Post milestone updates or handoffs to keep context clean and bounded.
+1. Read the current assignment and approved project/workspace/milestone sources.
+   Name usable increments where practical, rather than automatically splitting
+   schema, API, and UI into separate PRs. For a required infrastructure prerequisite,
+   identify its consumer and acceptance criteria.
+2. In the existing lifecycle plan, record each outcome, acceptance criteria,
+   dependencies, intended branch/PR, compatibility requirements, and verification.
+   Edit the source through the Plan editor; `contextspace-plan.md` is generated.
+   Branch labels do not create branches or PRs automatically.
+3. Sequence actual dependencies. Independent increments may proceed concurrently
+   with clear ownership and isolation. Each mergeable increment must build and pass
+   applicable gates; recheck dependent PRs when their base changes.
+4. Keep original contracts in source documents, durable decisions with reasons in
+   knowledge, and progress in milestones. Handoffs link those records and include
+   the tested revision, outstanding issues, and next permitted action.
+5. Respect the current stage and stopping point. Add migration, rollout, and recovery
+   evidence when the change affects stored data or deployed consumers. Verify the
+   current PR head and checks before reporting readiness; release requires authorization.

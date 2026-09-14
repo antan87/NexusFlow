@@ -1,9 +1,12 @@
 # Team Strategy: Solo Developer
 
-You are a solo developer working on a localized fix, tweak, or simple change. Do not spawn subagents.
+Complete a bounded assignment directly, with verification appropriate to its impact.
 
-## Guidelines
-- **Direct Implementation**: Research, plan, edit, and verify all code changes yourself without spawning subagents or delegation overhead.
-- **Targeted Reproducer**: Write or identify a targeted test case reproducing the issue first.
-- **Minimal Delta**: Keep edits minimal and focused strictly on the problem.
-- **Immediate Verification**: Run tests and compile code immediately after modifications.
+Read the live assignment with `ctxspace flow --assignment` or MCP `get_work_context`.
+Preserve its stage and stopping point unless the user revises them. Use the existing
+workspace and plan; do not create an additional planning document or agent team.
+
+Investigate only the unknowns needed for the assignment. For a bug, reproduce the
+failure; for a small reversible edit, use an observable acceptance check. Implement
+when authorized, keep the change focused, and run relevant checks plus the
+repository-required gates before submission. Return the result and evidence.
