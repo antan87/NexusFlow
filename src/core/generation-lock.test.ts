@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as analysisCache from './analysis-cache.js';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -39,6 +40,7 @@ describe('generation lock', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     setActiveStorageProvider(getStorageProvider('local'));
     await fse.remove(workspacePath);
   });
@@ -73,6 +75,15 @@ describe('generation lock', () => {
     expect(result.fresh).toBe(false);
     expect(result.drift).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'repo', name: 'repo' })]));
     expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf-8')).toContain(`STALE ${BRAND_NAME.toUpperCase()} CONTEXT`);
+  });
+
+  it('still proves clean-to-dirty drift when dirty bytes cannot be fingerprinted', async () => {
+    await createLock();
+    await fs.writeFile(path.join(repoPath, 'README.md'), '# changed without a safe file-open flag\n');
+    vi.spyOn(analysisCache, 'getRepoFingerprint').mockResolvedValue(null);
+    const result = await checkGenerationLock(workspacePath, { markDocuments: true });
+    expect(result.drift).toContainEqual(expect.objectContaining({ kind: 'repo', name: 'repo' }));
+    expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf8')).toContain('with uncommitted changes');
   });
 
   it('keeps generation usable when dirty files cannot be safely fingerprinted', async () => {

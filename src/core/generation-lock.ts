@@ -267,7 +267,13 @@ export async function checkGenerationLock(
         .then((result) => result.stdout.trim())
         .catch(() => 'unavailable');
       const wasUncacheable = recorded?.fingerprint.startsWith(UNCACHEABLE_FINGERPRINT_PREFIX);
-      const uncertain = Boolean(recorded && sha === recorded.sha && (!current || wasUncacheable));
+      // Even without safe dirty-file hashing, Git can prove that a formerly
+      // clean snapshot now has changes. Reserve 'unverified' for actual uncertainty.
+      const newlyDirty = !current && recorded && !wasUncacheable && !recorded.fingerprint.includes('+')
+        ? await execa('git', ['status', '--porcelain=v1', '-z', '-uall'], { cwd: repo.path })
+            .then((result) => Boolean(result.stdout)).catch(() => false)
+        : false;
+      const uncertain = Boolean(recorded && sha === recorded.sha && (!current || wasUncacheable) && !newlyDirty);
       return {
         kind: uncertain ? 'unverified' : 'repo',
         name: repo.name,
@@ -275,7 +281,7 @@ export async function checkGenerationLock(
         current: sha,
         message: uncertain
           ? `Generated from ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'} while dirty-file freshness could not be safely verified on this platform.`
-          : `Generated at ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}; repo now at ${sha.slice(0, 12)}${current?.includes('+') ? ' with uncommitted changes' : ''}.`,
+          : `Generated at ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}; repo now at ${sha.slice(0, 12)}${newlyDirty || current?.includes('+') ? ' with uncommitted changes' : ''}.`,
       };
     }
     return null;
