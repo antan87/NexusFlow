@@ -636,6 +636,9 @@ export interface LifecycleStep {
   title: string;
   description?: string;
   branch?: string;
+  repo?: string;
+  workItem?: string;
+  unblockCondition?: string;
   owner?: string;
   status: LifecycleStepStatus;
   dependsOn?: string[];

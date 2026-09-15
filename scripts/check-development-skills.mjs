@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFile, readdir, lstat } from 'node:fs/promises';
+import { readFile, readdir, lstat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -49,6 +50,7 @@ export async function checkDevelopmentSkills(root = repositoryRoot) {
       content: await readFile(path.join(root, 'resources/workflows', entry), 'utf8') });
   }
   const checkedCommands = new Set();
+  const helpByPath = new Map();
   for (const { file, content } of documents) {
     if (/implementation_plan\.md|\b\d+\+? (?:unit tests|test files)\b/.test(content)) {
       throw new Error(`Duplicate plan or fixed test count in ${file}`);
@@ -66,10 +68,24 @@ export async function checkDevelopmentSkills(root = repositoryRoot) {
       if (command.startsWith('ctxspace ') || command.startsWith('node dist/index.js ')) {
         const words = command.replace(/^(?:ctxspace|node dist\/index\.js) /, '').split(/\s+/);
         const commandPath = words.slice(0, words.findIndex((word) => word.startsWith('-')) < 0 ? words.length : words.findIndex((word) => word.startsWith('-')));
-        const help = spawnSync(process.execPath, [path.join(root, 'dist/index.js'), ...commandPath, '--help'], { cwd: root, encoding: 'utf8', timeout: 10_000 });
-        if (help.error || help.status !== 0 || !help.stdout.includes('Usage:')) throw new Error(`Documented CLI command failed: ${command}: ${help.error?.message ?? (help.stderr || `exit ${help.status}`)}`);
+        const key = commandPath.join(' ');
+        let help = helpByPath.get(key);
+        if (!help) {
+          // Help must describe the shipped CLI, unaffected by installed user plugins.
+          const configDir = await mkdtemp(path.join(tmpdir(), 'contextspace-skill-help-'));
+          try {
+            await writeFile(path.join(configDir, 'config.json'), JSON.stringify({ plugins: [] }));
+            const result = spawnSync(process.execPath, [path.join(root, 'dist/index.js'), ...commandPath, '--help'], {
+              cwd: root, encoding: 'utf8', timeout: 30_000,
+              env: { ...process.env, CONTEXTSPACE_HOME: configDir, NEXUSFLOW_HOME: configDir },
+            });
+            if (result.error || result.status !== 0 || !result.stdout.includes('Usage:')) throw new Error(`Documented CLI command failed: ${command}: ${result.error?.message ?? (result.stderr || `exit ${result.status}`)}`);
+            help = result.stdout;
+            helpByPath.set(key, help);
+          } finally { await rm(configDir, { recursive: true, force: true }); }
+        }
         for (const flag of words.filter((word) => word.startsWith('--') && word !== '--help')) {
-          if (!new RegExp(`${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[ ,=\\n]|$)`).test(help.stdout)) throw new Error(`Unknown documented flag ${flag}: ${command}`);
+          if (!new RegExp(`${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[ ,=\\n]|$)`).test(help)) throw new Error(`Unknown documented flag ${flag}: ${command}`);
         }
         checkedCommands.add(command);
       } else if (command.startsWith('npm ')) {

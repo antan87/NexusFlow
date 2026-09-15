@@ -122,3 +122,15 @@ test.describe('desktop app', () => {
     if (!packagedExe) expect(state.status).toBe('unsupported');
   });
 });
+
+test('packaged desktop exposes its bundled CLI without a separate Node installation', async () => {
+  test.skip(!packagedExe, 'Requires the packaged desktop runtime and dependency bundle.');
+  const entry = path.join(path.dirname(packagedExe), 'resources', 'backend', 'dist', 'index.js');
+  expect(existsSync(entry)).toBe(true);
+  const result = spawnSync(packagedExe, [entry, 'isolate', '--help'], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 30_000,
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain('isolate');
+});

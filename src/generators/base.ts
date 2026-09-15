@@ -273,9 +273,12 @@ ${reposSection}
 
 ## Where to look
 
-- \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas from earlier sessions, one per \`###\` heading. Use MCP \`search_knowledge\` for fast lookup (or read \`${PRIMARY_KNOWLEDGE_FILE}\` directly if the MCP server is not connected; inspect headings and read only those entries, not the whole file). Add with \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\` (or append a \`### <YYYY-MM-DD> — <Title>\` heading directly to \`${PRIMARY_KNOWLEDGE_FILE}\` if the CLI is not on PATH), keeping each entry to a rule and its reason. Prefer facts that cannot be recovered from the code or git history: environment quirks, contradictions in a spec, decisions and the reason behind them, things that cost you time to discover. Avoid restating structure the code already shows.
-- \`${PRIMARY_PLAN_FILE}\` — milestones and cross-repo merge order
+If \`ctxspace\` is not on PATH, use \`./.contextspace/bin/ctxspace\` (bash) or \`.\\.contextspace\\bin\\ctxspace.cmd\` (PowerShell) with the same arguments. Trust workspace MCP configs in your assistant.
+
+- \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas, one per \`###\` heading. Use MCP \`search_knowledge\`; if the MCP server is not connected, inspect headings, not the whole file. Add via \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\`; without CLI, append a \`### <YYYY-MM-DD> — <Title>\` heading directly. Record a rule and reason that cannot be recovered from the code or git history. Avoid restating structure the code already shows.
+- \`contextspace-milestones.md\` — authored delivery order, questions with owners/status, existing work and deferred decisions; refresh preserves it.
+- \`${PRIMARY_PLAN_FILE}\` — generated milestone definitions and package dependencies; use Plan to edit gates.
 - \`contextspace-work.json\` — assignment and sources. Read live guidance with \`ctxspace flow --assignment\` or MCP \`get_work_context\`.
-- \`.agents/skills/\` — procedural playbooks and specialized skills for this workspace (also mirrored to \`.claude/skills/\` where supported)
+- \`.agents/skills/\` — enabled playbooks; Claude copies: \`.claude/skills/\`.
 ${ownInstructions}${customCommands}${teamwork}${enterpriseSection}`;
 }

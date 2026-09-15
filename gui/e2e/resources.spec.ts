@@ -92,3 +92,32 @@ test.describe('Resource Library', () => {
     });
   });
 });
+
+test.describe('Workspace resource diagnostics', () => {
+  test.use({ workspacesData: [workspace] });
+  test('shows invalid local packages and saves explicit local skill selection', async ({ page }) => {
+    let selected: string[] = [];
+    await page.route('**/api/agents', (route) => route.fulfill({ json: { agents: [] } }));
+    await page.route('**/api/skills**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/api/skills/categories') return route.fulfill({ json: { categories: [] } });
+      if (pathname === '/api/skills') return route.fulfill({ json: { skills: [{ ...skill, scope: 'workspace' }], diagnostics: [{ id: 'wrong-name', scope: 'workspace', message: 'Skill id and name must match.' }] } });
+      if (pathname === '/api/skills/workspace/example') return route.fulfill({ json: { config: { revision: 1, enabledSkills: selected, enabledAgents: [], enabledCategories: [] } } });
+      if (pathname === '/api/skills/workspace/example/assign') {
+        selected = route.request().postDataJSON().enabledSkills;
+        return route.fulfill({ json: { success: true, config: { revision: 2, enabledSkills: selected, enabledAgents: [], enabledCategories: [] } } });
+      }
+      return route.fallback();
+    });
+    await page.route('**/api/workspace/example/refresh', (route) => route.fulfill({ json: { report: {} } }));
+    await page.goto('/#/workspaces/example/skills');
+    await expect(page.getByRole('heading', { name: 'Workspace Skills & Agents' })).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Skill id and name must match');
+    await expect(page.getByText('Uncategorized Skills', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /Portable Skill.*Use when testing resource selection/ }).click();
+    await page.getByRole('button', { name: /Save.*Deploy/ }).click();
+    await expect.poll(() => selected).toEqual(['portable-skill']);
+    await expect(page.getByText('Skills & agents deployed successfully to workspace context!', { exact: true })).toBeVisible();
+    await page.screenshot({ path: '/tmp/contextspace-skills-diagnostics.png', fullPage: true });
+  });
+});

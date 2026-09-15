@@ -257,12 +257,15 @@ describe('generateImplementationPlan', () => {
       expect(content).not.toContain('No dependencies on other workspace repos');
     });
 
-    it('names the cycle so the reader knows the order is unresolved', async () => {
+    it('keeps circular package topology separate from authored release order', async () => {
       const content = await planFor(...cyclic());
 
-      expect(content).toContain('**Cycle:**');
-      expect(content).toContain('depend on each other');
-      expect(content).toContain('break the cycle');
+      expect(content).toContain('circular package dependencies');
+      expect(content).toContain('publish its new package, then bump and verify consumers');
+      expect(content).toContain('contextspace-milestones.md');
+      expect(content).not.toContain('break the cycle');
+      expect(content).not.toContain('```mermaid');
+      expect(content).not.toContain('Suggested Implementation Order');
     });
   });
 

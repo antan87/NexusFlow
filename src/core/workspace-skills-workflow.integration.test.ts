@@ -120,6 +120,7 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     });
 
     // 1. Run the workspace generation pipeline
+    await fs.writeFile(path.join(tempWorkspace, 'contextspace.json'), JSON.stringify(ctx.feature));
     await generateContextFiles(ctx, assistants, tempWorkspace);
     const artifactCommit = await execa('git', ['log', '-1', '--format=%s'], { cwd: tempWorkspace });
     expect(artifactCommit.stdout).toBe('chore(ctxspace): refresh workspace artifacts');
@@ -199,6 +200,7 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     };
 
     // 3. Generate workspace files
+    await fs.writeFile(path.join(tempWorkspace, 'contextspace.json'), JSON.stringify(ctx.feature));
     await generateContextFiles(ctx, assistants, tempWorkspace);
 
     // 4. Verify custom skill and supporting references/scripts are deployed

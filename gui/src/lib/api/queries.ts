@@ -444,15 +444,19 @@ export function useDeleteSkillCategory() {
   });
 }
 
-export function useSkills(workspaceId?: string) {
-  return useQuery({
+function skillCatalogOptions(workspaceId?: string) {
+  return {
     queryKey: ['skills', workspaceId],
-    queryFn: async () => {
-      const url = workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills';
-      const data = await apiFetch<{ skills: SkillItem[] }>(url);
-      return data.skills;
-    },
-  });
+    queryFn: () => apiFetch<{ skills: SkillItem[]; diagnostics?: Array<{ id: string; scope: string; message: string }> }>(workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills'),
+  };
+}
+
+export function useSkillDiagnostics(workspaceId: string) {
+  return useQuery({ ...skillCatalogOptions(workspaceId), select: (data) => data.diagnostics ?? [] });
+}
+
+export function useSkills(workspaceId?: string) {
+  return useQuery({ ...skillCatalogOptions(workspaceId), select: (data) => data.skills });
 }
 
 export function useSaveSkill() {
@@ -628,4 +632,3 @@ export function usePostWorkspaceStream(workspaceId: string) {
     },
   });
 }
-

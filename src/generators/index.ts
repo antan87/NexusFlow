@@ -1,3 +1,5 @@
+import { ensurePlanningNotes } from '../core/planning-notes.js';
+import { generateWorkspaceTools } from '../core/workspace-tools.js';
 import chalk from 'chalk';
 import path from 'node:path';
 import fse from 'fs-extra';
@@ -8,7 +10,7 @@ import { generateCodexConfig } from './codex.js';
 import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
-import { getWorkContext, WORK_GUIDANCE_FILE, WORK_ASSIGNMENT_FILE } from '../core/work-guidance.js';
+import { getWorkContext, ensureWorkGuidance, WORK_GUIDANCE_FILE, WORK_ASSIGNMENT_FILE } from '../core/work-guidance.js';
 import { generateImplementationPlan } from './plan-generator.js';
 import { generateSkills } from './skills-generator.js';
 import { resolveResourceLockPath } from '../resources/materializer.js';
@@ -198,6 +200,10 @@ export async function generateContextFiles(
     location: 'workspace' | 'local';
   }> = [];
 
+  for (const output of await generateWorkspaceTools(workspacePath, assistants)) {
+    generatedOutputs.push({ path: output, source: 'workspace tool access', location: 'local' });
+  }
+
   const canonical = `${GENERATED_SNAPSHOT_HEADER}\n\n${await buildContextContent(renderCtx)}`;
   await writeWorkspaceFile(workspacePath, ctx.feature.id, 'AGENTS.md', canonical);
   generatedOutputs.push({ path: 'AGENTS.md', source: 'workspace snapshot', location: 'workspace' });
@@ -267,6 +273,9 @@ export async function generateContextFiles(
       throw error;
     }
   }
+
+  await ensurePlanningNotes(workspacePath, ctx.feature.id);
+  await ensureWorkGuidance(workspacePath);
 
   // Generate implementation plan from dependency analysis (if analysis data available)
   try {

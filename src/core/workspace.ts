@@ -195,27 +195,6 @@ async function scaffoldWorkspaceDir(
   } catch (error) {
     console.warn('Warning: Failed to create .vscode/settings.json:', error);
   }
-
-  // Create .cursor/mcp.json for workspace-local Cursor MCP configuration
-  try {
-    const cursorDir = path.join(workspacePath, '.cursor');
-    await fs.mkdir(cursorDir, { recursive: true });
-    const cursorMcp = {
-      "mcpServers": {
-        [BRAND_CONFIG.mcp.serverName]: {
-          "command": "npx",
-          "args": ["-y", BRAND_CONFIG.mcp.packageName, "mcp", "run"]
-        }
-      }
-    };
-    await fs.writeFile(
-      path.join(cursorDir, 'mcp.json'),
-      JSON.stringify(cursorMcp, null, 2) + '\n',
-      'utf-8'
-    );
-  } catch (error) {
-    console.warn('Warning: Failed to create .cursor/mcp.json:', error);
-  }
 }
 
 /** Options for {@link createWorkspace}. */

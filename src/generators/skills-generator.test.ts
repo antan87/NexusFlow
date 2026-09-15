@@ -89,6 +89,24 @@ describe('skills-generator', () => {
     expect(await fse.pathExists(path.join(tempWorkspace, PRIMARY_CONFIG_DIR_NAME, 'resources.lock.json'))).toBe(true);
   });
 
+  it('honors explicit local-skill deselection without removing authored source files', async () => {
+    const local = path.join(tempWorkspace, '.agents/skills/local-plan/SKILL.md');
+    await fs.mkdir(path.dirname(local), { recursive: true });
+    const content = '---\nname: local-plan\ndescription: Local planning\n---\n# Local plan\n';
+    await fs.writeFile(local, content);
+    const ctx: WorkspaceContext = { feature: { id: 'local', branchName: 'local', description: '', repos: [], assistants: ['claude'], workspacePath: tempWorkspace, createdAt: '' }, repos: [] };
+    await saveWorkspaceSkillsConfig(tempWorkspace, { enabledSkills: ['local-plan'] });
+    await generateSkills(ctx, ['claude'], tempWorkspace);
+    const mirror = path.join(tempWorkspace, '.claude/skills/local-plan/SKILL.md');
+    expect(await fse.pathExists(mirror)).toBe(true);
+    await saveWorkspaceSkillsConfig(tempWorkspace, { enabledSkills: [] });
+    await generateSkills(ctx, ['claude'], tempWorkspace);
+    expect(await fse.pathExists(mirror)).toBe(false);
+    expect(await fs.readFile(local, 'utf8')).toBe(content);
+    await generateSkills(ctx, ['claude'], tempWorkspace);
+    expect(await fse.pathExists(mirror)).toBe(false);
+  });
+
   it('respects empty enabledSkills array and deploys nothing when all are disabled', async () => {
     await saveWorkspaceSkillsConfig(tempWorkspace, {
       enabledSkills: [],

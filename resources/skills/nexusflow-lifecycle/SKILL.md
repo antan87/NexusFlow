@@ -12,7 +12,9 @@ metadata:
 
 Read the workspace instructions and live assignment with `ctxspace flow --assignment --json`
 or MCP `get_work_context`. Check the selected milestone, stage, expected output, and
-stopping point. If live tools are unavailable, read the authoritative
+stopping point. If the CLI is not on PATH, try the generated workspace launcher
+`./.contextspace/bin/ctxspace` (PowerShell: `.\.contextspace\bin\ctxspace.cmd`).
+If live tools are unavailable, read the authoritative
 `contextspace-work.json` and relevant sources; identify anything you cannot verify.
 The user's current instruction can revise a saved assignment. Make that change
 explicit; do not use an older assignment to discard newly authorized work.
@@ -36,6 +38,7 @@ Delegate only bounded independent work when permitted and useful; execution can 
 - Source documents: original requirements, designs, evidence, and references.
 - AI assignment: what to do now, expected result, and stopping point.
 - Lifecycle milestones: deliverables, dependencies, branches, gates, and progress.
+- Authored delivery notes: release sequence, questions with owners/status, existing work, and deferred decisions in `contextspace-milestones.md`.
 - Knowledge: durable decisions and their reasons, not a running task log.
 
 Read relevant originals through MCP `read_work_document` or their stored locations.
@@ -47,7 +50,8 @@ the selected milestone. Project sources remain owned by their originating worksp
 
 Use the Plan editor for assignments and milestone definitions. `contextspace-plan.md`
 and `contextspace-assignment.md` are generated views: update their sources and refresh.
-Do not create a second implementation plan. If working outside ContextSpace, use
+Keep authored rationale in `contextspace-milestones.md`, not in generated views or
+a competing milestone tracker. Read it directly or through MCP `get_planning_notes`. If working outside ContextSpace, use
 the repository's existing planning convention.
 
 ## Execute only the current stage
