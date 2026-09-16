@@ -48,8 +48,10 @@ export async function withResourceAdministrationLock<T>(operation: () => Promise
 export async function validateResourceSelections(
   enabledSkills: string[],
   enabledAgents: string[],
+  workspacePath?: string,
 ): Promise<void> {
-  const [skills, agents] = await Promise.all([getAllSkills(), getAllAgents()]);
+  // Agents currently have only a global catalog; skills also have workspace sources.
+  const [skills, agents] = await Promise.all([getAllSkills(workspacePath), getAllAgents()]);
   const skillIds = new Set(skills.map((skill) => skill.id));
   const agentIds = new Set(agents.map((agent) => agent.id));
   const missingSkills = [...new Set(enabledSkills)].filter((id) => !skillIds.has(id));

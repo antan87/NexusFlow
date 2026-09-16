@@ -1,3 +1,4 @@
+import { readPlanningNotes } from '../core/planning-notes.js';
 /**
  * @module mcp/tools
  * Registry of MCP tools NexusFlow exposes to AI assistants. Each tool declares
@@ -111,6 +112,16 @@ async function requireWorkspace(ctx: ToolContext): Promise<void> {
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 export const tools: NexusFlowTool[] = [
+  {
+    name: 'get_planning_notes',
+    description: 'Read the authored delivery plan, questions with owner/status, existing work evidence, and deferred decisions. Refresh preserves this document.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
+    handler: async (_args, ctx) => {
+      try { return json(await readPlanningNotes(ctx.workspacePath)); }
+      catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
+    },
+  },
   {
     name: 'get_work_context',
     description: 'Read the current owner-defined AI assignment, work type, size, stage, scoped document roles/statuses, and live milestone plan. Read this before starting work or advancing stages.',
@@ -1163,6 +1174,9 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'read_workroom_stream',
     'verify_workspace',
     'list_skills',
+    'get_work_context',
+    'read_work_document',
+    'get_planning_notes',
   ],
   review: [
     'search_workspace',
@@ -1177,6 +1191,9 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'read_workroom_stream',
     'verify_workspace',
     'list_skills',
+    'get_work_context',
+    'read_work_document',
+    'get_planning_notes',
   ],
   ci: [
     'search_workspace',
@@ -1191,6 +1208,9 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'read_workroom_stream',
     'verify_workspace',
     'list_skills',
+    'get_work_context',
+    'read_work_document',
+    'get_planning_notes',
   ],
   developer: ['*'],
   interactive: ['*'],

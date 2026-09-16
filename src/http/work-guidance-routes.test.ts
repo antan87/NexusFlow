@@ -30,3 +30,11 @@ it('rejects absent workspaces, malformed metadata, oversized input, and stale wr
   expect((await request({ revision: 0, title: 'First', role: 'reference', content: 'hello' })).status).toBe(200);
   expect((await request({ revision: 0, title: 'Stale', role: 'reference', content: 'world' })).status).toBe(409);
 });
+it('serves authored planning notes and returns a conflict without replacing newer content', async () => {
+  const initial = await (await app.request('/api/workspace/test/planning-notes')).json();
+  const save = (content: string) => app.request('/api/workspace/test/planning-notes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: initial.revision, content }) });
+  expect((await save('# Agreed sequence')).status).toBe(200);
+  expect((await save('# Stale overwrite')).status).toBe(409);
+  expect((await (await app.request('/api/workspace/test/planning-notes')).json()).content).toBe('# Agreed sequence');
+  expect((await app.request('/api/workspace/missing/planning-notes')).status).toBe(404);
+});

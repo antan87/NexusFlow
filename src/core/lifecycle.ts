@@ -42,7 +42,7 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
     try {
       const { stdout } = await execa(
         'git',
-        ['log', '-1', '--format=%h%x1f%s%x1f%an%x1f%cr'],
+        ['log', '-1', '--format=%h%x1f%s%x1f%an%x1f%cI'],
         { cwd: repo.path },
       );
       const [sha, msg, author, date] = stdout.trim().split('\x1f');
@@ -75,8 +75,8 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
         [
           'for-each-ref',
           '--sort=-committerdate',
-          '--count=6',
-          '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(authordate:relative)\x1f%(symref)',
+          '--count=100',
+          '--format=%(refname:short)\x1f%(objectname:short)\x1f%(subject)\x1f%(authorname)\x1f%(committerdate:iso-strict)\x1f%(symref)',
           'refs/remotes/origin/',
         ],
         { cwd: repo.path },
@@ -87,6 +87,8 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
         const [refShort, sha, subject, author, relDate, symref] = line.split('\x1f');
         if (!refShort) continue;
         const branchName = refShort.replace(/^origin\//, '');
+        if (/^(?:renovate|dependabot)\//i.test(branchName)) continue;
+        if (fleet.filter((member) => member.repoName === repo.name && !member.isCurrent).length >= 6) break;
         if (symref || refShort === 'origin' || refShort === 'origin/HEAD' || branchName === 'HEAD' || branchName === currentBranch) continue;
 
         fleet.push({
@@ -260,7 +262,7 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   }
 
   const branches = [...new Set(fleet.filter((member) => member.isCurrent).map((member) => member.branch))];
-  const branch = branches.length === 1 && branches[0] !== 'detached'
+  const branch = feature?.mode !== 'in-place' && branches.length === 1 && branches[0] !== 'detached'
     ? branches[0]
     : !branches.length && feature?.mode !== 'in-place' && !feature?.repoBranches
       ? feature?.branchName
@@ -372,6 +374,8 @@ const planStepSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]+$/).max(100),
   title: z.string().trim().min(1).max(200), description: z.string().max(4000).optional(),
   owner: z.string().max(200).optional(), branch: z.string().max(200).optional(),
+  repo: z.string().max(200).optional(), workItem: z.string().max(2000).optional(),
+  unblockCondition: z.string().max(2000).optional(),
   dependsOn: z.array(z.string()).max(100).optional(),
   requiresVerification: z.boolean().optional(), verificationCommand: z.string().max(2000).optional(),
 });
@@ -434,6 +438,9 @@ export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true):
     lines.push(`${index + 1}. **${step.title}**${live ? ` — ${step.status.replaceAll('_', ' ')}` : ''}`);
     if (step.description) lines.push(`   ${step.description}`);
     if (step.dependsOn?.length) lines.push(`   Depends on: ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}`);
+    if (step.repo) lines.push(`   Repository: ${step.repo}`);
+    if (step.workItem) lines.push(`   Work item / PR: ${step.workItem}`);
+    if (step.unblockCondition) lines.push(`   Unblock condition: ${step.unblockCondition}`);
     if (step.branch) lines.push(`   Branch: ${step.branch}`);
     if (step.requiresVerification || step.verificationCommand) lines.push('   Requires verification before completion.');
   }

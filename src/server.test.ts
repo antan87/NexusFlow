@@ -2300,6 +2300,7 @@ describe('Server API Endpoints Unit Tests', () => {
       });
 
       expect(response.status).toBe(200);
+      expect(resourceService.validateResourceSelections).toHaveBeenCalledWith(['pr-review-toolkit'], ['reviewer'], workspacePath);
       expect(skillsCatalog.saveWorkspaceSkillsConfig).toHaveBeenCalledWith(
         workspacePath,
         expect.objectContaining({ enabledSkills: ['pr-review-toolkit'], enabledAgents: ['reviewer'] }),

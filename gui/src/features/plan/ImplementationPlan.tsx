@@ -345,11 +345,14 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             <h5 className="text-sm font-semibold text-foreground">
                               {step.title}
                             </h5>
+                            {step.status === 'blocked' && <p className="w-full text-xs text-amber-500">Blocked: {step.unblockCondition || (step.dependsOn?.length ? `Complete ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}.` : 'Set an unblock condition in Edit milestones.')}</p>}
                             {step.owner && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
                                 <User size={10} /> {step.owner}
                               </span>
                             )}
+                            {step.repo && <span className="text-xs text-muted-foreground">Repo: {step.repo}</span>}
+                            {step.workItem && <span className="text-xs text-muted-foreground break-all">Work item / PR: {step.workItem}</span>}
                             {step.branch && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono text-cyan-400 bg-cyan-500/10 border border-cyan-500/20">
                                 <GitBranch size={10} /> {step.branch}
@@ -526,7 +529,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             {member.lastCommitAuthor}
                             {member.lastCommitDate && (
                               <span className="text-muted-foreground ml-1">
-                                ({member.lastCommitDate})
+                                ({Number.isNaN(Date.parse(member.lastCommitDate)) ? 'Date unavailable — reload flow' : new Date(member.lastCommitDate).toLocaleString()})
                               </span>
                             )}
                           </span>

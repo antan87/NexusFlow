@@ -92,3 +92,76 @@ Original text and metadata use the configured workspace storage adapter.
 another project workspace can update a shared source after that view was written.
 Run `ctxspace refresh` to update generated context pointers in older workspaces
 and regenerate derived views. Generated context is not a second place to edit the assignment.
+
+## Keep authored planning across refresh
+
+**Delivery notes & questions** edits `contextspace-milestones.md`. Refresh creates
+this document once and preserves subsequent edits. It contains release sequencing,
+questions with owners and open/resolved status, existing work with branch/PR/commit
+evidence, and flag-only or deferred decisions. Record what is already merged, on a
+branch, or needs no change before defining new work. Link these rows to milestone
+IDs and source documents instead of copying their contents. This register is
+Markdown; saving it does not automatically complete lifecycle gates or execute work.
+
+Use **Edit milestones** for executable dependencies and verification gates. Each
+milestone can name a repository, branch, work item or PR, and unblock condition.
+Circular milestone dependencies are invalid, but circular *package* dependencies
+can be legitimate. The dependency analysis does not invent a release order for
+cycles: record producer build, package publication, and consumer-version bumps in
+the authored plan, including compatibility transitions for breaking contracts.
+
+When upgrading, a manually appended `## Milestones` section in the old generated
+plan is copied into the new authored document before regenerating the plan. Review
+that imported section once. Other custom sections should be moved into the authored
+document before refresh. Do not edit generated `contextspace-plan.md` directly.
+
+Notes saves use a revision check. A conflicting save keeps the editor draft;
+copy any changes you need before using **Reload delivery notes**, which replaces
+it with the latest saved text. MCP exposes the document through `get_planning_notes`.
+
+For skill-based PBI generation, select the applicable skill and make the assignment
+explicit, for example: “Use the enabled PBI template; inventory existing work, draft
+one work item per remaining milestone, link its evidence, and stop before code.”
+Store generated work items as draft source documents. Skills provide procedures;
+enabling one does not run it or make its output approved.
+
+Knowledge already supports typed `decision`, `question`, and `gotcha` entries,
+rendered with their type labels. Use knowledge for compact reasons and lessons;
+use delivery notes for the evolving question owner, status, and resolution register.
+
+## Access tools from a desktop-created workspace
+
+If `ctxspace` is not on PATH, use the generated workspace launcher with the same
+arguments. From the workspace root:
+
+```sh
+./.contextspace/bin/ctxspace flow --assignment
+./.contextspace/bin/ctxspace isolate <repo>
+```
+
+In PowerShell use `.\.contextspace\bin\ctxspace.cmd`. These launchers use the
+installed runtime and CLI, including desktop's bundled Electron-as-Node runtime;
+they do not download a package. Refresh after moving or upgrading the installation.
+The launcher creates no global PATH entry. Host repositories remain read-only until
+isolated; tool access is not permission to bypass that rule.
+
+MCP configurations are generated for selected assistants: Claude's `.mcp.json`,
+Cursor's `.cursor/mcp.json`, Copilot's `.vscode/mcp.json` and `.mcp.json`, and Codex's
+`.codex/config.toml`. Other MCP servers/settings are retained. Trust the workspace
+in the assistant to enable its interactive tools. Antigravity uses user-level MCP
+configuration; configure it there or use the local CLI launcher.
+
+## Diagnose workspace skills
+
+The Skills tab includes workspace-local packages in selection validation and shows
+invalid-package, missing-global-source, and duplicate-ID diagnostics. A valid local
+package takes precedence over the same global ID. A workspace package labeled
+`scope: global` requires its source in the global catalog; restore that source or
+correct the scope if it is an authored local skill.
+
+Explicit selection controls deployment; deselecting a local skill removes its
+managed Claude copy. Authored `.agents/skills` files are preserved, so assistants
+that discover this folder directly may still see them. Move an authored skill out
+of that discovery folder if it must be unavailable to those assistants. General
+and uncategorized skills are grouped together in the UI. Agent selection currently
+uses the global agent catalog; it has no workspace-local agent catalog.

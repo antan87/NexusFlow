@@ -1,3 +1,4 @@
+import { readPlanningNotes, savePlanningNotes } from '../core/planning-notes.js';
 import type { Hono, Context, Handler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -17,6 +18,11 @@ export function registerWorkGuidanceRoutes(app: Hono, resolveWorkspace: (id: str
       return c.json({ error: message }, error instanceof z.ZodError ? 400 : /changed.*session|Reload/.test(message) ? 409 : 400);
     }
   };
+  app.get('/api/workspace/:id/planning-notes', handle((root) => readPlanningNotes(root)));
+  app.put('/api/workspace/:id/planning-notes', bounded, handle(async (root, c) => {
+    const input = z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/), content: z.string().max(500_000) }).parse(await c.req.json());
+    return savePlanningNotes(root, input.revision, input.content);
+  }));
   app.get('/api/workspace/:id/work', handle(async (root) => {
     await loadWorkspaceLifecycle(root);
     return getWorkContext(root);

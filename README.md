@@ -224,7 +224,9 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `ctxspace sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
 | `ctxspace finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
-| `ctxspace review` | Start an iterative reviewer-implementer agent loop with automated verification harnesses |
+| `ctxspace isolate` | On-demand worktree isolation for repositories in in-place workspaces (`[repo] [branch]`) |
+| `ctxspace strategy` | Manage teamwork strategy workflows (`list`, `create`, `edit`, `delete`, `show`) |
+| `ctxspace migrate` | Migrate legacy `.nexusflow` workspaces to `.contextspace` |
 | `ctxspace tag` | Manage enterprise categories, vertical subsystems, and cross-cutting traits (`list`, `add`, `remove`, `show`) (alias: `category`) |
 | `ctxspace skill` | Manage portable agent skills from CLI (`list`, `create`, `show`, `delete`) |
 | `ctxspace knowledge` | Capture titled decisions/gotchas/assumptions/questions with optional `--scope` and `--evidence`; `show`, `promote` into per-repo base knowledge |

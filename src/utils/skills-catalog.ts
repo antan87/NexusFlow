@@ -485,7 +485,9 @@ async function loadSkillFromDir(
 /**
  * Retrieves all available skills (built-in templates + user directory + optional workspace directory).
  */
-export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]> {
+export interface SkillDiagnostic { id: string; scope: 'global' | 'workspace'; message: string }
+
+export async function getAllSkills(workspacePath?: string, diagnostics?: SkillDiagnostic[]): Promise<SkillItem[]> {
   const skillMap = new Map<string, SkillItem>();
 
   // 1. Built-in template skills
@@ -530,6 +532,7 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
                 }
               } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
+                diagnostics?.push({ id: entryName, scope: 'global', message });
                 console.warn(`Skipping invalid skill "${entryName}": ${message}`);
               }
             }
@@ -601,14 +604,18 @@ export async function getAllSkills(workspacePath?: string): Promise<SkillItem[]>
                     if (skillMap.has(loaded.id)) {
                       const globalSkill = skillMap.get(loaded.id)!;
                       globalSkill.scope = 'global';
+                    } else {
+                      diagnostics?.push({ id: loaded.id, scope: 'workspace', message: 'This copy declares global scope or was generated from a global skill, but that catalog source is missing. Restore the source or explicitly convert the package to workspace scope.' });
                     }
                   } else {
+                    if (skillMap.has(loaded.id)) diagnostics?.push({ id: loaded.id, scope: 'workspace', message: 'The workspace package overrides a global skill with the same ID. Rename it to keep both independently selectable.' });
                     loaded.scope = 'workspace';
                     skillMap.set(loaded.id, loaded);
                   }
                 }
               } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
+                diagnostics?.push({ id: entryName, scope: 'workspace', message });
                 console.warn(`Skipping invalid workspace skill "${entryName}": ${message}`);
               }
             }

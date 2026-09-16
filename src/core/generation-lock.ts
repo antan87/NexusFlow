@@ -59,7 +59,7 @@ export interface GenerationLock extends GenerationSnapshot {
 }
 
 export interface GenerationDrift {
-  kind: 'missing-lock' | 'tool' | 'repo' | 'output';
+  kind: 'missing-lock' | 'tool' | 'repo' | 'output' | 'unverified';
   name: string;
   generated?: string;
   current?: string;
@@ -136,10 +136,12 @@ export function renderFreshnessBanner(
   const unverifiable = Object.entries(snapshot.repos)
     .filter(([, state]) => state.fingerprint.startsWith(UNCACHEABLE_FINGERPRINT_PREFIX))
     .map(([name]) => name);
-  const lines = drift.length === 0 && unverifiable.length > 0
+  const confirmedDrift = drift.filter((item) => item.kind !== 'unverified');
+  const uncertainRepos = [...new Set([...unverifiable, ...drift.filter((item) => item.kind === 'unverified').map((item) => item.name)])];
+  const lines = confirmedDrift.length === 0 && uncertainRepos.length > 0
     ? [
         `> **⚠ ${BRAND_NAME.toUpperCase()} CONTEXT FRESHNESS CANNOT BE VERIFIED.**`,
-        `> Regenerated from ${unverifiable.join(', ')} with uncommitted files that cannot be safely fingerprinted on this platform.`,
+        `> Dirty-file freshness for ${uncertainRepos.join(', ')} cannot be safely verified on this platform; this does not prove the context is stale.`,
         `> Treat generated facts as provisional; commit the files or verify live state with \`${CLI_NAME} status\`.`,
       ]
     : drift.length === 0
@@ -163,7 +165,7 @@ export async function captureGenerationSnapshot(repos: RepoInfo[]): Promise<Gene
     // A null fingerprint means cache reuse is unsafe, not that generation is
     // impossible. Preserve the generated output with an explicit unverifiable
     // snapshot that always trips the next freshness check.
-    const recordedFingerprint = fingerprint ?? `${UNCACHEABLE_FINGERPRINT_PREFIX}${randomUUID()}`;
+    const recordedFingerprint = fingerprint ?? `${UNCACHEABLE_FINGERPRINT_PREFIX}${stdout.trim()}`;
     return [repo.name, { sha: stdout.trim(), fingerprint: recordedFingerprint }] as const;
   }));
 
@@ -265,14 +267,21 @@ export async function checkGenerationLock(
         .then((result) => result.stdout.trim())
         .catch(() => 'unavailable');
       const wasUncacheable = recorded?.fingerprint.startsWith(UNCACHEABLE_FINGERPRINT_PREFIX);
+      // Even without safe dirty-file hashing, Git can prove that a formerly
+      // clean snapshot now has changes. Reserve 'unverified' for actual uncertainty.
+      const newlyDirty = !current && recorded && !wasUncacheable && !recorded.fingerprint.includes('+')
+        ? await execa('git', ['status', '--porcelain=v1', '-z', '-uall'], { cwd: repo.path })
+            .then((result) => Boolean(result.stdout)).catch(() => false)
+        : false;
+      const uncertain = Boolean(recorded && sha === recorded.sha && (!current || wasUncacheable) && !newlyDirty);
       return {
-        kind: 'repo',
+        kind: uncertain ? 'unverified' : 'repo',
         name: repo.name,
         generated: recorded?.sha,
         current: sha,
-        message: wasUncacheable
+        message: uncertain
           ? `Generated from ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'} while dirty-file freshness could not be safely verified on this platform.`
-          : `Generated at ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}; repo now at ${sha.slice(0, 12)}${current?.includes('+') ? ' with uncommitted changes' : ''}.`,
+          : `Generated at ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}; repo now at ${sha.slice(0, 12)}${newlyDirty || current?.includes('+') ? ' with uncommitted changes' : ''}.`,
       };
     }
     return null;
@@ -297,7 +306,7 @@ export async function checkGenerationLock(
   }));
   drift.push(...outputDrift.filter((item): item is GenerationDrift => item !== null));
 
-  if (options.markDocuments && drift.some((item) => item.kind === 'repo' || item.kind === 'tool')) {
+  if (options.markDocuments && drift.some((item) => item.kind === 'repo' || item.kind === 'tool' || item.kind === 'unverified')) {
     await markFreshnessBanners(workspacePath, lock, drift);
   }
   return { fresh: drift.length === 0, lock, drift };
@@ -308,7 +317,7 @@ async function markFreshnessBanners(
   snapshot: GenerationSnapshot,
   drift: GenerationDrift[],
 ): Promise<void> {
-  const banner = renderFreshnessBanner(snapshot, drift.filter((item) => item.kind === 'repo' || item.kind === 'tool'));
+  const banner = renderFreshnessBanner(snapshot, drift.filter((item) => item.kind === 'repo' || item.kind === 'tool' || item.kind === 'unverified'));
   const feature = await loadFeatureConfig(workspacePath);
   const featureId = feature?.id ?? path.basename(workspacePath);
   for (const [relativePath, output] of Object.entries((snapshot as GenerationLock).outputs ?? {})) {
