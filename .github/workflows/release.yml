@@ -18,6 +18,12 @@ name: Release
 on:
   repository_dispatch:
     types: [release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (must match package.json, e.g. 2.12.1)'
+        required: true
+        type: string
 
 concurrency:
   group: release
@@ -60,7 +66,7 @@ jobs:
       - name: Resolve and validate version
         id: resolve
         env:
-          REQUESTED: ${{ github.event.client_payload.version }}
+          REQUESTED: ${{ github.event.client_payload.version || inputs.version }}
         run: |
           PKG=$(node -p "require('./package.json').version")
           echo "Requested version: $REQUESTED / package.json version: $PKG"

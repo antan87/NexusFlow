@@ -22,6 +22,7 @@ const repoRoot = path.resolve(__dirname, '..');
 // Files whose top-level "version" field tracks the root version. The regex
 // targets the first "version" key, which is the top-level package version.
 const TARGETS = [
+  'package-lock.json',
   'extension/package.json',
   'desktop/package.json',
   'gui/package.json',

@@ -47,13 +47,20 @@ git push origin HEAD
 ```
 
 After the PR is merged, dispatch the release using the exact version in the merged
-`package.json` (the dispatch is intentionally separate from the source PR):
+`package.json`. You can trigger it either from GitHub Actions UI (**Actions** -> **Release** -> **Run workflow**, entering the version) or via `gh`:
 
 ```bash
 VERSION=$(node -p "require('./package.json').version")
 gh api "repos/antan87/NexusFlow/dispatches" \
   -f event_type=release \
   -F "client_payload[version]=$VERSION"
+```
+
+Or using `gh workflow run`:
+
+```bash
+VERSION=$(node -p "require('./package.json').version")
+gh workflow run release.yml -f version=$VERSION
 ```
 
 The `npm version` command runs the `version` lifecycle script
