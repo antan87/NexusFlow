@@ -76,6 +76,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
   const [diffCache, setDiffCache] = useState<Record<string, string>>({});
+  const [fileContentCache, setFileContentCache] = useState<Record<string, string>>({});
+  const [originalContentCache, setOriginalContentCache] = useState<Record<string, string>>({});
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
@@ -95,6 +97,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   // Reset cache and symbols when active workspace changes
   useEffect(() => {
     setDiffCache({});
+    setFileContentCache({});
+    setOriginalContentCache({});
     setExpandedFiles({});
     setDiffErrors({});
     setTargetLineMap({});
@@ -134,6 +138,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           const p = (async () => {
             if (cancelled) return;
             let diffText = diffCache[cacheKey];
+            let fullContent = fileContentCache[cacheKey];
             if (!diffText) {
               try {
                 const encodedId = encodeURIComponent(ws.branchName);
@@ -145,7 +150,14 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                 if (res.ok && !cancelled) {
                   const data = await res.json();
                   diffText = data.diff || '';
+                  fullContent = data.fileContent || '';
                   setDiffCache((prev) => ({ ...prev, [cacheKey]: diffText }));
+                  if (fullContent) {
+                    setFileContentCache((prev) => ({ ...prev, [cacheKey]: fullContent }));
+                  }
+                  if (data.originalContent) {
+                    setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
+                  }
                 }
               } catch {
                 // Ignore background prefetch network errors
@@ -154,10 +166,11 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
             if (diffText && !cancelled) {
               const parsed = parseUnifiedDiff(diffText);
+              const contentToIndex = fullContent || parsed.modifiedContent;
               globalChangesetSymbolIndex.indexFile(
                 repo.repoName,
                 f.file,
-                parsed.modifiedContent,
+                contentToIndex,
                 parsed.hunks,
                 repo.repoPath
               );
@@ -244,6 +257,12 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           }
           const data = await res.json();
           setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
+          if (data.fileContent) {
+            setFileContentCache((prev) => ({ ...prev, [cacheKey]: data.fileContent }));
+          }
+          if (data.originalContent) {
+            setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
+          }
         } catch (err: any) {
           setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
         } finally {
@@ -762,6 +781,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                       repoName={repo.repoName}
                                       repoPath={repo.repoPath}
                                       patchText={fileDiff}
+                                      fullFileContent={fileContentCache[cacheKey]}
+                                      fullOriginalContent={originalContentCache[cacheKey]}
                                       defaultEditor={defaultEditor}
                                       initialTargetLine={targetLineMap[cacheKey]}
                                       onOpenFile={handleCrossFileOpen}

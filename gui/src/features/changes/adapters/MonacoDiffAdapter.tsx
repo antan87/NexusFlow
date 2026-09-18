@@ -40,6 +40,7 @@ export interface MonacoDiffAdapterProps extends DiffAdapterRenderProps {
   height?: string | number;
   repoName?: string;
   targetLine?: number;
+  jumpNonce?: number;
   onOpenFile?: (repoName: string, filePath: string, line?: number) => void;
   onLineSelect?: (line: number) => void;
 }
@@ -53,11 +54,13 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
   ignoreWhitespace,
   height = 480,
   targetLine,
+  jumpNonce,
   onOpenFile,
   onLineSelect,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorInstanceRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const decorationCollectionRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const modelsRef = useRef<{
     original: monaco.editor.ITextModel | null;
     modified: monaco.editor.ITextModel | null;
@@ -73,7 +76,21 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     modifiedEditor.revealLineInCenter(targetLine);
     modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
     modifiedEditor.focus();
-  }, [targetLine]);
+
+    // Flash highlight on the target line
+    if (!decorationCollectionRef.current) {
+      decorationCollectionRef.current = modifiedEditor.createDecorationsCollection();
+    }
+    decorationCollectionRef.current.set([
+      {
+        range: new monaco.Range(targetLine, 1, targetLine, 1),
+        options: {
+          isWholeLine: true,
+          className: 'bg-primary/20 border-l-2 border-primary',
+        },
+      },
+    ]);
+  }, [targetLine, jumpNonce]);
 
   useEffect(() => {
     if (!containerRef.current) return;

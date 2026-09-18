@@ -2141,18 +2141,19 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Repo name "${repoName}" is ambiguous in this workspace.` }, 400);
       }
-      worktreePath = matches[0]!;
+      worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = resolveRepoPath(workspacePath, repoName);
     }
 
     let diff = '';
+    let isUntracked = false;
     
     // Check git status for the file to know if it's untracked
     try {
       const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', filePath], { cwd: worktreePath });
       const statusLine = statusOut.trim();
-      const isUntracked = statusLine.startsWith('??');
+      isUntracked = statusLine.startsWith('??');
       
       if (isUntracked) {
         const result = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
@@ -2175,7 +2176,29 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       diff = result.stdout || result.stderr || '';
     }
 
-    return c.json({ diff });
+    let fileContent = '';
+    try {
+      const fullPath = path.resolve(worktreePath, filePath);
+      fileContent = await fs.readFile(fullPath, 'utf-8');
+    } catch {
+      fileContent = '';
+    }
+
+    let originalContent = '';
+    if (!isUntracked) {
+      try {
+        const normalizedFile = filePath.replace(/\\/g, '/');
+        const { stdout } = await execa('git', ['show', `HEAD:${normalizedFile}`], {
+          cwd: worktreePath,
+          reject: false,
+        });
+        originalContent = stdout || '';
+      } catch {
+        originalContent = '';
+      }
+    }
+
+    return c.json({ diff, fileContent, originalContent });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2210,7 +2233,7 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
       }
-      worktreePath = matches[0]!;
+      worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
     }

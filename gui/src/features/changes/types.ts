@@ -17,6 +17,7 @@ export interface DiffHunkAction {
   startLineModified: number;
   lineCountModified: number;
   patchHeader: string;
+  enclosingDeclaration?: string;
   lines: string[];
 }
 

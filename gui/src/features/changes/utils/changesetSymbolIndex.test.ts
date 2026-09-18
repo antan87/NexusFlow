@@ -12,6 +12,7 @@ import {
   getCleanRepo,
 } from './changesetModelStore.ts';
 import type { DiffHunkAction } from '../types.ts';
+import { mapRealLineToSnippetLine } from './diffParser.ts';
 
 const SAMPLE_TS_FILE = `
 export interface VacationAgreement {
@@ -323,3 +324,31 @@ test('registerLightweightNavigationProviders safely returns disposable when mona
   assert.equal(typeof registration.dispose, 'function');
   registration.dispose();
 });
+
+test('mapRealLineToSnippetLine correctly maps real line to snippet line or null', () => {
+  const mockHunks: DiffHunkAction[] = [
+    {
+      id: 'hunk-1',
+      hunkIndex: 0,
+      type: 'accept',
+      startLineOriginal: 10,
+      lineCountOriginal: 3,
+      startLineModified: 20,
+      lineCountModified: 3,
+      patchHeader: '@@ -10,3 +20,3 @@',
+      lines: [
+        ' context line 20',
+        '+added line 21',
+        '-deleted line',
+        ' context line 22',
+      ],
+    },
+  ];
+
+  assert.equal(mapRealLineToSnippetLine(20, mockHunks), 1);
+  assert.equal(mapRealLineToSnippetLine(21, mockHunks), 2);
+  assert.equal(mapRealLineToSnippetLine(22, mockHunks), 3);
+  assert.equal(mapRealLineToSnippetLine(5, mockHunks), null);
+  assert.equal(mapRealLineToSnippetLine(99, mockHunks), null);
+});
+

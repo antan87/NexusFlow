@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
-import { parseUnifiedDiff } from './utils/diffParser.js';
+import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
 import { MonacoDiffAdapter } from './adapters/MonacoDiffAdapter.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
 import { launchVsCodeDiff, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
@@ -32,6 +32,8 @@ export interface PluggableDiffViewerProps {
   repoName: string;
   repoPath?: string;
   patchText: string;
+  fullFileContent?: string;
+  fullOriginalContent?: string;
   defaultEditor?: string | null;
   viewMode?: DiffViewMode;
   initialTargetLine?: number;
@@ -48,6 +50,8 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   repoName,
   repoPath = '',
   patchText,
+  fullFileContent,
+  fullOriginalContent,
   defaultEditor,
   viewMode: controlledViewMode,
   initialTargetLine,
@@ -70,6 +74,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const [refineFeedback, setRefineFeedback] = useState('');
   const [symbolsOpen, setSymbolsOpen] = useState(false);
   const [targetLine, setTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [jumpNonce, setJumpNonce] = useState(0);
   const editorLabel = getEditorLabel(defaultEditor);
 
   // Parse diff into original and modified buffers and hunk metadata
@@ -79,13 +84,22 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
 
   // Index symbols of this file in the global changeset symbol index
   const fileSymbols = useMemo(() => {
-    return globalChangesetSymbolIndex.indexFile(repoName, filePath, parsed.modifiedContent, hunks, repoPath);
-  }, [repoName, filePath, parsed.modifiedContent, hunks, repoPath]);
+    const contentToIndex = fullFileContent || parsed.modifiedContent;
+    return globalChangesetSymbolIndex.indexFile(repoName, filePath, contentToIndex, hunks, repoPath);
+  }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath]);
 
   // If initialTargetLine changes from parent, sync targetLine and active hunk
   useEffect(() => {
     if (initialTargetLine && initialTargetLine > 0) {
-      setTargetLine(initialTargetLine);
+      let targetJumpLine = initialTargetLine;
+      if (!fullFileContent) {
+        const snippetLine = mapRealLineToSnippetLine(initialTargetLine, hunks);
+        if (snippetLine !== null) {
+          targetJumpLine = snippetLine;
+        }
+      }
+      setTargetLine(targetJumpLine);
+      setJumpNonce((n) => n + 1);
       const matchingIndex = hunks.findIndex(
         (h) =>
           initialTargetLine >= h.startLineModified &&
@@ -95,7 +109,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         setActiveHunkIndex(matchingIndex);
       }
     }
-  }, [initialTargetLine, hunks]);
+  }, [initialTargetLine, hunks, fullFileContent]);
 
   const toggleViewMode = () => {
     if (onToggleViewMode) {
@@ -157,7 +171,20 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const handleSymbolSelect = (symbol: ChangesetSymbol) => {
     const cleanCurrent = filePath.replace(/\\/g, '/').replace(/^\//, '');
     if (symbol.filePath === cleanCurrent) {
-      setTargetLine(symbol.lineNumber);
+      let targetJumpLine = symbol.lineNumber;
+      if (!fullFileContent) {
+        const snippetLine = mapRealLineToSnippetLine(symbol.lineNumber, hunks);
+        if (snippetLine !== null) {
+          targetJumpLine = snippetLine;
+        } else {
+          showToast?.(`"${symbol.name}" is outside diff hunks (line ${symbol.lineNumber})`, 'info');
+          openInVsCodeAtLine(repoPath, filePath, symbol.lineNumber, symbol.column, defaultEditor);
+          return;
+        }
+      }
+      setTargetLine(targetJumpLine);
+      setJumpNonce((n) => n + 1);
+
       // Synchronize active hunk with target symbol
       const matchingHunkIndex = hunks.findIndex(
         (h) =>
@@ -332,13 +359,14 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             filePath={filePath}
             repoName={repoName}
             repoPath={repoPath}
-            originalContent={parsed.originalContent}
-            modifiedContent={parsed.modifiedContent}
+            originalContent={fullOriginalContent || parsed.originalContent}
+            modifiedContent={fullFileContent || parsed.modifiedContent}
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
             height={460}
             targetLine={targetLine}
+            jumpNonce={jumpNonce}
             onOpenFile={onOpenFile}
             onLineSelect={handleLineSelect}
           />
@@ -346,8 +374,8 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
           <FallbackDiffAdapter
             filePath={filePath}
             repoPath={repoPath}
-            originalContent={parsed.originalContent}
-            modifiedContent={parsed.modifiedContent}
+            originalContent={fullOriginalContent || parsed.originalContent}
+            modifiedContent={fullFileContent || parsed.modifiedContent}
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}

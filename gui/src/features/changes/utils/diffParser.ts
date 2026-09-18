@@ -67,6 +67,7 @@ export function parseUnifiedDiff(patchText: string): ParsedDiffResult {
         startLineModified: modStart,
         lineCountModified: modCount,
         patchHeader: line,
+        enclosingDeclaration: hunkMatch[5]?.trim() || undefined,
         lines: [],
       };
       continue;
@@ -108,3 +109,26 @@ export function parseUnifiedDiff(patchText: string): ParsedDiffResult {
     isDeletedFile,
   };
 }
+
+/**
+ * Maps a 1-based source file line number to the 1-based line number inside a hunk-only snippet buffer.
+ * Returns null if the real line falls outside all diff hunks.
+ */
+export function mapRealLineToSnippetLine(realLine: number, hunks: DiffHunkAction[]): number | null {
+  let snippetLine = 1;
+  for (const hunk of hunks) {
+    let currentRealLine = hunk.startLineModified;
+    for (const rawLine of hunk.lines || []) {
+      if (rawLine.startsWith('-') || rawLine.startsWith('\\')) {
+        continue;
+      }
+      if (currentRealLine === realLine) {
+        return snippetLine;
+      }
+      snippetLine++;
+      currentRealLine++;
+    }
+  }
+  return null;
+}
+

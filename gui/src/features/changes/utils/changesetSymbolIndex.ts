@@ -121,11 +121,35 @@ const CSHARP_PATTERNS: PatternDef[] = [
     kind: MonacoSymbolKind.Enum,
     label: 'enum',
   },
-  // Methods
+  // Constructors: public/private/protected/internal ClassName(...)
+  {
+    regex: /^\s*(?:(?:public|private|protected|internal)\s+)+([A-Z][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?::\s*(?:base|this)\s*\([^)]*\))?\s*\{?/,
+    kind: MonacoSymbolKind.Constructor,
+    label: 'function',
+  },
+  // Methods with access modifiers
   {
     regex: /^\s*(?:(?:public|private|protected|internal|static|async|virtual|override|abstract|sealed|new)\s+)+(?:void|[A-Za-z0-9_<>?[\]\s,]+)\s+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\([^)]*\)/,
     kind: MonacoSymbolKind.Method,
     label: 'function',
+  },
+  // Test methods or methods with Task/void return type
+  {
+    regex: /^\s*(?:(?:async|static)\s+)?(?:void|Task(?:<[^>]+>)?|IActionResult|ActionResult(?:<[^>]+>)?)\s+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\([^)]*\)/,
+    kind: MonacoSymbolKind.Method,
+    label: 'function',
+  },
+  // Properties: public/private/protected/internal Type Name { get; ... }
+  {
+    regex: /^\s*(?:(?:public|private|protected|internal|virtual|override|abstract|required|static)\s+)+[A-Za-z0-9_<>?[\]\s,]+\s+([A-Za-z0-9_]+)\s*\{\s*(?:get|set|init)/,
+    kind: MonacoSymbolKind.Property,
+    label: 'variable',
+  },
+  // Expression-bodied properties or methods: public Type Name => ...
+  {
+    regex: /^\s*(?:(?:public|private|protected|internal|virtual|override|abstract|static)\s+)+[A-Za-z0-9_<>?[\]\s,]+\s+([A-Za-z0-9_]+)\s*=>/,
+    kind: MonacoSymbolKind.Property,
+    label: 'variable',
   },
 ];
 
@@ -386,6 +410,38 @@ export class ChangesetSymbolIndex {
         }
       }
     });
+
+    // In addition to scanning content, scan hunk.enclosingDeclaration (from git diff @@ headers)
+    if (hunks && hunks.length > 0) {
+      for (const hunk of hunks) {
+        if (!hunk.enclosingDeclaration) continue;
+        for (const pattern of patterns) {
+          const match = hunk.enclosingDeclaration.match(pattern.regex);
+          if (match && match[1]) {
+            const symbolName = match[1];
+            if (!newFileSymbols.some((s) => s.name === symbolName)) {
+              newFileSymbols.push({
+                id: `${cleanRepo}:${cleanPath}:${hunk.startLineModified}:${symbolName}`,
+                name: symbolName,
+                kind: pattern.kind,
+                kindLabel: pattern.label,
+                repoName,
+                repoPath: repoPath || (cleanRepo.includes('/') || cleanRepo.includes('\\') ? cleanRepo : undefined),
+                filePath: cleanPath,
+                uriString,
+                lineNumber: hunk.startLineModified,
+                column: 1,
+                isModifiedInChangeset: true,
+                changeType: 'modified',
+                hunkIndex: hunk.hunkIndex,
+                hunkId: hunk.id,
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
 
     this.symbols = [...remainingSymbols, ...newFileSymbols];
     this.rebuildMap();
