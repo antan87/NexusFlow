@@ -1,6 +1,5 @@
-import { useState, useEffect, type ComponentProps } from 'react';
+import { useState, useEffect, useCallback, type ComponentProps } from 'react';
 import {
-  RefreshCw,
   MoreVertical,
   Copy,
   Trash2,
@@ -16,7 +15,6 @@ import {
   Bot,
   Brain,
   Workflow,
-  GitBranch,
   Zap,
   Building2,
   Tag,
@@ -36,6 +34,8 @@ import type { Feature, WorkspaceStatus, RepoInfo, DomainPack, ResolvedCategoryRu
 import { API_BASE } from '../lib/apiBase.js';
 import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
+import { ProcessCockpitHeader } from '../app/ProcessCockpitHeader.js';
+import { useCockpitStore, cockpitStore, upcastWorkspaceToCockpit } from '../features/cockpit/cockpitStore.js';
 
 const renderEditorIcon = (id: string, name: string) => {
   const lower = `${id} ${name}`.toLowerCase();
@@ -78,6 +78,7 @@ import { Spinner } from '../components/ui/spinner.js';
 import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
 import {
+  useConfig,
   useWorkspaceLaunchTargets,
   useWorkspaceSkills,
   useSkills,
@@ -85,6 +86,7 @@ import {
   useCreateDomainPack,
   useSaveDomainPack,
   useDeleteDomainPack,
+  useWorkspaceLifecycle,
 } from '../lib/api/queries.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
@@ -167,6 +169,28 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const [isLegacy, setIsLegacy] = useState(false);
   const [migrating, setMigrating] = useState(false);
+  const cockpit = useCockpitStore();
+  const { data: lifecycleData } = useWorkspaceLifecycle(selected?.branchName ?? null);
+
+  useEffect(() => {
+    if (!selected) return;
+    const st = workspaceStatuses[selected.branchName];
+    const cockpitData = upcastWorkspaceToCockpit(
+      selected,
+      lifecycleData?.lifecycle ?? null,
+      st,
+      planProps?.planContent,
+      lifecycleData?.report ?? null
+    );
+    cockpitStore.setWorkspaceData({
+      workspaceId: selected.branchName,
+      workspaceTitle: cockpitData.workspaceTitle,
+      workspaceIntent: cockpitData.workspaceIntent,
+      iterations: cockpitData.iterations,
+      worktrees: cockpitData.worktrees,
+      gateStatus: cockpitData.gateStatus,
+    });
+  }, [selected, workspaceStatuses, lifecycleData, planProps?.planContent]);
 
   useEffect(() => {
     if (!selected?.branchName) {
@@ -250,6 +274,15 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const [savingTagDetails, setSavingTagDetails] = useState(false);
   const [deletingTagDetails, setDeletingTagDetails] = useState(false);
 
+  const fetchDomainData = useCallback(async (wsId: string) => {
+    try {
+      const res = await apiFetch<any>(`/api/workspace/${encodeURIComponent(wsId)}/domain-packs`);
+      if (res) setDomainData(res);
+    } catch {
+      setDomainData(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selected) {
       setDomainData(null);
@@ -258,16 +291,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     setSpecInput(selected.description || '');
     setEditingSpec(false);
     void fetchDomainData(selected.branchName);
-  }, [selected?.branchName]);
-
-  const fetchDomainData = async (wsId: string) => {
-    try {
-      const res = await apiFetch<any>(`/api/workspace/${encodeURIComponent(wsId)}/domain-packs`);
-      if (res) setDomainData(res);
-    } catch {
-      setDomainData(null);
-    }
-  };
+  }, [selected, fetchDomainData]);
 
   const toggleDomainPack = async (packId: string) => {
     if (!selected) return;
@@ -476,10 +500,32 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const availableRepos = selected ? repos.filter((r) => !selected.repos.includes(r.path)) : [];
 
   const launchTargets = useWorkspaceLaunchTargets();
+  const config = useConfig().data?.config;
   const [openingEditor, setOpeningEditor] = useState<string | null>(null);
 
   const availableEditors = launchTargets.data?.filter((t) => t.kind === 'editor' && t.available) ?? [];
-  const primaryEditor = availableEditors.find((e) => e.id === 'vscode-insiders')
+  const preferredEditorId = config?.defaultEditor
+    ? ({
+        code: 'vscode',
+        vscode: 'vscode',
+        'code-insiders': 'vscode-insiders',
+        'vscode-insiders': 'vscode-insiders',
+        cursor: 'cursor',
+        antigravity: 'antigravity',
+        idea: 'intellij',
+        intellij: 'intellij',
+        webstorm: 'webstorm',
+        charm: 'pycharm',
+        pycharm: 'pycharm',
+        subl: 'sublime',
+        sublime: 'sublime',
+        zed: 'zed',
+        windsurf: 'windsurf',
+      } as Record<string, string>)[config.defaultEditor] || config.defaultEditor
+    : undefined;
+
+  const primaryEditor = (preferredEditorId ? availableEditors.find((e) => e.id === preferredEditorId) : undefined)
+    || availableEditors.find((e) => e.id === 'vscode-insiders')
     || availableEditors.find((e) => e.id === 'vscode')
     || availableEditors[0];
 
@@ -505,100 +551,121 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     const sync = selectedMode === 'in-place' ? null : (st ? syncMeta(st.syncStatus) : null);
     const totalChangedFiles = st?.changedFiles ?? 0;
 
-    return (
-      <div className="flex flex-col min-w-0 pb-12">
-        {/* Workspace Hero Cockpit Header */}
-        <div className="border-b border-border/80 bg-card/75 backdrop-blur-md px-6 py-5 shadow-xs">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            {/* Left: Branch Title, Badges, and Live Telemetry */}
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="grid size-7 place-items-center rounded-md bg-primary/15 text-primary border border-primary/25 shrink-0">
-                  <GitBranch size={15} />
-                </div>
-                <h1 className="truncate font-mono text-base sm:text-lg font-extrabold text-foreground tracking-tight" title={selected.branchName}>
-                  {selected.branchName}
-                </h1>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const copied = await safeCopyToClipboard(selected.branchName);
-                    if (copied) showToast?.('Copied branch name to clipboard.', 'success');
-                  }}
-                  className="text-muted-foreground hover:text-primary transition-colors p-1 rounded-md hover:bg-accent cursor-pointer"
-                  title="Copy branch name"
-                >
-                  <Copy size={13} />
-                </button>
-                <span className="inline-flex items-center rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary uppercase tracking-wider">
-                  {selectedMode === 'in-place' ? 'In-Place Mode' : 'Worktree Mode'}
-                </span>
-              </div>
+    const activeWorktree = (cockpit.activeWorktreeId && cockpit.worktrees[cockpit.activeWorktreeId])
+      ? cockpit.worktrees[cockpit.activeWorktreeId]
+      : Object.values(cockpit.worktrees)[0] || null;
 
-              {/* High-tech Sub-strip with live status indicators */}
-              <div className="mt-2.5 flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted-foreground">
-                <span className="flex items-center gap-1.5 text-foreground/80 font-medium">
-                  <FolderGit2 size={13} className="text-muted-foreground" />
-                  {selected.repos.length} {selected.repos.length === 1 ? 'repo' : 'repos'}
-                </span>
-                <span>•</span>
-                {totalChangedFiles > 0 ? (
+    return (
+      <div className="flex flex-col min-w-0 pb-12 w-full">
+        {/* L0 + L1 Process Cockpit Header */}
+        <ProcessCockpitHeader
+          workspaceTitle={cockpit.workspaceTitle || selected.description || selected.branchName}
+          workspaceDescription={cockpit.workspaceIntent || selected.description}
+          activeWorktree={activeWorktree}
+          iterations={cockpit.iterations}
+          activeIterationId={cockpit.activeIterationId}
+          onSelectIteration={(iterId) => cockpit.selectIteration(iterId)}
+          activeStage={subTab === 'changes' ? 'diff' : subTab === 'plan' ? 'plan' : subTab === 'knowledge' ? 'knowledge' : 'overview'}
+          onSelectStage={(stage) => {
+            if (stage === 'diff') onSelectTab(selected.branchName, 'changes');
+            else if (stage === 'plan') onSelectTab(selected.branchName, 'plan');
+            else if (stage === 'knowledge') onSelectTab(selected.branchName, 'knowledge');
+            else onSelectTab(selected.branchName, 'overview');
+            cockpit.setActiveStage(stage);
+          }}
+          diffViewMode={cockpit.diffViewMode}
+          onToggleDiffMode={() => cockpit.toggleDiffMode()}
+          isZenMode={cockpit.isZenMode}
+          onToggleZenMode={() => cockpit.toggleZenMode()}
+          gateStatus={cockpit.gateStatus}
+          onNewIteration={() => onSelectTab(selected.branchName, 'plan')}
+          showToast={showToast}
+        />
+
+        {/* Compact Workspace Action Bar (collapsed in Zen Mode) */}
+        {!cockpit.isZenMode && (
+          <div className="border-b border-border bg-card/80 px-4 py-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
+            {/* Left: Branch Title & Telemetry */}
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <span className="font-mono font-bold text-foreground truncate" title={selected.branchName}>
+                {selected.branchName}
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  const copied = await safeCopyToClipboard(selected.branchName);
+                  if (copied) showToast?.('Copied branch name to clipboard.', 'success');
+                }}
+                className="text-muted-foreground hover:text-primary transition-colors p-0.5 rounded hover:bg-secondary cursor-pointer"
+                title="Copy branch name"
+              >
+                <Copy size={11} />
+              </button>
+              <span className="inline-flex items-center rounded border border-border bg-secondary/60 px-1.5 py-0.2 font-mono text-[10px] font-medium text-muted-foreground uppercase">
+                {selectedMode === 'in-place' ? 'in-place' : 'worktree'}
+              </span>
+              <span className="text-muted-foreground/50">•</span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {selected.repos.length} {selected.repos.length === 1 ? 'repo' : 'repos'}
+              </span>
+              {totalChangedFiles > 0 ? (
+                <>
+                  <span className="text-muted-foreground/50">•</span>
                   <button
                     type="button"
                     onClick={() => onSelectTab(selected.branchName, 'changes')}
-                    className="flex items-center gap-1.5 text-amber-400 font-semibold hover:underline cursor-pointer"
+                    className="inline-flex items-center gap-1 text-amber-400 font-semibold font-mono text-[11px] hover:underline cursor-pointer"
                   >
-                    <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
-                    {totalChangedFiles} modified files
+                    <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {totalChangedFiles} diffs
                   </button>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                    <span className="size-2 rounded-full bg-emerald-400" />
-                    Clean worktrees
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground/50">•</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-400 font-mono text-[11px]">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    clean
                   </span>
-                )}
-                <span>•</span>
-                <span className="text-muted-foreground/80">Created {new Date(selected.createdAt).toLocaleDateString()}</span>
-                {sync && (
-                  <>
-                    <span>•</span>
-                    <span className="flex items-center gap-1.5 text-primary font-medium">
-                      <RefreshCw size={11} className="animate-spin-slow" /> {sync.label}
-                    </span>
-                  </>
-                )}
-              </div>
+                </>
+              )}
+              {sync && (
+                <>
+                  <span className="text-muted-foreground/50">•</span>
+                  <span className="font-mono text-[10px] text-primary">{sync.label}</span>
+                </>
+              )}
             </div>
 
-            {/* Right: Quick Action Controls */}
-            <div className="flex items-center gap-2 shrink-0">
+            {/* Right: Compact Editor & Context Actions */}
+            <div className="flex items-center gap-1.5 shrink-0">
               {primaryEditor && (
                 availableEditors.length > 1 ? (
-                  <div className="inline-flex h-9 items-center rounded-lg border border-border bg-card shadow-xs hover:border-primary/40 transition-colors">
+                  <div className="inline-flex h-7 items-center rounded-md border border-border bg-secondary/80 text-xs">
                     <button
                       type="button"
                       disabled={Boolean(openingEditor)}
                       onClick={() => void handleOpenEditor(primaryEditor.id)}
-                      title={`Open workspace in ${primaryEditor.name}`}
-                      className="inline-flex h-full items-center gap-2 px-3.5 text-xs font-bold text-foreground hover:bg-accent transition-colors cursor-pointer rounded-l-lg"
+                      title={`Open in ${primaryEditor.name}`}
+                      className="inline-flex h-full items-center gap-1.5 px-2.5 font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer rounded-l-md"
                     >
-                      {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
+                      {openingEditor === primaryEditor.id ? <Spinner className="size-3" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
                       <span>{primaryEditor.name}</span>
                     </button>
                     <Menu>
-                      <MenuTrigger aria-label="Choose editor" className="inline-flex h-full w-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent border-l border-border transition-colors cursor-pointer rounded-r-lg">
-                        <ChevronDown size={13} />
+                      <MenuTrigger aria-label="Choose editor" className="inline-flex h-full w-6 items-center justify-center text-muted-foreground hover:text-foreground border-l border-border transition-colors cursor-pointer rounded-r-md">
+                        <ChevronDown size={11} />
                       </MenuTrigger>
-                      <MenuPopup align="end" className="w-56">
-                        <div className="px-2.5 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                          Open Workspace In
+                      <MenuPopup align="end" className="w-52">
+                        <div className="px-2 py-1 text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-wider">
+                          Open in Editor
                         </div>
                         {availableEditors.map((ed) => (
                           <MenuItem
                             key={ed.id}
                             onClick={() => void handleOpenEditor(ed.id)}
                             className={cn(
-                              'flex items-center justify-between text-xs py-2',
+                              'flex items-center justify-between text-xs py-1.5',
                               ed.id === primaryEditor.id && 'font-bold text-primary bg-primary/5'
                             )}
                           >
@@ -606,7 +673,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                               {renderEditorIcon(ed.id, ed.name)}
                               <span className="truncate">{ed.name}</span>
                             </div>
-                            {ed.id === primaryEditor.id && <span className="text-[10px] text-primary font-mono font-bold">(default)</span>}
+                            {ed.id === primaryEditor.id && <span className="text-[10px] text-primary font-mono">(default)</span>}
                           </MenuItem>
                         ))}
                       </MenuPopup>
@@ -615,53 +682,49 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 ) : (
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="xs"
                     disabled={Boolean(openingEditor)}
                     onClick={() => void handleOpenEditor(primaryEditor.id)}
-                    title={`Open workspace in ${primaryEditor.name}`}
-                    className="font-bold h-9 gap-2"
+                    className="h-7 text-xs gap-1.5 border-border cursor-pointer"
                   >
-                    {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
+                    {openingEditor === primaryEditor.id ? <Spinner className="size-3" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
                     <span>{primaryEditor.name}</span>
                   </Button>
                 )
               )}
 
-              {/* Fast Copy Prompt Button */}
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={() => handleCopyPrompt(selected)}
-                aria-label="Copy Context"
-                title="Copy AI Context prompt for external LLM"
-                className="h-9 gap-1.5 text-xs font-semibold"
+                title="Copy Context prompt for external LLM"
+                className="h-7 gap-1 text-xs border-border text-muted-foreground hover:text-foreground cursor-pointer"
               >
-                <Copy size={13} />
+                <Copy size={11} />
                 <span className="hidden sm:inline">Copy Context</span>
               </Button>
 
-              {/* More Actions Menu */}
               <Menu>
-                <MenuTrigger aria-label="Workspace actions" className="grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer shadow-xs">
-                  <MoreVertical size={15} />
+                <MenuTrigger aria-label="Workspace actions" className="grid size-7 place-items-center rounded-md border border-border bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                  <MoreVertical size={13} />
                 </MenuTrigger>
-                <MenuPopup align="end" className="w-52">
-                  <MenuItem onClick={() => handleCopyPrompt(selected)} className="flex items-center gap-2 text-xs py-2">
-                    <Copy size={13} /> <span>Copy AI Context</span>
+                <MenuPopup align="end" className="w-48">
+                  <MenuItem onClick={() => handleCopyPrompt(selected)} className="flex items-center gap-2 text-xs py-1.5">
+                    <Copy size={12} /> <span>Copy AI Context</span>
                   </MenuItem>
                   <MenuItem
                     onClick={() => void handleDeleteWorkspace(selected.branchName)}
                     disabled={deleteWsLoading === selected.branchName}
-                    className="flex items-center gap-2 text-xs py-2 text-destructive hover:bg-destructive/10"
+                    className="flex items-center gap-2 text-xs py-1.5 text-destructive hover:bg-destructive/10"
                   >
-                    <Trash2 size={13} />
-                    <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Workspace'}</span>
+                    <Trash2 size={12} />
+                    <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Worktree'}</span>
                   </MenuItem>
                 </MenuPopup>
               </Menu>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Tab Navigation & Content Container */}
         <div className="px-6 pt-5">
@@ -691,8 +754,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}
             className="mb-6"
           >
-            {/* Rich Luxury Segmented Menu Bar */}
-            <TabsList className="w-full flex-nowrap overflow-x-auto justify-start gap-1.5 p-1.5 rounded-xl border border-border/70 bg-card/60 backdrop-blur-md shadow-xs">
+            {/* Minimalist Cockpit Editor Tabstrip */}
+            <TabsList className="w-full flex-nowrap overflow-x-auto justify-start gap-1 p-1 rounded-lg border border-border bg-card shadow-xs">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = subTab === tab.value;
@@ -700,13 +763,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
                 if (tab.value === 'changes' && totalChangedFiles > 0) {
                   badge = (
-                    <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-amber-400">
+                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-amber-400">
                       {totalChangedFiles}
                     </span>
                   );
                 } else if (tab.value === 'skills' && activeSkills.length > 0) {
                   badge = (
-                    <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
+                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
                       {activeSkills.length}
                     </span>
                   );
@@ -718,13 +781,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     value={tab.value}
                     aria-label={tab.ariaLabel || tab.label}
                     className={cn(
-                      'flex shrink-0 items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer',
+                      'flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
                       isActive
-                        ? 'bg-card text-foreground shadow-xs border border-primary/30 text-primary ring-1 ring-primary/20'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/70'
+                        ? 'bg-secondary text-foreground shadow-xs border border-border font-bold'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                     )}
                   >
-                    <Icon size={14} className={cn('shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')} />
+                    <Icon size={13} className={cn('shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')} />
                     <span>{tab.label}</span>
                     {badge}
                   </TabsTab>
@@ -1319,8 +1382,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-w-0 h-full overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-6xl flex-col">
+        <div className="flex-1 min-w-0 h-full overflow-y-auto flex flex-col">
+          <div className="flex w-full flex-1 min-w-0 flex-col">
             {renderInspector()}
           </div>
         </div>

@@ -1092,23 +1092,21 @@ Core Instructions:
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
-              <div className="min-w-0">
-                <span className="font-semibold text-foreground">Desktop updates</span>
-                {updateCheckError ? (
+            {updateCheckError && (
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs">
+                <div className="min-w-0">
+                  <span className="font-semibold text-foreground">Desktop update check</span>
                   <p className="mt-0.5 truncate text-red-300" role="alert">{updateCheckError}</p>
-                ) : (
-                  <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
-                )}
+                </div>
+                <button
+                  onClick={handleCheckForUpdates}
+                  disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
+                  className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50 cursor-pointer"
+                >
+                  Check again
+                </button>
               </div>
-              <button
-                onClick={handleCheckForUpdates}
-                disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
-                className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                {updateCheckError ? 'Check again' : 'Check for updates'}
-              </button>
-            </div>
+            )}
             {/* Update Notification Banner. Updates are always optional: Later
                 hides the banner for this session and no native installer is
                 exposed when this dashboard is running in a browser. */}

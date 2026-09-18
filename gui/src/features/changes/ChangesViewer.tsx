@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+
 import {
   FolderGit2,
   RefreshCw,
@@ -6,9 +7,12 @@ import {
   Save,
   ChevronDown,
   ChevronRight,
-  Copy,
+  ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
+  ListTree,
+  ExternalLink,
+  Navigation,
 } from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
@@ -17,6 +21,17 @@ import { Input } from '../../components/ui/input.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
+import { PluggableDiffViewer } from './PluggableDiffViewer.js';
+import { DiffErrorBoundary } from './DiffErrorBoundary.js';
+import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
+import {
+  globalChangesetSymbolIndex,
+  useChangesetSymbolStore,
+  type ChangesetSymbol,
+} from './utils/changesetSymbolIndex.js';
+import { parseUnifiedDiff } from './utils/diffParser.js';
+import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
+import { useConfig } from '../../lib/api/queries.js';
 
 interface ChangesViewerProps {
   ws: Feature;
@@ -35,6 +50,7 @@ interface ChangesViewerProps {
   fetchGitChanges: (wsId: string) => Promise<void>;
   handleSyncAll: (wsId: string) => Promise<void>;
   handleCommitAll: (wsId: string) => Promise<void>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export const ChangesViewer: React.FC<ChangesViewerProps> = ({
@@ -54,6 +70,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   fetchGitChanges,
   handleSyncAll,
   handleCommitAll,
+  showToast,
 }) => {
   // Collapsed repositories state: default to TRUE (collapsed) so user isn't overwhelmed
   const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
@@ -61,10 +78,124 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [diffCache, setDiffCache] = useState<Record<string, string>>({});
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
-  const [copiedKey, setCopiedKey] = useState<string>('');
+  const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
+  const [targetLineMap, setTargetLineMap] = useState<Record<string, number>>({});
+  const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
+
+  const config = useConfig().data?.config;
+  const defaultEditor = config?.defaultEditor;
+  const editorLabel = getEditorLabel(defaultEditor);
+
+  // Subscribe reactively to the global symbol store
+  const allIndexedSymbols = useChangesetSymbolStore();
+
+  const reposWithChanges = gitChanges.filter((repo) => repo.files && repo.files.length > 0);
+  const totalFilesAcrossRepos = reposWithChanges.reduce((sum, r) => sum + r.files.length, 0);
+
+  // Reset cache and symbols when active workspace changes
+  useEffect(() => {
+    setDiffCache({});
+    setExpandedFiles({});
+    setDiffErrors({});
+    setTargetLineMap({});
+    globalChangesetSymbolIndex.clear();
+  }, [ws.branchName]);
+
+  // Eagerly pre-fetch diffs for all modified files and index symbols immediately
+  useEffect(() => {
+    if (!gitChanges || gitChanges.length === 0) {
+      globalChangesetSymbolIndex.clear();
+      return;
+    }
+
+    let cancelled = false;
+
+    // Collect all valid repo/file pairs currently in gitChanges
+    const activeFileKeys = new Set<string>();
+    for (const repo of gitChanges) {
+      for (const f of repo.files || []) {
+        activeFileKeys.add(`${repo.repoName}/${f.file}`);
+      }
+    }
+
+    // Prune symbols for files no longer in gitChanges
+    for (const sym of globalChangesetSymbolIndex.getAllSymbols()) {
+      if (!activeFileKeys.has(`${sym.repoName}/${sym.filePath}`)) {
+        globalChangesetSymbolIndex.removeFile(sym.repoName, sym.filePath);
+      }
+    }
+
+    const fetchAndIndexAll = async () => {
+      const fetchPromises: Promise<void>[] = [];
+
+      for (const repo of gitChanges) {
+        for (const f of repo.files || []) {
+          const cacheKey = `${repo.repoName}/${f.file}`;
+          const p = (async () => {
+            if (cancelled) return;
+            let diffText = diffCache[cacheKey];
+            if (!diffText) {
+              try {
+                const encodedId = encodeURIComponent(ws.branchName);
+                const encodedRepo = encodeURIComponent(repo.repoName);
+                const encodedFile = encodeURIComponent(f.file);
+                const res = await fetch(
+                  `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
+                );
+                if (res.ok && !cancelled) {
+                  const data = await res.json();
+                  diffText = data.diff || '';
+                  setDiffCache((prev) => ({ ...prev, [cacheKey]: diffText }));
+                }
+              } catch {
+                // Ignore background prefetch network errors
+              }
+            }
+
+            if (diffText && !cancelled) {
+              const parsed = parseUnifiedDiff(diffText);
+              globalChangesetSymbolIndex.indexFile(
+                repo.repoName,
+                f.file,
+                parsed.modifiedContent,
+                parsed.hunks,
+                repo.repoPath
+              );
+            }
+          })();
+          fetchPromises.push(p);
+        }
+      }
+
+      await Promise.all(fetchPromises);
+    };
+
+    void fetchAndIndexAll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gitChanges, ws.branchName]);
+
+  // Flattened list of all files across all repos for multi-file jump bar and keyboard navigation
+  const allFiles = useMemo(() => {
+    const list: { repoName: string; repoPath: string; file: string; type: string; additions: number; deletions: number }[] = [];
+    for (const repo of reposWithChanges) {
+      for (const f of repo.files || []) {
+        list.push({
+          repoName: repo.repoName,
+          repoPath: repo.repoPath,
+          file: f.file,
+          type: f.type,
+          additions: f.additions || 0,
+          deletions: f.deletions || 0,
+        });
+      }
+    }
+    return list;
+  }, [reposWithChanges]);
 
   const isRepoCollapsed = (repoName: string): boolean => {
-    // Default to collapsed (true) if never explicitly toggled
     return collapsedRepos[repoName] ?? true;
   };
 
@@ -92,75 +223,121 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setExpandedFiles({});
   };
 
-  const toggleFileExpansion = async (repoName: string, fileName: string) => {
-    const cacheKey = `${repoName}/${fileName}`;
-    const newExpanded = !expandedFiles[cacheKey];
-    setExpandedFiles((prev) => ({ ...prev, [cacheKey]: newExpanded }));
+  const toggleFileExpansion = useCallback(
+    async (repoName: string, fileName: string) => {
+      const cacheKey = `${repoName}/${fileName}`;
+      const newExpanded = !expandedFiles[cacheKey];
+      setExpandedFiles((prev) => ({ ...prev, [cacheKey]: newExpanded }));
 
-    if (newExpanded && !diffCache[cacheKey]) {
-      setDiffLoading((prev) => ({ ...prev, [cacheKey]: true }));
-      setDiffErrors((prev) => ({ ...prev, [cacheKey]: '' }));
-      try {
-        const encodedId = encodeURIComponent(ws.branchName);
-        const encodedRepo = encodeURIComponent(repoName);
-        const encodedFile = encodeURIComponent(fileName);
-        const res = await fetch(
-          `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
-        );
-        if (!res.ok) {
-          throw new Error(`Failed to load diff: ${res.statusText}`);
-        }
-        const data = await res.json();
-        setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
-      } catch (err: any) {
-        setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
-      } finally {
-        setDiffLoading((prev) => ({ ...prev, [cacheKey]: false }));
-      }
-    }
-  };
-
-  const renderDiffContent = (diffText: string) => {
-    if (!diffText || !diffText.trim()) {
-      return <div className="p-3 font-mono text-[11px] italic text-muted-foreground">No diff details available.</div>;
-    }
-    const lines = diffText.split('\n');
-    return (
-      <pre className="custom-scrollbar max-h-[450px] overflow-x-auto overflow-y-auto rounded-xl border border-border bg-muted/40 p-4 font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-        {lines.map((line, idx) => {
-          let lineClass: string;
-          if (line.startsWith('+') && !line.startsWith('+++')) {
-            lineClass = 'block w-full rounded-sm bg-success/10 px-1 text-success-foreground';
-          } else if (line.startsWith('-') && !line.startsWith('---')) {
-            lineClass = 'block w-full rounded-sm bg-destructive/10 px-1 text-destructive-foreground';
-          } else if (line.startsWith('@@')) {
-            lineClass = 'block w-full bg-info/10 px-1 font-semibold italic text-info-foreground';
-          } else if (
-            line.startsWith('diff') ||
-            line.startsWith('index') ||
-            line.startsWith('---') ||
-            line.startsWith('+++')
-          ) {
-            lineClass = 'block w-full font-bold text-muted-foreground';
-          } else {
-            lineClass = 'block w-full px-1 text-foreground';
-          }
-          return (
-            <code key={idx} className={lineClass}>
-              {line}
-            </code>
+      if (newExpanded && !diffCache[cacheKey]) {
+        setDiffLoading((prev) => ({ ...prev, [cacheKey]: true }));
+        setDiffErrors((prev) => ({ ...prev, [cacheKey]: '' }));
+        try {
+          const encodedId = encodeURIComponent(ws.branchName);
+          const encodedRepo = encodeURIComponent(repoName);
+          const encodedFile = encodeURIComponent(fileName);
+          const res = await fetch(
+            `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
           );
-        })}
-      </pre>
+          if (!res.ok) {
+            throw new Error(`Failed to load diff: ${res.statusText}`);
+          }
+          const data = await res.json();
+          setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
+        } catch (err: any) {
+          setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
+        } finally {
+          setDiffLoading((prev) => ({ ...prev, [cacheKey]: false }));
+        }
+      }
+    },
+    [expandedFiles, diffCache, ws.branchName]
+  );
+
+  // Jump to a specific file in the changeset and optionally reveal a line
+  const jumpToFile = useCallback(
+    async (index: number, line?: number) => {
+      if (index < 0 || index >= allFiles.length) return;
+      setSelectedFileIndex(index);
+      const target = allFiles[index];
+      const cacheKey = `${target.repoName}/${target.file}`;
+
+      // Ensure repo is expanded
+      setCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
+
+      // Ensure file is expanded
+      if (!expandedFiles[cacheKey]) {
+        await toggleFileExpansion(target.repoName, target.file);
+      }
+
+      if (line !== undefined) {
+        setTargetLineMap((prev) => ({ ...prev, [cacheKey]: line }));
+      }
+
+      // Scroll to file in DOM
+      const cleanId = `file-diff-${target.repoName}-${target.file.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      setTimeout(() => {
+        const elem = document.getElementById(cleanId);
+        if (elem) {
+          elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
+    },
+    [allFiles, expandedFiles, toggleFileExpansion]
+  );
+
+
+  // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
+  const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
+    const cleanTarget = targetFile.replace(/\\/g, '/').replace(/^\//, '');
+    const index = allFiles.findIndex(
+      (f) =>
+        (f.repoName === targetRepo || targetRepo === 'workspace' || !targetRepo) &&
+        f.file.replace(/\\/g, '/').replace(/^\//, '') === cleanTarget
     );
+
+    if (index !== -1) {
+      void jumpToFile(index, line);
+      showToast?.(`Navigated to ${targetFile}${line ? `:${line}` : ''}`, 'info');
+    } else {
+      showToast?.(`Opening ${targetFile}${line ? `:${line}` : ''} in ${editorLabel}`, 'info');
+      const matchedRepo = gitChanges.find((r) => r.repoName === targetRepo);
+      const targetRepoPath = matchedRepo?.repoPath || (ws.repos && ws.repos.find((p: string) => p.endsWith(targetRepo))) || targetRepo;
+      openInVsCodeAtLine(targetRepoPath, targetFile, line || 1, 1, defaultEditor);
+    }
   };
 
-  const reposWithChanges = gitChanges.filter((repo) => repo.files && repo.files.length > 0);
-  const totalFilesAcrossRepos = reposWithChanges.reduce((sum, r) => sum + r.files.length, 0);
+  // Keyboard navigation shortcuts: Alt+Down (next file) and Alt+Up (prev file)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+      if (e.altKey && (e.key === 'ArrowDown' || e.key === 'Down')) {
+        e.preventDefault();
+        if (allFiles.length > 0) {
+          const nextIdx = (selectedFileIndex + 1) % allFiles.length;
+          void jumpToFile(nextIdx);
+        }
+      } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'Up')) {
+        e.preventDefault();
+        if (allFiles.length > 0) {
+          const prevIdx = (selectedFileIndex - 1 + allFiles.length) % allFiles.length;
+          void jumpToFile(prevIdx);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedFileIndex, allFiles, jumpToFile]);
+
+
+  const activeSelectedFile = allFiles[selectedFileIndex] || null;
 
   return (
     <div className="animate-fade-in">
-      <header className="flex justify-between items-center mb-6 flex-wrap gap-3">
+      <header className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3 flex-wrap">
           <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
             <FolderGit2 size={16} className="text-primary" /> Active Workspace Git Diffs
@@ -219,6 +396,122 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           </Button>
         </div>
       </header>
+
+      {/* ─── QUICK MULTI-FILE JUMP BAR ─────────────────────────────────────────── */}
+      {allFiles.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/90 bg-card/75 p-2.5 px-3.5 backdrop-blur-md shadow-xs select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="grid size-6 place-items-center rounded-md bg-primary/10 text-primary shrink-0">
+              <Navigation size={12} />
+            </span>
+            <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-foreground">
+              <span>File</span>
+              <span className="rounded bg-primary/15 border border-primary/25 px-1.5 py-0.2 text-primary">
+                {selectedFileIndex + 1}
+              </span>
+              <span className="text-muted-foreground">of {allFiles.length}</span>
+            </div>
+
+            {/* Quick File Selector Dropdown */}
+            <select
+              value={selectedFileIndex}
+              onChange={(e) => void jumpToFile(Number(e.target.value))}
+              className="ml-2 max-w-[240px] sm:max-w-[360px] rounded-lg border border-border bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
+            >
+              {allFiles.map((f, i) => (
+                <option key={`${f.repoName}/${f.file}`} value={i}>
+                  [{f.type.slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Jump Bar Navigation Controls & Global Symbols Toggle */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Prev File Button (Alt+Up) */}
+            <button
+              type="button"
+              onClick={() => {
+                const prevIdx = (selectedFileIndex - 1 + allFiles.length) % allFiles.length;
+                void jumpToFile(prevIdx);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              title="Jump to previous modified file (Shortcut: Alt+Up)"
+            >
+              <ChevronUp size={12} />
+              <span className="hidden sm:inline">Prev (Alt+↑)</span>
+            </button>
+
+            {/* Next File Button (Alt+Down) */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextIdx = (selectedFileIndex + 1) % allFiles.length;
+                void jumpToFile(nextIdx);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              title="Jump to next modified file (Shortcut: Alt+Down)"
+            >
+              <ChevronDown size={12} />
+              <span className="hidden sm:inline">Next (Alt+↓)</span>
+            </button>
+
+            {/* Global Changeset Symbols Palette Toggle */}
+            <button
+              type="button"
+              onClick={() => setGlobalSymbolsOpen((prev) => !prev)}
+              className={cn(
+                'inline-flex items-center gap-1 px-2 py-1 rounded border font-mono text-[10px] transition-colors cursor-pointer',
+                globalSymbolsOpen
+                  ? 'border-primary/50 bg-primary/15 text-primary font-bold'
+                  : 'border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground'
+              )}
+              title="Toggle Global Changeset Symbol Explorer"
+            >
+              <ListTree size={12} />
+              <span>Symbols ({allIndexedSymbols.length})</span>
+            </button>
+
+            {/* Open Current File in Desktop Editor */}
+            {activeSelectedFile && (
+              <button
+                type="button"
+                onClick={() => {
+                  openInVsCodeAtLine(activeSelectedFile.repoPath, activeSelectedFile.file, 1, 1, defaultEditor);
+                  showToast?.(`Opened ${activeSelectedFile.file} in ${editorLabel}`, 'success');
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title={`Open selected file in desktop ${editorLabel}`}
+              >
+                <ExternalLink size={11} />
+                <span className="hidden sm:inline">{editorLabel}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── GLOBAL CHANGESET SYMBOLS PALETTE ──────────────────────────────────── */}
+      {globalSymbolsOpen && (
+        <div className="mb-5">
+          <ChangesetSymbolNavigator
+            symbols={allIndexedSymbols}
+            activeFilePath={activeSelectedFile?.file}
+            editorLabel={editorLabel}
+            onSelectSymbol={(sym: ChangesetSymbol) => {
+              handleCrossFileOpen(sym.repoName, sym.filePath, sym.lineNumber);
+            }}
+            onOpenInVsCode={(sym: ChangesetSymbol) => {
+              const fileObj = allFiles.find((f) => f.repoName === sym.repoName && f.file === sym.filePath)
+                || allFiles.find((f) => f.file === sym.filePath);
+              const targetRepoPath = sym.repoPath || fileObj?.repoPath || gitChanges.find((r) => r.repoName === sym.repoName)?.repoPath || sym.repoName;
+              openInVsCodeAtLine(targetRepoPath, sym.filePath, sym.lineNumber, sym.column, defaultEditor);
+              showToast?.(`Opened ${sym.filePath}:${sym.lineNumber} in ${editorLabel}`, 'success');
+            }}
+            onClose={() => setGlobalSymbolsOpen(false)}
+          />
+        </div>
+      )}
 
       {/* Sync Results Banner */}
       {syncResults && ws.mode !== 'in-place' && (
@@ -406,10 +699,12 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                         const isLoading = !!diffLoading[cacheKey];
                         const fileDiff = diffCache[cacheKey] || '';
                         const error = diffErrors[cacheKey] || '';
+                        const cleanDomId = `file-diff-${repo.repoName}-${fileInfo.file.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
                         return (
                           <div
                             key={fileInfo.file}
+                            id={cleanDomId}
                             className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 transition-colors hover:border-primary/30 shadow-2xs"
                           >
                             {/* File Header Row */}
@@ -461,28 +756,21 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                 ) : error ? (
                                   <div className="p-2 font-mono text-[10px] text-destructive-foreground">Error: {error}</div>
                                 ) : (
-                                  <div className="relative">
-                                    {/* Copy Button */}
-                                    <div className="absolute top-2 right-2 z-10">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          navigator.clipboard.writeText(fileDiff);
-                                          setCopiedKey(cacheKey);
-                                          setTimeout(() => setCopiedKey(''), 2000);
-                                        }}
-                                        className="cursor-pointer rounded-lg border border-border bg-card p-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
-                                        title="Copy Diff"
-                                      >
-                                        {copiedKey === cacheKey ? (
-                                          <Check size={12} className="text-success-foreground" />
-                                        ) : (
-                                          <Copy size={12} />
-                                        )}
-                                      </button>
-                                    </div>
-                                    {renderDiffContent(fileDiff)}
-                                  </div>
+                                  <DiffErrorBoundary filePath={fileInfo.file} fallbackContent={fileDiff}>
+                                    <PluggableDiffViewer
+                                      filePath={fileInfo.file}
+                                      repoName={repo.repoName}
+                                      repoPath={repo.repoPath}
+                                      patchText={fileDiff}
+                                      defaultEditor={defaultEditor}
+                                      initialTargetLine={targetLineMap[cacheKey]}
+                                      onOpenFile={handleCrossFileOpen}
+                                      onSelectSymbol={(sym) => {
+                                        handleCrossFileOpen(sym.repoName, sym.filePath, sym.lineNumber);
+                                      }}
+                                      showToast={showToast}
+                                    />
+                                  </DiffErrorBoundary>
                                 )}
                               </div>
                             )}

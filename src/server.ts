@@ -346,7 +346,7 @@ app.get('/ws', async (c, next) => {
 });
 
 // Allowed editor binaries/scripts to prevent command injection
-const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
+const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs', 'windsurf', 'zed']);
 
 // ─── Path containment guards ──────────────────────────────────────────────
 // The server exposes state-changing routes keyed by a workspace `:id` taken
@@ -1730,8 +1730,9 @@ app.post('/api/open-editor', async (c) => {
     const body = await c.req.json().catch(() => ({})) as {
       workspacePath?: unknown;
       command?: unknown;
+      filePath?: unknown;
     };
-    const { workspacePath, command } = body;
+    const { workspacePath, command, filePath } = body;
     if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
@@ -1745,9 +1746,16 @@ app.post('/api/open-editor', async (c) => {
     }
 
     const config = await loadConfig();
-    const safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+    let safeWorkspacePath: string;
+    let isDevDir = false;
+    try {
+      safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+    } catch {
+      safeWorkspacePath = assertWithin(config.devDir, workspacePath);
+      isDevDir = true;
+    }
 
-    // Validate this is an existing NexusFlow workspace, not an arbitrary path.
+    // Validate this is an existing NexusFlow workspace or source repository, not an arbitrary path.
     try {
       const stats = await fs.stat(safeWorkspacePath);
       if (!stats.isDirectory()) {
@@ -1756,15 +1764,44 @@ app.post('/api/open-editor', async (c) => {
     } catch {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
-    const exactWorkspacePath = await resolveExactLaunchWorkspace(
-      config.workspacesDir,
-      safeWorkspacePath,
-    );
+
+    let exactWorkspacePath: string | null = null;
+    if (!isDevDir) {
+      exactWorkspacePath = await resolveExactLaunchWorkspace(
+        config.workspacesDir,
+        safeWorkspacePath,
+      );
+      if (!exactWorkspacePath) {
+        let current = path.dirname(safeWorkspacePath);
+        while (current.length >= config.workspacesDir.length) {
+          exactWorkspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, current);
+          if (exactWorkspacePath) break;
+          const parent = path.dirname(current);
+          if (parent === current) break;
+          current = parent;
+        }
+      }
+    } else {
+      exactWorkspacePath = safeWorkspacePath;
+    }
     if (!exactWorkspacePath) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    await launchWorkspaceTarget(targetId, exactWorkspacePath);
+    let resolvedFilePath: string | undefined;
+    if (typeof filePath === 'string' && filePath.trim()) {
+      const resolved = path.resolve(safeWorkspacePath, filePath.trim());
+      assertWithin(safeWorkspacePath, resolved);
+      resolvedFilePath = resolved;
+    }
+
+    await launchWorkspaceTarget(
+      targetId,
+      resolvedFilePath ? safeWorkspacePath : exactWorkspacePath,
+      { kind: 'new-workspace' },
+      process.platform,
+      resolvedFilePath,
+    );
 
     return c.json({ success: true });
   } catch (error) {
