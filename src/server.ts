@@ -2147,55 +2147,30 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       worktreePath = resolveRepoPath(workspacePath, repoName);
     }
 
-    let diff = '';
-    let isUntracked = false;
-    
-    // Check git status for the file to know if it's untracked
-    try {
-      const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', filePath], { cwd: worktreePath });
-      const statusLine = statusOut.trim();
-      isUntracked = statusLine.startsWith('??');
-      
-      if (isUntracked) {
-        const result = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
-          cwd: worktreePath,
-          reject: false
-        });
-        diff = result.stdout || result.stderr || '';
-      } else {
-        const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
-          cwd: worktreePath,
-          reject: false
-        });
-        diff = result.stdout || result.stderr || '';
-      }
-    } catch (e) {
-      const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
-        cwd: worktreePath,
-        reject: false
-      });
-      diff = result.stdout || result.stderr || '';
-    }
+    const fullPath = path.resolve(worktreePath, filePath);
+    const normalizedFile = filePath.replace(/\\/g, '/');
 
-    let fileContent = '';
-    try {
-      const fullPath = path.resolve(worktreePath, filePath);
-      fileContent = await fs.readFile(fullPath, 'utf-8');
-    } catch {
-      fileContent = '';
-    }
+    // Run git diff, disk file read, and git show HEAD in parallel
+    const [diffResult, fileContentResult, originalContentResult] = await Promise.allSettled([
+      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
+      fs.readFile(fullPath, 'utf-8'),
+      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false }),
+    ]);
 
-    let originalContent = '';
-    if (!isUntracked) {
+    let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
+    let fileContent = fileContentResult.status === 'fulfilled' ? fileContentResult.value : '';
+    let originalContent = originalContentResult.status === 'fulfilled' ? (originalContentResult.value.stdout || '') : '';
+
+    // Handle untracked new files if diff is empty but file exists on disk
+    if (!diff && fileContent && !originalContent) {
       try {
-        const normalizedFile = filePath.replace(/\\/g, '/');
-        const { stdout } = await execa('git', ['show', `HEAD:${normalizedFile}`], {
+        const untrackedDiff = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
           cwd: worktreePath,
           reject: false,
         });
-        originalContent = stdout || '';
+        diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
       } catch {
-        originalContent = '';
+        diff = '';
       }
     }
 
@@ -2209,6 +2184,71 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     return c.json({ diff, fileContent, originalContent, symbols });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13_symbols. Fast batch symbol extraction across all modified files in workspace
+app.get('/api/workspace/:id/changes/symbols', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const allSymbols: any[] = [];
+
+    // Concurrently scan modified files across repositories in feature
+    await Promise.all(
+      feature.repos.map(async (repoPath) => {
+        const repoName = path.basename(repoPath);
+        const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
+
+        try {
+          const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
+          const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+
+          const readPromises = lines.map(async (line) => {
+            const status = line.slice(0, 2).trim();
+            const file = line.slice(2).trim();
+            if (status === 'D') return; // Deleted files have no symbols on disk
+
+            const ext = file.split('.').pop()?.toLowerCase();
+            if (!ext || !['cs', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs'].includes(ext)) {
+              return;
+            }
+
+            const fullFilePath = path.resolve(worktreePath, file);
+            try {
+              const content = await fs.readFile(fullFilePath, 'utf-8');
+              const extracted = await extractAstSymbols(file, content);
+              if (extracted && extracted.length > 0) {
+                for (const s of extracted) {
+                  allSymbols.push({
+                    ...s,
+                    repoName,
+                    repoPath: worktreePath,
+                    filePath: file.replace(/\\/g, '/'),
+                  });
+                }
+              }
+            } catch {
+              // Ignore unreadable or missing files
+            }
+          });
+
+          await Promise.all(readPromises);
+        } catch {
+          // Ignore repo git status errors
+        }
+      })
+    );
+
+    return c.json({ symbols: allSymbols });
   } catch (error) {
     return errorResponse(c, error);
   }

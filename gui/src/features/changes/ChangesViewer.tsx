@@ -108,7 +108,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     globalChangesetSymbolIndex.clear();
   }, [ws.branchName]);
 
-  // Eagerly pre-fetch diffs for all modified files and index symbols immediately
+  // Load symbols across all modified workspace files in a single fast batch call
   useEffect(() => {
     if (!gitChanges || gitChanges.length === 0) {
       globalChangesetSymbolIndex.clear();
@@ -132,67 +132,43 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       }
     }
 
-    const fetchAndIndexAll = async () => {
-      const fetchPromises: Promise<void>[] = [];
-
-      for (const repo of gitChanges) {
-        for (const f of repo.files || []) {
-          const cacheKey = `${repo.repoName}/${f.file}`;
-          const p = (async () => {
-            if (cancelled) return;
-            let diffText = diffCache[cacheKey];
-            let fullContent = fileContentCache[cacheKey];
-            let fileSymbols = symbolsCache[cacheKey];
-            if (!diffText) {
-              try {
-                const encodedId = encodeURIComponent(ws.branchName);
-                const encodedRepo = encodeURIComponent(repo.repoName);
-                const encodedFile = encodeURIComponent(f.file);
-                const res = await fetch(
-                  `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
-                );
-                if (res.ok && !cancelled) {
-                  const data = await res.json();
-                  diffText = data.diff || '';
-                  fullContent = data.fileContent || '';
-                  fileSymbols = data.symbols;
-                  setDiffCache((prev) => ({ ...prev, [cacheKey]: diffText }));
-                  if (fullContent) {
-                    setFileContentCache((prev) => ({ ...prev, [cacheKey]: fullContent }));
-                  }
-                  if (data.originalContent) {
-                    setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
-                  }
-                  if (data.symbols) {
-                    setSymbolsCache((prev) => ({ ...prev, [cacheKey]: data.symbols }));
-                  }
-                }
-              } catch {
-                // Ignore background prefetch network errors
+    const loadWorkspaceSymbols = async () => {
+      try {
+        const encodedId = encodeURIComponent(ws.branchName);
+        const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes/symbols`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          if (data.symbols && Array.isArray(data.symbols)) {
+            // Group symbols by repo/filePath and batch index into store
+            const byFile: Record<string, { repoName: string; filePath: string; repoPath?: string; symbols: any[] }> = {};
+            for (const s of data.symbols) {
+              const key = `${s.repoName}/${s.filePath}`;
+              if (!byFile[key]) {
+                byFile[key] = { repoName: s.repoName, filePath: s.filePath, repoPath: s.repoPath, symbols: [] };
               }
+              byFile[key].symbols.push(s);
             }
 
-            if (diffText && !cancelled) {
-              const parsed = parseUnifiedDiff(diffText);
-              const contentToIndex = fullContent || parsed.modifiedContent;
+            for (const item of Object.values(byFile)) {
+              if (cancelled) break;
+              setSymbolsCache((prev) => ({ ...prev, [`${item.repoName}/${item.filePath}`]: item.symbols }));
               globalChangesetSymbolIndex.indexFile(
-                repo.repoName,
-                f.file,
-                contentToIndex,
-                parsed.hunks,
-                repo.repoPath,
-                fileSymbols || symbolsCache[cacheKey]
+                item.repoName,
+                item.filePath,
+                '',
+                [],
+                item.repoPath,
+                item.symbols
               );
             }
-          })();
-          fetchPromises.push(p);
+          }
         }
+      } catch {
+        // Ignore network errors in background symbol prefetch
       }
-
-      await Promise.all(fetchPromises);
     };
 
-    void fetchAndIndexAll();
+    void loadWorkspaceSymbols();
 
     return () => {
       cancelled = true;
@@ -309,13 +285,14 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       // Ensure repo is expanded
       setCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
 
+      // Set target line BEFORE expansion so PluggableDiffViewer receives initialTargetLine immediately
+      if (line !== undefined) {
+        setTargetLineMap((prev) => ({ ...prev, [cacheKey]: line }));
+      }
+
       // Ensure file is expanded
       if (!expandedFiles[cacheKey]) {
         await toggleFileExpansion(target.repoName, target.file);
-      }
-
-      if (line !== undefined) {
-        setTargetLineMap((prev) => ({ ...prev, [cacheKey]: line }));
       }
 
       // Scroll to file in DOM
@@ -334,11 +311,11 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
   const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
     const cleanTarget = targetFile.replace(/\\/g, '/').replace(/^\//, '');
-    const index = allFiles.findIndex(
-      (f) =>
-        (f.repoName === targetRepo || targetRepo === 'workspace' || !targetRepo) &&
-        f.file.replace(/\\/g, '/').replace(/^\//, '') === cleanTarget
-    );
+    const index = allFiles.findIndex((f) => {
+      const cleanF = f.file.replace(/\\/g, '/').replace(/^\//, '');
+      const repoMatches = f.repoName === targetRepo || targetRepo === 'workspace' || !targetRepo;
+      return repoMatches && (cleanF === cleanTarget || cleanF.endsWith(cleanTarget) || cleanTarget.endsWith(cleanF));
+    });
 
     if (index !== -1) {
       void jumpToFile(index, line);

@@ -122,6 +122,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
 
     let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
     let cursorSub: monaco.IDisposable | null = null;
+    let updateSub: monaco.IDisposable | null = null;
 
     try {
       diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
@@ -129,10 +130,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
         renderSideBySide: viewMode === 'side-by-side',
         ignoreTrimWhitespace: ignoreWhitespace,
         hideUnchangedRegions: {
-          enabled: true,
-          contextLineCount: 3,
-          minimumLineCount: 10,
-          revealLineCount: 20,
+          enabled: false,
         },
         renderIndicators: true,
         originalEditable: false,
@@ -164,6 +162,14 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
         onLineSelect?.(e.position.lineNumber);
       });
 
+      // Synchronize targetLine whenever diff computation completes or updates
+      updateSub = diffEditor.onDidUpdateDiff(() => {
+        if (targetLine && targetLine > 0) {
+          modifiedEditor.revealLineInCenter(targetLine);
+          modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
+        }
+      });
+
       // If an initial targetLine is supplied, reveal it immediately after mounting
       if (targetLine && targetLine > 0) {
         modifiedEditor.revealLineInCenter(targetLine);
@@ -175,6 +181,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
 
     // Cleanup: Strictly dispose listeners and editor widget to prevent memory leaks
     return () => {
+      updateSub?.dispose();
       cursorSub?.dispose();
       openerDisposable?.dispose();
       diffEditor?.dispose();
