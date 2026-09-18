@@ -66,6 +66,7 @@
     "@inquirer/prompts": "^8.5.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "0.152.1",
+    "@vscode/tree-sitter-wasm": "^0.3.1",
     "chalk": "^6.0.0",
     "commander": "^15.0.0",
     "execa": "^10.0.1",
@@ -78,6 +79,7 @@
     "pm2": "^7.0.3",
     "selfsigned": "5.5.0",
     "smol-toml": "^1.8.0",
+    "web-tree-sitter": "^0.27.0",
     "zod": "^4.4.3"
   },
   "overrides": {

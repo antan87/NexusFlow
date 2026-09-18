@@ -1,4 +1,5 @@
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
+import { extractAstSymbols } from './services/symbolService.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -346,7 +347,7 @@ app.get('/ws', async (c, next) => {
 });
 
 // Allowed editor binaries/scripts to prevent command injection
-const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs']);
+const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs', 'windsurf', 'zed']);
 
 // ─── Path containment guards ──────────────────────────────────────────────
 // The server exposes state-changing routes keyed by a workspace `:id` taken
@@ -1730,8 +1731,9 @@ app.post('/api/open-editor', async (c) => {
     const body = await c.req.json().catch(() => ({})) as {
       workspacePath?: unknown;
       command?: unknown;
+      filePath?: unknown;
     };
-    const { workspacePath, command } = body;
+    const { workspacePath, command, filePath } = body;
     if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
@@ -1745,9 +1747,16 @@ app.post('/api/open-editor', async (c) => {
     }
 
     const config = await loadConfig();
-    const safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+    let safeWorkspacePath: string;
+    let isDevDir = false;
+    try {
+      safeWorkspacePath = assertWithin(config.workspacesDir, workspacePath);
+    } catch {
+      safeWorkspacePath = assertWithin(config.devDir, workspacePath);
+      isDevDir = true;
+    }
 
-    // Validate this is an existing NexusFlow workspace, not an arbitrary path.
+    // Validate this is an existing NexusFlow workspace or source repository, not an arbitrary path.
     try {
       const stats = await fs.stat(safeWorkspacePath);
       if (!stats.isDirectory()) {
@@ -1756,15 +1765,44 @@ app.post('/api/open-editor', async (c) => {
     } catch {
       return c.json({ error: 'Workspace path does not exist' }, 400);
     }
-    const exactWorkspacePath = await resolveExactLaunchWorkspace(
-      config.workspacesDir,
-      safeWorkspacePath,
-    );
+
+    let exactWorkspacePath: string | null = null;
+    if (!isDevDir) {
+      exactWorkspacePath = await resolveExactLaunchWorkspace(
+        config.workspacesDir,
+        safeWorkspacePath,
+      );
+      if (!exactWorkspacePath) {
+        let current = path.dirname(safeWorkspacePath);
+        while (current.length >= config.workspacesDir.length) {
+          exactWorkspacePath = await resolveExactLaunchWorkspace(config.workspacesDir, current);
+          if (exactWorkspacePath) break;
+          const parent = path.dirname(current);
+          if (parent === current) break;
+          current = parent;
+        }
+      }
+    } else {
+      exactWorkspacePath = safeWorkspacePath;
+    }
     if (!exactWorkspacePath) {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    await launchWorkspaceTarget(targetId, exactWorkspacePath);
+    let resolvedFilePath: string | undefined;
+    if (typeof filePath === 'string' && filePath.trim()) {
+      const resolved = path.resolve(safeWorkspacePath, filePath.trim());
+      assertWithin(safeWorkspacePath, resolved);
+      resolvedFilePath = resolved;
+    }
+
+    await launchWorkspaceTarget(
+      targetId,
+      resolvedFilePath ? safeWorkspacePath : exactWorkspacePath,
+      { kind: 'new-workspace' },
+      process.platform,
+      resolvedFilePath,
+    );
 
     return c.json({ success: true });
   } catch (error) {
@@ -2104,41 +2142,113 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Repo name "${repoName}" is ambiguous in this workspace.` }, 400);
       }
-      worktreePath = matches[0]!;
+      worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = resolveRepoPath(workspacePath, repoName);
     }
 
-    let diff = '';
-    
-    // Check git status for the file to know if it's untracked
-    try {
-      const { stdout: statusOut } = await execa('git', ['status', '--porcelain', '--', filePath], { cwd: worktreePath });
-      const statusLine = statusOut.trim();
-      const isUntracked = statusLine.startsWith('??');
-      
-      if (isUntracked) {
-        const result = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
+    const fullPath = path.resolve(worktreePath, filePath);
+    const normalizedFile = filePath.replace(/\\/g, '/');
+
+    // Run git diff, disk file read, and git show HEAD in parallel
+    const [diffResult, fileContentResult, originalContentResult] = await Promise.allSettled([
+      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
+      fs.readFile(fullPath, 'utf-8'),
+      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false }),
+    ]);
+
+    let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
+    let fileContent = fileContentResult.status === 'fulfilled' ? fileContentResult.value : '';
+    let originalContent = originalContentResult.status === 'fulfilled' ? (originalContentResult.value.stdout || '') : '';
+
+    // Handle untracked new files if diff is empty but file exists on disk
+    if (!diff && fileContent && !originalContent) {
+      try {
+        const untrackedDiff = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
           cwd: worktreePath,
-          reject: false
+          reject: false,
         });
-        diff = result.stdout || result.stderr || '';
-      } else {
-        const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
-          cwd: worktreePath,
-          reject: false
-        });
-        diff = result.stdout || result.stderr || '';
+        diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
+      } catch {
+        diff = '';
       }
-    } catch (e) {
-      const result = await execa('git', ['diff', 'HEAD', '--', filePath], {
-        cwd: worktreePath,
-        reject: false
-      });
-      diff = result.stdout || result.stderr || '';
     }
 
-    return c.json({ diff });
+    let symbols: any[] = [];
+    if (fileContent) {
+      try {
+        symbols = await extractAstSymbols(filePath, fileContent);
+      } catch {
+        symbols = [];
+      }
+    }
+
+    return c.json({ diff, fileContent, originalContent, symbols });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13_symbols. Fast batch symbol extraction across all modified files in workspace
+app.get('/api/workspace/:id/changes/symbols', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) {
+      return c.json({ error: 'Workspace configuration not found.' }, 404);
+    }
+
+    const allSymbols: any[] = [];
+
+    // Concurrently scan modified files across repositories in feature
+    await Promise.all(
+      feature.repos.map(async (repoPath) => {
+        const repoName = path.basename(repoPath);
+        const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
+
+        try {
+          const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
+          const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+
+          const readPromises = lines.map(async (line) => {
+            const status = line.slice(0, 2).trim();
+            const file = line.slice(2).trim();
+            if (status === 'D') return; // Deleted files have no symbols on disk
+
+            const ext = file.split('.').pop()?.toLowerCase();
+            if (!ext || !['cs', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs'].includes(ext)) {
+              return;
+            }
+
+            const fullFilePath = path.resolve(worktreePath, file);
+            try {
+              const content = await fs.readFile(fullFilePath, 'utf-8');
+              const extracted = await extractAstSymbols(file, content);
+              if (extracted && extracted.length > 0) {
+                for (const s of extracted) {
+                  allSymbols.push({
+                    ...s,
+                    repoName,
+                    repoPath: worktreePath,
+                    filePath: file.replace(/\\/g, '/'),
+                  });
+                }
+              }
+            } catch {
+              // Ignore unreadable or missing files
+            }
+          });
+
+          await Promise.all(readPromises);
+        } catch {
+          // Ignore repo git status errors
+        }
+      })
+    );
+
+    return c.json({ symbols: allSymbols });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2173,7 +2283,7 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
       }
-      worktreePath = matches[0]!;
+      worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
     }

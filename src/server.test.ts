@@ -361,11 +361,83 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(execa).toHaveBeenCalledWith('code-insiders', [process.platform === 'win32' ? `"${workspacePath}"` : workspacePath], {
         stdio: 'ignore',
         shell: process.platform === 'win32',
+        windowsHide: true,
       });
     });
 
-    it('rejects an existing directory outside the configured workspace root', async () => {
+    it('should launch a specific file when filePath is provided', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.spyOn(fs, 'stat').mockResolvedValue({
+        isDirectory: () => true
+      } as any);
+      vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
+        id: 'test-workspace',
+        workspacePath,
+      } as any);
+
+      vi.mocked(execa).mockImplementation((async (command: any, args?: readonly string[]): Promise<any> => ({
+        exitCode: args?.[0] === '--version' && command === 'code-insiders' ? 0 : 1,
+      })) as any);
+
+      const targetFile = 'src/example.ts';
+      const expectedTarget = path.resolve(workspacePath, targetFile);
+
+      const response = await app.request('/api/open-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath,
+          command: 'code-insiders',
+          filePath: targetFile,
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+
+      expect(execa).toHaveBeenCalledWith('code-insiders', [process.platform === 'win32' ? `"${expectedTarget}"` : expectedTarget], {
+        stdio: 'ignore',
+        shell: process.platform === 'win32',
+        windowsHide: true,
+      });
+    });
+
+    it('should launch an in-place repo located in devDir', async () => {
+      const devDir = path.resolve('mock-dev-dir');
+      const repoDir = path.join(devDir, 'in-place-repo');
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir, devDir } as any);
+      vi.spyOn(fs, 'stat').mockResolvedValue({
+        isDirectory: () => true
+      } as any);
+
+      vi.mocked(execa).mockImplementation((async (command: any, args?: readonly string[]): Promise<any> => ({
+        exitCode: args?.[0] === '--version' && command === 'code' ? 0 : 1,
+      })) as any);
+
+      const response = await app.request('/api/open-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspacePath: repoDir,
+          command: 'code',
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+
+      expect(execa).toHaveBeenCalledWith('code', [process.platform === 'win32' ? `"${repoDir}"` : repoDir], {
+        stdio: 'ignore',
+        shell: process.platform === 'win32',
+        windowsHide: true,
+      });
+    });
+
+    it('rejects an existing directory outside the configured workspace root and devDir', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir, devDir: path.resolve('mock-dev-dir') } as any);
 
       const response = await app.request('/api/open-editor', {
         method: 'POST',
@@ -913,6 +985,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(execa).toHaveBeenCalledWith('code', [expect.any(String)], {
         stdio: 'ignore',
         shell: isWin,
+        windowsHide: true,
       });
     });
   });
