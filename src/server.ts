@@ -1,4 +1,5 @@
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
+import { extractAstSymbols } from './services/symbolService.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -2198,7 +2199,16 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       }
     }
 
-    return c.json({ diff, fileContent, originalContent });
+    let symbols: any[] = [];
+    if (fileContent) {
+      try {
+        symbols = await extractAstSymbols(filePath, fileContent);
+      } catch {
+        symbols = [];
+      }
+    }
+
+    return c.json({ diff, fileContent, originalContent, symbols });
   } catch (error) {
     return errorResponse(c, error);
   }

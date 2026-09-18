@@ -25,7 +25,11 @@ import { MonacoDiffAdapter } from './adapters/MonacoDiffAdapter.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
 import { launchVsCodeDiff, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
-import { globalChangesetSymbolIndex, type ChangesetSymbol } from './utils/changesetSymbolIndex.js';
+import {
+  globalChangesetSymbolIndex,
+  type ChangesetSymbol,
+  type RawAstSymbol,
+} from './utils/changesetSymbolIndex.js';
 
 export interface PluggableDiffViewerProps {
   filePath: string;
@@ -38,6 +42,7 @@ export interface PluggableDiffViewerProps {
   viewMode?: DiffViewMode;
   initialTargetLine?: number;
   changesetSymbols?: ChangesetSymbol[];
+  preExtractedSymbols?: RawAstSymbol[];
   onToggleViewMode?: () => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   onHunkAction?: (action: DiffHunkAction) => Promise<void> | void;
@@ -56,6 +61,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   viewMode: controlledViewMode,
   initialTargetLine,
   changesetSymbols,
+  preExtractedSymbols,
   onToggleViewMode,
   showToast,
   onHunkAction,
@@ -85,8 +91,15 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   // Index symbols of this file in the global changeset symbol index
   const fileSymbols = useMemo(() => {
     const contentToIndex = fullFileContent || parsed.modifiedContent;
-    return globalChangesetSymbolIndex.indexFile(repoName, filePath, contentToIndex, hunks, repoPath);
-  }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath]);
+    return globalChangesetSymbolIndex.indexFile(
+      repoName,
+      filePath,
+      contentToIndex,
+      hunks,
+      repoPath,
+      preExtractedSymbols
+    );
+  }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath, preExtractedSymbols]);
 
   // If initialTargetLine changes from parent, sync targetLine and active hunk
   useEffect(() => {

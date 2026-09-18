@@ -221,11 +221,142 @@ test('ChangesetSymbolIndex parses C# symbols', () => {
 
   const method = symbols.find((s) => s.name === 'BuildDataset');
   assert.ok(method);
-  assert.equal(method.kindLabel, 'function');
+  assert.equal(method.kindLabel, 'method');
 
   const enumSym = symbols.find((s) => s.name === 'PriorityBucket');
   assert.ok(enumSym);
   assert.equal(enumSym.kindLabel, 'enum');
+});
+
+test('ChangesetSymbolIndex parses C# constructors and multiline methods accurately', () => {
+  const index = new ChangesetSymbolIndex();
+  const csharpCode = `
+namespace Hogia.LasService.Api.Controllers.Cases.CancelCase;
+
+public sealed class CancelCaseController : ControllerBase
+{
+    private readonly IResultDispatcher _dispatcher;
+
+    public CancelCaseController(IResultDispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+    }
+
+    [HttpPost("{caseId}/cancel")]
+    public async Task<ActionResult<CreateCaseResponse>> Cancel(
+        [FromRoute] string? caseId,
+        [FromBody] CancelCaseRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return Ok();
+    }
+}
+`;
+  const symbols = index.indexFile('API_LasService', 'CancelCaseController.cs', csharpCode);
+
+  const cls = symbols.find((s) => s.name === 'CancelCaseController' && s.kindLabel === 'class');
+  assert.ok(cls);
+  assert.equal(cls.kind, MonacoSymbolKind.Class);
+
+  const ctor = symbols.find((s) => s.name === 'CancelCaseController' && s.kindLabel === 'constructor');
+  assert.ok(ctor, 'Constructor CancelCaseController should be identified');
+  assert.equal(ctor.kind, MonacoSymbolKind.Constructor);
+
+  const method = symbols.find((s) => s.name === 'Cancel');
+  assert.ok(method, 'Multiline method Cancel should be identified');
+  assert.equal(method.kind, MonacoSymbolKind.Method);
+  assert.equal(method.kindLabel, 'method');
+});
+
+test('ChangesetSymbolIndex utilizes preExtractedSymbols from AST parser when provided', () => {
+  const index = new ChangesetSymbolIndex();
+  const mockAstSymbols = [
+    {
+      name: 'CancelCaseController',
+      kind: MonacoSymbolKind.Class,
+      kindLabel: 'class' as const,
+      lineNumber: 4,
+      endLineNumber: 25,
+      column: 21,
+    },
+    {
+      name: 'CancelCaseController',
+      kind: MonacoSymbolKind.Constructor,
+      kindLabel: 'constructor' as const,
+      lineNumber: 8,
+      endLineNumber: 12,
+      column: 12,
+      containerName: 'CancelCaseController',
+    },
+    {
+      name: 'Cancel',
+      kind: MonacoSymbolKind.Method,
+      kindLabel: 'method' as const,
+      lineNumber: 14,
+      endLineNumber: 24,
+      column: 57,
+      containerName: 'CancelCaseController',
+    },
+  ];
+
+  // Hunk only modifies lines 18-20 (inside the Cancel method body)
+  const mockHunks: DiffHunkAction[] = [
+    {
+      id: 'hunk-1',
+      hunkIndex: 0,
+      type: 'accept',
+      startLineOriginal: 18,
+      lineCountOriginal: 3,
+      startLineModified: 18,
+      lineCountModified: 3,
+      patchHeader: '@@ -18,3 +18,3 @@',
+      lines: ['-old statement', '+new statement'],
+    },
+  ];
+
+  const symbols = index.indexFile(
+    'API_LasService',
+    'CancelCaseController.cs',
+    'dummy content',
+    mockHunks,
+    'C:/Users/anton.patron/Git/api_lasservice_container',
+    mockAstSymbols
+  );
+
+  assert.equal(symbols.length, 3);
+  const ctor = symbols.find((s) => s.kindLabel === 'constructor');
+  assert.ok(ctor);
+  assert.equal(ctor.name, 'CancelCaseController');
+  assert.equal(ctor.kind, MonacoSymbolKind.Constructor);
+  assert.equal(ctor.isModifiedInChangeset, false);
+
+  const method = symbols.find((s) => s.kindLabel === 'method');
+  assert.ok(method);
+  assert.equal(method.name, 'Cancel');
+  assert.equal(method.kind, MonacoSymbolKind.Method);
+  assert.equal(method.isModifiedInChangeset, true, 'Method must be marked modified when hunk touches inside its body');
+  assert.equal(method.hunkIndex, 0);
+});
+
+test('ChangesetSymbolIndex parses TypeScript constructors and class methods via fallback regex', () => {
+  const index = new ChangesetSymbolIndex();
+  const tsClassCode = `
+export class OrderProcessor {
+  constructor(private readonly logger: Logger) {}
+
+  public async processOrder(orderId: string): Promise<boolean> {
+    return true;
+  }
+}
+`;
+  const symbols = index.indexFile('repo', 'src/OrderProcessor.ts', tsClassCode);
+  const ctor = symbols.find((s) => s.kindLabel === 'constructor');
+  assert.ok(ctor, 'TypeScript constructor should be detected');
+  assert.equal(ctor.name, 'constructor');
+
+  const meth = symbols.find((s) => s.kindLabel === 'method');
+  assert.ok(meth, 'TypeScript class method should be detected');
+  assert.equal(meth.name, 'processOrder');
 });
 
 

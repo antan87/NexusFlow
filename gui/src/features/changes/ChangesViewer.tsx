@@ -28,6 +28,7 @@ import {
   globalChangesetSymbolIndex,
   useChangesetSymbolStore,
   type ChangesetSymbol,
+  type RawAstSymbol,
 } from './utils/changesetSymbolIndex.js';
 import { parseUnifiedDiff } from './utils/diffParser.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
@@ -78,6 +79,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [diffCache, setDiffCache] = useState<Record<string, string>>({});
   const [fileContentCache, setFileContentCache] = useState<Record<string, string>>({});
   const [originalContentCache, setOriginalContentCache] = useState<Record<string, string>>({});
+  const [symbolsCache, setSymbolsCache] = useState<Record<string, RawAstSymbol[]>>({});
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
@@ -99,6 +101,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setDiffCache({});
     setFileContentCache({});
     setOriginalContentCache({});
+    setSymbolsCache({});
     setExpandedFiles({});
     setDiffErrors({});
     setTargetLineMap({});
@@ -139,6 +142,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             if (cancelled) return;
             let diffText = diffCache[cacheKey];
             let fullContent = fileContentCache[cacheKey];
+            let fileSymbols = symbolsCache[cacheKey];
             if (!diffText) {
               try {
                 const encodedId = encodeURIComponent(ws.branchName);
@@ -151,12 +155,16 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                   const data = await res.json();
                   diffText = data.diff || '';
                   fullContent = data.fileContent || '';
+                  fileSymbols = data.symbols;
                   setDiffCache((prev) => ({ ...prev, [cacheKey]: diffText }));
                   if (fullContent) {
                     setFileContentCache((prev) => ({ ...prev, [cacheKey]: fullContent }));
                   }
                   if (data.originalContent) {
                     setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
+                  }
+                  if (data.symbols) {
+                    setSymbolsCache((prev) => ({ ...prev, [cacheKey]: data.symbols }));
                   }
                 }
               } catch {
@@ -172,7 +180,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                 f.file,
                 contentToIndex,
                 parsed.hunks,
-                repo.repoPath
+                repo.repoPath,
+                fileSymbols || symbolsCache[cacheKey]
               );
             }
           })();
@@ -263,6 +272,22 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           if (data.originalContent) {
             setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
           }
+          if (data.symbols) {
+            setSymbolsCache((prev) => ({ ...prev, [cacheKey]: data.symbols }));
+          }
+          if (data.diff) {
+            const parsed = parseUnifiedDiff(data.diff);
+            const contentToIndex = data.fileContent || parsed.modifiedContent;
+            const repoObj = gitChanges.find((r) => r.repoName === repoName);
+            globalChangesetSymbolIndex.indexFile(
+              repoName,
+              fileName,
+              contentToIndex,
+              parsed.hunks,
+              repoObj?.repoPath,
+              data.symbols
+            );
+          }
         } catch (err: any) {
           setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
         } finally {
@@ -270,7 +295,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         }
       }
     },
-    [expandedFiles, diffCache, ws.branchName]
+    [expandedFiles, diffCache, ws.branchName, gitChanges]
   );
 
   // Jump to a specific file in the changeset and optionally reveal a line
@@ -783,6 +808,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                       patchText={fileDiff}
                                       fullFileContent={fileContentCache[cacheKey]}
                                       fullOriginalContent={originalContentCache[cacheKey]}
+                                      preExtractedSymbols={symbolsCache[cacheKey]}
                                       defaultEditor={defaultEditor}
                                       initialTargetLine={targetLineMap[cacheKey]}
                                       onOpenFile={handleCrossFileOpen}

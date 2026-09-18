@@ -14,7 +14,11 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
-import type { ChangesetSymbol, SymbolKindLabel } from './utils/changesetSymbolIndex.js';
+import {
+  MonacoSymbolKind,
+  type ChangesetSymbol,
+  type SymbolKindLabel,
+} from './utils/changesetSymbolIndex.js';
 
 export interface ChangesetSymbolNavigatorProps {
   symbols: ChangesetSymbol[];
@@ -33,12 +37,80 @@ const CATEGORY_PILLS: { id: FilterCategory; label: string; short: string }[] = [
   { id: 'all', label: 'All', short: 'All' },
   { id: 'modified', label: 'Modified Only', short: 'Mod' },
   { id: 'function', label: 'Functions', short: 'fn' },
+  { id: 'method', label: 'Methods', short: 'meth' },
+  { id: 'constructor', label: 'Constructors', short: 'ctor' },
   { id: 'class', label: 'Classes', short: 'cls' },
   { id: 'interface', label: 'Interfaces', short: 'iface' },
   { id: 'type', label: 'Types', short: 'type' },
   { id: 'enum', label: 'Enums', short: 'enum' },
+  { id: 'property', label: 'Properties', short: 'prop' },
   { id: 'variable', label: 'Variables', short: 'var' },
 ];
+
+export const getEffectiveKind = (s: ChangesetSymbol): SymbolKindLabel => {
+  if (s.kind === MonacoSymbolKind.Constructor || s.kindLabel === 'constructor') {
+    return 'constructor';
+  }
+  if (s.kind === MonacoSymbolKind.Method || s.kindLabel === 'method') {
+    return 'method';
+  }
+  if (s.kind === MonacoSymbolKind.Property || s.kindLabel === 'property') {
+    return 'property';
+  }
+  return s.kindLabel;
+};
+
+export const getKindBadgeText = (s: ChangesetSymbol): string => {
+  const eff = getEffectiveKind(s);
+  switch (eff) {
+    case 'constructor':
+      return '[CTOR]';
+    case 'method':
+      return '[METH]';
+    case 'function':
+      return '[FUNC]';
+    case 'class':
+      return '[CLAS]';
+    case 'interface':
+      return '[IFAC]';
+    case 'type':
+      return '[TYPE]';
+    case 'enum':
+      return '[ENUM]';
+    case 'property':
+      return '[PROP]';
+    case 'variable':
+      return '[VAR]';
+    default:
+      return `[${String(eff).slice(0, 4).toUpperCase()}]`;
+  }
+};
+
+export const getKindBadgeClass = (s: ChangesetSymbol) => {
+  const eff = getEffectiveKind(s);
+  switch (eff) {
+    case 'constructor':
+      return 'border-orange-500/40 bg-orange-500/15 text-orange-400';
+    case 'method':
+      return 'border-cyan-500/40 bg-cyan-500/15 text-cyan-400';
+    case 'function':
+      return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400';
+    case 'class':
+      return 'border-purple-500/40 bg-purple-500/15 text-purple-400';
+    case 'interface':
+      return 'border-sky-500/40 bg-sky-500/15 text-sky-400';
+    case 'type':
+      return 'border-amber-500/40 bg-amber-500/15 text-amber-400';
+    case 'enum':
+      return 'border-pink-500/40 bg-pink-500/15 text-pink-400';
+    case 'property':
+      return 'border-teal-500/40 bg-teal-500/15 text-teal-400';
+    case 'variable':
+      return 'border-slate-500/40 bg-slate-500/15 text-slate-400';
+    default:
+      return 'border-border bg-muted text-muted-foreground';
+  }
+};
 
 export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> = ({
   symbols,
@@ -60,7 +132,7 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
     if (activeCategory === 'modified') {
       result = result.filter((s) => s.isModifiedInChangeset);
     } else if (activeCategory !== 'all') {
-      result = result.filter((s) => s.kindLabel === activeCategory);
+      result = result.filter((s) => getEffectiveKind(s) === activeCategory);
     }
 
     // Filter by Search Query
@@ -70,7 +142,8 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
         (s) =>
           s.name.toLowerCase().includes(q) ||
           s.filePath.toLowerCase().includes(q) ||
-          s.kindLabel.toLowerCase().includes(q)
+          s.kindLabel.toLowerCase().includes(q) ||
+          getEffectiveKind(s).toLowerCase().includes(q)
       );
     }
 
@@ -92,29 +165,11 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
       modified: symbols.filter((s) => s.isModifiedInChangeset).length,
     };
     for (const s of symbols) {
-      counts[s.kindLabel] = (counts[s.kindLabel] || 0) + 1;
+      const eff = getEffectiveKind(s);
+      counts[eff] = (counts[eff] || 0) + 1;
     }
     return counts;
   }, [symbols]);
-
-  const getKindBadgeClass = (kind: SymbolKindLabel) => {
-    switch (kind) {
-      case 'class':
-        return 'border-purple-500/40 bg-purple-500/15 text-purple-400';
-      case 'interface':
-        return 'border-sky-500/40 bg-sky-500/15 text-sky-400';
-      case 'function':
-        return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400';
-      case 'type':
-        return 'border-amber-500/40 bg-amber-500/15 text-amber-400';
-      case 'enum':
-        return 'border-pink-500/40 bg-pink-500/15 text-pink-400';
-      case 'variable':
-        return 'border-teal-500/40 bg-teal-500/15 text-teal-400';
-      default:
-        return 'border-border bg-muted text-muted-foreground';
-    }
-  };
 
   return (
     <div
@@ -232,10 +287,10 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
                   <span
                     className={cn(
                       'px-1.5 py-0.2 rounded font-mono text-[9px] font-bold border uppercase shrink-0',
-                      getKindBadgeClass(s.kindLabel)
+                      getKindBadgeClass(s)
                     )}
                   >
-                    {s.kindLabel.slice(0, 4)}
+                    {getKindBadgeText(s)}
                   </span>
 
                   {/* Symbol Name */}
