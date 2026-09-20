@@ -31,6 +31,8 @@ import type {
   WorkspaceStreamResponse,
   RepoFreshness,
   FastForwardResult,
+  WorkspaceLifecycle,
+  WorkspaceVerificationReport,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -630,5 +632,27 @@ export function usePostWorkspaceStream(workspaceId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspace-stream', workspaceId] });
     },
+  });
+}
+
+// ─── Lifecycle & Planning ───────────────────────────────────────────────────
+
+export interface WorkspaceLifecycleResponse {
+  lifecycle: WorkspaceLifecycle;
+  report?: WorkspaceVerificationReport | null;
+  plan?: string;
+}
+
+export function useWorkspaceLifecycle(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-lifecycle', wsId],
+    queryFn: async () => {
+      const data = await apiFetch<WorkspaceLifecycleResponse>(
+        `/api/workspace/${encodeURIComponent(wsId!)}/lifecycle`
+      );
+      return data;
+    },
+    enabled: Boolean(wsId),
+    staleTime: 10_000,
   });
 }

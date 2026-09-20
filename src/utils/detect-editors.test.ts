@@ -50,10 +50,10 @@ describe('detectEditors', () => {
 
     expect(result).toEqual(expected);
 
-    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin });
-    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin });
-    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin });
-    expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, shell: isWin });
+    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, shell: isWin, windowsHide: true });
   });
 
   it('should return detected = false for all editors if execa throws an error (except built-in Windows shells)', async () => {

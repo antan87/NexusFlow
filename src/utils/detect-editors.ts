@@ -36,6 +36,7 @@ async function commandExists(command: string): Promise<boolean> {
     const result = await execa(command, ['--version'], {
       reject: false,
       shell: process.platform === 'win32',
+      windowsHide: true,
     });
     return result.exitCode === 0;
   } catch {

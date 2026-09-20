@@ -168,6 +168,9 @@ export interface Feature {
   flowType?: FlowPreset;
   organizationId?: string;
   domainPacks?: string[];
+  isolatedRepos?: Record<string, { worktreePath: string; branchName: string; baseBranch?: string; isolatedAt: string }>;
+  originalRepos?: string[];
+  repoBranches?: Record<string, string>;
 }
 
 export interface OrganizationConventions {

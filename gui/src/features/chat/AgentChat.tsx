@@ -49,6 +49,8 @@ function reasoningEffortLabelForId(id: string): string {
 
 interface AgentChatProps {
   ws: Feature;
+  draft?: { id: string; text: string };
+  onDraftConsumed?: (id: string) => void;
 }
 
 interface ProviderCapabilities {
@@ -432,7 +434,7 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
-export function AgentChat({ ws }: AgentChatProps) {
+export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [providers, setProviders] = useState<ChatProvider[]>([]);
@@ -443,6 +445,13 @@ export function AgentChat({ ws }: AgentChatProps) {
   const [initialStore] = useState(() => loadChatStore(ws.branchName));
   const [messages, setMessages] = useState<ChatMessage[]>(initialStore.messages);
   const [input, setInput] = useState('');
+  const consumedDraftRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draft || consumedDraftRef.current === draft.id) return;
+    consumedDraftRef.current = draft.id;
+    setInput((current) => current ? `${current}\n\n${draft.text}` : draft.text);
+    onDraftConsumed?.(draft.id);
+  }, [draft, onDraftConsumed]);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   // True once the current turn has streamed its first chunk.

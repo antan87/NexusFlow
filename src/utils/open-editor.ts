@@ -42,7 +42,11 @@ export async function resolveEditorTarget(
  * Opens the workspace in the given editor or shell terminal. Throws if the editor cannot be
  * spawned so callers can surface a manual-open hint.
  */
-export async function openInEditor(editorCommand: string, workspacePath: string): Promise<void> {
+export async function openInEditor(
+  editorCommand: string,
+  workspacePath: string,
+  filePath?: string,
+): Promise<void> {
   if (editorCommand === 'powershell' || editorCommand === 'pwsh') {
     await launchWorkspaceTerminal(workspacePath, { title: 'PowerShell' });
     return;
@@ -52,9 +56,11 @@ export async function openInEditor(editorCommand: string, workspacePath: string)
     return;
   }
 
-  const target = await resolveEditorTarget(editorCommand, workspacePath);
+  const target = filePath
+    ? path.resolve(workspacePath, filePath)
+    : await resolveEditorTarget(editorCommand, workspacePath);
   const useShell = process.platform === 'win32';
   // With `shell: true` execa does not escape arguments; quote so spaces survive.
   const arg = useShell ? `"${target}"` : target;
-  await execa(editorCommand, [arg], { stdio: 'ignore', shell: useShell });
+  await execa(editorCommand, [arg], { stdio: 'ignore', shell: useShell, windowsHide: true });
 }

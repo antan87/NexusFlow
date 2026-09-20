@@ -9,6 +9,7 @@ export interface FloatingChatState {
   activeTab: string | null;
   position: { x: number; y: number } | null;
   size: { width: number; height: number };
+  drafts: Record<string, { id: string; text: string }>;
 }
 
 const DEFAULT_STATE: FloatingChatState = {
@@ -19,6 +20,7 @@ const DEFAULT_STATE: FloatingChatState = {
   activeTab: null,
   position: null,
   size: { width: 560, height: 680 },
+  drafts: {},
 };
 
 function loadState(): FloatingChatState {
@@ -27,6 +29,7 @@ function loadState(): FloatingChatState {
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw);
     return {
+      drafts: {},
       isOpen: typeof parsed.isOpen === 'boolean' ? parsed.isOpen : DEFAULT_STATE.isOpen,
       isMinimized: typeof parsed.isMinimized === 'boolean' ? parsed.isMinimized : DEFAULT_STATE.isMinimized,
       isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : DEFAULT_STATE.isMaximized,
@@ -71,6 +74,23 @@ export const floatingChatStore = {
   subscribe: (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
+  },
+
+  openDraft: (branchName: string, text: string) => {
+    floatingChatStore.open(branchName);
+    updateState((prev) => ({ ...prev, drafts: {
+      ...prev.drafts,
+      [branchName]: { id: crypto.randomUUID(), text },
+    } }));
+  },
+
+  consumeDraft: (branchName: string, id: string) => {
+    updateState((prev) => {
+      if (prev.drafts[branchName]?.id !== id) return prev;
+      const drafts = { ...prev.drafts };
+      delete drafts[branchName];
+      return { ...prev, drafts };
+    });
   },
 
   open: (branchName?: string) => {

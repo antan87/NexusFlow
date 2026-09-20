@@ -19,6 +19,7 @@ test.describe('Theme toggle', () => {
 
   test('starts light, switches to dark, and persists the choice', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
 
     const html = page.locator('html');
     await expect(html).not.toHaveClass(/dark/);
@@ -28,11 +29,13 @@ test.describe('Theme toggle', () => {
 
     // The choice survives a reload (applied pre-paint by the boot script).
     await page.reload();
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
     await expect(html).toHaveClass(/dark/);
   });
 
   test('switches between Sunset and Aurora palettes and updates favicon and data-color-theme', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
 
     const html = page.locator('html');
     const favicon = page.locator('link[rel="icon"]');
@@ -42,35 +45,38 @@ test.describe('Theme toggle', () => {
     await expect(favicon).toHaveAttribute('href', '/favicon.svg');
 
     // Switch to Aurora
-    await page.getByRole('button', { name: 'Aurora' }).click();
+    await page.getByRole('button', { name: 'Switch to Aurora palette' }).click();
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
     await expect(favicon).toHaveAttribute('href', '/favicon-aurora.svg');
 
     // Choice survives reload
     await page.reload();
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
     await expect(favicon).toHaveAttribute('href', '/favicon-aurora.svg');
 
     // Switch back to Sunset
-    await page.getByRole('button', { name: 'Sunset' }).click();
+    await page.getByRole('button', { name: 'Switch to Sunset palette' }).click();
     await expect(html).toHaveAttribute('data-color-theme', 'sunset');
     await expect(favicon).toHaveAttribute('href', '/favicon.svg');
   });
 
   test('persists appearance mode and color palette independently across reloads', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
 
     const html = page.locator('html');
 
     // Switch to dark mode + Aurora palette
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
-    await page.getByRole('button', { name: 'Aurora' }).click();
+    await page.getByRole('button', { name: 'Switch to Aurora palette' }).click();
 
     await expect(html).toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
 
     // Reload and verify both dark mode and aurora are active
     await page.reload();
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
     await expect(html).toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
 
@@ -80,6 +86,7 @@ test.describe('Theme toggle', () => {
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
 
     await page.reload();
+    await page.getByRole('button', { name: 'Tools & Library' }).click();
     await expect(html).not.toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
   });

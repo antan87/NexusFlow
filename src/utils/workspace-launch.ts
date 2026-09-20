@@ -255,6 +255,7 @@ export async function launchWorkspaceTarget(
   workspacePath: string,
   intent: WorkspaceLaunchIntent = { kind: 'new-workspace' },
   platform = process.platform,
+  filePath?: string,
 ): Promise<void> {
   const absolutePath = path.resolve(workspacePath);
   if (!path.isAbsolute(workspacePath)) {
@@ -290,7 +291,7 @@ export async function launchWorkspaceTarget(
   if (!detected.some((candidate) => candidate.command === editor.command && candidate.detected)) {
     throw new Error(`${editor.name} is not available on this computer.`);
   }
-  await openInEditor(editor.command, absolutePath);
+  await openInEditor(editor.command, absolutePath, filePath);
 }
 
 /** Convert a legacy editor command to its closed target id. */

@@ -8,7 +8,7 @@ export default defineConfig({
       '**/cypress/**',
       '**/.{idea,git,cache,output,temp}/**',
       '**/scratch/**',
-      '**/gui/**',
+      '**/gui/e2e/**',
       '**/desktop/*.js',
       '**/desktop/e2e/**'
     ],
