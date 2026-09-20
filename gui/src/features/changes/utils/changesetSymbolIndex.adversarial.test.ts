@@ -2,14 +2,8 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   ChangesetSymbolIndex,
-  MonacoSymbolKind,
-  registerLightweightNavigationProviders,
 } from './changesetSymbolIndex.ts';
 import {
-  getModifiedFileUri,
-  getOriginalFileUri,
-  getCleanPath,
-  getCleanRepo,
   registerCrossFileEditorOpener,
 } from './changesetModelStore.ts';
 import type { DiffHunkAction } from '../types.ts';
