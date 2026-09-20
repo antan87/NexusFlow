@@ -10,7 +10,8 @@ export type WorktreeStatusType =
   | 'dirty'
   | 'host_readonly'
   | 'provisioning'
-  | 'stale';
+  | 'stale'
+  | 'unknown';
 
 export interface WorktreeCommitInfo {
   headSha: string;
@@ -33,7 +34,7 @@ export interface WorktreeDescriptor {
   title: string;
   intent?: string;
   commitSha: string;
-  dirtyFilesCount: number;
+  dirtyFilesCount: number | null;
   status: WorktreeStatusType;
   isPinned: boolean;
   isHostReadOnly: boolean;

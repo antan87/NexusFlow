@@ -614,6 +614,16 @@ export function useChangesetSymbolStore(
   );
 }
 
+export function findChangesetReferences(models: monaco.editor.ITextModel[], symbolName: string): monaco.languages.Location[] {
+  const results: monaco.languages.Location[] = [];
+  for (const model of models) {
+    if (model.uri.scheme !== 'file') continue;
+    const matches = model.findMatches(symbolName, true, false, true, ' `~!@#%^&*()-=+[{]}\\|;:\'",.<>/?', false);
+    for (const match of matches) results.push({ uri: model.uri, range: match.range });
+  }
+  return results;
+}
+
 let providersRegistered = false;
 
 /**
@@ -663,27 +673,7 @@ export function registerLightweightNavigationProviders(
           const word = model.getWordAtPosition(position);
           if (!word) return null;
 
-          const symbolName = word.word;
-          const results: monaco.languages.Location[] = [];
-
-          // Scan all text models currently active in Monaco's editor
-          for (const textModel of m.editor.getModels()) {
-            const matches = textModel.findMatches(
-              `\\b${symbolName}\\b`,
-              true,
-              false,
-              true,
-              null,
-              false
-            );
-            for (const match of matches) {
-              results.push({
-                uri: textModel.uri,
-                range: match.range,
-              });
-            }
-          }
-          return results;
+          return findChangesetReferences(m.editor.getModels(), word.word);
         },
       })
     );

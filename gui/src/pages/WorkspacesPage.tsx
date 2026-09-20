@@ -587,9 +587,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           <div className="border-b border-border bg-card/80 px-4 py-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
             {/* Left: Branch Title & Telemetry */}
             <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <span className="font-mono font-bold text-foreground truncate" title={selected.branchName}>
+              <h1 className="font-mono font-bold text-foreground truncate" title={selected.branchName}>
                 {selected.branchName}
-              </span>
+              </h1>
               <button
                 type="button"
                 onClick={async () => {

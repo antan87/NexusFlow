@@ -457,6 +457,7 @@ function SidebarContents({
           <button
             type="button"
             onClick={() => setToolsExpanded(!toolsExpanded)}
+            aria-expanded={toolsExpanded}
             className="flex w-full items-center justify-between px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground uppercase tracking-wider transition-colors cursor-pointer"
           >
             <span>Tools & Library</span>
@@ -490,6 +491,7 @@ function SidebarContents({
               <button
                 type="button"
                 onClick={() => setColorTheme(colorTheme === 'aurora' ? 'sunset' : 'aurora')}
+                aria-label={`Switch to ${colorTheme === 'aurora' ? 'Sunset' : 'Aurora'} palette`}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
               >
                 <span className="size-2 rounded-full bg-primary" />
@@ -500,6 +502,7 @@ function SidebarContents({
               <button
                 type="button"
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
               >
                 {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}

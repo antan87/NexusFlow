@@ -19,73 +19,53 @@ export function normalizeWorktreeGroups(
     const repoName = repoPath.split(/[/\\]/).filter(Boolean).pop() || repoPath;
     const sanitizedRepoPath = repoPath.replace(/[^a-zA-Z0-9]/g, '_');
     const isolated = feature.isolatedRepos?.[repoName];
-    const isIsolated = Boolean(isolated);
-
-    const worktrees: WorktreeDescriptor[] = [];
-
-    if (isIsolated && isolated) {
-      // Dynamic isolated feature worktree
-      const branch = isolated.branchName || 'head';
-      worktrees.push({
-        id: `wt-${repoName}-${branch}-${sanitizedRepoPath}`,
-        workspaceId: feature.branchName || '',
-        repoName,
-        repoPath,
-        sourcePath: feature.originalRepos?.find((r: string) => r.endsWith(repoName)) || repoPath,
-        worktreePath: isolated.worktreePath || repoPath,
-        branchName: branch,
-        baseBranch: isolated.baseBranch || 'main',
-        title: feature.description && feature.description.length > 3 && feature.description.length < 55
-          ? feature.description
-          : formatBranchTitle(branch),
-        intent: feature.description || `Isolated feature worktree on ${branch}`,
-        status: (status?.changedFiles ?? 0) > 0 ? 'dirty' : 'clean',
-        isPinned: true,
-        isHostReadOnly: false,
-        commitSha: 'latest',
-        commitInfo: {
-          headSha: 'latest',
-          shortSha: 'head',
-          commitMessage: feature.description || 'Feature worktree',
-        },
-        dirtyFilesCount: Math.max(0, status?.changedFiles ?? 0),
-        isolatedAt: isolated.isolatedAt,
-      });
-    }
-
-    // Always include host repo reference for context
-    worktrees.push({
-      id: `wt-${repoName}-host-${sanitizedRepoPath}`,
+    const inPlace = feature.mode === 'in-place';
+    const sourcePath = feature.originalRepos?.find((r) => r.split(/[/\\]/).filter(Boolean).pop() === repoName) || repoPath;
+    const worktreePath = isolated?.worktreePath || repoPath;
+    const branch = isolated?.branchName || (inPlace ? feature.repoBranches?.[repoName] : feature.branchName) || 'unknown';
+    // Workspace status is aggregate; it cannot establish a per-repo count in a multi-repo workspace.
+    const dirtyFilesCount = status && (repos.length === 1 || status.changedFiles === 0)
+      ? Math.max(0, status.changedFiles) : null;
+    const worktrees: WorktreeDescriptor[] = [{
+      id: `wt-${repoName}-${branch}-${sanitizedRepoPath}`,
       workspaceId: feature.branchName || '',
       repoName,
       repoPath,
-      sourcePath: repoPath,
-      worktreePath: repoPath,
-      branchName: feature.repoBranches?.[repoName] || 'main',
-      baseBranch: 'main',
-      title: `${repoName} Host Baseline`,
-      intent: 'Read-only host reference branch on main',
-      status: 'host_readonly',
-      isPinned: true,
-      isHostReadOnly: true,
-      commitSha: 'main',
-      commitInfo: {
-        headSha: 'main',
-        shortSha: 'main',
-        commitMessage: 'Host reference commit',
-      },
-      dirtyFilesCount: 0,
-      isolatedAt: feature.createdAt,
-    });
+      sourcePath,
+      worktreePath,
+      branchName: branch,
+      baseBranch: isolated?.baseBranch,
+      title: feature.description && feature.description.length > 3 && feature.description.length < 55
+        ? feature.description : formatBranchTitle(branch),
+      intent: feature.description || `Working repository on ${branch}`,
+      status: dirtyFilesCount === null ? 'unknown' : dirtyFilesCount > 0 ? 'dirty' : 'clean',
+      isPinned: false,
+      isHostReadOnly: false,
+      commitSha: '',
+      dirtyFilesCount,
+      isolatedAt: isolated?.isolatedAt || feature.createdAt,
+    }];
 
-    groups.push({
-      repoName,
-      repoPath,
-      isHostRepo: !isIsolated,
-      sourcePath: repoPath,
-      defaultBranch: 'main',
-      worktrees,
-    });
+    // A source reference is distinct from the working checkout and has no live telemetry here.
+    if (sourcePath !== worktreePath) {
+      worktrees.push({
+        id: `wt-${repoName}-host-${sanitizedRepoPath}`,
+        workspaceId: feature.branchName || '',
+        repoName,
+        repoPath: sourcePath,
+        sourcePath,
+        worktreePath: sourcePath,
+        branchName: isolated?.baseBranch || 'unknown',
+        title: `${repoName} Host Baseline`,
+        intent: 'Source repository reference',
+        status: 'host_readonly',
+        isPinned: false,
+        isHostReadOnly: true,
+        commitSha: '',
+        dirtyFilesCount: null,
+      });
+    }
+    groups.push({ repoName, repoPath, isHostRepo: inPlace && !isolated, sourcePath, worktrees });
   }
 
   return groups;

@@ -1914,6 +1914,13 @@ describe('Server API Endpoints Unit Tests', () => {
     });
 
     describe('diff repo containment (A2.3)', () => {
+      it('rejects file traversal before reading outside the repository', async () => {
+        vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+        vi.mocked(workspace.loadFeatureConfig).mockResolvedValue(null);
+        const response = await app.request('/api/workspace/feat/changes/diff?repo=repo&file=..%2F..%2Foutside.txt');
+        expect(response.status).toBe(400);
+        expect(execa).not.toHaveBeenCalled();
+      });
       it('rejects a sibling-prefix repo escape', async () => {
         vi.spyOn(config, 'loadConfig').mockResolvedValue({
           workspacesDir: '/mock/workspaces',

@@ -29,7 +29,7 @@ export const WorktreeItem: React.FC<WorktreeItemProps> = ({
   onSelect,
   onEditTitle,
 }) => {
-  const shortSha = worktree.commitInfo?.shortSha || worktree.commitSha?.slice(0, 7) || 'head';
+  const shortSha = worktree.commitInfo?.shortSha || worktree.commitSha?.slice(0, 7) || 'unknown';
 
   return (
     <div
@@ -95,6 +95,8 @@ export const WorktreeItem: React.FC<WorktreeItemProps> = ({
             >
               host: ro
             </span>
+          ) : worktree.dirtyFilesCount === null ? (
+            <span className="text-[9px] text-muted-foreground">status unknown</span>
           ) : worktree.dirtyFilesCount > 0 ? (
             <span
               className="font-mono text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"

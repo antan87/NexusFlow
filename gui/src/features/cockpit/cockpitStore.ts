@@ -286,14 +286,15 @@ export function upcastWorkspaceToCockpit(
   // 2. Secondary: parse markdown milestones from planContent if no lifecycle steps
   if (iterations.length === 0 && planContent && planContent.trim().length > 0) {
     const parsedMilestones: DevelopmentIteration[] = [];
-    const lineRegex = /(?:^|\n)\s*(?:-|\*|\d+\.|#{2,4})\s+(?:\[([ xX])\]\s+)?(?:\*\*(?:Milestone\s*\d+:?\s*)?([^*]+)\*\*|(?:Milestone\s*(\d+):?\s*)([^\n\r]+))(?:\s*[-—–:]\s*([^\n\r]+))?/g;
-    let match: RegExpExecArray | null;
+    const lineRegex = /^[\t ]*(?:-|\*|\d+\.|#{2,4})[\t ]+(?:\[([ xX])\][\t ]+)?(?:\*\*(?:Milestone[\t ]*\d+:?[\t ]*)?([^*]+)\*\*|Milestone[\t ]*(\d+):?[\t ]*(.+?))(?:[\t ]+[-—–:][\t ]+(.+))?[\t ]*$/i;
     let counter = 1;
-    while ((match = lineRegex.exec(planContent)) !== null) {
+    for (const line of planContent.split(/\r?\n/)) {
+      const match = line.match(lineRegex);
+      if (!match) continue;
       const isChecked = Boolean(match[1] && match[1].toLowerCase() === 'x');
       const rawTitle = (match[2] || match[4] || '').trim();
       const lower = rawTitle.toLowerCase();
-      if (!rawTitle || lower === 'acceptance criteria' || lower === 'verification' || lower === 'verification method') {
+      if (!rawTitle || /(?:^|:\s*)(?:acceptance criteria|verification|verification method)$/.test(lower)) {
         continue;
       }
       const goal = match[5]?.trim();

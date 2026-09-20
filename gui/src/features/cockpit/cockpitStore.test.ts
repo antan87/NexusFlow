@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { cockpitStore, upcastWorkspaceToCockpit } from './cockpitStore.js';
 import type { Feature, WorkspaceLifecycle, WorkspaceStatus, WorkspaceVerificationReport } from '../../types.js';

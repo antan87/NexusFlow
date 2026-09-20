@@ -25,11 +25,11 @@ test.describe('Redesigned ContextSpace shell', () => {
   test('shows the dashboard overview with environment stats', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Your workspaces' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Multi-Worktree Process & Review Station' })).toBeVisible();
     // Stat tiles + workspace row driven by the mocked status endpoint.
-    await expect(page.getByText('Changed files', { exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
-    await expect(page.getByText('3 changed files').first()).toBeVisible();
+    await expect(page.getByText('Review Queue', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Test feature workspace' })).toBeVisible();
+    await expect(page.getByText('3 modified files').first()).toBeVisible();
   });
 
   test('navigates to the workspaces master-detail and opens a workspace via deep link', async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe('Redesigned ContextSpace shell', () => {
     await page.goto('/#/workspaces/feature-x');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
-    await expect(page.getByText('Test feature workspace', { exact: true })).toBeVisible();
+    await expect(page.getByText('Test feature workspace', { exact: true }).first()).toBeVisible();
   });
 });
 

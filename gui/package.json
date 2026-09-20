@@ -48,6 +48,9 @@
     "vite": "^8.2.2"
   },
   "overrides": {
+    "monaco-editor": {
+      "dompurify": "^3.4.15"
+    },
     "ansi-to-react": {
       "linkify-it": "^5.0.2"
     }

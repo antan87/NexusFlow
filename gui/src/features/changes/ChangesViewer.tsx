@@ -33,6 +33,8 @@ import {
 import { parseUnifiedDiff } from './utils/diffParser.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { useConfig } from '../../lib/api/queries.js';
+import { useCockpitStore } from '../cockpit/cockpitStore.js';
+import { floatingChatStore } from '../chat/floatingChatStore.js';
 
 interface ChangesViewerProps {
   ws: Feature;
@@ -87,6 +89,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
 
   const config = useConfig().data?.config;
+  const cockpit = useCockpitStore();
   const defaultEditor = config?.defaultEditor;
   const editorLabel = getEditorLabel(defaultEditor);
 
@@ -787,6 +790,17 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                       fullOriginalContent={originalContentCache[cacheKey]}
                                       preExtractedSymbols={symbolsCache[cacheKey]}
                                       defaultEditor={defaultEditor}
+                                      viewMode={cockpit.diffViewMode}
+                                      onToggleViewMode={cockpit.toggleDiffMode}
+                                      onRequestRefine={(hunk, feedback) => {
+                                        floatingChatStore.openDraft(ws.branchName, [
+                                          `Refine ${repo.repoName}/${fileInfo.file} at line ${hunk.startLineModified}.`,
+                                          feedback,
+                                          'Selected diff hunk:',
+                                          hunk.patchHeader,
+                                          ...hunk.lines,
+                                        ].join('\n'));
+                                      }}
                                       initialTargetLine={targetLineMap[cacheKey]}
                                       onOpenFile={handleCrossFileOpen}
                                       onSelectSymbol={(sym) => {

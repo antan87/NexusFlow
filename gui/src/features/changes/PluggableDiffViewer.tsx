@@ -4,7 +4,7 @@
  * and changeset symbol navigation.
  * File: gui/src/features/changes/PluggableDiffViewer.tsx
  */
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import {
   Columns2,
   ExternalLink,
@@ -21,7 +21,6 @@ import {
 import { cn } from '../../lib/utils.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
 import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
-import { MonacoDiffAdapter } from './adapters/MonacoDiffAdapter.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
 import { launchVsCodeDiff, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -30,6 +29,8 @@ import {
   type ChangesetSymbol,
   type RawAstSymbol,
 } from './utils/changesetSymbolIndex.js';
+
+const MonacoDiffAdapter = lazy(() => import('./adapters/MonacoDiffAdapter.js').then((module) => ({ default: module.MonacoDiffAdapter })));
 
 export interface PluggableDiffViewerProps {
   filePath: string;
@@ -46,6 +47,7 @@ export interface PluggableDiffViewerProps {
   onToggleViewMode?: () => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
   onHunkAction?: (action: DiffHunkAction) => Promise<void> | void;
+  onRequestRefine?: (action: DiffHunkAction, feedback: string) => Promise<void> | void;
   onOpenFile?: (repoName: string, filePath: string, line?: number) => void;
   onSelectSymbol?: (symbol: ChangesetSymbol) => void;
 }
@@ -65,6 +67,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   onToggleViewMode,
   showToast,
   onHunkAction,
+  onRequestRefine,
   onOpenFile,
   onSelectSymbol,
 }) => {
@@ -89,16 +92,17 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const currentHunk = hunks[activeHunkIndex] || null;
 
   // Index symbols of this file in the global changeset symbol index
-  const fileSymbols = useMemo(() => {
+  const [fileSymbols, setFileSymbols] = useState<ChangesetSymbol[]>([]);
+  useEffect(() => {
     const contentToIndex = fullFileContent || parsed.modifiedContent;
-    return globalChangesetSymbolIndex.indexFile(
+    setFileSymbols(globalChangesetSymbolIndex.indexFile(
       repoName,
       filePath,
       contentToIndex,
       hunks,
       repoPath,
       preExtractedSymbols
-    );
+    ));
   }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath, preExtractedSymbols]);
 
   // If initialTargetLine changes from parent, sync targetLine and active hunk
@@ -153,18 +157,18 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   }, [activeHunkIndex, hunks]);
 
   const handleAcceptHunk = useCallback(async () => {
-    if (!currentHunk) return;
+    if (!currentHunk || !onHunkAction) return;
+    await onHunkAction({ ...currentHunk, type: 'accept' });
     setHunkStates((prev) => ({ ...prev, [currentHunk.id]: 'accepted' }));
     showToast?.(`Accepted hunk #${activeHunkIndex + 1}`, 'success');
-    await onHunkAction?.({ ...currentHunk, type: 'accept' });
     handleNextHunk();
   }, [currentHunk, activeHunkIndex, showToast, onHunkAction, handleNextHunk]);
 
   const handleRejectHunk = useCallback(async () => {
-    if (!currentHunk) return;
+    if (!currentHunk || !onHunkAction) return;
+    await onHunkAction({ ...currentHunk, type: 'reject' });
     setHunkStates((prev) => ({ ...prev, [currentHunk.id]: 'rejected' }));
     showToast?.(`Rejected hunk #${activeHunkIndex + 1}`, 'info');
-    await onHunkAction?.({ ...currentHunk, type: 'reject' });
     handleNextHunk();
   }, [currentHunk, activeHunkIndex, showToast, onHunkAction, handleNextHunk]);
 
@@ -174,11 +178,13 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   };
 
   const handleConfirmRefine = async () => {
-    if (!currentHunk || !refineFeedback.trim()) return;
-    setHunkStates((prev) => ({ ...prev, [currentHunk.id]: 'refining' }));
-    showToast?.(`Refinement requested for hunk #${activeHunkIndex + 1}`, 'info');
-    await onHunkAction?.({ ...currentHunk, type: 'refine' });
-    setRefineModalOpen(false);
+    if (!currentHunk || !refineFeedback.trim() || !onRequestRefine) return;
+    try {
+      await onRequestRefine({ ...currentHunk, type: 'refine' }, refineFeedback.trim());
+      setRefineModalOpen(false);
+    } catch (error) {
+      showToast?.(error instanceof Error ? error.message : 'Could not open refinement in chat.', 'error');
+    }
   };
 
   const handleSymbolSelect = (symbol: ChangesetSymbol) => {
@@ -368,6 +374,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       {/* ─── CENTER DIFF CANVAS ──────────────────────────────────────────────── */}
       <div className="p-2 bg-background/50">
         {engine === 'monaco' ? (
+          <Suspense fallback={<div role="status">Loading diff editor…</div>}>
           <MonacoDiffAdapter
             filePath={filePath}
             repoName={repoName}
@@ -383,6 +390,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             onOpenFile={onOpenFile}
             onLineSelect={handleLineSelect}
           />
+          </Suspense>
         ) : (
           <FallbackDiffAdapter
             filePath={filePath}
@@ -466,6 +474,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             )}
 
             {/* Accept Hunk */}
+            {onHunkAction && <>
             <button
               type="button"
               onClick={() => void handleAcceptHunk()}
@@ -488,15 +497,18 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             </button>
 
             {/* Request Refine */}
+            </>}
+            {onRequestRefine &&
             <button
               type="button"
               onClick={handleOpenRefineModal}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer shadow-2xs"
-              title="Instruct autonomous agent to refine this hunk"
+              title="Prepare refinement instructions in AI chat"
             >
               <RefreshCw size={11} />
               <span>Refine</span>
             </button>
+            }
           </div>
         </div>
       )}
@@ -522,7 +534,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             </div>
 
             <p className="text-[11px] text-muted-foreground">
-              Provide feedback or instructions for the AI agent to revise this specific diff hunk:
+              Add instructions for this hunk. They will open as a draft in AI chat for you to send:
             </p>
 
             <textarea
@@ -548,7 +560,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
                 onClick={() => void handleConfirmRefine()}
                 className="px-3 py-1 text-xs font-semibold text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 rounded-lg transition-colors"
               >
-                Send Refinement
+                Open in AI chat
               </button>
             </div>
           </div>

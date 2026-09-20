@@ -1,5 +1,6 @@
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
+import { readRepositoryFile, RepositoryFileAccessError } from './services/repository-file.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -2147,18 +2148,22 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       worktreePath = resolveRepoPath(workspacePath, repoName);
     }
 
-    const fullPath = path.resolve(worktreePath, filePath);
+    assertWithin(worktreePath, path.resolve(worktreePath, filePath));
     const normalizedFile = filePath.replace(/\\/g, '/');
 
     // Run git diff, disk file read, and git show HEAD in parallel
     const [diffResult, fileContentResult, originalContentResult] = await Promise.allSettled([
       execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
-      fs.readFile(fullPath, 'utf-8'),
-      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false }),
+      readRepositoryFile(worktreePath, filePath),
+      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false }),
     ]);
 
     let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
-    let fileContent = fileContentResult.status === 'fulfilled' ? fileContentResult.value : '';
+    if (fileContentResult.status === 'rejected') {
+      if (fileContentResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileContentResult.reason.message);
+      throw fileContentResult.reason;
+    }
+    let fileContent = fileContentResult.value;
     let originalContent = originalContentResult.status === 'fulfilled' ? (originalContentResult.value.stdout || '') : '';
 
     // Handle untracked new files if diff is empty but file exists on disk
@@ -2222,9 +2227,8 @@ app.get('/api/workspace/:id/changes/symbols', async (c) => {
               return;
             }
 
-            const fullFilePath = path.resolve(worktreePath, file);
             try {
-              const content = await fs.readFile(fullFilePath, 'utf-8');
+              const content = await readRepositoryFile(worktreePath, file);
               const extracted = await extractAstSymbols(file, content);
               if (extracted && extracted.length > 0) {
                 for (const s of extracted) {

@@ -60,6 +60,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     setActiveTab,
     setPosition,
     setSize,
+    drafts,
+    consumeDraft,
   } = useFloatingChat();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -421,7 +423,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 key={branchName}
                 className={cn('h-full flex flex-col', !isTabActive && 'hidden')}
               >
-                <AgentChat ws={ws} />
+                <AgentChat ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
               </div>
             );
           })

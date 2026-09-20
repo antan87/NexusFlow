@@ -82,7 +82,7 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
     [showToast]
   );
 
-  const shortSha = activeWorktree?.commitInfo?.shortSha || activeWorktree?.commitSha?.slice(0, 7) || 'head';
+  const shortSha = activeWorktree?.commitInfo?.shortSha || activeWorktree?.commitSha?.slice(0, 7) || 'unknown';
 
   return (
     <header className="w-full shrink-0 border-b border-border/80 bg-card/85 backdrop-blur-md z-20 select-none">
@@ -136,7 +136,9 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
               </span>
 
               {/* Dirty / Clean Telemetry */}
-              {activeWorktree.dirtyFilesCount > 0 ? (
+              {activeWorktree.dirtyFilesCount === null ? (
+                <span className="text-muted-foreground">Status unavailable</span>
+              ) : activeWorktree.dirtyFilesCount > 0 ? (
                 <button
                   type="button"
                   onClick={() => onSelectStage('diff')}
