@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { IPty } from 'node-pty';
 import type { LaunchSpec } from './targets.js';
+import { preparePtyHelper } from './native.js';
 
 export type PtyProcess = Pick<IPty, 'pid' | 'write' | 'resize' | 'pause' | 'resume' | 'kill' | 'onData' | 'onExit'>;
 export type PtyFactory = (launch: LaunchSpec, cwd: string, cols: number, rows: number) => Promise<PtyProcess>;
@@ -15,17 +16,18 @@ const MAX_REPLAY = 512 * 1024;
 const HIGH_WATER = 128 * 1024;
 
 export async function nativePtyAvailable(): Promise<{ available: boolean; reason?: string }> {
-  try { await import('node-pty'); return { available: true }; }
+  try { await preparePtyHelper(); await import('node-pty'); return { available: true }; }
   catch { return { available: false, reason: 'Native terminal support could not load. Reinstall a supported ContextSpace build or rebuild node-pty for this runtime.' }; }
 }
 export const spawnNativePty: PtyFactory = async (launch, cwd, cols, rows) => {
+  await preparePtyHelper();
   const pty = await import('node-pty').catch(() => { throw new Error('Native terminal support is unavailable. Reinstall ContextSpace or rebuild node-pty for this runtime.'); });
   return pty.spawn(launch.file, launch.args, { name: 'xterm-256color', cwd, cols, rows, env: launch.env });
 };
 
 /** Terminate owned PTY descendants too, including foreground job process groups. */
-export function terminatePty(pty: PtyProcess): void {
-  if (process.platform === 'win32') {
+export function terminatePty(pty: PtyProcess, platform = process.platform): void {
+  if (platform === 'win32') {
     try { execFileSync('taskkill.exe', ['/pid', String(pty.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 5000 }); } catch { /* may have exited */ }
   } else {
     try {
@@ -37,7 +39,7 @@ export function terminatePty(pty: PtyProcess): void {
     } catch { /* still kill the PTY's group below */ }
     try { process.kill(-pty.pid, 'SIGKILL'); } catch { /* no group */ }
   }
-  try { pty.kill('SIGKILL'); } catch { /* gone */ }
+  try { pty.kill(platform === 'win32' ? undefined : 'SIGKILL'); } catch { /* gone */ }
 }
 
 export class TerminalManager {

@@ -15,9 +15,14 @@ child.onData(data => {
     success = true;
     child.resize(100, 30);
     terminatePty(child);
-    clearTimeout(deadline);
-    console.log(`Native terminal verified: ${process.platform}/${process.arch}, ${process.versions.electron ? 'Electron ' + process.versions.electron : 'Node ' + process.versions.node}`);
   }
 });
-child.onExit(({ exitCode }) => { if (!success) { clearTimeout(deadline); console.error(`Terminal exited before its output was verified (${exitCode}).`); process.exitCode = 1; } });
+child.onExit(({ exitCode }) => {
+  clearTimeout(deadline);
+  if (!success) console.error(`Terminal exited before its output was verified (${exitCode}).`);
+  else console.log(`Native terminal verified: ${process.platform}/${process.arch}, ${process.versions.electron ? 'Electron ' + process.versions.electron : 'Node ' + process.versions.node}`);
+  // ConPTY workers can retain Node's event loop after the shell exits. This
+  // one-shot probe has verified output, resize and exit; release its runtime.
+  setTimeout(() => process.exit(success ? 0 : 1), 100);
+});
 child.write(command);
