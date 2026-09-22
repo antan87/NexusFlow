@@ -1,3 +1,4 @@
+import { stopOwnedUnixTree } from './lib/process-tree.js';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { spawn, spawnSync } from 'child_process';
 import { existsSync, statSync, createWriteStream, readdirSync } from 'fs';
@@ -428,7 +429,7 @@ function stopBackend() {
     if (process.platform === 'win32') {
       try { spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ignore */ }
     } else {
-      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+      stopOwnedUnixTree(child.pid);
     }
   }
   // Release the log file handle so it can't keep the event loop alive.

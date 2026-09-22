@@ -94,7 +94,7 @@ test.describe('Workrooms', () => {
 
     await page.goto('/#/workrooms');
     await expect(page.getByRole('heading', { name: 'Workrooms' })).toBeVisible();
-    await page.getByText('Select a workspace').click();
+    await page.getByText('Select a workspace', { exact: true }).click();
     await page.getByRole('option', { name: 'feature-one' }).click();
     await expect(page.getByText('Exact sharing review')).toBeVisible();
     await expect(page.getByText(/never adds code, diffs, credentials/i)).toBeVisible();

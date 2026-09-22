@@ -1,0 +1,77 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { findExecutable, getAugmentedPath } from '../utils/user-paths.js';
+
+const harnesses = {
+  antigravity: { name: 'Antigravity (agy)', binary: 'agy' },
+  codex: { name: 'Codex', binary: 'codex' },
+  claude: { name: 'Claude Code', binary: 'claude' },
+  copilot: { name: 'GitHub Copilot', binary: 'copilot' },
+  cursor: { name: 'Cursor Agent', binary: 'cursor-agent' },
+  pi: { name: 'Pi', binary: 'pi' },
+} as const;
+export type TerminalTarget = 'shell' | keyof typeof harnesses;
+export interface LaunchSpec { file: string; args: string[]; env: NodeJS.ProcessEnv; label: string }
+
+export function terminalEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: getAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+  // Desktop launches its backend as Electron-as-Node. Do not propagate that
+  // runtime mode or injected Node options into users' shells and harnesses.
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.NODE_OPTIONS;
+  if (process.platform === 'win32') env.Path = env.PATH;
+  return env;
+}
+
+export function resolveShell(env = terminalEnvironment(), platform = process.platform): string {
+  if (platform === 'win32') {
+    const shell = findExecutable('pwsh.exe', env, platform) ?? findExecutable('powershell.exe', env, platform);
+    if (!shell) throw new Error('PowerShell was not found. Install PowerShell or check your PATH.');
+    return shell;
+  }
+  const candidates = [env.SHELL, '/bin/bash', '/bin/zsh', '/bin/sh'];
+  for (const shell of candidates) {
+    if (!shell || !path.isAbsolute(shell)) continue;
+    try { fs.accessSync(shell, fs.constants.X_OK); if (fs.statSync(shell).isFile()) return shell; } catch { /* next shell */ }
+  }
+  throw new Error('No interactive shell was found.');
+}
+
+export function resolveLaunch(target: string, sessionId?: string, env = terminalEnvironment(), platform = process.platform): LaunchSpec {
+  if (target === 'shell') {
+    if (sessionId) throw new Error('Shells do not have saved assistant sessions.');
+    const file = resolveShell(env, platform);
+    return { file, args: platform === 'win32' ? ['-NoLogo'] : ['-l'], env, label: path.basename(file) };
+  }
+  if (!Object.hasOwn(harnesses, target)) throw new Error('This harness does not have an embedded terminal target.');
+  const harness = harnesses[target as keyof typeof harnesses];
+  const file = target === 'cursor'
+    ? findExecutable('agent', env, platform) ?? findExecutable(harness.binary, env, platform)
+    : findExecutable(harness.binary, env, platform);
+  if (!file) throw new Error(`${harness.name} is not installed or is not on PATH. Install it, then refresh the terminal list.`);
+  let args: string[] = [];
+  if (sessionId) {
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('Invalid saved session ID.');
+    if (target === 'codex') args = ['resume', sessionId];
+    else if (target === 'claude') args = ['--resume', sessionId];
+    else if (target === 'antigravity') args = ['--conversation', sessionId];
+    else if (target === 'copilot' || target === 'cursor') args = ['--resume', sessionId];
+    else if (target === 'pi') args = ['--session', sessionId];
+    else throw new Error('Direct resume is not verified for this harness. Start it and use its own session picker.');
+  }
+  if (platform === 'win32' && !/\.exe$/i.test(file)) {
+    // npm shims cannot be passed directly to CreateProcess. PowerShell's call
+    // operator receives server-resolved, single-quoted literals, never raw input.
+    const quote = (s: string) => `'${s.replaceAll("'", "''")}'`;
+    const command = `& ${[file, ...args].map(quote).join(' ')}; exit $LASTEXITCODE`;
+    return { file: resolveShell(env, platform), args: ['-NoLogo', '-NoProfile', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], env, label: harness.name };
+  }
+  return { file, args, env, label: harness.name };
+}
+
+export function listTerminalTargets() {
+  return ['shell', ...Object.keys(harnesses)].map(id => {
+    try { const spec = resolveLaunch(id); return { id, name: spec.label, available: true, reason: null }; }
+    catch (error) { return { id, name: id === 'shell' ? 'Shell' : harnesses[id as keyof typeof harnesses].name, available: false, reason: (error as Error).message }; }
+  });
+}

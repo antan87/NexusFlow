@@ -1,3 +1,5 @@
+import { SessionActivity } from './SessionActivity.js';
+import { SessionKind, mainSessionFor } from './SessionKind.js';
 import React, { useRef, useState, useMemo, useCallback } from 'react';
 import {
   ChevronDown,
@@ -94,21 +96,9 @@ const renderAssistantIcon = (ast: string) => {
   }
 };
 
-const formatDate = (dStr?: string) => {
-  if (!dStr) return '';
-  const d = new Date(dStr);
-  if (isNaN(d.getTime())) return '';
-  const now = new Date();
-  const isToday = now.toDateString() === d.toDateString();
-  if (isToday) {
-    return `Today ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-  }
-  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-};
-
 export const SessionHistory: React.FC<SessionHistoryProps> = ({
   ws,
-  sessions,
+  sessions: allSessions,
   sessionsLoading,
   setActiveSession,
   setTranscript,
@@ -116,6 +106,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   handleOpenDesktopSession,
   showToast,
 }) => {
+  const [includeSubagents, setIncludeSubagents] = useState(false);
+  const sessions = useMemo(() => allSessions.filter(s => includeSubagents || s.threadKind !== 'subagent'), [allSessions, includeSubagents]);
+  const hiddenSubagents = allSessions.filter(s => s.threadKind === 'subagent').length;
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
   const aiDetect = useAiDetect();
@@ -134,7 +127,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const [launchedInfo, setLaunchedInfo] = useState<{ assistant: string; cmd: string; timestamp: Date } | null>(null);
 
   // Sorting & Filtering state
-  const [sortBy, setSortBy] = useState<SessionSortOption>('created-desc');
+  const [sortBy, setSortBy] = useState<SessionSortOption>('updated-desc');
   const [viewMode, setViewMode] = useState<SessionViewMode>('harness');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAssistantFilter, setSelectedAssistantFilter] = useState<string>('all');
@@ -182,7 +175,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Started new ${assistant} session in terminal`, 'success');
+      showToast?.(`Opened ${assistant} inside ContextSpace`, 'success');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to launch terminal';
       showToast?.(message, 'error');
@@ -208,7 +201,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Resumed ${assistant} session in terminal`, 'success');
+      showToast?.(`Opened ${assistant} resume inside ContextSpace`, 'success');
     } catch {
       const fallbackCmd = getResumeCliCommand(assistant, sessionId);
       await safeCopyToClipboard(fallbackCmd);
@@ -246,8 +239,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
           return aTime - bTime;
         }
         case 'updated-desc': {
-          const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-          const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          const aTime = (Date.parse(a.updatedAt) || 0);
+          const bTime = (Date.parse(b.updatedAt) || 0);
           return bTime - aTime;
         }
         case 'messages-desc': {
@@ -507,13 +500,18 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <p>Main threads are your conversations. Subagents are delegated tasks that report back to them.</p>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={includeSubagents} onChange={e => setIncludeSubagents(e.target.checked)} />Include subagent sessions{hiddenSubagents ? ` (${hiddenSubagents})` : ''}</label>
+      </div>
+
       {/* Live Session HUD Banner */}
       {launchedInfo && (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-xs animate-fade-in">
           <div className="flex items-center gap-2 text-foreground min-w-0">
             <span className="size-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="truncate">
-              <strong>Active in terminal:</strong>{' '}
+              <strong>Opened in ContextSpace:</strong>{' '}
               <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded text-emerald-400">
                 {launchedInfo.cmd}
               </code>
@@ -563,9 +561,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : 'Copilot'}
                       </span>
                       <span>•</span>
-                      <span className="font-mono text-muted-foreground/80">{sess.id.slice(0, 8)}</span>
+                      <span className="font-mono text-muted-foreground/80">{sess.id.slice(0, 8)}</span><SessionKind session={sess} />
                       <span>•</span>
-                      <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
+                      <SessionActivity session={sess} />
                       <span>•</span>
                       <span className="font-mono">
                         {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
@@ -582,12 +580,12 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   <Button
                     size="xs"
                     variant="default"
-                    disabled={resumingTerminalId === sess.id}
-                    onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
-                    title={`Resume session in terminal (${sess.id})`}
+                    disabled={resumingTerminalId === sess.id || !mainSessionFor(sess, allSessions)}
+                    onClick={() => { const main = mainSessionFor(sess, allSessions); if (main) void resumeTerminalSession(main.id, main.assistant, main.workspacePath); }}
+                    title={sess.threadKind === 'subagent' ? 'Resume the main conversation instead of the delegated task' : `Resume session in terminal (${sess.id})`}
                   >
                     {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
-                    <span>Resume</span>
+                    <span>{sess.threadKind === 'subagent' ? 'Main thread' : 'Resume'}</span>
                   </Button>
 
                   <Button
@@ -735,9 +733,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5 mb-0.5 text-[11px] text-muted-foreground font-mono">
-                              <span>{sess.id.slice(0, 8)}</span>
+                              <span>{sess.id.slice(0, 8)}</span><SessionKind session={sess} />
                               <span>•</span>
-                              <span>{formatDate(sess.createdAt || sess.updatedAt)}</span>
+                              <SessionActivity session={sess} />
                               <span>•</span>
                               <span>
                                 {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
@@ -753,12 +751,12 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                             <Button
                               size="xs"
                               variant="default"
-                              disabled={resumingTerminalId === sess.id}
-                              onClick={() => void resumeTerminalSession(sess.id, sess.assistant, sess.workspacePath)}
-                              title={`Resume session in terminal (${sess.id})`}
+                              disabled={resumingTerminalId === sess.id || !mainSessionFor(sess, allSessions)}
+                              onClick={() => { const main = mainSessionFor(sess, allSessions); if (main) void resumeTerminalSession(main.id, main.assistant, main.workspacePath); }}
+                              title={sess.threadKind === 'subagent' ? 'Resume the main conversation instead of the delegated task' : `Resume session in terminal (${sess.id})`}
                             >
                               {resumingTerminalId === sess.id ? <Spinner className="size-3" /> : <Terminal size={12} />}
-                              <span>Resume</span>
+                              <span>{sess.threadKind === 'subagent' ? 'Main thread' : 'Resume'}</span>
                             </Button>
 
                             <Button

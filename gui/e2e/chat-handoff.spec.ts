@@ -218,6 +218,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await expect(page.getByRole('heading', { name: 'feature-x', level: 1 })).toBeVisible();
 
     await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+    await page.getByRole('region', { name: 'Workspace Chat', exact: true }).getByRole('button', { name: 'Chat', exact: true }).click();
     await expect(page.getByLabel('Select Provider')).toContainText('Codex (First-Party SDK)');
 
     await page.getByLabel('Select model').click();
@@ -240,10 +241,13 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       model: 'gpt-5.6-luna',
     });
 
+    const chatWindow = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+    await chatWindow.getByRole('button', { name: 'CLI', exact: true }).click();
+    await chatWindow.getByRole('button', { name: 'Chat', exact: true }).click();
+    expect(await page.evaluate(() => (window as any).__harnessSocketCloseCount)).toBe(0);
+
     await page.getByRole('tab', { name: 'Changes' }).click();
     await expect(page.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
     expect(await page.evaluate(() => (window as any).__harnessSocketCloseCount)).toBe(0);
   });
 });
-
-

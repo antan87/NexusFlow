@@ -15,7 +15,7 @@ import {
   Check,
   Activity,
   Users,
-  Bot,
+  MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
@@ -423,7 +423,7 @@ function SidebarContents({
                               className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-background text-muted-foreground"
                               title="Open floating chat"
                             >
-                              <Bot size={11} />
+                              <MessagesSquare size={11} />
                             </button>
                             <span
                               className={cn(

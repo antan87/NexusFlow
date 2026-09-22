@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 // electron-builder afterPack hook. Fails the build if the bundled backend is
 // missing its manifest or runtime dependencies in the packed output, so an
 // installer whose backend can't start (ERR_MODULE_NOT_FOUND at launch — as
 // shipped once when resources/backend arrived without node_modules) can never
 // be produced silently again.
-import { existsSync } from 'node:fs';
+import { existsSync, chmodSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -28,6 +29,8 @@ export default async function verifyBackend(context) {
   const required = [
     'package.json',
     path.join('dist', 'desktop-server.js'),
+    path.join('node_modules', 'node-pty'),
+    path.join('dist', 'terminal', 'smoke.js'),
     path.join('node_modules', 'hono'),
     path.join('node_modules', '@hono', 'node-server'),
   ];
@@ -41,5 +44,29 @@ export default async function verifyBackend(context) {
         'and build.extraResources.',
     );
   }
+  // node-pty 1.1.0's Darwin npm tarball records spawn-helper as 0644. The
+  // packaged copy must be executable before the Electron-as-Node smoke runs.
+  if (electronPlatformName === 'darwin') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    for (const relative of [
+      path.join('build', 'Release', 'spawn-helper'),
+      path.join('build', 'Debug', 'spawn-helper'),
+      path.join('prebuilds', `darwin-${arch}`, 'spawn-helper'),
+    ]) {
+      const helper = path.join(backendDir, 'node_modules', 'node-pty', relative);
+      if (existsSync(helper) && statSync(helper).isFile()) chmodSync(helper, statSync(helper).mode | 0o111);
+    }
+  }
+  // Test loading AND spawning with the packaged Electron binary. Native N-API
+  // compatibility is verified here instead of assuming the staging Node ABI.
+  const product = packager?.appInfo?.productFilename ?? 'ContextSpace';
+  const executable = electronPlatformName === 'darwin'
+    ? path.join(appOutDir, `${product}.app`, 'Contents', 'MacOS', product)
+    : path.join(appOutDir, electronPlatformName === 'win32' ? `${product}.exe` : 'contextspace-desktop');
+  execFileSync(executable, [path.join(backendDir, 'dist', 'terminal', 'smoke.js')], {
+    cwd: backendDir,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' },
+    stdio: 'inherit', timeout: 20_000,
+  });
   console.log(`[verify-backend] OK — bundled backend complete at ${backendDir}`);
 }

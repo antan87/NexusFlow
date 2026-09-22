@@ -103,6 +103,36 @@ export function isCodexSessionId(id: unknown): id is string {
   return isUuid(id);
 }
 
+/** Preserve only provider-recorded dates; discovery time is not session activity. */
+function sessionTimestamp(value: unknown): string | undefined {
+  if ((typeof value !== 'string' || !value.trim()) && typeof value !== 'number') return undefined;
+  const ms = new Date(value as string | number).getTime();
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+function sessionTimes() {
+  let first: string | undefined, last: string | undefined;
+  return {
+    add(value: unknown) {
+      const iso = sessionTimestamp(value);
+      if (!iso) return;
+      if (!first || iso < first) first = iso;
+      if (!last || iso > last) last = iso;
+    },
+    values: () => ({ createdAt: first ?? '', updatedAt: last ?? '' }),
+  };
+}
+
+export function codexThreadIdentity(meta: any): Pick<AISession, 'threadKind' | 'parentSessionId'> {
+  const source = meta?.source;
+  if (source && typeof source === 'object' && Object.hasOwn(source, 'subagent')) {
+    const parent = source.subagent?.thread_spawn?.parent_thread_id;
+    return { threadKind: 'subagent', ...(isUuid(parent) ? { parentSessionId: parent } : {}) };
+  }
+  if (source === 'subagent') return { threadKind: 'subagent' };
+  // forked_from_id is a user-created fork, not proof of a subagent.
+  return { threadKind: ['cli', 'vscode', 'exec', 'mcp'].includes(source) ? 'main' : 'unknown' };
+}
+
 /**
  * True for a user message that is CLI-injected context (Codex
  * <environment_context>/<user_instructions>, Copilot <system_reminder>) rather
@@ -380,8 +410,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     for (const [convId, convData] of conversationsMap.entries()) {
       const transcriptPath = path.join(agDir, 'brain', convId, '.system_generated', 'logs', 'transcript.jsonl');
       let messageCount = 0;
-      let createdAt = new Date(convData.entries[0]?.timestamp || Date.now()).toISOString();
-      let updatedAt = new Date(convData.entries[convData.entries.length - 1]?.timestamp || Date.now()).toISOString();
+      const times = sessionTimes();
+      for (const entry of convData.entries) times.add(entry.timestamp);
       let title = convData.title;
 
       try {
@@ -392,6 +422,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         for (const line of transcriptLines) {
           try {
             const tObj = JSON.parse(line);
+            times.add(tObj.timestamp);
             if (tObj.type === 'USER_INPUT' || tObj.type === 'PLANNER_RESPONSE') {
               messageCount++;
               if (tObj.type === 'USER_INPUT' && !firstUserMessage) {
@@ -413,10 +444,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         id: convId,
         assistant: 'antigravity',
         title: sanitizeSessionTitle(title),
-        createdAt,
-        updatedAt,
+        ...times.values(),
         messageCount,
         workspacePath: resolveTargetCwd(convData.entries[0]?.workspace),
+        recordedCwd: convData.entries[0]?.workspace,
+        threadKind: 'unknown',
       });
     }
   } catch {}
@@ -446,9 +478,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             const lines = content.split('\n').filter(Boolean);
             
             let messageCount = 0;
-            let createdAt = null;
-            let updatedAt = null;
+            const times = sessionTimes();
             let title = 'Claude Session';
+            let recordedCwd: string | undefined;
+            let threadKind: AISession['threadKind'] = file.startsWith('agent-') ? 'subagent' : 'unknown';
 
             for (const line of lines) {
               let record: any;
@@ -457,10 +490,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               } catch {
                 continue;
               }
-              if (record.timestamp) {
-                if (!createdAt) createdAt = record.timestamp;
-                updatedAt = record.timestamp;
-              }
+              times.add(record.timestamp);
+
+              if (record.sessionId === sessionId && typeof record.cwd === 'string') recordedCwd ??= record.cwd;
+              if (record.isSidechain === true) threadKind = 'subagent';
+              else if (record.isSidechain === false && threadKind === 'unknown') threadKind = 'main';
 
               if (record.type === 'user' || record.type === 'assistant') {
                 const text = claudeRecordText(record);
@@ -479,10 +513,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               id: sessionId,
               assistant: 'claude',
               title: sanitizeSessionTitle(title),
-              createdAt: createdAt || new Date().toISOString(),
-              updatedAt: updatedAt || new Date().toISOString(),
+              ...times.values(),
               messageCount,
               workspacePath: targetPath,
+              recordedCwd,
+              threadKind,
             });
           } catch {}
         }
@@ -509,24 +544,21 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         let sessionCwd: string | null = null;
         let sessionId: string | null = null;
         let messageCount = 0;
-        let createdAt: string | null = null;
-        let updatedAt: string | null = null;
+        const times = sessionTimes();
         let title = 'Codex Session';
+        let identity: Pick<AISession, 'threadKind' | 'parentSessionId'> = { threadKind: 'unknown' };
 
         for (const line of lines) {
           let record: any;
           try { record = JSON.parse(line); } catch { continue; }
 
-          const ts = record.timestamp || record.payload?.timestamp;
-          if (ts) {
-            const iso = new Date(ts).toISOString();
-            if (!createdAt) createdAt = iso;
-            updatedAt = iso;
-          }
+          times.add(record.timestamp);
+          times.add(record.payload?.timestamp);
 
           if (record.type === 'session_meta') {
             if (record.payload?.cwd) sessionCwd = record.payload.cwd;
             sessionId = codexSessionId(record) ?? sessionId;
+            identity = codexThreadIdentity(record.payload);
           } else if (record.type === 'response_item' && record.payload?.type === 'message') {
             const role = record.payload.role;
             if (role !== 'user' && role !== 'assistant') continue;
@@ -554,10 +586,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           id: sessionId,
           assistant: 'codex',
           title: sanitizeSessionTitle(title),
-          createdAt: createdAt || new Date().toISOString(),
-          updatedAt: updatedAt || new Date().toISOString(),
+          ...times.values(),
           messageCount,
           workspacePath: resolveTargetCwd(sessionCwd || undefined),
+          recordedCwd: sessionCwd ?? undefined,
+          ...identity,
         });
       } catch {}
     }
@@ -602,10 +635,12 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           id: row.id,
           assistant: 'copilot',
           title: sanitizeSessionTitle(title),
-          createdAt: row.created_at || new Date().toISOString(),
-          updatedAt: row.updated_at || new Date().toISOString(),
+          createdAt: sessionTimestamp(row.created_at) ?? '',
+          updatedAt: sessionTimestamp(row.updated_at) ?? '',
           messageCount,
           workspacePath: resolveTargetCwd(row.cwd),
+          recordedCwd: row.cwd,
+          threadKind: 'unknown',
         });
       }
     } catch {
@@ -616,7 +651,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   }
 
   // Sort by updatedAt descending
-  sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  sessions.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
   return sessions;
 }
 
