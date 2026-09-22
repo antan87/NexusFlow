@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, realpath } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { TerminalAccess, containedTerminalCwd, registerTerminalRoutes, trustedTerminalOrigin } from './routes.js';
@@ -27,7 +27,7 @@ describe('terminal execution boundary', () => {
   it('rejects traversal and symlink launch directories', async () => {
     const parent = await mkdtemp(path.join(os.tmpdir(), 'cs-terminal-')); dirs.push(parent);
     const root = path.join(parent, 'workspace'); await mkdir(root); await mkdir(path.join(root, 'repo')); await mkdir(path.join(parent, 'outside'));
-    expect(await containedTerminalCwd(root, 'repo')).toBe(path.join(root, 'repo'));
+    expect(await containedTerminalCwd(root, 'repo')).toBe(await realpath(path.join(root, 'repo')));
     await expect(containedTerminalCwd(root, '../outside')).rejects.toThrow('inside');
     await symlink(path.join(parent, 'outside'), path.join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
     await expect(containedTerminalCwd(root, 'escape')).rejects.toThrow('inside');

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -69,10 +69,11 @@ describe('resume the histories already shown in Sessions', () => {
     db.exec('CREATE TABLE sessions (id TEXT, cwd TEXT, summary TEXT, created_at TEXT, updated_at TEXT); CREATE TABLE turns (session_id TEXT, user_message TEXT, assistant_response TEXT, turn_index INTEGER)');
     db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?, ?)').run(ids.copilot, workspace, 'Copilot task', '2026-09-21', '2026-09-21'); db.close();
     const f = await fixture();
+    const canonicalWorkspace = await realpath(workspace);
     for (const [target, id] of Object.entries(ids)) {
       const response = await f.launch(target, id);
       expect(response.status, await response.text()).toBe(200);
-      expect(f.create).toHaveBeenLastCalledWith(expect.objectContaining({ target, sessionId: id, cwd: workspace }));
+      expect(f.create).toHaveBeenLastCalledWith(expect.objectContaining({ target, sessionId: id, cwd: canonicalWorkspace }));
     }
     expect((await f.launch('claude', ids.codex)).status).toBe(400);
     expect(f.create).toHaveBeenCalledTimes(4);
