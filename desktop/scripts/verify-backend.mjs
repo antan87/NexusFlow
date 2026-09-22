@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 // electron-builder afterPack hook. Fails the build if the bundled backend is
 // missing its manifest or runtime dependencies in the packed output, so an
 // installer whose backend can't start (ERR_MODULE_NOT_FOUND at launch — as
@@ -28,6 +29,8 @@ export default async function verifyBackend(context) {
   const required = [
     'package.json',
     path.join('dist', 'desktop-server.js'),
+    path.join('node_modules', 'node-pty'),
+    path.join('dist', 'terminal', 'smoke.js'),
     path.join('node_modules', 'hono'),
     path.join('node_modules', '@hono', 'node-server'),
   ];
@@ -41,5 +44,16 @@ export default async function verifyBackend(context) {
         'and build.extraResources.',
     );
   }
+  // Test loading AND spawning with the packaged Electron binary. Native N-API
+  // compatibility is verified here instead of assuming the staging Node ABI.
+  const product = packager?.appInfo?.productFilename ?? 'ContextSpace';
+  const executable = electronPlatformName === 'darwin'
+    ? path.join(appOutDir, `${product}.app`, 'Contents', 'MacOS', product)
+    : path.join(appOutDir, electronPlatformName === 'win32' ? `${product}.exe` : 'contextspace-desktop');
+  execFileSync(executable, [path.join(backendDir, 'dist', 'terminal', 'smoke.js')], {
+    cwd: backendDir,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '' },
+    stdio: 'inherit', timeout: 20_000,
+  });
   console.log(`[verify-backend] OK — bundled backend complete at ${backendDir}`);
 }

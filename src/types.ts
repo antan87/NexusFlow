@@ -136,6 +136,11 @@ export interface AISession {
   updatedAt: string;
   messageCount: number;
   workspacePath: string;
+  /** Only classify using provider metadata, never prompt text or a title. */
+  threadKind?: 'main' | 'subagent' | 'unknown';
+  parentSessionId?: string;
+  /** Unmodified cwd from the provider record, for canonical launch validation. */
+  recordedCwd?: string;
   /**
    * Server-verified way to continue this exact local session in a Desktop app.
    * `direct` opens the existing task by provider deep link. `guided` uses the
@@ -913,4 +918,3 @@ export interface ResolvedCategoryRules {
   editRepos: string[];
   referenceRepos: string[];
 }
-

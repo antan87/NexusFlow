@@ -16,7 +16,7 @@ export interface TerminalLaunchOptions {
   title?: string;
 }
 
-export const SUPPORTED_ASSISTANTS = new Set(['antigravity', 'claude', 'codex', 'copilot', 'cursor']);
+export const SUPPORTED_ASSISTANTS = new Set(['antigravity', 'claude', 'codex', 'copilot', 'cursor', 'pi']);
 
 /**
  * Escapes a string for PowerShell single-quoted string literal (' -> '')
@@ -67,6 +67,8 @@ export function buildHarnessCliCommand(assistant: string, sessionId?: string): s
         return `codex resume ${sessionId}`;
       case 'copilot':
         return `copilot --resume ${sessionId}`;
+      case 'pi':
+        throw new Error('Resume Pi sessions from its own session picker.');
       case 'cursor':
         return `cursor-agent --resume ${sessionId}`;
     }
@@ -83,6 +85,8 @@ export function buildHarnessCliCommand(assistant: string, sessionId?: string): s
       return 'copilot';
     case 'cursor':
       return 'cursor-agent';
+    case 'pi':
+      return 'pi';
     default:
       return 'agy';
   }

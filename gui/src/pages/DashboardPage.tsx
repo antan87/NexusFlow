@@ -301,7 +301,7 @@ export function DashboardPage({
           assistant: harness.id,
           command: option.command,
         });
-        showToast?.(`Launched ${harness.name} (${option.label}) for ${targetWs.branchName}`, 'success');
+        showToast?.(`Opened ${harness.name} inside ContextSpace for ${targetWs.branchName}`, 'success');
       } else if (option.targetId) {
         await apiFetch(`/api/workspace/${encodeURIComponent(targetWs.branchName)}/launch`, {
           method: 'POST',

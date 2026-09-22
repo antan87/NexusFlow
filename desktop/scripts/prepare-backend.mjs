@@ -34,6 +34,11 @@ run(existsSync(path.join(backendDir, 'package-lock.json')) ? 'npm ci --omit=dev'
 // Guard: fail loudly if the production install didn't actually stage its deps.
 // A silently empty node_modules would package into an app whose backend can't
 // start (ERR_MODULE_NOT_FOUND at launch) — catch it here, at build time.
+// node-pty is optional for CLI installs; desktop distributions require it.
+if (!existsSync(path.join(backendDir, 'node_modules', 'node-pty', 'package.json'))) {
+  throw new Error('Native terminal dependency is missing from the staged backend. Install the platform build prerequisites and retry.');
+}
+
 const sentinel = path.join(backendDir, 'node_modules', 'hono', 'package.json');
 if (!existsSync(sentinel)) {
   throw new Error(

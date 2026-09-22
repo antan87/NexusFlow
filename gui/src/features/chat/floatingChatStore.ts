@@ -1,3 +1,4 @@
+import type { TerminalLaunch } from '../terminal/client.js';
 import { useSyncExternalStore } from 'react';
 import { FLOATING_CHAT_STORAGE_KEY, LEGACY_FLOATING_CHAT_STORAGE_KEY } from '../../brand';
 
@@ -9,6 +10,9 @@ export interface FloatingChatState {
   activeTab: string | null;
   position: { x: number; y: number } | null;
   size: { width: number; height: number };
+  modes: Record<string, 'cli' | 'chat'>;
+  harnesses: Record<string, string>;
+  terminalLaunches: Record<string, TerminalLaunch>;
   drafts: Record<string, { id: string; text: string }>;
 }
 
@@ -21,6 +25,9 @@ const DEFAULT_STATE: FloatingChatState = {
   position: null,
   size: { width: 560, height: 680 },
   drafts: {},
+  modes: {},
+  harnesses: {},
+  terminalLaunches: {},
 };
 
 function loadState(): FloatingChatState {
@@ -30,6 +37,9 @@ function loadState(): FloatingChatState {
     const parsed = JSON.parse(raw);
     return {
       drafts: {},
+      harnesses: Object.fromEntries(Object.entries(parsed.harnesses ?? {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>,
+      terminalLaunches: {},
+      modes: Object.fromEntries(Object.entries(parsed.modes ?? {}).filter(([, mode]) => mode === 'cli' || mode === 'chat')) as Record<string, 'cli' | 'chat'>,
       isOpen: typeof parsed.isOpen === 'boolean' ? parsed.isOpen : DEFAULT_STATE.isOpen,
       isMinimized: typeof parsed.isMinimized === 'boolean' ? parsed.isMinimized : DEFAULT_STATE.isMinimized,
       isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : DEFAULT_STATE.isMaximized,
@@ -55,7 +65,7 @@ const listeners = new Set<() => void>();
 
 function notify() {
   try {
-    localStorage.setItem(FLOATING_CHAT_STORAGE_KEY, JSON.stringify(currentState));
+    localStorage.setItem(FLOATING_CHAT_STORAGE_KEY, JSON.stringify({ ...currentState, terminalLaunches: {}, drafts: {} }));
   } catch {
     // Non-fatal if localStorage is unavailable
   }
@@ -76,8 +86,23 @@ export const floatingChatStore = {
     return () => listeners.delete(listener);
   },
 
+  openTerminal: (branchName: string, target = 'shell', sessionId?: string, cwd?: string) => {
+    floatingChatStore.open(branchName);
+    floatingChatStore.setHarness(branchName, target);
+    updateState(prev => ({ ...prev, modes: { ...prev.modes, [branchName]: 'cli' }, terminalLaunches: { ...prev.terminalLaunches, [branchName]: { id: crypto.randomUUID(), target, sessionId, cwd } } }));
+  },
+  consumeTerminalLaunch: (branchName: string, id: string) => {
+    updateState(prev => {
+      if (prev.terminalLaunches[branchName]?.id !== id) return prev;
+      const terminalLaunches = { ...prev.terminalLaunches }; delete terminalLaunches[branchName];
+      return { ...prev, terminalLaunches };
+    });
+  },
+  setMode: (branchName: string, mode: 'cli' | 'chat') => updateState(prev => ({ ...prev, modes: { ...prev.modes, [branchName]: mode } })),
+  setHarness: (branchName: string, harness: string) => updateState(prev => ({ ...prev, harnesses: { ...prev.harnesses, [branchName]: harness } })),
   openDraft: (branchName: string, text: string) => {
     floatingChatStore.open(branchName);
+    floatingChatStore.setMode(branchName, 'chat');
     updateState((prev) => ({ ...prev, drafts: {
       ...prev.drafts,
       [branchName]: { id: crypto.randomUUID(), text },

@@ -130,7 +130,7 @@ export function TranscriptDialog({
         sessionId: activeSession.id,
         cwd: activeSession.workspacePath,
       });
-      showToast(`Launched interactive terminal for ${assistantLabel(activeSession.assistant)}.`, 'success');
+      showToast(`Opened ${assistantLabel(activeSession.assistant)} inside ContextSpace.`, 'success');
       setActiveSession(null);
     } catch {
       const cmd = getResumeCommand(activeSession.assistant, activeSession.id);

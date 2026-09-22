@@ -1,3 +1,4 @@
+import { floatingChatStore } from '../../features/chat/floatingChatStore.js';
 /**
  * TanStack Query hooks for the NexusFlow API. One hook per endpoint group;
  * mutations invalidate the queries they affect so screens stay fresh without
@@ -577,11 +578,15 @@ export interface LaunchTerminalPayload {
 
 export function useLaunchTerminal() {
   return useMutation({
-    mutationFn: ({ workspaceId, ...payload }: LaunchTerminalPayload) =>
-      apiFetch<{ success: boolean; command: string }>(`/api/workspace/${encodeURIComponent(workspaceId)}/terminal`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }),
+    mutationFn: async ({ workspaceId, ...payload }: LaunchTerminalPayload) => {
+      if (payload.assistant) {
+        floatingChatStore.openTerminal(workspaceId, payload.assistant, payload.sessionId, payload.cwd);
+        return { success: true, command: payload.assistant };
+      }
+      return apiFetch<{ success: boolean; command: string }>(`/api/workspace/${encodeURIComponent(workspaceId)}/terminal`, {
+        method: 'POST', body: JSON.stringify(payload),
+      });
+    },
   });
 }
 

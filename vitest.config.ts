@@ -9,6 +9,7 @@ export default defineConfig({
       '**/.{idea,git,cache,output,temp}/**',
       '**/scratch/**',
       '**/gui/e2e/**',
+      '**/gui/terminal-e2e/**',
       '**/desktop/*.js',
       '**/desktop/e2e/**'
     ],

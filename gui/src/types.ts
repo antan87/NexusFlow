@@ -75,6 +75,9 @@ export interface AISession {
   updatedAt: string;
   messageCount: number;
   workspacePath: string;
+  threadKind?: 'main' | 'subagent' | 'unknown';
+  parentSessionId?: string;
+  recordedCwd?: string;
   desktopHandoff?: {
     targetId: 'codex-desktop' | 'claude-desktop';
     method: 'direct' | 'guided';

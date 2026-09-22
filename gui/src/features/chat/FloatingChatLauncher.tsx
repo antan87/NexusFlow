@@ -1,4 +1,4 @@
-import { Bot } from 'lucide-react';
+import { MessagesSquare } from 'lucide-react';
 import { useFloatingChat } from './floatingChatStore.js';
 import { cn } from '../../lib/utils.js';
 
@@ -20,7 +20,7 @@ export function FloatingChatLauncher() {
       <button
         onClick={() => open()}
         className={cn(
-          'group relative flex items-center justify-center size-12 rounded-full',
+          'group relative flex items-center justify-center gap-2 h-11 px-4 rounded-full',
           'bg-primary text-primary-foreground shadow-lg shadow-primary/25',
           'hover:scale-105 hover:shadow-xl hover:shadow-primary/35 active:scale-95',
           'transition-all duration-200 cursor-pointer border border-primary/20',
@@ -28,7 +28,7 @@ export function FloatingChatLauncher() {
         title="Open Floating Workspace Chat"
         aria-label="Open Floating Workspace Chat"
       >
-        <Bot className="size-6 transition-transform group-hover:rotate-6" />
+        <MessagesSquare className="size-4" aria-hidden="true" /><span className="text-xs font-medium">Chat & CLI</span>
 
         {openTabs.length > 0 && (
           <span className="absolute -top-1 -right-1 size-5 rounded-full bg-emerald-500 text-white text-[10px] font-bold grid place-items-center shadow-md border-2 border-background">

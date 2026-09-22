@@ -42,6 +42,9 @@ jobs:
       - name: Build Project
         run: npm run build
 
+      - name: Verify native terminal with the backend runtime
+        run: node dist/terminal/smoke.js
+
       - name: Validate development skills and documented commands
         run: npm run check:skills
 
@@ -62,6 +65,25 @@ jobs:
 
       - name: Run GUI E2E Tests
         run: npm run test:gui
+
+      - name: Run real terminal GUI E2E
+        working-directory: gui
+        run: npx playwright test --config playwright.terminal.config.ts
+
+  desktop-macos-terminal:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm ci --prefix gui
+      - run: npm ci --prefix desktop
+      # afterPack launches a real PTY with the packaged Electron runtime.
+      - run: npm run pack --prefix desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
   # Verify both first-class desktop targets package into a standalone build and
   # their PACKAGED binaries boot the bundled backend (the app.isPackaged path

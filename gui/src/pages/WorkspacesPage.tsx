@@ -12,7 +12,7 @@ import {
   Puzzle,
   LayoutDashboard,
   GitCompare,
-  Bot,
+  MessagesSquare,
   Brain,
   Workflow,
   Zap,
@@ -115,7 +115,7 @@ const TABS: TabDef[] = [
   { value: 'plan', label: 'Plan', ariaLabel: 'Plan', icon: Calendar },
   { value: 'changes', label: 'Git Diff', ariaLabel: 'Changes', icon: GitCompare },
   { value: 'services', label: 'Services', ariaLabel: 'Services', icon: Zap },
-  { value: 'sessions', label: 'AI & Chat', ariaLabel: 'AI & Sessions', icon: Bot },
+  { value: 'sessions', label: 'AI & Chat', ariaLabel: 'AI & Sessions', icon: MessagesSquare },
   { value: 'knowledge', label: 'Knowledge', ariaLabel: 'Knowledge', icon: Brain },
   { value: 'skills', label: 'Skills', ariaLabel: 'Skills', icon: Puzzle },
 ];
@@ -848,7 +848,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary shrink-0 border border-primary/20">
-                          <Bot size={14} />
+                          <MessagesSquare size={14} />
                         </span>
                         <div className="min-w-0">
                           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">AI Assistant</div>
@@ -1338,7 +1338,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       className="text-xs h-8 gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
                       title="Open floating multi-workspace chat"
                     >
-                      <Bot className="size-3.5" />
+                      <MessagesSquare className="size-3.5" />
                       <span>Open Floating Chat</span>
                     </Button>
                   </div>

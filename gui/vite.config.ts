@@ -33,6 +33,12 @@ function monacoSubpathPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), monacoSubpathPlugin()],
+  server: {
+    proxy: {
+      '/api/terminals': { target: 'http://127.0.0.1:3000', changeOrigin: false },
+      '/ws/terminal': { target: 'http://127.0.0.1:3000', changeOrigin: false, ws: true },
+    },
+  },
   worker: {
     format: 'es',
   },

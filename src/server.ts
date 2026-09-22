@@ -1,3 +1,4 @@
+import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
 import { readRepositoryFile, RepositoryFileAccessError } from './services/repository-file.js';
@@ -1636,6 +1637,11 @@ app.post('/api/workspace/:id/launch', async (c) => {
   }
 });
 
+registerTerminalRoutes(app, upgradeWebSocket, async (id) => {
+  const config = await loadConfig();
+  return resolveExactLaunchWorkspace(config.workspacesDir, resolveWorkspacePath(config.workspacesDir, id));
+});
+
 // 8b. Launch an external interactive terminal for a workspace or AI session.
 app.post('/api/workspace/:id/terminal', async (c) => {
   const origin = c.req.header('origin');
@@ -2996,7 +3002,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
 
     const requestedCount = limit ?? 3;
     const candidates = discoveredSessions
-      .filter((session) => session.assistant === 'codex' || session.assistant === 'claude')
+      .filter((session) => session.threadKind !== 'subagent' && (session.assistant === 'codex' || session.assistant === 'claude'))
       .slice(0, DESKTOP_HANDOFF_SCAN_LIMIT);
     const sessions = [];
     const claudeTransferAvailable = candidates.some((session) => session.assistant === 'claude')
@@ -4304,8 +4310,16 @@ export function startServer(
     }) as import('node:http').Server;
 
     injectWebSocket(server);
+    const stopTerminals = () => { terminalManager.dispose(); process.exit(0); };
+    process.once('SIGTERM', stopTerminals);
+    process.once('SIGINT', stopTerminals);
+    server.once('close', () => {
+      process.removeListener('SIGTERM', stopTerminals);
+      process.removeListener('SIGINT', stopTerminals);
+    });
 
     server.on('close', () => {
+      terminalManager.dispose();
       void workroomManager.stopOrLeave().catch((error) => {
         console.error('[workroom] failed to stop with the dashboard:', error instanceof Error ? error.message : String(error));
       });

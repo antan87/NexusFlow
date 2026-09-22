@@ -1,6 +1,8 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { TerminalPane } from '../terminal/TerminalPane.js';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
-  Bot,
+  MessagesSquare,
+  TerminalSquare,
   X,
   Minus,
   Maximize2,
@@ -11,35 +13,24 @@ import {
   FolderGit2,
   MessageSquare,
 } from 'lucide-react';
-import { BsOpenai } from 'react-icons/bs';
-import { SiClaude, SiGithubcopilot } from 'react-icons/si';
-import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
+import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { AgentChat } from './AgentChat.js';
 import { useFloatingChat } from './floatingChatStore.js';
-import { loadChatStore } from './chatStore.js';
-import { providerForAssistant } from './chatLaunch.js';
 
 interface FloatingChatModalProps {
   workspaces: Feature[];
 }
 
-function getWorkspaceChatIcon(ws?: Feature) {
-  if (!ws) return <FolderGit2 className="size-3 text-muted-foreground shrink-0" />;
-  try {
-    const chatStore = loadChatStore(ws.branchName);
-    const provider = chatStore.providerId || providerForAssistant(ws.assistants?.[0]) || 'antigravity-cli';
-    if (provider.startsWith('claude')) return <SiClaude className="size-3 text-[#D97757] shrink-0" />;
-    if (provider.startsWith('codex')) return <BsOpenai className="size-3 text-foreground shrink-0" />;
-    if (provider.startsWith('copilot')) return <SiGithubcopilot className="size-3 text-blue-400 shrink-0" />;
-    if (provider.startsWith('antigravity')) return <AntigravityIcon className="size-3.5 shrink-0" />;
-  } catch {
-    // Non-fatal if workspace chat store could not be read
-  }
-  return <FolderGit2 className="size-3 text-muted-foreground shrink-0" />;
+function RetainedChat({ visible, ...props }: React.ComponentProps<typeof AgentChat> & { visible: boolean }) {
+  const [opened, setOpened] = useState(visible);
+  useEffect(() => { if (visible) setOpened(true); }, [visible]);
+  return <div className={cn('h-full min-h-0', !visible && 'hidden')}>
+    {(opened || visible) && <AgentChat {...props} />}
+  </div>;
 }
 
 export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
@@ -62,6 +53,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     setSize,
     drafts,
     consumeDraft,
+    modes, setMode, terminalLaunches, consumeTerminalLaunch, harnesses,
   } = useFloatingChat();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -188,13 +180,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     };
   }, [isMaximized, position, size]);
 
-  if (!isOpen) {
-    return null;
-  }
-
-  // Minimized Pill Mode
-  if (isMinimized) {
-    return (
+  return <>
+    {isOpen && isMinimized && (
       <div className="fixed bottom-5 right-6 z-50 animate-fade-in">
         <button
           onClick={restore}
@@ -202,7 +189,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           title="Restore floating workspace chat"
         >
           <div className="size-7 rounded-full bg-primary/10 grid place-items-center text-primary group-hover:scale-105 transition-transform">
-            <Bot className="size-4" />
+            <MessagesSquare className="size-4" />
           </div>
           <div className="flex flex-col items-start text-left">
             <span className="text-xs font-semibold leading-tight flex items-center gap-1.5">
@@ -220,16 +207,15 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           <Maximize2 className="size-3.5 text-muted-foreground group-hover:text-foreground ml-1" />
         </button>
       </div>
-    );
-  }
+    )}
 
-  return (
     <div
       ref={modalRef}
-      style={stylePos}
+      style={{ ...stylePos, display: !isOpen || isMinimized ? 'none' : undefined }}
+      role="region" aria-label="Workspace Chat"
       className={cn(
         'fixed z-50 flex flex-col overflow-hidden bg-card/98 backdrop-blur-xl border border-border/80 shadow-2xl rounded-2xl transition-[border-color] duration-150',
-        isMaximized && 'inset-4 w-auto h-auto rounded-xl',
+        isMaximized && 'inset-0 w-auto h-auto rounded-none',
       )}
     >
       {/* Header Bar & Drag Handle */}
@@ -245,7 +231,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         <div className="flex items-center gap-2 min-w-0 pr-2">
           {!isMaximized && <GripHorizontal className="size-4 text-muted-foreground/50 shrink-0" />}
           <div className="size-5 rounded-md bg-primary/15 grid place-items-center text-primary shrink-0">
-            <Bot className="size-3.5" />
+            <MessagesSquare className="size-3.5" />
           </div>
           <span className="text-xs font-bold text-foreground truncate shrink-0">
             Workspace Chat
@@ -284,7 +270,6 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
       {/* Tabs Row */}
       <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-border/60 bg-muted/20 overflow-x-auto no-scrollbar shrink-0" data-no-drag>
         {openTabs.map((branchName) => {
-          const ws = workspaceMap.get(branchName);
           const isActive = branchName === activeTab;
 
           return (
@@ -301,8 +286,9 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               )}
               title={branchName}
             >
-              {getWorkspaceChatIcon(ws)}
+              <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
               <span className="truncate">{branchName}</span>
+              {modes[branchName] !== 'chat' && harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
               <button
                 type="button"
                 onClick={(e) => {
@@ -363,7 +349,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                         ws.branchName === activeTab && 'bg-accent/70 font-semibold',
                       )}
                     >
-                      {getWorkspaceChatIcon(ws)}
+                      <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                       <div className="flex flex-col min-w-0 flex-1">
                         <span className="font-medium text-foreground truncate">{ws.branchName}</span>
                         {ws.description && (
@@ -384,6 +370,11 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         </Menu>
       </div>
 
+      {activeTab && <div className="flex items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
+        <Button size="xs" variant={(modes[activeTab] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[activeTab] ?? 'cli') === 'cli'} onClick={() => setMode(activeTab, 'cli')}><TerminalSquare className="size-3" />CLI</Button>
+        <Button size="xs" variant={modes[activeTab] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[activeTab] === 'chat'} onClick={() => setMode(activeTab, 'chat')}><MessageSquare className="size-3" />Chat</Button>
+        <span className="text-[10px] text-muted-foreground">{(modes[activeTab] ?? 'cli') === 'cli' ? 'Direct harness sessions' : 'Existing API and structured chat'}</span>
+      </div>}
       {/* Main Chat Body (Multi-Tab Mounted Execution) */}
       <div className="flex-1 min-h-0 relative overflow-hidden bg-card" data-no-drag>
         {openTabs.length === 0 ? (
@@ -394,7 +385,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
             <div className="space-y-1">
               <h3 className="text-sm font-semibold text-foreground">No Workspace Tab Open</h3>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Select a workspace below to start or continue an AI assistant chat session.
+                Select a workspace to run a CLI harness or open your existing chat.
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-1.5 mt-2 max-w-sm">
@@ -406,7 +397,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   onClick={() => addTab(ws.branchName)}
                   className="text-xs h-7 gap-1.5"
                 >
-                  {getWorkspaceChatIcon(ws)}
+                  <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                   <span>{ws.branchName}</span>
                 </Button>
               ))}
@@ -423,7 +414,10 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 key={branchName}
                 className={cn('h-full flex flex-col', !isTabActive && 'hidden')}
               >
-                <AgentChat ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
+                <div className={cn('h-full min-h-0', modes[branchName] === 'chat' && 'hidden')}>
+                  <TerminalPane workspace={branchName} active={isOpen && !isMinimized && isTabActive && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)} />
+                </div>
+                <RetainedChat visible={modes[branchName] === 'chat'} ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
               </div>
             );
           })
@@ -443,5 +437,5 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         </div>
       )}
     </div>
-  );
+  </>;
 }

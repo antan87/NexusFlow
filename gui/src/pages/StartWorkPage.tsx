@@ -1,3 +1,4 @@
+import { HarnessIcon } from '../components/icons/HarnessIcon.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw, Tag } from 'lucide-react';
@@ -272,19 +273,6 @@ export function StartWorkPage() {
   const retryObservation = () => {
     if (creationJobId) start(creationJobId);
   };
-
-  // Seed the assistant selection from detection exactly ONCE — a background
-  // refetch must never overwrite a deliberately emptied selection.
-  const assistantsSeededRef = useRef(false);
-  useEffect(() => {
-    if (!assistantsSeededRef.current && aiDetect.data) {
-      assistantsSeededRef.current = true;
-      setAssistants(aiDetect.data.filter((a) => a.detected).map((a) => a.name));
-    }
-  }, [aiDetect.data]);
-
-
-
 
   const selectedProject = useMemo(
     () => (projects.data ?? []).find((p) => p.id === projectId) ?? null,
@@ -1075,21 +1063,11 @@ export function StartWorkPage() {
           </div>
         </section>
 
-        {/* 6. Advanced */}
-        <section className="rounded-xl border border-border">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent"
-            aria-expanded={advancedOpen}
-          >
-            Advanced
-            <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', advancedOpen && 'rotate-180')} />
-          </button>
-          {advancedOpen && (
-            <div className="flex flex-col gap-4 border-t border-border p-4">
+        {/* 6. Explicit harness choices */}
+        <section className="rounded-lg border border-border bg-card p-4" aria-label="AI harnesses">
               <div>
-                <span className="mb-1.5 block text-sm font-medium">AI assistants</span>
+                <span className="mb-1.5 block text-sm font-medium">AI harnesses</span>
+                <p className="mb-3 text-xs text-muted-foreground">Choose which tools receive workspace instructions. This does not start a session or choose a default harness.</p>
                 <div className="flex flex-wrap gap-3">
                   {(aiDetect.data ?? []).map((assistant) => (
                     <label
@@ -1109,12 +1087,26 @@ export function StartWorkPage() {
                           )
                         }
                       />
-                      {assistant.displayName}
+                      <HarnessIcon harness={assistant.name} />{assistant.displayName}{!assistant.detected && <span className="text-xs text-muted-foreground">Not installed</span>}
                     </label>
                   ))}
                 </div>
               </div>
 
+        </section>
+
+        <section className="rounded-xl border border-border">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent"
+            aria-expanded={advancedOpen}
+          >
+            Advanced
+            <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', advancedOpen && 'rotate-180')} />
+          </button>
+          {advancedOpen && (
+            <div className="flex flex-col gap-4 border-t border-border p-4">
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="text-sm font-medium">Teamwork strategy</span>
