@@ -1,7 +1,7 @@
 {
   "name": "gui",
   "private": true,
-  "version": "2.14.0",
+  "version": "2.15.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -25,6 +25,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.39.0",
     "monaco-editor": "^0.56.0",
+    "parse5": "^8.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-icons": "^5.7.0",

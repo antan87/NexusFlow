@@ -10,7 +10,7 @@ import { checkGenerationLock } from '../core/generation-lock.js';
 import { loadWorkspaceManifest } from '../core/workspace.js';
 import { canOpenCodexSessionInWorkspace, canTransferClaudeSessionInWorkspace, findSessions } from '../utils/session-finder.js';
 import { TerminalManager, nativePtyAvailable, type TerminalClient } from './manager.js';
-import { listTerminalTargets, resolveLaunch } from './targets.js';
+import { listTerminalTargets, resolveLaunch, withWorkspaceCli } from './targets.js';
 
 const COOKIE = 'contextspace_terminal_owner';
 const HEADER = 'x-contextspace-terminal';
@@ -112,7 +112,7 @@ export function registerTerminalRoutes(app: Hono, upgrade: UpgradeWebSocket<any,
         if (found.threadKind === 'subagent') throw new Error('This is a subagent session. Resume its main conversation instead.');
         cwd = await containedTerminalCwd(root, found.recordedCwd);
       }
-      const terminal = await manager.create({ owner: getCookie(c, COOKIE)!, workspace: id, cwd, target: input.target, sessionId: input.sessionId, launchId: input.launchId, launch: resolveLaunch(input.target, input.sessionId) });
+      const terminal = await manager.create({ owner: getCookie(c, COOKIE)!, workspace: id, cwd, target: input.target, sessionId: input.sessionId, launchId: input.launchId, launch: withWorkspaceCli(resolveLaunch(input.target, input.sessionId), root) });
       return c.json({ terminal });
     } catch (error) { return c.json({ error: error instanceof z.ZodError ? 'Invalid terminal launch parameters.' : (error as Error).message }, 400); }
   });

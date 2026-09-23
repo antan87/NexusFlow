@@ -21,6 +21,7 @@ import { Input } from '../../components/ui/input.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
+import { FileTree } from './FileTree.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -85,6 +86,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
+  const [revealFile, setRevealFile] = useState<string>('');
+  const [revealKey, setRevealKey] = useState(0);
   const [targetLineMap, setTargetLineMap] = useState<Record<string, number>>({});
   const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
 
@@ -283,6 +286,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       if (index < 0 || index >= allFiles.length) return;
       setSelectedFileIndex(index);
       const target = allFiles[index];
+      setRevealFile(`${target.repoName}/${target.file}`);
+      setRevealKey(value => value + 1);
       const cacheKey = `${target.repoName}/${target.file}`;
 
       // Ensure repo is expanded
@@ -717,7 +722,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                   {/* Collapsible File List Body */}
                   {!collapsed && (
                     <div className="p-5 flex flex-col gap-3 bg-card/40">
-                      {repo.files.map((fileInfo: any) => {
+                      <FileTree label={`${repo.repoName} changed files`} files={repo.files} revealPath={revealFile.startsWith(`${repo.repoName}/`) ? revealFile.slice(repo.repoName.length + 1) : undefined} revealKey={revealKey} renderFile={(fileInfo: any) => {
                         const cacheKey = `${repo.repoName}/${fileInfo.file}`;
                         const isExpanded = !!expandedFiles[cacheKey];
                         const isLoading = !!diffLoading[cacheKey];
@@ -729,11 +734,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                           <div
                             key={fileInfo.file}
                             id={cleanDomId}
-                            className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 transition-colors hover:border-primary/30 shadow-2xs"
+                            className="overflow-hidden rounded transition-colors"
                           >
                             {/* File Header Row */}
                             <div
-                              className="flex cursor-pointer select-none items-center justify-between px-4 py-3 transition-colors hover:bg-accent/50"
+                              className="flex cursor-pointer select-none items-center justify-between px-2 py-1.5 transition-colors hover:bg-accent/50"
+                              role="button" tabIndex={0} aria-expanded={isExpanded}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void toggleFileExpansion(repo.repoName, fileInfo.file); } }}
                               onClick={() => toggleFileExpansion(repo.repoName, fileInfo.file)}
                             >
                               <div className="flex items-center gap-2.5 min-w-0">
@@ -746,7 +753,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                   className="max-w-[240px] truncate font-mono text-[11px] text-foreground sm:max-w-[480px] font-semibold"
                                   title={fileInfo.file}
                                 >
-                                  {fileInfo.file}
+                                  {fileInfo.file.split('/').at(-1)}
                                 </span>
                                 {(fileInfo.additions > 0 || fileInfo.deletions > 0) && (
                                   <span className="ml-1 shrink-0 font-mono text-[9px] font-bold text-muted-foreground">
@@ -814,7 +821,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                             )}
                           </div>
                         );
-                      })}
+                      }} />
                     </div>
                   )}
                 </div>

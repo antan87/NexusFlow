@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 import { parse } from 'smol-toml';
 import { BRAND_CONFIG } from './constants.js';
-import { generateWorkspaceTools, CLI_LAUNCHER } from './workspace-tools.js';
+import { generateWorkspaceTools, CLI_LAUNCHER, CLI_ALIAS_LAUNCHER } from './workspace-tools.js';
 let root: string;
 beforeEach(async () => { root = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-tools-')); });
 afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
@@ -14,6 +14,7 @@ it('provides an executable local CLI and selected-assistant MCP configs without 
   const outputs = await generateWorkspaceTools(root, ['claude', 'codex', 'copilot', 'antigravity'], runtime);
   expect(outputs).not.toContain('.cursor/mcp.json');
   expect((await (process.platform === 'win32' ? execa('cmd.exe', ['/d', '/c', path.join(root, `${CLI_LAUNCHER}.cmd`), 'isolate', '--help']) : execa(path.join(root, CLI_LAUNCHER), ['isolate', '--help']))).stdout).toContain('isolate');
+  expect((await (process.platform === 'win32' ? execa('cmd.exe', ['/d', '/c', path.join(root, `${CLI_ALIAS_LAUNCHER}.cmd`), '--version']) : execa(path.join(root, CLI_ALIAS_LAUNCHER), ['--version']))).stdout).toMatch(/\d+\.\d+\.\d+/);
   for (const file of ['.mcp.json', '.vscode/mcp.json']) {
     const config = JSON.parse(await fs.readFile(path.join(root, file), 'utf8'));
     const server = (config.mcpServers ?? config.servers)[BRAND_CONFIG.mcp.serverName];

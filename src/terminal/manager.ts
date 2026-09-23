@@ -122,7 +122,14 @@ export class TerminalManager {
   }
   attach(owner: string, workspace: string, id: string, client: TerminalClient): void {
     const s = this.owned(owner, workspace, id);
-    if (s.client && s.client !== client) throw new Error('This terminal is already attached to another window. Close that connection first.');
+    if (s.client && s.client !== client) {
+      // A reloaded or moved ContextSpace window may leave its old WebSocket
+      // attached until TCP notices it disappeared. Replace that connection;
+      // control() rejects any late input from the previous client.
+      const previous = s.client;
+      this.detach(owner, workspace, id, previous);
+      try { previous.close(); } catch { /* the stale connection is already gone */ }
+    }
     clearTimeout(s.timer); s.client = client; s.unacked = s.length;
     this.send(s, { type: 'ready', terminal: this.info(s), truncated: s.truncated });
     for (const data of s.chunks) this.send(s, { type: 'output', data });
