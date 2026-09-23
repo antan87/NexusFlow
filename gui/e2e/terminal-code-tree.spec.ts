@@ -31,6 +31,36 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await expect(chat.getByTestId('terminal-pane')).toBeVisible();
 });
 
+test('labels the maximized CLI and exposes a disconnected session with a reconnect action', async ({ page }) => {
+  let dropConnection: (() => Promise<void>) | undefined;
+  let connections = 0;
+  await page.routeWebSocket('**/ws/terminal', socket => {
+    connections++;
+    dropConnection = () => socket.close();
+    socket.onMessage(message => {
+      if (JSON.parse(String(message)).type !== 'attach') return;
+      socket.send(JSON.stringify({ type: 'ready', terminal, truncated: false }));
+      socket.send(JSON.stringify({ type: 'replayed' }));
+    });
+  });
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  const pane = chat.getByTestId('terminal-pane');
+  await expect(pane.getByRole('status')).toContainText('Connected');
+  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
+  await expect(chat.getByText('ContextSpace', { exact: true })).toBeVisible();
+  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
+  await chat.getByRole('button', { name: 'Show code' }).click();
+  await expect(chat.getByText('ContextSpace code', { exact: true })).toBeVisible();
+  await dropConnection?.();
+  await expect(pane.getByTestId('terminal-disconnected')).toContainText('Input is paused');
+  await pane.getByRole('button', { name: 'Reconnect CLI' }).click();
+  await expect.poll(() => connections).toBe(2);
+  await expect(pane.getByRole('status')).toContainText('Connected');
+  await expect(pane.getByTestId('terminal-disconnected')).toHaveCount(0);
+});
+
 test('uses ordinary terminal copy and paste shortcuts', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
   const inputs: string[] = [];
@@ -58,8 +88,10 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context }
   await page.mouse.up();
   await screen.press('ControlOrMeta+c');
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('copy this line');
+  await page.evaluate(() => navigator.clipboard.writeText('replaced before menu copy'));
   await screen.click({ button: 'right' });
   await pane.getByRole('menuitem', { name: 'Copy selection' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('copy this line');
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
   await page.evaluate(() => navigator.clipboard.writeText('pasted into CLI'));
   await page.keyboard.press('ControlOrMeta+v');

@@ -233,9 +233,12 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           <div className="size-5 rounded-md bg-primary/15 grid place-items-center text-primary shrink-0">
             <MessagesSquare className="size-3.5" />
           </div>
-          <span className="text-xs font-bold text-foreground truncate shrink-0">
-            Workspace Chat
+          <span className="text-xs font-bold text-foreground shrink-0">ContextSpace</span>
+          <span className="text-muted-foreground/70" aria-hidden="true">/</span>
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">
+            {activeTab && modes[activeTab] === 'chat' ? 'Agent chat' : 'CLI chat'}
           </span>
+          {activeWorkspace && <span className="truncate text-[11px] text-muted-foreground" title={activeWorkspace.branchName}>{activeWorkspace.branchName}</span>}
         </div>
 
         {/* Window Control Buttons */}

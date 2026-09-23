@@ -191,7 +191,11 @@ export function saveChatStore(branchName: string, store: ChatStore): void {
     try {
       const lightweight = {
         ...trimmed,
-        messages: trimmed.messages.map(({ images: _images, ...message }) => message),
+        messages: trimmed.messages.map(message => {
+          const lightweightMessage = { ...message };
+          delete lightweightMessage.images;
+          return lightweightMessage;
+        }),
       };
       localStorage.removeItem(chatStorageKey(branchName));
       localStorage.setItem(chatStorageKey(branchName), JSON.stringify(lightweight));

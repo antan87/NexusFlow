@@ -61,9 +61,10 @@ export async function safeCopyToClipboard(text: string): Promise<boolean> {
 /** Recover text from rich clipboard formats that omit text/plain. */
 export function clipboardHtmlToText(html: string): string {
   if (!html || typeof document === 'undefined') return '';
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  template.content.querySelectorAll('script,style').forEach(element => element.remove());
+  // Parse into a separate inert document; clipboard HTML must never be
+  // inserted into the live page, even temporarily.
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  parsed.querySelectorAll('script,style').forEach(element => element.remove());
   const blocks = new Set(['ADDRESS', 'ARTICLE', 'BLOCKQUOTE', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TR']);
   let text = '';
   const lineBreak = () => { if (text && !text.endsWith('\n')) text += '\n'; };
@@ -75,7 +76,7 @@ export function clipboardHtmlToText(html: string): string {
     node.childNodes.forEach(visit);
     if (block) lineBreak();
   };
-  template.content.childNodes.forEach(visit);
+  parsed.body.childNodes.forEach(visit);
   return text.replace(/^\n+|\n+$/g, '');
 }
 

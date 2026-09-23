@@ -8,7 +8,8 @@ export function TerminalWorkspace(props: ComponentProps<typeof TerminalPane>) {
   const [showCode, setShowCode] = useState(false);
   const [openReference, setOpenReference] = useState<{ path: string; line?: number; id: number } | null>(null);
   return <div className="flex h-full min-h-0 flex-col">
-    <div className="border-b border-border px-2 py-1">
+    <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1">
+      <span className="text-[11px] font-semibold text-foreground">CLI chat</span>
       <Button size="xs" variant={showCode ? 'secondary' : 'ghost'} aria-pressed={showCode} onClick={() => setShowCode(value => !value)}><ListTree className="size-3" />{showCode ? 'Hide code' : 'Show code'}</Button>
     </div>
     <div className="flex min-h-0 flex-1 flex-row">

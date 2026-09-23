@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../components/ui/button.js';
 import { Select, SelectTrigger, SelectPopup, SelectItem } from '../../components/ui/select.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
-import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap } from 'lucide-react';
+import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff } from 'lucide-react';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
 import { apiFetch } from '../../lib/api/client.js';
@@ -35,6 +35,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const [query, setQuery] = useState('');
   const [screenReader, setScreenReader] = useState(false);
   const [clipboardMenu, setClipboardMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuSelection = useRef('');
   const launchSeen = useRef('');
   const lastLaunch = useRef<TerminalLaunch | undefined>(undefined);
   const [retryLaunch, setRetryLaunch] = useState<TerminalLaunch | undefined>(undefined);
@@ -233,15 +234,20 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     try { await terminalRequest(workspace, `${terminal.id}/stop`); await refresh(); }
     catch (e) { setError((e as Error).message); }
   };
-  const copySelection = async () => {
-    const selected = renderer.current?.getSelection() ?? '';
-    if (!selected) {
-      setError('Select terminal output before copying.');
-      return;
+  const copySelection = async (captured?: string) => {
+    try {
+      const selected = captured || renderer.current?.getSelection() || '';
+      if (!selected) {
+        setError('Select terminal output before copying.');
+        return;
+      }
+      if (!await safeCopyToClipboard(selected)) setError('Could not copy terminal output. Check browser clipboard permissions.');
+      else setError('');
+    } finally {
+      // The context-menu button is removed after click. Focus on the next
+      // frame so its unmount cannot steal focus back from xterm's textarea.
+      requestAnimationFrame(() => renderer.current?.focus());
     }
-    if (!await safeCopyToClipboard(selected)) setError('Could not copy terminal output. Check browser clipboard permissions.');
-    else setError('');
-    renderer.current?.focus();
   };
   const pasteClipboard = async () => {
     setClipboardMenu(null);
@@ -282,15 +288,22 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       </select>
     </div>}
     {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
+    {terminal && state.startsWith('Disconnected') && <div data-testid="terminal-disconnected" role="alert" className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
+      <WifiOff className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      <span className="min-w-0 flex-1"><strong>CLI chat disconnected.</strong> Input is paused; the session may still be running.</span>
+      <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>
+    </div>}
     {!terminal && <div className="flex-1 px-3 py-3 text-xs text-muted-foreground">Choose a harness for a new session, or resume a saved conversation above. The harness keeps its own login and permissions. Shell opens PowerShell or your Unix shell. Existing API conversations remain under Chat.</div>}
-    <div className={`relative min-h-0 flex-1 ${terminal ? '' : 'hidden'}`} onContextMenu={event => {
+    <div className={`relative min-h-0 flex-1 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
+      if (event.button === 2) menuSelection.current = renderer.current?.getSelection() ?? '';
+    }} onContextMenu={event => {
       event.preventDefault();
       const bounds = event.currentTarget.getBoundingClientRect();
       setClipboardMenu({ x: Math.min(event.clientX - bounds.left, Math.max(0, bounds.width - 150)), y: Math.min(event.clientY - bounds.top, Math.max(0, bounds.height - 80)) });
     }}>
       <div ref={host} className="h-full overflow-hidden bg-[#111b18] p-2" aria-label="Interactive CLI terminal" />
       {clipboardMenu && <div className="absolute z-20 min-w-36 rounded border border-border bg-card p-1 shadow-lg" style={{ left: clipboardMenu.x, top: clipboardMenu.y }} role="menu" onKeyDown={event => { if (event.key === 'Escape') setClipboardMenu(null); }}>
-        <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { setClipboardMenu(null); void copySelection(); }}>Copy selection</button>
+        <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { setClipboardMenu(null); void copySelection(menuSelection.current); menuSelection.current = ''; }}>Copy selection</button>
         <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => void pasteClipboard()}>Paste</button>
       </div>}
     </div>

@@ -75,6 +75,7 @@ export function WorkspaceCodePanel({ workspace, active, openReference }: { works
 
   return <section aria-label="Workspace code" className="flex h-full min-h-0 min-w-0 flex-col bg-background">
     <div className="flex items-center gap-1 border-b border-border p-2">
+      <span className="mr-1 text-[11px] font-semibold text-foreground">ContextSpace code</span>
       <Button size="xs" variant={mode === 'changes' ? 'secondary' : 'ghost'} aria-pressed={mode === 'changes'} onClick={() => setMode('changes')}>Changes</Button>
       <Button size="xs" variant={mode === 'files' ? 'secondary' : 'ghost'} aria-pressed={mode === 'files'} onClick={() => setMode('files')}>Files</Button>
       <Button size="xs" variant="ghost" aria-label="Refresh code" onClick={() => setRevision(value => value + 1)} disabled={loading}><RefreshCw className="size-3" /></Button>
