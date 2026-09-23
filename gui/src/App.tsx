@@ -168,7 +168,7 @@ function AppInner() {
   const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -770,7 +770,7 @@ function AppInner() {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       const tab = parts[2];
-      const valid = ['overview', 'plan', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
+      const valid = ['overview', 'plan', 'documents', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
       setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
     } else {
       setActiveWsId(null);

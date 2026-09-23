@@ -1,0 +1,67 @@
+import { z } from 'zod';
+import { lifecyclePlanSchema, updateLifecyclePlan } from '../core/lifecycle.js';
+import {
+  addWorkDocument, updateWorkDocument, updateWorkGuidance, getWorkContext,
+  documentInputSchema, documentMetadataSchema, guidanceUpdateSchema,
+} from '../core/work-guidance.js';
+import { savePlanningNotes } from '../core/planning-notes.js';
+import { loadFeatureConfig } from '../core/workspace.js';
+import type { NexusFlowTool } from './tools.js';
+
+/** Publish and validate the same input contract used by the core mutations. */
+function planningTool<T extends z.ZodObject>(
+  name: string,
+  description: string,
+  schema: T,
+  action: (input: z.output<T>, root: string) => Promise<unknown>,
+  destructiveHint = false,
+): NexusFlowTool {
+  const inputSchema = z.toJSONSchema(schema, { io: 'input' });
+  return {
+    name, description,
+    annotations: { readOnlyHint: false, destructiveHint, idempotentHint: false, openWorldHint: false },
+    inputSchema: { ...inputSchema, additionalProperties: false, properties: {
+      ...inputSchema.properties,
+      workspaceId: { type: 'string', description: 'Optional workspace ID. Defaults to the active workspace.' },
+    } },
+    handler: async (args, ctx) => {
+      try {
+        const { workspaceId: _workspaceId, ...input } = args;
+        z.string().optional().parse(_workspaceId);
+        const validated = schema.strict().parse(input) as z.output<T>;
+        if (!await loadFeatureConfig(ctx.workspacePath)) throw new Error('Workspace not found.');
+        const result = await action(validated, ctx.workspacePath);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] };
+      }
+    },
+  };
+}
+
+const revision = z.number().int().nonnegative();
+const addDocumentSchema = documentInputSchema.safeExtend({ revision });
+const updateDocumentSchema = documentMetadataSchema.extend({ revision, documentId: z.string().uuid() });
+
+export const planningTools: NexusFlowTool[] = [
+  planningTool('update_milestone_plan',
+    'Create, edit, reorder, or remove feature-specific workspace milestones. Read get_work_context first and send lifecycle.revision (0 when absent) plus the entire desired steps array. Omitted steps are removed; [] disables milestones. Retained steps keep progress and verification. Reassign document/assignment scopes before removing referenced milestones. On conflict, reread and merge. Do not invent generic steps. Refresh context after saving to update generated files.',
+    lifecyclePlanSchema,
+    async (input, root) => ({ lifecycle: await updateLifecyclePlan(root, input) }), true),
+  planningTool('update_work_assignment',
+    'Update work type, size, and the current AI assignment, including stage, objective, expected output, stopping point, and optional milestone scope. Read get_work_context first and use guidance.revision. Supply the complete assignment; omit milestoneId for workspace scope. Follow the user-authorized scope; changing a saved stage does not itself grant permission to proceed. Returns the updated context and revision.',
+    guidanceUpdateSchema,
+    async (input, root) => { await updateWorkGuidance(root, input); return getWorkContext(root); }),
+  planningTool('add_work_document',
+    'Attach original Markdown/text or an HTTP(S) document link to the workspace, a milestone, or its project. Read get_work_context for guidance.revision. Provide exactly one of content or url. Documents default to draft; mark approved only when the user has approved the requirements. Links are stored, not fetched. Returns document IDs and the updated guidance revision.',
+    addDocumentSchema,
+    async ({ revision, ...input }, root) => { await addWorkDocument(root, revision, input); return getWorkContext(root); }),
+  planningTool('update_work_document',
+    'Edit an attached source document’s title, role, status, scope, and summary without changing its original content or URL. Read get_work_context for guidance.revision and documentId. Supply the complete metadata; use scope:{} for workspace scope. Use superseded for historical sources. Approval status must reflect the user’s decision. Shared project sources must be edited in their owning workspace.',
+    updateDocumentSchema,
+    async ({ revision, documentId, ...input }, root) => { await updateWorkDocument(root, documentId, revision, input); return getWorkContext(root); }),
+  planningTool('save_planning_notes',
+    'Replace authored delivery notes, questions, and deferred decisions in contextspace-milestones.md. First read get_planning_notes and supply its revision hash plus the entire revised content. On conflict, reread and merge instead of overwriting newer notes. Use update_milestone_plan for structured milestones.',
+    z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/), content: z.string().max(500_000) }),
+    (input, root) => savePlanningNotes(root, input.revision, input.content), true),
+];

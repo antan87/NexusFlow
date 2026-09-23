@@ -7,7 +7,7 @@ import * as config from './config.js';
 import { LocalStorageAdapter } from './adapters/local-storage.js';
 import { setActiveStorageProvider } from './adapters/registry.js';
 import { loadWorkspaceLifecycle, advanceLifecycleStep, updateLifecyclePlan, renderLifecyclePlan } from './lifecycle.js';
-import { loadWorkspaceState } from './workspace-state.js';
+import { loadWorkspaceState, saveWorkspaceState } from './workspace-state.js';
 import { addWorkDocument, loadWorkGuidance, updateWorkGuidance, updateWorkDocument, readWorkDocument, getWorkContext, WORK_GUIDANCE_FILE, WORK_ASSIGNMENT_FILE } from './work-guidance.js';
 
 let root: string;
@@ -17,7 +17,17 @@ beforeEach(async () => {
   await fs.writeFile(path.join(root, 'contextspace.json'), JSON.stringify({
     id: 'test', branchName: 'test', description: 'Improve invoice performance', flowType: 'feature', workType: 'performance', repos: [], assistants: [], workspacePath: root,
   }));
-  await loadWorkspaceLifecycle(root);
+  const lifecycle = await loadWorkspaceLifecycle(root);
+  // An authored plan fixture, independent of new-workspace defaults.
+  lifecycle.steps = [
+    { id: 'step_discovery', title: 'Measure current invoice timings', status: 'in_progress' },
+    { id: 'step_implementation', title: 'Optimize invoice lookup', status: 'pending', dependsOn: ['step_discovery'] },
+    { id: 'step_verification', title: 'Compare timings', status: 'pending', dependsOn: ['step_implementation'], requiresVerification: true },
+    { id: 'step_ship', title: 'Roll out invoice lookup', status: 'pending', dependsOn: ['step_verification'] },
+  ];
+  lifecycle.currentStepId = 'step_discovery';
+  const state = await loadWorkspaceState(root);
+  await saveWorkspaceState({ ...state, lifecycle });
 });
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -198,9 +208,8 @@ describe('editable milestone definitions', () => {
     expect((await loadWorkspaceState(root)).lifecycle?.revision ?? 0).toBe(0);
   });
 
-  it('retains IDs referenced by documents and blocks changing completed gate dependencies', async () => {
+  it('blocks changing completed gate dependencies', async () => {
     const lifecycle = await advanceLifecycleStep(root, 'step_discovery', 'complete');
-    await expect(updateLifecyclePlan(root, { revision: lifecycle.revision, steps: lifecycle.steps.slice(0, -1) })).rejects.toThrow('retained');
     const steps = lifecycle.steps.map((step) => step.id === 'step_discovery' ? { ...step, requiresVerification: true } : step);
     await expect(updateLifecyclePlan(root, { revision: lifecycle.revision, steps })).rejects.toThrow('Completed milestone');
   });

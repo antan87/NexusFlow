@@ -86,6 +86,40 @@ IDs in the assignment. Read originals before relying on summaries. Approved
 requirements establish intended behavior; drafts are proposals. Conflicting
 sources should be surfaced to the owner.
 
+### Planning through MCP
+
+The `interactive`, `developer`, and `full` MCP roles can manage planning directly.
+The `readonly`, `review`, and `ci` roles can read planning context but cannot edit it.
+Reconnect an already running MCP server after upgrading to discover new tools.
+
+- `get_work_context` returns `guidance` (including the assignment, documents, and
+  revision), `lifecycle`, shared project sources, and the rendered assignment.
+- `update_milestone_plan` accepts `revision` from `lifecycle.revision` (0 when
+  absent) and the complete desired `steps` array. Retained IDs preserve progress;
+  omitted IDs are removed. `steps: []` disables milestones. Move any assignment
+  and source-document scopes before deleting milestones they reference.
+- `update_work_assignment` accepts `guidance.revision`, `workType`, `size`, and
+  the complete `assignment`. Omit `milestoneId` to use workspace scope. Saving a
+  stage is not authorization to exceed the user's requested scope.
+- `add_work_document` accepts `guidance.revision`, `title`, `role`, optional
+  `status`/`scope`/`summary`, and exactly one of `content` or `url`. New documents
+  default to draft. Links are stored without fetching their contents.
+- `update_work_document` accepts `guidance.revision`, `documentId`, and the full
+  document metadata. It preserves original text and URLs. Use `scope: {}` for
+  workspace scope and `status: "superseded"` to retain a source as history.
+- `save_planning_notes` accepts the revision hash from `get_planning_notes` and
+  the complete revised `content`.
+
+All writes reject stale revisions. Reread and merge after a conflict rather than
+retrying an old replacement. Write results return the new revision. Call
+`refresh_context` after editing milestone definitions to regenerate the Markdown
+plan. These tools manage workspace planning; Workroom completion proposals still
+use the separate Workroom approval flow.
+
+For maintainers, `npm run build:backend` followed by
+`node scripts/smoke-mcp-planning.mjs` checks actual stdio discovery, planning edits,
+read-only denials, and conflict recovery in temporary workspaces without model calls.
+
 `contextspace-work.json` is the authoritative assignment and document index.
 Original text and metadata use the configured workspace storage adapter.
 `contextspace-assignment.md` is a derived view. Prefer live CLI/MCP reads because

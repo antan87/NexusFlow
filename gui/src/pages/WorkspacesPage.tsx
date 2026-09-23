@@ -26,6 +26,7 @@ import {
   RotateCcw,
   X,
   Calendar,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
@@ -97,11 +98,12 @@ import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
+import { RootDocumentsPanel } from '../features/work-guidance/RootDocumentsPanel.js';
 import { WorkspaceWorkPanel } from '../features/work-guidance/WorkspaceWorkPanel.js';
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
-type SubTab = 'overview' | 'plan' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills';
+type SubTab = 'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills';
 
 interface TabDef {
   value: SubTab;
@@ -113,6 +115,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { value: 'overview', label: 'Command Center', ariaLabel: 'Overview', icon: LayoutDashboard },
   { value: 'plan', label: 'Plan', ariaLabel: 'Plan', icon: Calendar },
+  { value: 'documents', label: 'Documents', ariaLabel: 'Documents', icon: FileText },
   { value: 'changes', label: 'Git Diff', ariaLabel: 'Changes', icon: GitCompare },
   { value: 'services', label: 'Services', ariaLabel: 'Services', icon: Zap },
   { value: 'sessions', label: 'AI & Chat', ariaLabel: 'AI & Sessions', icon: MessagesSquare },
@@ -1345,6 +1348,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
+              {subTab === 'documents' && <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} />}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}

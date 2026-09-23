@@ -89,7 +89,7 @@ test('SUITE 1: Generative Fuzzing - Zero mock strings across 60 pathological fix
       assert.ok(result.workspaceTitle, 'Workspace title must never be empty');
       assert.ok(result.workspaceIntent, 'Workspace intent must never be empty');
       assert.ok(Array.isArray(result.iterations), 'Iterations must be an array');
-      assert.ok(result.iterations.length >= 1, 'Fallback must produce at least 1 iteration');
+      assert.deepEqual(result.iterations, []);
       assert.ok(result.gateStatus, 'Gate status must be present');
       assert.equal(result.gateStatus.overallStatus, 'idle');
 
@@ -110,9 +110,7 @@ test('SUITE 2.1: Pathological empty and missing fields feature object', () => {
   assertNoMockStrings(result, 'emptyFeature');
   assert.equal(result.workspaceTitle, 'Untitled Worktree');
   assert.equal(result.workspaceIntent, 'Workspace Process and Code Review Cockpit');
-  assert.equal(result.iterations.length, 1);
-  assert.equal(result.iterations[0].number, 1);
-  assert.equal(result.iterations[0].status, 'planned');
+  assert.deepEqual(result.iterations, []);
 });
 
 test('SUITE 2.2: Workspace with 100 lifecycle steps under high load', () => {
@@ -189,8 +187,7 @@ test('SUITE 2.3: Pathological & corrupted markdown planContent parsing', () => {
   const elapsed = performance.now() - t0;
   assert.ok(elapsed < 100, `ReDoS check: took ${elapsed}ms for 500 lines of noise`);
   // When no milestones parsed, should cleanly fall back to initial step
-  assert.equal(resNoise.iterations.length, 1);
-  assert.equal(resNoise.iterations[0].title, 'Corrupted Plan Test');
+  assert.deepEqual(resNoise.iterations, []);
 
   // Case B: Markdown with HTML tags, unclosed brackets, and mixed milestone formats
   const dirtyMarkdown = `
@@ -217,24 +214,7 @@ test('SUITE 2.3: Pathological & corrupted markdown planContent parsing', () => {
   }, dirtyMarkdown);
 
   assertNoMockStrings(resDirty, 'dirtyMarkdown');
-  // Expected to parse Milestones 1, 2, 3, 4, 5 and skip Acceptance Criteria & Verification Method
-  assert.ok(resDirty.iterations.length >= 4, `Expected at least 4 milestones, got ${resDirty.iterations.length}`);
-  const titles = resDirty.iterations.map((i) => i.title);
-  console.log('ACTUAL PARSED TITLES:', titles);
-  assert.ok(titles.some((t) => t.includes('Clean Architecture Setup')));
-  assert.ok(titles.some((t) => t.includes('Security & OAuth2')));
-  assert.ok(titles.some((t) => t.includes('Database Sharding')));
-  assert.ok(!titles.some((t) => t.toLowerCase().includes('acceptance criteria')));
-  assert.ok(!titles.some((t) => t.toLowerCase().includes('verification method')));
-
-  // Milestone 1: done
-  const m1 = resDirty.iterations.find((i) => i.title.includes('Clean Architecture Setup'));
-  assert.equal(m1?.status, 'done');
-
-  // Milestone 2: first unfinished with changedFiles=4 -> review_ready
-  const m2 = resDirty.iterations.find((i) => i.title.includes('Security & OAuth2'));
-  assert.equal(m2?.status, 'review_ready');
-  assert.equal(m2?.changesCount, 4);
+  assert.deepEqual(resDirty.iterations, []);
 });
 
 test('SUITE 2.4: Lifecycle with unusual / missing step properties', () => {

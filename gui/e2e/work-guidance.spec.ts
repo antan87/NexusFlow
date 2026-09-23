@@ -5,11 +5,12 @@ test.use({ workspacesData: [{
   assistants: [], workspacePath: 'C:/ws/demo', projectId: 'billing', createdAt: '2026-06-01T00:00:00.000Z',
 }] });
 
-async function setupWork(page: import('@playwright/test').Page) {
+async function setupWork(page: import('@playwright/test').Page, empty = false) {
   let lifecycle: any = { workspaceId: 'demo', flowType: 'feature', revision: 0, steps: [
     { id: 'baseline', title: 'Measure baseline', status: 'in_progress' },
     { id: 'improve', title: 'Improve lookup', status: 'pending', dependsOn: ['baseline'] },
   ], fleet: [], updatedAt: '' };
+  if (empty) lifecycle.steps = [];
   let guidance: any = { version: 1, revision: 0, workType: 'performance', size: 'epic',
     assignment: { stage: 'investigate', objective: 'Find the bottleneck', expectedOutput: '', stopCondition: '' }, documents: [],
   };
@@ -95,6 +96,7 @@ test('adds a dependent milestone without resetting existing progress', async ({ 
   await page.getByRole('button', { name: 'Add milestone', exact: true }).click();
   await page.getByLabel('Milestone 3 title').fill('Roll out gradually');
   await page.getByLabel('Milestone 3 outcome').fill('Compare production timings');
+  await page.getByRole('group', { name: 'Milestone 3 dependencies', exact: true }).getByLabel('Improve lookup').check();
   await page.getByLabel('Milestone 3 repository (optional)').fill('billing-api');
   await page.getByLabel('Milestone 3 work item / PR (optional)').fill('PBI-123');
   await page.getByLabel('Milestone 3 unblock condition (optional)').fill('Package published');
@@ -144,4 +146,23 @@ test('keeps delivery notes through section switches and save conflicts, then rel
   expect(saved.content).toBe('# Agreed delivery order');
   await page.getByRole('heading', { name: 'Work brief & sources' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/contextspace-delivery-notes.png', fullPage: true });
+});
+
+
+test('hides unused milestones and supports an empty plan after removing custom outcomes', async ({ page }) => {
+  const state = await setupWork(page, true);
+  await expect(page.getByText('Iterations:', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Visual Flow', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add milestones', exact: true }).click();
+  await expect(page.getByLabel('Milestone 1 title')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add milestone', exact: true }).click();
+  await page.getByLabel('Milestone 1 title').fill('Browse root documents');
+  await page.getByRole('button', { name: 'Save milestones', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Visual Flow', exact: true })).toBeVisible();
+  expect(state.lifecycle().steps[0].dependsOn).toEqual([]);
+  await page.getByRole('button', { name: 'Remove milestone 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Save milestones', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Visual Flow', exact: true })).toHaveCount(0);
+  expect(state.lifecycle().steps).toEqual([]);
+  await page.screenshot({ path: 'test-results/optional-milestones.png', fullPage: true });
 });

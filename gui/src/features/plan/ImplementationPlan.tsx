@@ -135,9 +135,11 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   };
 
   const milestoneMarker = /<!-- CONTEXTSPACE:MILESTONES:START -->[\s\S]*?<!-- CONTEXTSPACE:MILESTONES:END -->/;
-  const currentPlanContent = milestoneMarkdown
+  const currentPlanContent = milestoneMarkdown !== null
     ? milestoneMarker.test(planContent) ? planContent.replace(milestoneMarker, () => milestoneMarkdown) : `${milestoneMarkdown}\n\n${planContent}`
     : planContent;
+
+  if (!lifecycle?.steps.length) return null;
 
   return (
     <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">

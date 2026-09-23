@@ -38,3 +38,21 @@ it('serves authored planning notes and returns a conflict without replacing newe
   expect((await (await app.request('/api/workspace/test/planning-notes')).json()).content).toBe('# Agreed sequence');
   expect((await app.request('/api/workspace/missing/planning-notes')).status).toBe(404);
 });
+
+it('lists and previews root documents without registering sources, and serves safe downloads', async () => {
+  await fs.writeFile(path.join(root, 'agent report.md'), '# Agent report');
+  await fs.writeFile(path.join(root, 'brief.pdf'), '%PDF-1.7\nfixture');
+  const list = await (await app.request('/api/workspace/test/documents')).json();
+  expect(list.documents.map((doc: { name: string }) => doc.name)).toEqual(['agent report.md', 'brief.pdf']);
+  const preview = await (await app.request('/api/workspace/test/documents/preview?name=agent%20report.md')).json();
+  expect(preview).toMatchObject({ name: 'agent report.md', kind: 'markdown', content: '# Agent report' });
+  expect(preview).not.toHaveProperty('bytes');
+  const file = await app.request('/api/workspace/test/documents/file?name=brief.pdf');
+  expect(file.headers.get('content-type')).toBe('application/pdf');
+  expect(file.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(await file.text()).toBe('%PDF-1.7\nfixture');
+  const download = await app.request('/api/workspace/test/documents/file?name=agent%20report.md&download=1');
+  expect(download.headers.get('content-disposition')).toContain('attachment;');
+  expect((await app.request('/api/workspace/test/documents/preview?name=..%2Fescape.md')).status).toBe(400);
+  expect((await app.request('/api/workspace/missing/documents')).status).toBe(404);
+});

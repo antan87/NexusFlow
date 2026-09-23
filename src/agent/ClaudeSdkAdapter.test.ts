@@ -169,6 +169,18 @@ describe('ClaudeSdkAdapter', () => {
     });
   });
 
+  it.each(['workspace-write', 'review'] as const)('respects the %s profile for planning tools', async (profile) => {
+    const names = ['update_milestone_plan', 'update_work_assignment', 'add_work_document', 'update_work_document', 'save_planning_notes'];
+    const { handle, approvals } = createMockHandle(names.map((name, index) => ({
+      type: 'approval_required', requestId: `planning-${index}`, tool: `mcp__contextspace-mcp__${name}`, input: {},
+    })));
+    const adapter = new ClaudeSdkAdapter(undefined, createMockAdapter(handle));
+    await adapter.start('C:/test/workspace');
+    await adapter.send('Set up the feature plan', profile);
+    await vi.waitFor(() => expect(approvals).toHaveLength(names.length));
+    expect(approvals.every((item) => item.decision.behavior === (profile === 'workspace-write' ? 'allow' : 'deny'))).toBe(true);
+  });
+
   it('emits idle on silent stream termination (prevents turn gate lock)', async () => {
     const { handle } = createMockHandle([
       { type: 'text_delta', text: 'Partial output' },

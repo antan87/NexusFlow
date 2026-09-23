@@ -362,7 +362,18 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
 | `get_service_logs` | Tail a running service's logs |
+| `get_work_context` | Read the assignment, document IDs, milestones, and edit revisions |
+| `update_milestone_plan` | Create, edit, reorder, or remove feature-specific milestones; an empty list disables them |
+| `update_work_assignment` | Set work type, size, stage, objective, expected output, stopping point, and scope |
+| `add_work_document` | Attach original text or a document link with role, status, and scope |
+| `update_work_document` | Edit source labels and scope while preserving original content |
+| `read_work_document` | Read an attached source by its document ID |
+| `get_planning_notes` | Read authored delivery notes and their revision hash |
+| `save_planning_notes` | Save revised delivery notes with conflict detection |
 
+Planning writes are available to `interactive`, `developer`, and `full` roles.
+Read the current revision before editing; see [planning through MCP](docs/work-guidance.md#planning-through-mcp).
+After upgrading a running MCP server, reconnect it in the assistant to discover the new tools.
 
 Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 

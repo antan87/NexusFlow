@@ -2768,7 +2768,7 @@ describe('Server API Endpoints Unit Tests', () => {
     try {
       const response = await app.request('/api/workspace/demo/lifecycle');
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ lifecycle, report, plan: expect.stringContaining('Milestone plan') });
+      expect(await response.json()).toMatchObject({ lifecycle, report, plan: '' });
     } finally {
       lifecycleSpy.mockRestore();
       stateSpy.mockRestore();

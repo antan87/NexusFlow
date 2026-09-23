@@ -1,4 +1,5 @@
 import { readPlanningNotes } from '../core/planning-notes.js';
+import { planningTools } from './planning-tools.js';
 /**
  * @module mcp/tools
  * Registry of MCP tools NexusFlow exposes to AI assistants. Each tool declares
@@ -112,6 +113,7 @@ async function requireWorkspace(ctx: ToolContext): Promise<void> {
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 export const tools: NexusFlowTool[] = [
+  ...planningTools,
   {
     name: 'get_planning_notes',
     description: 'Read the authored delivery plan, questions with owner/status, existing work evidence, and deferred decisions. Refresh preserves this document.',
@@ -124,13 +126,13 @@ export const tools: NexusFlowTool[] = [
   },
   {
     name: 'get_work_context',
-    description: 'Read the current owner-defined AI assignment, work type, size, stage, scoped document roles/statuses, and live milestone plan. Read this before starting work or advancing stages.',
+    description: 'Read the current assignment, work type, size, stage, source documents and IDs, shared sources, and milestone plan. Returns guidance.revision for update_work_assignment/add_work_document/update_work_document and lifecycle.revision for update_milestone_plan (use 0 when absent). Read before starting work or editing planning; reread after conflicts.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
     handler: async (_args, ctx) => {
       try {
         const context = await getWorkContext(ctx.workspacePath);
-        return json({ assignment: context.assignment, lifecycle: context.lifecycle });
+        return json(context);
       }
       catch (error) { return errorResult(error instanceof Error ? error.message : String(error)); }
     },

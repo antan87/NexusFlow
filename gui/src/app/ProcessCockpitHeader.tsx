@@ -243,7 +243,7 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
       {!isZenMode && (
         <div className="h-7 px-3 flex items-center justify-between border-b border-border/40 bg-muted/20 text-xs">
           {/* Left: Scrollable Iterations Strip */}
-          <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar min-w-0 flex-1 pr-3">
+          {iterations.length > 0 && <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar min-w-0 flex-1 pr-3">
             <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 shrink-0">
               Iterations:
             </span>
@@ -309,7 +309,7 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
                 <span>New Iteration</span>
               </button>
             )}
-          </div>
+          </div>}
 
           {/* Right: Stage Navigation Switcher */}
           <div className="flex items-center gap-1 shrink-0 font-mono text-[10px]">

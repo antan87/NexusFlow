@@ -26,7 +26,7 @@ import {
 } from '../../src/core/domain-packs.js';
 
 import { buildHarnessCliCommand } from '../../src/utils/terminal-launch.js';
-import { createDefaultSteps } from '../../src/core/lifecycle.js';
+import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';
 import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
 import { refreshWorkspace } from '../../src/core/refresh.js';
 
@@ -60,12 +60,8 @@ describe('Tier 4: Real-World Application Scenarios', () => {
       ],
     });
 
-    // 2. Sizing verification: Lifecycle sizes to 2 steps for fast turnaround
-    const steps = createDefaultSteps('quick', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(2);
-    expect(steps[0].id).toBe('reproduce_and_fix');
-    expect(steps[1].id).toBe('verify_and_ship');
-    expect(steps[1].dependsOn).toContain('reproduce_and_fix');
+    // 2. Sizing verification: Sizing does not generate milestones
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     // 3. Context check: AGENTS.md carries isolation instructions and domain rules
     const agentsMd = await generateAgentsMd(ws.feature, ws.repos);
@@ -84,7 +80,7 @@ describe('Tier 4: Real-World Application Scenarios', () => {
   });
 
   // ─── Scenario 2: Standard Feature Development Workflow ───────────────
-  it('Scenario 2: Standard Feature Development Workflow (feature flow, worktree, multi-tag, 4-step pipeline)', async () => {
+  it('Scenario 2: Standard Feature Development Workflow (feature flow, worktree, multi-tag, optional milestones)', async () => {
     // 1. Inception: Standard feature with dedicated git worktree
     ws = await createTestWorkspace({
       id: 'feat-payroll-benefits',
@@ -97,15 +93,8 @@ describe('Tier 4: Real-World Application Scenarios', () => {
       ],
     });
 
-    // 2. Lifecycle check: 4-stage pipeline is configured
-    const steps = createDefaultSteps('feature', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(4);
-    expect(steps.map((s) => s.id)).toEqual([
-      'step_discovery',
-      'step_implementation',
-      'step_verification',
-      'step_ship',
-    ]);
+    // 2. Lifecycle check: no pipeline is configured automatically
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     // 3. Domain rules: Parent and sub-vertical rules composite cleanly
     const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll']);
@@ -248,13 +237,8 @@ describe('Tier 4: Real-World Application Scenarios', () => {
       ],
     });
 
-    // 2. Lifecycle Sizing: 4 multi-slice stages
-    const steps = createDefaultSteps('epic', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(4);
-    expect(steps[0].id).toBe('epic_slice_1');
-    expect(steps[1].id).toBe('epic_slice_2');
-    expect(steps[2].id).toBe('epic_slice_3');
-    expect(steps[3].id).toBe('epic_slice_4');
+    // 2. Lifecycle sizing does not invent deliverables
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     // 3. Composite verification across all vertical tags
     const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll', 'economy']);

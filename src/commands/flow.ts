@@ -51,51 +51,53 @@ export async function flowCommand(
 
   console.log(chalk.bold.cyan(`\n🌊 ${BRAND_NAME} — Active Lifecycle & Fleet Radar\n`));
   console.log(
-    `Workspace: ${chalk.bold(lifecycle.workspaceId)}  •  Flow Preset: ${chalk.magenta(lifecycle.flowType.toUpperCase())}  •  Active Step: ${chalk.green(lifecycle.currentStepId ?? 'none')}\n`,
+    `Workspace: ${chalk.bold(lifecycle.workspaceId)}${lifecycle.currentStepId ? `  •  Active milestone: ${chalk.green(lifecycle.currentStepId)}` : ''}\n`,
   );
 
-  console.log(chalk.bold('📍 Lifecycle Milestone Pipeline:'));
-  console.log(chalk.dim('─'.repeat(72)));
+  if (lifecycle.steps.length) {
+    console.log(chalk.bold('📍 Lifecycle Milestone Pipeline:'));
+    console.log(chalk.dim('─'.repeat(72)));
 
-  lifecycle.steps.forEach((step, idx) => {
-    let badge = '';
-    switch (step.status) {
-      case 'completed':
-        badge = chalk.green('✔ COMPLETED');
-        break;
-      case 'verified':
-        badge = chalk.cyan('🛡 VERIFIED');
-        break;
-      case 'in_progress':
-        badge = chalk.bgCyan.black.bold(' 🔄 ACTIVE ');
-        break;
-      case 'pending':
-        badge = chalk.yellow('⏳ PENDING');
-        break;
-      case 'blocked':
-        badge = chalk.dim('🔒 BLOCKED');
-        break;
-    }
+    lifecycle.steps.forEach((step, idx) => {
+      let badge = '';
+      switch (step.status) {
+        case 'completed':
+          badge = chalk.green('✔ COMPLETED');
+          break;
+        case 'verified':
+          badge = chalk.cyan('🛡 VERIFIED');
+          break;
+        case 'in_progress':
+          badge = chalk.bgCyan.black.bold(' 🔄 ACTIVE ');
+          break;
+        case 'pending':
+          badge = chalk.yellow('⏳ PENDING');
+          break;
+        case 'blocked':
+          badge = chalk.dim('🔒 BLOCKED');
+          break;
+      }
 
-    const prefix = idx === lifecycle.steps.length - 1 ? '└─' : '├─';
-    const depNotice = step.dependsOn && step.dependsOn.length > 0 ? chalk.dim(` [depends on: ${step.dependsOn.join(', ')}]`) : '';
-    const ownerNotice = step.owner ? chalk.dim(` (${step.owner})`) : '';
-    const branchNotice = step.branch ? chalk.cyan(` [${step.branch}]`) : '';
+      const prefix = idx === lifecycle.steps.length - 1 ? '└─' : '├─';
+      const depNotice = step.dependsOn && step.dependsOn.length > 0 ? chalk.dim(` [depends on: ${step.dependsOn.join(', ')}]`) : '';
+      const ownerNotice = step.owner ? chalk.dim(` (${step.owner})`) : '';
+      const branchNotice = step.branch ? chalk.cyan(` [${step.branch}]`) : '';
 
-    console.log(`${prefix} ${badge}  ${chalk.bold(step.title)}${ownerNotice}${branchNotice}${depNotice}`);
-    if (step.description) {
-      console.log(`│    ${chalk.dim(step.description)}`);
-    }
-    if (step.lastVerificationStatus) {
-      const vStatus = step.lastVerificationStatus === 'pass' ? chalk.green('PASS') : chalk.red('FAIL');
-      const shaStr = step.lastVerificationSha ? ` @ ${step.lastVerificationSha.slice(0, 7)}` : '';
-      console.log(`│    ${chalk.dim(`Gate:`)} ${vStatus}${chalk.dim(shaStr)}`);
-    }
-    if (idx < lifecycle.steps.length - 1) {
-      console.log('│');
-    }
-  });
-  console.log(chalk.dim('─'.repeat(72)));
+      console.log(`${prefix} ${badge}  ${chalk.bold(step.title)}${ownerNotice}${branchNotice}${depNotice}`);
+      if (step.description) {
+        console.log(`│    ${chalk.dim(step.description)}`);
+      }
+      if (step.lastVerificationStatus) {
+        const vStatus = step.lastVerificationStatus === 'pass' ? chalk.green('PASS') : chalk.red('FAIL');
+        const shaStr = step.lastVerificationSha ? ` @ ${step.lastVerificationSha.slice(0, 7)}` : '';
+        console.log(`│    ${chalk.dim(`Gate:`)} ${vStatus}${chalk.dim(shaStr)}`);
+      }
+      if (idx < lifecycle.steps.length - 1) {
+        console.log('│');
+      }
+    });
+    console.log(chalk.dim('─'.repeat(72)));
+  }
 
   if (lifecycle.fleet && lifecycle.fleet.length > 0) {
     console.log(chalk.bold('\n🛰️  Sister Branch Fleet & Collaborator Radar:'));
