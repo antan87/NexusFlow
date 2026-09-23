@@ -4,7 +4,7 @@
  * and changeset symbol navigation.
  * File: gui/src/features/changes/PluggableDiffViewer.tsx
  */
-import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   Columns2,
   ExternalLink,
@@ -50,6 +50,9 @@ export interface PluggableDiffViewerProps {
   onRequestRefine?: (action: DiffHunkAction, feedback: string) => Promise<void> | void;
   onOpenFile?: (repoName: string, filePath: string, line?: number) => void;
   onSelectSymbol?: (symbol: ChangesetSymbol) => void;
+  onNextFile?: () => void;
+  onPrevFile?: () => void;
+  fillContainer?: boolean;
 }
 
 export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
@@ -70,6 +73,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   onRequestRefine,
   onOpenFile,
   onSelectSymbol,
+  onNextFile,
+  onPrevFile,
+  fillContainer = false,
 }) => {
   // Local or controlled viewMode
   const [internalViewMode, setInternalViewMode] = useState<DiffViewMode>('side-by-side');
@@ -105,9 +111,14 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     ));
   }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath, preExtractedSymbols]);
 
-  // If initialTargetLine changes from parent, sync targetLine and active hunk
+  // If initialTargetLine changes from parent, sync targetLine and active hunk without jumping back on background diff updates
+  const lastTargetLineJumpRef = useRef<string>('');
   useEffect(() => {
     if (initialTargetLine && initialTargetLine > 0) {
+      const jumpKey = `${filePath}:${initialTargetLine}`;
+      if (lastTargetLineJumpRef.current === jumpKey) return;
+      lastTargetLineJumpRef.current = jumpKey;
+
       let targetJumpLine = initialTargetLine;
       if (!fullFileContent) {
         const snippetLine = mapRealLineToSnippetLine(initialTargetLine, hunks);
@@ -126,7 +137,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         setActiveHunkIndex(matchingIndex);
       }
     }
-  }, [initialTargetLine, hunks, fullFileContent]);
+  }, [initialTargetLine, filePath, hunks, fullFileContent]);
 
   const toggleViewMode = () => {
     if (onToggleViewMode) {
@@ -136,25 +147,31 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     }
   };
 
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleSelectHunk = useCallback((index: number) => {
+    if (index >= 0 && index < hunks.length && hunks[index]) {
+      setActiveHunkIndex(index);
+      setTargetLine(Math.max(1, hunks[index].startLineModified));
+      setJumpNonce((n) => n + 1);
+    }
+  }, [hunks]);
+
   const handleNextHunk = useCallback(() => {
     if (activeHunkIndex < hunks.length - 1) {
-      const nextIdx = activeHunkIndex + 1;
-      setActiveHunkIndex(nextIdx);
-      if (hunks[nextIdx]) {
-        setTargetLine(hunks[nextIdx].startLineModified);
-      }
+      handleSelectHunk(activeHunkIndex + 1);
+    } else if (onNextFile) {
+      onNextFile();
     }
-  }, [activeHunkIndex, hunks]);
+  }, [activeHunkIndex, hunks.length, handleSelectHunk, onNextFile]);
 
   const handlePrevHunk = useCallback(() => {
     if (activeHunkIndex > 0) {
-      const prevIdx = activeHunkIndex - 1;
-      setActiveHunkIndex(prevIdx);
-      if (hunks[prevIdx]) {
-        setTargetLine(hunks[prevIdx].startLineModified);
-      }
+      handleSelectHunk(activeHunkIndex - 1);
+    } else if (onPrevFile) {
+      onPrevFile();
     }
-  }, [activeHunkIndex, hunks]);
+  }, [activeHunkIndex, handleSelectHunk, onPrevFile]);
 
   const handleAcceptHunk = useCallback(async () => {
     if (!currentHunk || !onHunkAction) return;
@@ -220,7 +237,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     }
   };
 
-  const handleLineSelect = (line: number) => {
+  const handleLineSelect = useCallback((line: number) => {
     const matchingIndex = hunks.findIndex(
       (h) =>
         line >= h.startLineModified &&
@@ -229,7 +246,13 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) {
       setActiveHunkIndex(matchingIndex);
     }
-  };
+  }, [hunks, activeHunkIndex]);
+
+  useEffect(() => {
+    if (!tabsContainerRef.current) return;
+    const activeTab = tabsContainerRef.current.querySelector<HTMLElement>('[data-active-tab="true"]');
+    activeTab?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [activeHunkIndex]);
 
   // Keyboard shortcut listener for fast hunk triage
   useEffect(() => {
@@ -238,9 +261,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
-      if (e.key === 'j') {
+      if (e.key === 'j' || e.key === 'n') {
         handleNextHunk();
-      } else if (e.key === 'k') {
+      } else if (e.key === 'k' || e.key === 'p') {
         handlePrevHunk();
       } else if (e.key === 'a') {
         void handleAcceptHunk();
@@ -255,9 +278,16 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const displayedSymbols = changesetSymbols && changesetSymbols.length > 0 ? changesetSymbols : fileSymbols;
 
   return (
-    <div className="flex flex-col rounded-xl border border-border/80 bg-card/60 backdrop-blur-md overflow-hidden shadow-sm my-2">
+    <div
+      className={cn(
+        'flex flex-col overflow-hidden',
+        fillContainer
+          ? 'h-full w-full min-h-0 bg-background border-0 rounded-none shadow-none my-0'
+          : 'rounded-xl border border-border/80 bg-card/60 backdrop-blur-md shadow-sm my-2'
+      )}
+    >
       {/* ─── TOP DIFF TOOLBAR ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-muted/20 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-muted/20 text-xs shrink-0">
         {/* File & Hunk Summary */}
         <div className="flex items-center gap-2 min-w-0">
           <FileText size={13} className="text-primary shrink-0" />
@@ -353,9 +383,80 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         </div>
       </div>
 
+      {/* ─── CHANGE SECTION TABS NAVIGATION ───────────────────────────────────── */}
+      {hunks.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-1.5 px-3 py-1.5 border-b border-border/60 bg-muted/15 text-xs select-none">
+          <div
+            ref={tabsContainerRef}
+            role="tablist"
+            aria-label="Change sections"
+            className="flex items-center gap-1 min-w-[130px] flex-1 overflow-x-auto py-0.5"
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-1 shrink-0">
+              Changes ({hunks.length}):
+            </span>
+            {hunks.map((h, i) => {
+              const adds = h.lines ? h.lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length : 0;
+              const dels = h.lines ? h.lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length : 0;
+              const isSelected = i === activeHunkIndex;
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  data-active-tab={isSelected ? 'true' : undefined}
+                  onClick={() => handleSelectHunk(i)}
+                  className={cn(
+                    'px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border whitespace-nowrap shrink-0',
+                    isSelected
+                      ? 'bg-primary text-primary-foreground border-primary font-semibold shadow-xs'
+                      : 'bg-card/70 text-muted-foreground hover:text-foreground hover:bg-accent border-border/60'
+                  )}
+                  title={`Jump to change section #${i + 1}: line ${h.startLineModified}${h.enclosingDeclaration ? ` (${h.enclosingDeclaration})` : ''}`}
+                >
+                  <span>Section {i + 1}</span>
+                  {(adds > 0 || dels > 0) && (
+                    <span className="ml-1 text-[9px] opacity-80">
+                      {adds > 0 && <span className="text-emerald-300">+{adds}</span>}
+                      {dels > 0 && <span className="text-rose-300">-{dels}</span>}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
+            <button
+              type="button"
+              disabled={activeHunkIndex <= 0 && !onPrevFile}
+              onClick={handlePrevHunk}
+              className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-mono border border-border bg-card/60 hover:bg-accent disabled:opacity-35 transition-colors cursor-pointer"
+              title={activeHunkIndex <= 0 && onPrevFile ? 'Previous file' : 'Previous change section (k / p)'}
+              aria-label={activeHunkIndex <= 0 && onPrevFile ? 'Previous file' : 'Previous section'}
+            >
+              <ChevronLeft size={12} />
+              <span>{activeHunkIndex <= 0 && onPrevFile ? 'Prev File' : 'Prev'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={activeHunkIndex >= hunks.length - 1 && !onNextFile}
+              onClick={handleNextHunk}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-medium border border-primary/50 bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-35 transition-colors cursor-pointer shadow-2xs"
+              title={activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next file' : 'Next change section (j / n)'}
+              aria-label={activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next file' : 'Next section'}
+            >
+              <span>{activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next File' : 'Next Section'}</span>
+              <ChevronRight size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ─── CHANGESET SYMBOL EXPLORER DRAWER ─────────────────────────────────── */}
       {symbolsOpen && (
-        <div className="p-3 border-b border-border/70 bg-muted/20">
+        <div className="p-3 border-b border-border/70 bg-muted/20 shrink-0">
           <ChangesetSymbolNavigator
             symbols={displayedSymbols}
             activeFilePath={filePath}
@@ -372,9 +473,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       )}
 
       {/* ─── CENTER DIFF CANVAS ──────────────────────────────────────────────── */}
-      <div className="p-2 bg-background/50">
+      <div className={cn('bg-background/50', fillContainer ? 'flex-1 min-h-0 p-1 flex flex-col' : 'p-2')}>
         {engine === 'monaco' ? (
-          <Suspense fallback={<div role="status">Loading diff editor…</div>}>
+          <Suspense fallback={<div role="status" className="p-4 text-xs text-muted-foreground">Loading diff editor…</div>}>
           <MonacoDiffAdapter
             filePath={filePath}
             repoName={repoName}
@@ -384,7 +485,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
-            height={460}
+            height={fillContainer ? '100%' : 460}
             targetLine={targetLine}
             jumpNonce={jumpNonce}
             onOpenFile={onOpenFile}
@@ -400,6 +501,8 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
+            targetLine={targetLine}
+            jumpNonce={jumpNonce}
           />
         )}
       </div>

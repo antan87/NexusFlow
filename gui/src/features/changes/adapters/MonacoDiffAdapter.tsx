@@ -69,9 +69,50 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     modified: null,
   });
 
-  // Track targetLine jumps in modified buffer
+  const onOpenFileRef = useRef(onOpenFile);
+  const onLineSelectRef = useRef(onLineSelect);
+
+  useEffect(() => {
+    onOpenFileRef.current = onOpenFile;
+    onLineSelectRef.current = onLineSelect;
+  });
+
+  const initialJumpDoneRef = useRef<string>('');
+  const lastJumpNonceRef = useRef<number | undefined>(undefined);
+
+  // Dynamically update viewMode without recreating editor
+  useEffect(() => {
+    if (!editorInstanceRef.current) return;
+    editorInstanceRef.current.updateOptions({
+      renderSideBySide: viewMode === 'side-by-side',
+    });
+  }, [viewMode]);
+
+  // Dynamically update whitespace trimming without recreating editor
+  useEffect(() => {
+    if (!editorInstanceRef.current) return;
+    editorInstanceRef.current.updateOptions({
+      ignoreTrimWhitespace: ignoreWhitespace,
+    });
+  }, [ignoreWhitespace]);
+
+  // Update text model contents in-place without destroying editor or losing scroll
+  useEffect(() => {
+    const { original, modified } = modelsRef.current;
+    if (original && originalContent !== undefined && original.getValue() !== originalContent) {
+      original.setValue(originalContent);
+    }
+    if (modified && modifiedContent !== undefined && modified.getValue() !== modifiedContent) {
+      modified.setValue(modifiedContent);
+    }
+  }, [originalContent, modifiedContent]);
+
+  // Track targetLine jumps in modified buffer (only on intentional jump requests)
   useEffect(() => {
     if (!editorInstanceRef.current || !targetLine || targetLine <= 0) return;
+    if (lastJumpNonceRef.current === jumpNonce) return;
+    lastJumpNonceRef.current = jumpNonce;
+
     const modifiedEditor = editorInstanceRef.current.getModifiedEditor();
     modifiedEditor.revealLineInCenter(targetLine);
     modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
@@ -110,10 +151,9 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     modelsRef.current = { original: originalModel, modified: modifiedModel };
 
     // Register editor opener for cross-file definition jumps
-    let openerDisposable: monaco.IDisposable | null = null;
-    if (onOpenFile) {
-      openerDisposable = registerCrossFileEditorOpener(onOpenFile, monaco);
-    }
+    const openerDisposable = registerCrossFileEditorOpener((repo, file, line) => {
+      onOpenFileRef.current?.(repo, file, line);
+    }, monaco);
 
     // Instantiate Monaco Diff Editor
     const isDark =
@@ -159,12 +199,14 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       // Track cursor changes to sync active hunk and line
       const modifiedEditor = diffEditor.getModifiedEditor();
       cursorSub = modifiedEditor.onDidChangeCursorPosition((e) => {
-        onLineSelect?.(e.position.lineNumber);
+        onLineSelectRef.current?.(e.position.lineNumber);
       });
 
-      // Synchronize targetLine whenever diff computation completes or updates
+      // Synchronize initial targetLine on first diff computation, avoiding scroll jump-back on subsequent diff updates
       updateSub = diffEditor.onDidUpdateDiff(() => {
-        if (targetLine && targetLine > 0) {
+        const jumpKey = `${filePath}:${targetLine}`;
+        if (targetLine && targetLine > 0 && initialJumpDoneRef.current !== jumpKey) {
+          initialJumpDoneRef.current = jumpKey;
           modifiedEditor.revealLineInCenter(targetLine);
           modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
         }
@@ -172,6 +214,8 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
 
       // If an initial targetLine is supplied, reveal it immediately after mounting
       if (targetLine && targetLine > 0) {
+        const jumpKey = `${filePath}:${targetLine}`;
+        initialJumpDoneRef.current = jumpKey;
         modifiedEditor.revealLineInCenter(targetLine);
         modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
       }
@@ -187,14 +231,13 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       diffEditor?.dispose();
       editorInstanceRef.current = null;
     };
-  }, [filePath, repoName, originalContent, modifiedContent, viewMode, ignoreWhitespace, onOpenFile, onLineSelect, targetLine]);
-
+  }, [filePath, repoName]);
 
   return (
     <div
       ref={containerRef}
       style={{ height: typeof height === 'number' ? `${height}px` : height }}
-      className="w-full rounded-lg overflow-hidden border border-border/70 bg-background"
+      className="w-full h-full rounded-lg overflow-hidden border border-border/70 bg-background"
     />
   );
 };

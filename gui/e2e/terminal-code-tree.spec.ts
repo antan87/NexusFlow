@@ -210,3 +210,120 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   await clickRow(1);
   await expect(code.getByText(`repo/${longPath}:42`)).toBeVisible();
 });
+
+test('renders file tree as a left sidebar alongside code panel and allows collapsing it', async ({ page }) => {
+  const changed = { repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/demo.ts', type: 'modified' }] };
+  await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: 'diff --git a/demo.ts b/demo.ts\n--- a/demo.ts\n+++ b/demo.ts\n@@ -1 +1 @@\n-old\n+new\n', fileContent: 'new\n' } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await chat.getByRole('button', { name: 'Show code' }).click();
+  const code = chat.getByRole('region', { name: 'Workspace code' });
+
+  // File tree is on the left side of the code panel (sidebar)
+  const aside = code.locator('aside');
+  const main = code.locator('main');
+  await expect(aside).toBeVisible();
+  await expect(main).toBeVisible();
+  const asideBox = await aside.boundingBox();
+  const mainBox = await main.boundingBox();
+  expect(asideBox).not.toBeNull();
+  expect(mainBox).not.toBeNull();
+  expect(asideBox!.x).toBeLessThan(mainBox!.x);
+
+  // Collapse and expand sidebar
+  const toggleBtn = code.getByRole('button', { name: /file tree sidebar/i });
+  await expect(toggleBtn).toBeVisible();
+  await toggleBtn.click();
+  await expect(aside).toHaveClass(/w-0/);
+  await toggleBtn.click();
+  await expect(aside).not.toHaveClass(/w-0/);
+});
+
+test('navigates through change sections using section tabs and Next Section button', async ({ page }) => {
+  const multiDiff = [
+    'diff --git a/src/multi.ts b/src/multi.ts',
+    '--- a/src/multi.ts',
+    '+++ b/src/multi.ts',
+    '@@ -1,3 +1,4 @@',
+    ' const a = 1;',
+    '+const b = 2;',
+    ' const c = 3;',
+    '@@ -20,3 +21,4 @@',
+    ' const x = 10;',
+    '+const y = 20;',
+    ' const z = 30;',
+  ].join('\n');
+  const changed = { repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/multi.ts', type: 'modified' }] };
+  await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: multiDiff, fileContent: 'const a = 1;\nconst b = 2;\nconst c = 3;\n' } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await chat.getByRole('button', { name: 'Show code' }).click();
+  const code = chat.getByRole('region', { name: 'Workspace code' });
+
+  await code.getByRole('button', { name: /multi\.ts/ }).click();
+  await expect(code.getByText('repo/src/multi.ts')).toBeVisible();
+
+  // Section tabs are rendered as tablist with tab roles
+  const tablist = code.getByRole('tablist', { name: 'Change sections' });
+  await expect(tablist).toBeVisible();
+  const sec1 = tablist.getByRole('tab', { name: /Section 1/i });
+  const sec2 = tablist.getByRole('tab', { name: /Section 2/i });
+  await expect(sec1).toBeVisible();
+  await expect(sec2).toBeVisible();
+  await expect(sec1).toHaveAttribute('aria-selected', 'true');
+
+  // Next section button advances active section
+  const nextBtn = code.getByRole('button', { name: /Next Section|Next File/i });
+  await expect(nextBtn).toBeVisible();
+  await nextBtn.click();
+  await expect(sec2).toHaveClass(/bg-primary/);
+  await expect(sec2).toHaveAttribute('aria-selected', 'true');
+
+  // Clicking Section 1 jumps back to section 1
+  await sec1.click();
+  await expect(sec1).toHaveClass(/bg-primary/);
+  await expect(sec1).toHaveAttribute('aria-selected', 'true');
+});
+
+test('allows expanding code view to focused width and restoring split', async ({ page }) => {
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await chat.getByRole('button', { name: 'Show code' }).click();
+
+  const expandBtn = chat.getByRole('button', { name: /Expand code/i });
+  await expect(expandBtn).toBeVisible();
+  await expandBtn.click();
+
+  const codeContainer = chat.getByRole('region', { name: 'Workspace code' }).locator('xpath=..');
+  await expect(codeContainer).toHaveAttribute('style', /width:\s*85%/);
+
+  const splitBtn = chat.getByRole('button', { name: /Split view/i });
+  await expect(splitBtn).toBeVisible();
+  await splitBtn.click();
+  await expect(codeContainer).toHaveAttribute('style', /width:\s*50%/);
+});
+
+test('supports keyboard resizing of code panel using arrow keys on separator', async ({ page }) => {
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await chat.getByRole('button', { name: 'Show code' }).click();
+
+  const separator = chat.getByRole('separator', { name: 'Resize code panel' });
+  await expect(separator).toBeVisible();
+  await separator.focus();
+  await separator.press('ArrowLeft');
+
+  const codeContainer = chat.getByRole('region', { name: 'Workspace code' }).locator('xpath=..');
+  await expect(codeContainer).toHaveAttribute('style', /width:\s*55%/);
+
+  await separator.press('ArrowRight');
+  await expect(codeContainer).toHaveAttribute('style', /width:\s*50%/);
+});
