@@ -55,6 +55,33 @@ describe('Brand Configuration System', () => {
     expect(BRAND_CONFIG.theme.dark.background).toBe('#0A0812');
   });
 
+  it('defines extended atmospheric color palettes (Aurora, Forest, Nebula, Glacier)', () => {
+    expect(BRAND_CONFIG.theme.aurora).toEqual({
+      first: '#5EEAD4',
+      middle: '#22D3EE',
+      last: '#818CF8',
+      depth: '#6366F1',
+    });
+    expect(BRAND_CONFIG.theme.forest).toEqual({
+      first: '#86EFAC',
+      middle: '#22C55E',
+      last: '#14B8A6',
+      depth: '#0F766E',
+    });
+    expect(BRAND_CONFIG.theme.nebula).toEqual({
+      first: '#F472B6',
+      middle: '#C084FC',
+      last: '#818CF8',
+      depth: '#4F46E5',
+    });
+    expect(BRAND_CONFIG.theme.glacier).toEqual({
+      first: '#93C5FD',
+      middle: '#38BDF8',
+      last: '#60A5FA',
+      depth: '#2563EB',
+    });
+  });
+
   it('resolves first defined environment variable in priority order', () => {
     delete process.env.CONTEXTSPACE_HOME;
     delete process.env.NEXUSFLOW_HOME;

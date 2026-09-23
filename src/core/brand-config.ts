@@ -149,6 +149,30 @@ export interface BrandConfigSchema {
       readonly hibiscus: string;
       readonly indigo: string;
     };
+    readonly aurora?: {
+      readonly first: string;
+      readonly middle: string;
+      readonly last: string;
+      readonly depth: string;
+    };
+    readonly forest?: {
+      readonly first: string;
+      readonly middle: string;
+      readonly last: string;
+      readonly depth: string;
+    };
+    readonly nebula?: {
+      readonly first: string;
+      readonly middle: string;
+      readonly last: string;
+      readonly depth: string;
+    };
+    readonly glacier?: {
+      readonly first: string;
+      readonly middle: string;
+      readonly last: string;
+      readonly depth: string;
+    };
     readonly dark: {
       readonly background: string;
       readonly foreground: string;
@@ -333,6 +357,30 @@ export const BRAND_CONFIG: BrandConfigSchema = {
       coral: '#FB923C',
       hibiscus: '#F43F5E',
       indigo: '#6366F1',
+    },
+    aurora: {
+      first: '#5EEAD4',
+      middle: '#22D3EE',
+      last: '#818CF8',
+      depth: '#6366F1',
+    },
+    forest: {
+      first: '#86EFAC',
+      middle: '#22C55E',
+      last: '#14B8A6',
+      depth: '#0F766E',
+    },
+    nebula: {
+      first: '#F472B6',
+      middle: '#C084FC',
+      last: '#818CF8',
+      depth: '#4F46E5',
+    },
+    glacier: {
+      first: '#93C5FD',
+      middle: '#38BDF8',
+      last: '#60A5FA',
+      depth: '#2563EB',
     },
     dark: {
       background: '#0A0812',

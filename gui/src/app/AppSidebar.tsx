@@ -32,7 +32,7 @@ import { BRAND_NAME } from '../brand.js';
 import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
 import { useIsMobile } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
-import { useTheme } from './ThemeProvider.js';
+import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { WorktreePicker } from '../features/worktrees/WorktreePicker.js';
@@ -488,15 +488,35 @@ function SidebarContents({
               </a>
 
               {/* Color Theme Switcher */}
-              <button
-                type="button"
-                onClick={() => setColorTheme(colorTheme === 'aurora' ? 'sunset' : 'aurora')}
-                aria-label={`Switch to ${colorTheme === 'aurora' ? 'Sunset' : 'Aurora'} palette`}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-              >
-                <span className="size-2 rounded-full bg-primary" />
-                <span>Theme: {colorTheme === 'aurora' ? 'Aurora' : 'Sunset'}</span>
-              </button>
+              <div className="flex flex-col gap-1 py-1">
+                <div className="flex items-center justify-between px-2 text-[11px] text-muted-foreground">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="size-2 rounded-full bg-primary" />
+                    <span>Theme: {COLOR_THEMES.find((t) => t.id === colorTheme)?.label ?? 'Sunset'}</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-1 px-1">
+                  {COLOR_THEMES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setColorTheme(t.id)}
+                      aria-label={`Switch to ${t.label} palette`}
+                      aria-pressed={colorTheme === t.id}
+                      title={`${t.label} palette — ${t.description}`}
+                      className={cn(
+                        'flex flex-col items-center justify-center py-1 px-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                        colorTheme === t.id
+                          ? 'bg-accent text-accent-foreground font-semibold ring-1 ring-border shadow-xs'
+                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+                      )}
+                    >
+                      <span className={cn('size-2 rounded-full mb-0.5', t.dotClass)} />
+                      <span className="truncate max-w-full tracking-tight">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {/* Dark/Light mode */}
               <button
