@@ -106,6 +106,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setColorTheme = useCallback((next: ColorTheme) => {
+    if (!COLOR_THEMES.some((t) => t.id === next)) return;
     try { localStorage.setItem(COLOR_STORAGE_KEY, next); } catch { /* Keep in-memory selection working. */ }
     setColorThemeState(next);
   }, []);

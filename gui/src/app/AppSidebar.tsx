@@ -503,16 +503,16 @@ function SidebarContents({
                       onClick={() => setColorTheme(t.id)}
                       aria-label={`Switch to ${t.label} palette`}
                       aria-pressed={colorTheme === t.id}
-                      title={`${t.label} palette`}
+                      title={`${t.label} palette — ${t.description}`}
                       className={cn(
-                        'flex flex-col items-center justify-center py-1 px-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer',
+                        'flex flex-col items-center justify-center py-1 px-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                         colorTheme === t.id
                           ? 'bg-accent text-accent-foreground font-semibold ring-1 ring-border shadow-xs'
                           : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
                       )}
                     >
                       <span className={cn('size-2 rounded-full mb-0.5', t.dotClass)} />
-                      <span className="truncate max-w-full">{t.label}</span>
+                      <span className="truncate max-w-full tracking-tight">{t.label}</span>
                     </button>
                   ))}
                 </div>

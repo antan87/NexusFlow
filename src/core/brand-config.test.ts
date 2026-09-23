@@ -56,10 +56,30 @@ describe('Brand Configuration System', () => {
   });
 
   it('defines extended atmospheric color palettes (Aurora, Forest, Nebula, Glacier)', () => {
-    expect(BRAND_CONFIG.theme.aurora?.first).toBe('#5EEAD4');
-    expect(BRAND_CONFIG.theme.forest?.middle).toBe('#22C55E');
-    expect(BRAND_CONFIG.theme.nebula?.first).toBe('#F472B6');
-    expect(BRAND_CONFIG.theme.glacier?.middle).toBe('#38BDF8');
+    expect(BRAND_CONFIG.theme.aurora).toEqual({
+      first: '#5EEAD4',
+      middle: '#22D3EE',
+      last: '#818CF8',
+      depth: '#6366F1',
+    });
+    expect(BRAND_CONFIG.theme.forest).toEqual({
+      first: '#86EFAC',
+      middle: '#22C55E',
+      last: '#14B8A6',
+      depth: '#0F766E',
+    });
+    expect(BRAND_CONFIG.theme.nebula).toEqual({
+      first: '#F472B6',
+      middle: '#C084FC',
+      last: '#818CF8',
+      depth: '#4F46E5',
+    });
+    expect(BRAND_CONFIG.theme.glacier).toEqual({
+      first: '#93C5FD',
+      middle: '#38BDF8',
+      last: '#60A5FA',
+      depth: '#2563EB',
+    });
   });
 
   it('resolves first defined environment variable in priority order', () => {
