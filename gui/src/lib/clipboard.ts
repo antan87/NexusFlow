@@ -2,6 +2,7 @@
  * @module lib/clipboard
  * Cross-browser safe clipboard helper with textarea fallback for non-secure contexts.
  */
+import { decodeHTML } from 'entities/decode';
 
 export async function safeCopyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
@@ -63,39 +64,33 @@ export function clipboardHtmlToText(html: string): string {
   if (!html) return '';
   // Clipboard HTML is untrusted. Extract text without sending it through any
   // browser HTML parser or DOM sink, including an inert document.
-  const entities: Record<string, string> = {
-    amp: '&', apos: "'", copy: '©', gt: '>', hellip: '…', lt: '<', mdash: '—',
-    nbsp: '\u00a0', ndash: '–', quot: '"', reg: '®', trade: '™',
+  const ignoredClosers = {
+    head: /<\/\s*head\s*>/i,
+    script: /<\/\s*script\s*>/i,
+    style: /<\/\s*style\s*>/i,
+    template: /<\/\s*template\s*>/i,
+    title: /<\/\s*title\s*>/i,
   };
-  const decode = (value: string) => value.replace(/&(#(?:x[\da-f]+|\d+)|[a-z][\da-z]+);/gi, (match, entity: string) => {
-    if (entity.startsWith('#')) {
-      const hex = entity[1]?.toLowerCase() === 'x';
-      const codePoint = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-      return codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
-        ? String.fromCodePoint(codePoint) : '\ufffd';
-    }
-    return entities[entity.toLowerCase()] ?? match;
-  });
   const blocks = new Set(['address', 'article', 'blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p', 'pre', 'section', 'tr']);
   const tagPattern = /<\s*(\/?)\s*([a-z][\w:-]*)\b/iy;
   let text = '';
   const lineBreak = () => { if (text && !text.endsWith('\n')) text += '\n'; };
-  let ignoredTag = '';
+  let ignoredTag: keyof typeof ignoredClosers | null = null;
   let offset = 0;
   while (offset < html.length) {
     if (ignoredTag) {
-      const closingTag = (ignoredTag === 'script' ? /<\/\s*script\s*>/i : /<\/\s*style\s*>/i).exec(html.slice(offset));
+      const closingTag = ignoredClosers[ignoredTag].exec(html.slice(offset));
       if (!closingTag) break;
       offset += closingTag.index + closingTag[0].length;
-      ignoredTag = '';
+      ignoredTag = null;
       continue;
     }
     const tagStart = html.indexOf('<', offset);
     if (tagStart < 0) {
-      text += decode(html.slice(offset));
+      text += decodeHTML(html.slice(offset));
       break;
     }
-    text += decode(html.slice(offset, tagStart));
+    text += decodeHTML(html.slice(offset, tagStart));
     if (html.startsWith('<!--', tagStart)) {
       const end = html.indexOf('-->', tagStart + 4);
       if (end < 0) break;
@@ -126,7 +121,7 @@ export function clipboardHtmlToText(html: string): string {
     if (tagEnd === html.length) break;
     const name = tagMatch[2].toLowerCase();
     const closing = Boolean(tagMatch[1]);
-    if (!closing && (name === 'script' || name === 'style')) {
+    if (!closing && (name === 'head' || name === 'script' || name === 'style' || name === 'template' || name === 'title')) {
       ignoredTag = name;
     } else if (name === 'br' || blocks.has(name)) {
       lineBreak();
