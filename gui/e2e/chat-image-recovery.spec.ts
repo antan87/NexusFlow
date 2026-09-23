@@ -90,4 +90,18 @@ test('pastes text normally when the clipboard also advertises an image', async (
     element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: payload }));
   });
   await expect(composer).toHaveValue('ordinary copied textfallback rich textfirst line\nsecond linesafe & soundcafé å ≤ 5 ≪ 10');
+
+  await composer.evaluate(element => {
+    const payload = new DataTransfer();
+    payload.setData('text/html', '<template><template>inner hidden</template>outer hidden</template><p>visible snippet</p>');
+    element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: payload }));
+  });
+  await expect(composer).toHaveValue('ordinary copied textfallback rich textfirst line\nsecond linesafe & soundcafé å ≤ 5 ≪ 10visible snippet');
+
+  await composer.evaluate(element => {
+    const payload = new DataTransfer();
+    payload.setData('text/html', '<head><title>hidden title</title><body><p>visible body</p>');
+    element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: payload }));
+  });
+  await expect(composer).toHaveValue('ordinary copied textfallback rich textfirst line\nsecond linesafe & soundcafé å ≤ 5 ≪ 10visible snippetvisible body');
 });

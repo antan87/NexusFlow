@@ -2,7 +2,7 @@
  * @module lib/clipboard
  * Cross-browser safe clipboard helper with textarea fallback for non-secure contexts.
  */
-import { decodeHTML } from 'entities/decode';
+import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 
 export async function safeCopyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
@@ -62,72 +62,28 @@ export async function safeCopyToClipboard(text: string): Promise<boolean> {
 /** Recover text from rich clipboard formats that omit text/plain. */
 export function clipboardHtmlToText(html: string): string {
   if (!html) return '';
-  // Clipboard HTML is untrusted. Extract text without sending it through any
-  // browser HTML parser or DOM sink, including an inert document.
-  const ignoredClosers = {
-    head: /<\/\s*head\s*>/i,
-    script: /<\/\s*script\s*>/i,
-    style: /<\/\s*style\s*>/i,
-    template: /<\/\s*template\s*>/i,
-    title: /<\/\s*title\s*>/i,
-  };
+  // Parse into plain JavaScript objects, never into browser DOM nodes. The
+  // HTML tree builder handles malformed clipboard markup and full documents.
+  const documentTree = parse(html);
+  const isElement = (node: DefaultTreeAdapterTypes.ChildNode): node is DefaultTreeAdapterTypes.Element => 'tagName' in node;
+  const htmlElement = documentTree.childNodes.find(node => isElement(node) && node.tagName === 'html');
+  const body = htmlElement && isElement(htmlElement)
+    ? htmlElement.childNodes.find(node => isElement(node) && node.tagName === 'body')
+    : null;
+  if (!body || !isElement(body)) return '';
   const blocks = new Set(['address', 'article', 'blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p', 'pre', 'section', 'tr']);
-  const tagPattern = /<\s*(\/?)\s*([a-z][\w:-]*)\b/iy;
   let text = '';
   const lineBreak = () => { if (text && !text.endsWith('\n')) text += '\n'; };
-  let ignoredTag: keyof typeof ignoredClosers | null = null;
-  let offset = 0;
-  while (offset < html.length) {
-    if (ignoredTag) {
-      const closingTag = ignoredClosers[ignoredTag].exec(html.slice(offset));
-      if (!closingTag) break;
-      offset += closingTag.index + closingTag[0].length;
-      ignoredTag = null;
-      continue;
-    }
-    const tagStart = html.indexOf('<', offset);
-    if (tagStart < 0) {
-      text += decodeHTML(html.slice(offset));
-      break;
-    }
-    text += decodeHTML(html.slice(offset, tagStart));
-    if (html.startsWith('<!--', tagStart)) {
-      const end = html.indexOf('-->', tagStart + 4);
-      if (end < 0) break;
-      offset = end + 3;
-      continue;
-    }
-    if (html[tagStart + 1] === '!' || html[tagStart + 1] === '?') {
-      const end = html.indexOf('>', tagStart + 2);
-      if (end < 0) break;
-      offset = end + 1;
-      continue;
-    }
-    tagPattern.lastIndex = tagStart;
-    const tagMatch = tagPattern.exec(html);
-    if (!tagMatch) {
-      text += '<';
-      offset = tagStart + 1;
-      continue;
-    }
-    let quote = '';
-    let tagEnd = tagStart + tagMatch[0].length;
-    for (; tagEnd < html.length; tagEnd++) {
-      const char = html[tagEnd];
-      if (quote) { if (char === quote) quote = ''; }
-      else if (char === '"' || char === "'") quote = char;
-      else if (char === '>') break;
-    }
-    if (tagEnd === html.length) break;
-    const name = tagMatch[2].toLowerCase();
-    const closing = Boolean(tagMatch[1]);
-    if (!closing && (name === 'head' || name === 'script' || name === 'style' || name === 'template' || name === 'title')) {
-      ignoredTag = name;
-    } else if (name === 'br' || blocks.has(name)) {
-      lineBreak();
-    }
-    offset = tagEnd + 1;
-  }
+  const visit = (node: DefaultTreeAdapterTypes.ChildNode): void => {
+    if ('value' in node) { text += node.value; return; }
+    if (!isElement(node) || ['script', 'style', 'template'].includes(node.tagName)) return;
+    if (node.tagName === 'br') { lineBreak(); return; }
+    const block = blocks.has(node.tagName);
+    if (block) lineBreak();
+    node.childNodes.forEach(visit);
+    if (block) lineBreak();
+  };
+  body.childNodes.forEach(visit);
   return text.replace(/^\n+|\n+$/g, '');
 }
 
