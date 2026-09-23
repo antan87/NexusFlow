@@ -78,9 +78,9 @@ test('pastes text normally when the clipboard also advertises an image', async (
 
   await composer.evaluate(element => {
     const payload = new DataTransfer();
-    payload.setData('text/html', '<script>window.__pastedScriptRan = true</script><p>safe snippet</p><img src="missing" onerror="window.__pastedScriptRan = true">');
+    payload.setData('text/html', '<!--StartFragment--><script>const x = 1 < bad; window.__pastedScriptRan = true</script><p>safe &amp; sound</p><img src="missing" onerror="window.__pastedScriptRan = true">');
     element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: payload }));
   });
-  await expect(composer).toHaveValue('ordinary copied textfallback rich textfirst line\nsecond linesafe snippet');
+  await expect(composer).toHaveValue('ordinary copied textfallback rich textfirst line\nsecond linesafe & sound');
   expect(await page.evaluate(() => (window as typeof window & { __pastedScriptRan?: boolean }).__pastedScriptRan)).toBeUndefined();
 });
