@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IBufferLine } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
@@ -10,11 +10,12 @@ import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap }
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
 import { apiFetch } from '../../lib/api/client.js';
-import { safeCopyToClipboard } from '../../lib/clipboard.js';
+import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
+import { findFileReferences, type FileReference } from './fileReferences.js';
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void }
-export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props) {
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean }
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -25,6 +26,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
   const target = harnesses[workspace] ?? '';
   const setTarget = useCallback((value: string) => setHarness(workspace, value), [workspace, setHarness]);
   const [showHistory, setShowHistory] = useState(true);
+  useEffect(() => { if (codeVisible) setShowHistory(false); }, [codeVisible]);
   const [terminal, setTerminal] = useState<TerminalInfo | null>(null);
   const [state, setState] = useState('Choose a harness or shell');
   const [error, setError] = useState('');
@@ -32,8 +34,14 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
   const [screenReader, setScreenReader] = useState(false);
+  const [clipboardMenu, setClipboardMenu] = useState<{ x: number; y: number } | null>(null);
   const launchSeen = useRef('');
   const lastLaunch = useRef<TerminalLaunch | undefined>(undefined);
+  const [retryLaunch, setRetryLaunch] = useState<TerminalLaunch | undefined>(undefined);
+  const activeRef = useRef(active);
+  const openFileRef = useRef(onOpenFileReference);
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
   const send = useCallback((message: object) => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)); }, []);
   const refresh = useCallback(async () => {
     try {
@@ -60,6 +68,80 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
     const term = new Terminal({ cursorBlink: true, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, scrollback: 5000, allowProposedApi: false, theme: { background: '#111b18', foreground: '#e1e9e4', cursor: '#a3dbae' } });
     const sizing = new FitAddon(), searching = new SearchAddon();
     term.loadAddon(sizing); term.loadAddon(searching); term.open(host.current);
+    const terminalHost = host.current;
+    const onPasteShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'v') {
+        // Keep Ctrl+V out of the PTY: Codex interprets a literal Ctrl+V as
+        // its image-paste command on Windows. The browser still dispatches its
+        // ordinary paste event to xterm's focused textarea.
+        event.stopPropagation();
+      }
+    };
+    terminalHost.addEventListener('keydown', onPasteShortcut, true);
+    const onPaste = (event: ClipboardEvent) => {
+      const clipboard = event.clipboardData;
+      if (!clipboard || clipboard.getData('text/plain')) return;
+      const richText = clipboardHtmlToText(clipboard.getData('text/html'));
+      if (richText.trim()) {
+        event.preventDefault(); event.stopPropagation();
+        if (!term.options.disableStdin) term.paste(richText);
+      } else if ([...clipboard.items].some(item => item.type.startsWith('image/')) || [...clipboard.files].some(file => file.type.startsWith('image/'))) {
+        event.preventDefault(); event.stopPropagation();
+        setError('The clipboard contains an image but no text. Use Chat to attach the image, or copy text and paste again.');
+      }
+    };
+    terminalHost.addEventListener('paste', onPaste, true);
+    // A selected terminal range behaves like selected browser text. Without a
+    // selection Ctrl+C remains the terminal's interrupt key.
+    term.attachCustomKeyEventHandler(event => {
+      if (event.type !== 'keydown') return true;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && (event.shiftKey || term.hasSelection())) {
+        event.preventDefault();
+        void safeCopyToClipboard(term.getSelection()).then(copied => {
+          if (!copied) setError('Select terminal output before copying, or check clipboard permissions.');
+          else setError('');
+        });
+        return false;
+      }
+      // Let the browser dispatch its native paste event into xterm's textarea.
+      // xterm handles that event, including bracketed paste for CLI harnesses.
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return false;
+      return true;
+    });
+    const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+      const buffer = term.buffer.active;
+      let first = bufferLineNumber - 1;
+      while (first > 0 && buffer.getLine(first)?.isWrapped && bufferLineNumber - first <= 20) first--;
+      if (buffer.getLine(first)?.isWrapped) { callback([]); return; }
+      let last = bufferLineNumber - 1;
+      while (buffer.getLine(last + 1)?.isWrapped && last - first < 20) last++;
+      if (buffer.getLine(last + 1)?.isWrapped) { callback([]); return; }
+      const rows: { line: IBufferLine; text: string }[] = [];
+      for (let at = first; at <= last; at++) {
+        const line = buffer.getLine(at);
+        if (!line) { callback([]); return; }
+        rows.push({ line, text: line.translateToString(at === last) });
+      }
+      const positionAt = (offset: number, ending: boolean) => {
+        let before = 0;
+        for (let row = 0; row < rows.length; row++) {
+          const length = rows[row].text.length;
+          if (offset < before + length || (ending && offset === before + length) || row === rows.length - 1) {
+            const local = Math.max(0, offset - before);
+            let column = 0;
+            while (column < term.cols && rows[row].line.translateToString(false, 0, column).length < local) column++;
+            return { x: column + (ending ? 0 : 1), y: first + row + 1 };
+          }
+          before += length;
+        }
+        return { x: 1, y: first + 1 };
+      };
+      callback(findFileReferences(rows.map(row => row.text).join('')).map(reference => ({
+        text: reference.text,
+        range: { start: positionAt(reference.start, false), end: positionAt(reference.end, true) },
+        activate: () => openFileRef.current?.({ path: reference.path, line: reference.line }),
+      })));
+    } });
     renderer.current = term; fit.current = sizing; search.current = searching;
     const input = term.onData(data => {
       // Never queue keystrokes while disconnected, replaying, or after exit.
@@ -74,9 +156,19 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
     const resize = term.onResize(({ cols, rows }) => { if (!term.options.disableStdin) send({ type: 'resize', cols: Math.min(cols, 500), rows: Math.min(rows, 300) }); });
     const observer = new ResizeObserver(() => { if (host.current?.clientWidth && host.current?.clientHeight) sizing.fit(); });
     observer.observe(host.current);
-    return () => { observer.disconnect(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
+    return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
   }, [send]);
-  useEffect(() => { if (active) { fit.current?.fit(); renderer.current?.focus(); } }, [active]);
+  useEffect(() => {
+    if (!active || !terminal) return;
+    // The mode switch first reveals a previously hidden terminal. Wait for that
+    // layout before fitting and focusing xterm's real input textarea.
+    const frame = requestAnimationFrame(() => {
+      if (!activeRef.current || !host.current?.getClientRects().length) return;
+      fit.current?.fit();
+      renderer.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, terminal]);
   useEffect(() => { if (renderer.current) renderer.current.options.screenReaderMode = screenReader; }, [screenReader]);
 
   useEffect(() => {
@@ -105,7 +197,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
             if (cancelled) return;
             term.options.disableStdin = ended;
             setState(ended ? 'Exited' : 'Connected');
-            if (!ended) { fit.current?.fit(); send({ type: 'resize', cols: Math.min(term.cols, 500), rows: Math.min(term.rows, 300) }); if (active) term.focus(); }
+            if (!ended) { fit.current?.fit(); send({ type: 'resize', cols: Math.min(term.cols, 500), rows: Math.min(term.rows, 300) }); if (activeRef.current) term.focus(); }
           });
         } else if (message.type === 'exit') {
           ended = true; term.options.disableStdin = true; setState(`Exited${message.exitCode == null ? '' : ` (${message.exitCode})`}`);
@@ -121,7 +213,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
   }, [terminal?.id, retry, workspace, send]);
 
   const start = useCallback(async (request: TerminalLaunch) => {
-    lastLaunch.current = request; setBusy(true); setError(''); setTarget(request.target);
+    lastLaunch.current = request; setRetryLaunch(request); setBusy(true); setError(''); setTarget(request.target);
     try {
       const { terminal: created } = await terminalRequest<{ terminal: TerminalInfo }>(workspace, 'create', { launchId: request.id, target: request.target, sessionId: request.sessionId, cwd: request.cwd });
       setTerminal(created);
@@ -140,6 +232,29 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
     if (!terminal || !window.confirm('End this terminal and its running commands?')) return;
     try { await terminalRequest(workspace, `${terminal.id}/stop`); await refresh(); }
     catch (e) { setError((e as Error).message); }
+  };
+  const copySelection = async () => {
+    const selected = renderer.current?.getSelection() ?? '';
+    if (!selected) {
+      setError('Select terminal output before copying.');
+      return;
+    }
+    if (!await safeCopyToClipboard(selected)) setError('Could not copy terminal output. Check browser clipboard permissions.');
+    else setError('');
+    renderer.current?.focus();
+  };
+  const pasteClipboard = async () => {
+    setClipboardMenu(null);
+    try {
+      const value = await readClipboardText();
+      if (!value) throw new Error('Clipboard has no text');
+      if (!renderer.current || renderer.current.options.disableStdin) throw new Error('Reconnect the terminal before pasting.');
+      renderer.current.paste(value);
+      renderer.current.focus();
+      setError('');
+    } catch {
+      setError('No clipboard text was available. Focus the terminal and press Ctrl+V (or Cmd+V); attach image-only content in Chat.');
+    }
   };
   const external = async () => {
     setError('');
@@ -166,15 +281,25 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch }: Props
         <option value="" disabled>Select a terminal</option>{status.sessions.map(s => <option key={s.id} value={s.id}>{s.label} · {s.state} · {s.id.slice(0, 8)}</option>)}
       </select>
     </div>}
-    {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{lastLaunch.current && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(lastLaunch.current!)}>Retry launch</Button>}</div>}
+    {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
     {!terminal && <div className="flex-1 px-3 py-3 text-xs text-muted-foreground">Choose a harness for a new session, or resume a saved conversation above. The harness keeps its own login and permissions. Shell opens PowerShell or your Unix shell. Existing API conversations remain under Chat.</div>}
-    <div ref={host} className={`min-h-0 flex-1 overflow-hidden bg-[#111b18] p-2 ${terminal ? '' : 'hidden'}`} aria-label="Interactive CLI terminal" />
+    <div className={`relative min-h-0 flex-1 ${terminal ? '' : 'hidden'}`} onContextMenu={event => {
+      event.preventDefault();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      setClipboardMenu({ x: Math.min(event.clientX - bounds.left, Math.max(0, bounds.width - 150)), y: Math.min(event.clientY - bounds.top, Math.max(0, bounds.height - 80)) });
+    }}>
+      <div ref={host} className="h-full overflow-hidden bg-[#111b18] p-2" aria-label="Interactive CLI terminal" />
+      {clipboardMenu && <div className="absolute z-20 min-w-36 rounded border border-border bg-card p-1 shadow-lg" style={{ left: clipboardMenu.x, top: clipboardMenu.y }} role="menu" onKeyDown={event => { if (event.key === 'Escape') setClipboardMenu(null); }}>
+        <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { setClipboardMenu(null); void copySelection(); }}>Copy selection</button>
+        <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => void pasteClipboard()}>Paste</button>
+      </div>}
+    </div>
     <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1 text-xs">
       <span role="status">{state}</span>
       {terminal && <Button size="xs" variant="ghost" onClick={() => setRetry(n => n + 1)}><PlugZap className="size-3" />Reconnect</Button>}
       <input aria-label="Search terminal output" placeholder="Search output" className="w-28 rounded border border-border bg-card px-1" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
       <Button size="xs" variant="ghost" onClick={() => search.current?.findNext(query)}><Search className="size-3" />Find</Button>
-      <Button size="xs" variant="ghost" onClick={() => void safeCopyToClipboard(renderer.current?.getSelection() ?? '')}><Copy className="size-3" />Copy selection</Button>
+      <Button size="xs" variant="ghost" onClick={() => void copySelection()}><Copy className="size-3" />Copy selection</Button>
       <label className="flex items-center gap-1"><input type="checkbox" checked={screenReader} onChange={e => setScreenReader(e.target.checked)} />Screen reader</label>
     </div>
     <div className="truncate px-3 pb-1 text-[10px] text-muted-foreground" title={terminal?.cwd}>Local user permissions · {terminal?.cwd ?? workspace} · Hide keeps running; End session stops it.</div>

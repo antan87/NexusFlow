@@ -23,6 +23,21 @@ export function terminalEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
+/** Prefer the CLI generated for this workspace over an older global install. */
+export function withWorkspaceCli(launch: LaunchSpec, workspaceRoot: string): LaunchSpec {
+  const bin = path.join(workspaceRoot, '.contextspace', 'bin');
+  const executable = path.join(bin, process.platform === 'win32' ? 'ctxspace.cmd' : 'ctxspace');
+  try {
+    fs.accessSync(executable, fs.constants.X_OK);
+  } catch {
+    return launch;
+  }
+  const current = launch.env.PATH ?? launch.env.Path ?? '';
+  const env: NodeJS.ProcessEnv = { ...launch.env, PATH: `${bin}${path.delimiter}${current}` };
+  if (process.platform === 'win32') env.Path = env.PATH;
+  return { ...launch, env };
+}
+
 export function resolveShell(env = terminalEnvironment(), platform = process.platform): string {
   if (platform === 'win32') {
     const shell = findExecutable('pwsh.exe', env, platform) ?? findExecutable('powershell.exe', env, platform);

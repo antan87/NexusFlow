@@ -8,6 +8,7 @@ import { BRAND_CONFIG } from './constants.js';
 import { assertNoLinkedPathComponents, atomicWriteFile } from '../resources/fs-safety.js';
 
 export const CLI_LAUNCHER = '.contextspace/bin/ctxspace';
+export const CLI_ALIAS_LAUNCHER = '.contextspace/bin/contextspace';
 export interface CliRuntime { command: string; entry: string; electron?: boolean }
 export function currentCliRuntime(): CliRuntime {
   return { command: process.execPath, entry: fileURLToPath(new URL('../index.js', import.meta.url)), electron: Boolean(process.versions.electron) };
@@ -31,9 +32,13 @@ export async function generateWorkspaceTools(root: string, assistants: AIAssista
     if (/["\r\n]/.test(value)) throw new Error('The CLI runtime path cannot be represented in a Windows launcher.');
     return `"${value.replaceAll('%', '%%')}"`;
   };
+  const shellLauncher = `#!/bin/sh\n# ${marker}\n${runtime.electron ? 'export ELECTRON_RUN_AS_NODE=1\n' : ''}exec ${shellQuote(runtime.command.replaceAll('\\', '/'))} ${shellQuote(runtime.entry.replaceAll('\\', '/'))} "$@"\n`;
+  const cmdLauncher = `@echo off\r\nrem ${marker}\r\nsetlocal DisableDelayedExpansion\r\n${runtime.electron ? 'set "ELECTRON_RUN_AS_NODE=1"\r\n' : ''}${cmdQuote(runtime.command)} ${cmdQuote(runtime.entry)} %*\r\nexit /b %errorlevel%\r\n`;
   const launchers = [
-    [CLI_LAUNCHER, `#!/bin/sh\n# ${marker}\n${runtime.electron ? 'export ELECTRON_RUN_AS_NODE=1\n' : ''}exec ${shellQuote(runtime.command.replaceAll('\\', '/'))} ${shellQuote(runtime.entry.replaceAll('\\', '/'))} "$@"\n`],
-    [`${CLI_LAUNCHER}.cmd`, `@echo off\r\nrem ${marker}\r\nsetlocal DisableDelayedExpansion\r\n${runtime.electron ? 'set "ELECTRON_RUN_AS_NODE=1"\r\n' : ''}${cmdQuote(runtime.command)} ${cmdQuote(runtime.entry)} %*\r\nexit /b %errorlevel%\r\n`],
+    [CLI_LAUNCHER, shellLauncher],
+    [`${CLI_LAUNCHER}.cmd`, cmdLauncher],
+    [CLI_ALIAS_LAUNCHER, shellLauncher],
+    [`${CLI_ALIAS_LAUNCHER}.cmd`, cmdLauncher],
   ];
   for (const [relative, content] of launchers) {
     await assertNoLinkedPathComponents(root, path.join(root, relative));
@@ -43,6 +48,7 @@ export async function generateWorkspaceTools(root: string, assistants: AIAssista
     await write(relative, content);
   }
   await fs.chmod(path.join(root, CLI_LAUNCHER), 0o755);
+  await fs.chmod(path.join(root, CLI_ALIAS_LAUNCHER), 0o755);
 
   const server = { command: runtime.command, args: [runtime.entry, 'mcp', 'run', root, '--role', 'interactive'],
     ...(runtime.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) };

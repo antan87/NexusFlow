@@ -9,7 +9,7 @@ import { Textarea } from '../../components/ui/textarea.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
-import { safeCopyToClipboard } from '../../lib/clipboard.js';
+import { clipboardHtmlToText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { loadChatStore, saveChatStore, clearChatStore, fetchRemoteChatStore, type ChatMessage, type ChatStore } from './chatStore.js';
 import { providerForAssistant, readChatLaunchIntent } from './chatLaunch.js';
@@ -474,6 +474,10 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Uploading an image is asynchronous, so `busy` alone cannot prevent a
+  // second Enter/click from dispatching the same turn before the first upload
+  // completes.
+  const turnDispatchingRef = useRef(false);
 
   const appendSystemNote = useCallback((content: string, kind: 'error' | 'note') => {
     setMessages(prev => [...prev, { role: 'system', content, kind, ts: Date.now() }]);
@@ -481,12 +485,13 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
 
   const handleImageFiles = useCallback((files: FileList | File[]) => {
     const allFiles = Array.from(files);
-    const nonImages = allFiles.filter(f => !f.type.startsWith('image/'));
+    const acceptedTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+    const nonImages = allFiles.filter(f => !acceptedTypes.has(f.type));
     if (nonImages.length > 0) {
-      appendSystemNote(`${nonImages.length} non-image file(s) ignored. Only image attachments are supported.`, 'note');
+      appendSystemNote(`${nonImages.length} unsupported file(s) ignored. Attach PNG, JPEG, GIF, or WebP images.`, 'note');
     }
 
-    const imageFiles = allFiles.filter(f => f.type.startsWith('image/'));
+    const imageFiles = allFiles.filter(f => acceptedTypes.has(f.type));
     if (imageFiles.length === 0) return;
 
     for (const file of imageFiles) {
@@ -497,13 +502,16 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
-        if (dataUrl) {
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
           setAttachedImages(current => [
             ...current,
-            { id: crypto.randomUUID(), name: file.name, dataUrl, file }
+            { id: crypto.randomUUID(), name: file.name || `pasted-image-${Date.now()}.png`, dataUrl, file }
           ]);
+        } else {
+          appendSystemNote(`Image "${file.name || 'pasted image'}" could not be read.`, 'error');
         }
       };
+      reader.onerror = () => appendSystemNote(`Image "${file.name || 'pasted image'}" could not be read.`, 'error');
       reader.readAsDataURL(file);
     }
   }, [appendSystemNote]);
@@ -613,7 +621,23 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
         if (current.length === 0 && remote.messages.length > 0) {
           return remote.messages;
         }
-        return current;
+        // localStorage may have dropped inline image bytes after a quota
+        // failure. Restore them from the durable server thread when the text
+        // transcript already exists locally.
+        const remoteImages = new Map(
+          remote.messages
+            .filter(message => message.images?.length)
+            .map(message => [`${message.role}:${message.ts ?? ''}:${message.content}`, message.images!]),
+        );
+        let changed = false;
+        const merged = current.map(message => {
+          if (message.images?.length) return message;
+          const images = remoteImages.get(`${message.role}:${message.ts ?? ''}:${message.content}`);
+          if (!images) return message;
+          changed = true;
+          return { ...message, images };
+        });
+        return changed ? merged : current;
       });
       if (remote.sessions && Object.keys(remote.sessions).length > 0) {
         updateSessions((currentSessions) => ({ ...remote.sessions, ...currentSessions }));
@@ -750,76 +774,99 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
     executionProfile?: ChatExecutionProfile,
     imagesToSend?: AttachedImage[],
   ) => {
-    const turnId = crypto.randomUUID();
+    if (turnDispatchingRef.current) return;
+    turnDispatchingRef.current = true;
     const currentImages = imagesToSend ?? attachedImages;
-    let uploadedPaths: string[] = [];
-    let imageUrls: string[] = [];
-
-    if (currentImages.length > 0) {
-      const payloads = await Promise.all(currentImages.map(async (img) => {
-        try {
-          const res = await fetch(`${API_BASE}/api/chat/upload-attachment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              dataUrl: img.dataUrl,
-              filename: img.name,
-              workspacePath: ws.workspacePath,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            return { dataUrl: img.dataUrl, path: data.path as string };
-          }
-          const errData = await res.json().catch(() => ({ error: 'Upload failed' }));
-          appendSystemNote(`Image "${img.name}" could not be uploaded: ${errData.error || res.statusText}`, 'error');
-        } catch (err) {
-          console.error('Failed to upload image attachment', err);
-          appendSystemNote(`Image "${img.name}" failed to upload.`, 'error');
-        }
-        return { dataUrl: img.dataUrl, path: null };
-      }));
-      uploadedPaths = payloads.map(p => p.path).filter((p): p is string => Boolean(p));
-      imageUrls = payloads.map(p => p.dataUrl);
-    }
-
-    let turnPrompt = text;
-    if (uploadedPaths.length > 0) {
-      const fileRefText = uploadedPaths.map(p => `[Attached image: ${p}]`).join('\n');
-      turnPrompt = turnPrompt ? `${turnPrompt}\n\n${fileRefText}` : fileRefText;
-    }
-
-    const message: ChatMessage = {
-      role: 'user',
-      content: text,
-      ts: Date.now(),
-      ...(executionProfile ? { executionProfile } : {}),
-      ...(imageUrls.length > 0 ? { images: imageUrls } : {}),
-    };
-    pendingAdmissionsRef.current.push({ turnId, text: turnPrompt, message });
-    const effort = effortsByProvider[agentName];
     try {
-      socket.send(JSON.stringify({
-        type: 'input',
-        input: turnPrompt,
-        turnId,
+      const turnId = crypto.randomUUID();
+      let uploadedPaths: string[] = [];
+      let imageUrls: string[] = [];
+      let uploadFailed = false;
+
+      if (currentImages.length > 0) {
+        const payloads = await Promise.all(currentImages.map(async (img) => {
+          try {
+            const res = await fetch(`${API_BASE}/api/chat/upload-attachment`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dataUrl: img.dataUrl,
+                filename: img.name,
+                workspacePath: ws.workspacePath,
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (typeof data.path === 'string' && data.path) return { dataUrl: img.dataUrl, path: data.path };
+              throw new Error('Invalid upload response');
+            }
+            const errData = await res.json().catch(() => ({ error: 'Upload failed' }));
+            uploadFailed = true;
+            appendSystemNote(`Image "${img.name}" could not be uploaded: ${errData.error || res.statusText}`, 'error');
+          } catch (err) {
+            console.error('Failed to upload image attachment', err);
+            uploadFailed = true;
+            appendSystemNote(`Image "${img.name}" failed to upload.`, 'error');
+          }
+          return { dataUrl: img.dataUrl, path: null };
+        }));
+        if (uploadFailed) {
+          // Keep the draft and every preview so the user can retry or remove
+          // the failing image. Sending the text without its requested image
+          // changes the meaning of the turn.
+          appendSystemNote('The message was kept in the composer. Fix or remove the failed image, then try again.', 'note');
+          return;
+        }
+        uploadedPaths = payloads.map(p => p.path).filter((p): p is string => Boolean(p));
+        imageUrls = payloads.map(p => p.dataUrl);
+      }
+
+      let turnPrompt = text;
+      if (uploadedPaths.length > 0) {
+        const fileRefText = uploadedPaths.map(p => `[Attached image: ${p}]`).join('\n');
+        turnPrompt = turnPrompt ? `${turnPrompt}\n\n${fileRefText}` : fileRefText;
+      }
+
+      const message: ChatMessage = {
+        role: 'user',
+        content: text,
+        ts: Date.now(),
         ...(executionProfile ? { executionProfile } : {}),
-        command: agentName,
-        cwd: ws.workspacePath,
-        ...(effort ? { effort } : {}),
-      }));
-    } catch {
-      pendingAdmissionsRef.current = pendingAdmissionsRef.current
-        .filter(admission => admission.turnId !== turnId);
-      setMessages(prev => prev.filter(m => m !== message));
-      setInput(current => current ? `${turnPrompt}\n\n${current}` : turnPrompt);
-      appendSystemNote('Failed to send message to the agent.', 'error');
+        ...(imageUrls.length > 0 ? { images: imageUrls } : {}),
+      };
+      if (socket.readyState !== WebSocket.OPEN || wsRef.current !== socket) {
+        appendSystemNote('The agent disconnected while images were uploading. Your draft and attachments were kept.', 'error');
+        return;
+      }
+      pendingAdmissionsRef.current.push({ turnId, text: turnPrompt, message });
+      const effort = effortsByProvider[agentName];
+      try {
+        socket.send(JSON.stringify({
+          type: 'input',
+          input: turnPrompt,
+          turnId,
+          ...(executionProfile ? { executionProfile } : {}),
+          command: agentName,
+          cwd: ws.workspacePath,
+          ...(effort ? { effort } : {}),
+        }));
+      } catch {
+        pendingAdmissionsRef.current = pendingAdmissionsRef.current
+          .filter(admission => admission.turnId !== turnId);
+        appendSystemNote('Failed to send message to the agent. Your draft and attachments were kept.', 'error');
+        return;
+      }
+      setMessages(prev => [...prev, message]);
+      // Only clear the snapshot that was submitted. Edits or newly pasted
+      // images made while uploads were in flight remain in the composer.
+      setInput(current => current.trim() === text ? '' : current);
+      const sentIds = new Set(currentImages.map(image => image.id));
+      setAttachedImages(current => current.filter(image => !sentIds.has(image.id)));
+      setBusy(true);
+      closeTurn();
+    } finally {
+      turnDispatchingRef.current = false;
     }
-    setMessages(prev => [...prev, message]);
-    setInput('');
-    setAttachedImages([]);
-    setBusy(true);
-    closeTurn();
   }, [agentName, appendSystemNote, attachedImages, closeTurn, effortsByProvider, ws.workspacePath]);
 
   const noteSessionEnded = useCallback(() => {
@@ -1202,7 +1249,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
 
   const sendMessage = useCallback(() => {
     const text = input.trim();
-    if ((!text && attachedImages.length === 0) || busy || sessionSwitchingRef.current) return;
+    if ((!text && attachedImages.length === 0) || busy || sessionSwitchingRef.current || turnDispatchingRef.current) return;
     const socket = wsRef.current;
     const providerId = connectionProviderRef.current || agentName;
     if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
@@ -1214,21 +1261,44 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
         }
         wsRef.current = null;
       }
-      startAgent(providerId, { firstMessage: text });
+      if (attachedImages.length > 0) {
+        const provider = providers.find(candidate => candidate.id === providerId);
+        const executionProfile = profileForProvider(providerId, provider);
+        if (provider?.executionProfiles?.length && !executionProfile) return;
+        const draftText = text;
+        const draftImages = attachedImages;
+        startAgent(providerId, {
+          firstMessage: null,
+          onDispatched: () => {
+            const connectedSocket = wsRef.current;
+            if (!connectedSocket || connectedSocket.readyState !== WebSocket.OPEN) {
+              appendSystemNote('The agent connected, but the pasted message could not be sent. Your draft and attachments were kept.', 'error');
+              return;
+            }
+            void sendTurn(connectedSocket, draftText, executionProfile, draftImages);
+          },
+        });
+      } else {
+        startAgent(providerId, { firstMessage: text });
+      }
       return;
     }
     const provider = providers.find(candidate => candidate.id === providerId);
     const executionProfile = profileForProvider(providerId, provider);
     if (provider?.executionProfiles?.length && !executionProfile) return;
     void sendTurn(socket, text, executionProfile, attachedImages);
-  }, [agentName, attachedImages, busy, connected, input, profileForProvider, providers, sendTurn, startAgent]);
+  }, [agentName, appendSystemNote, attachedImages, busy, connected, input, profileForProvider, providers, sendTurn, startAgent]);
 
   const copyMessage = useCallback((idx: number, content: string) => {
-    navigator.clipboard.writeText(content).then(() => {
+    void safeCopyToClipboard(content).then((copied) => {
+      if (!copied) {
+        appendSystemNote('Could not copy this message. Check browser clipboard permissions or copy it manually.', 'error');
+        return;
+      }
       setCopiedIdx(idx);
       setTimeout(() => setCopiedIdx(prev => (prev === idx ? null : prev)), 1500);
-    }).catch(() => {});
-  }, []);
+    });
+  }, [appendSystemNote]);
 
   const finishSessionSwitch = useCallback((requestId: number) => {
     if (sessionLoadRef.current.id !== requestId) return;
@@ -1526,21 +1596,16 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
   const copyRecoveryCommand = () => {
     if (!currentProvider || !currentRecovery) return;
     const copyFailed = () => appendSystemNote('Could not copy the recovery command. Copy the command shown above manually.', 'error');
-    try {
-      const writeText = navigator.clipboard?.writeText;
-      if (!writeText) {
+    void safeCopyToClipboard(currentRecovery.command).then((copied) => {
+      if (!copied) {
         copyFailed();
         return;
       }
-      void writeText.call(navigator.clipboard, currentRecovery.command).then(() => {
-        setCopiedRecoveryProvider(currentProvider.id);
-        setTimeout(() => {
-          if (mountedRef.current) setCopiedRecoveryProvider(current => current === currentProvider.id ? null : current);
-        }, 1500);
-      }).catch(copyFailed);
-    } catch {
-      copyFailed();
-    }
+      setCopiedRecoveryProvider(currentProvider.id);
+      setTimeout(() => {
+        if (mountedRef.current) setCopiedRecoveryProvider(current => current === currentProvider.id ? null : current);
+      }, 1500);
+    });
   };
 
   const [copiedSessionId, setCopiedSessionId] = useState(false);
@@ -1883,7 +1948,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="image/*"
+                accept="image/png,image/jpeg,image/gif,image/webp"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -1938,13 +2003,40 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               value={input}
               disabled={sessionSwitching}
               onPaste={(e) => {
+                // Rich clipboard payloads can expose an image preview alongside
+                // copied text (notably across desktop apps). Let the browser
+                // paste plain text normally instead of attaching that image.
+                if (e.clipboardData?.getData('text/plain')) return;
+                const htmlText = clipboardHtmlToText(e.clipboardData?.getData('text/html') ?? '');
+                if (htmlText.trim()) {
+                  e.preventDefault();
+                  const target = e.currentTarget;
+                  const start = target.selectionStart;
+                  const end = target.selectionEnd;
+                  setInput(current => `${current.slice(0, start)}${htmlText}${current.slice(end)}`);
+                  requestAnimationFrame(() => {
+                    target.focus();
+                    const caret = start + htmlText.length;
+                    target.setSelectionRange(caret, caret);
+                  });
+                  return;
+                }
                 const items = e.clipboardData?.items;
-                if (!items) return;
                 const imageFiles: File[] = [];
-                for (let i = 0; i < items.length; i++) {
-                  if (items[i].type.startsWith('image/')) {
-                    const file = items[i].getAsFile();
-                    if (file) imageFiles.push(file);
+                if (items) {
+                  for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.startsWith('image/')) {
+                      const file = items[i].getAsFile();
+                      if (file) imageFiles.push(file);
+                    }
+                  }
+                }
+                // Some browsers expose clipboard images through `files` but
+                // leave the item list empty. Keep this fallback for screenshots
+                // copied from native apps and remote desktop sessions.
+                if (imageFiles.length === 0 && e.clipboardData?.files?.length) {
+                  for (const file of Array.from(e.clipboardData.files)) {
+                    if (file.type.startsWith('image/')) imageFiles.push(file);
                   }
                 }
                 if (imageFiles.length > 0) {
@@ -1964,7 +2056,8 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                   if (busy || connecting || sessionSwitchingRef.current) return;
                   if (!connected) {
                     if (canStart) {
-                      startAgent();
+                      if (input.trim() || attachedImages.length) sendMessage();
+                      else startAgent();
                     }
                   } else {
                     sendMessage();
@@ -1979,7 +2072,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               rows={1}
             />
             {!connected ? (
-              <Button className="h-11 shrink-0 rounded-lg" onClick={() => startAgent()} disabled={!canStart}>
+              <Button className="h-11 shrink-0 rounded-lg" onClick={() => { if (input.trim() || attachedImages.length) sendMessage(); else startAgent(); }} disabled={!canStart}>
                 <PlaySquare size={14} />
                 Start
               </Button>

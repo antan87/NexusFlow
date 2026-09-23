@@ -1,3 +1,5 @@
+import { listRepositoryChanges } from './core/repository-changes.js';
+import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
@@ -11,6 +13,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { cors } from 'hono/cors';
+import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
@@ -617,7 +620,7 @@ app.post('/api/adapters/status/refresh', async (c) => {
   return c.json(ProviderRegistry.getAllStatus({ refreshProviderId: providerId }));
 });
 
-app.post('/api/chat/upload-attachment', async (c) => {
+app.post('/api/chat/upload-attachment', bodyLimit({ maxSize: 28 * 1024 * 1024, onError: c => c.json({ error: 'Image attachment exceeds the 20MB limit.' }, 413) }), async (c) => {
   if (!hasTrustedLocalOrigin(c.req.header('origin'))) {
     return c.json({ error: 'A local browser origin is required.' }, 403);
   }
@@ -629,23 +632,10 @@ app.post('/api/chat/upload-attachment', async (c) => {
       workspacePath?: unknown;
     } | null;
 
-    if (!body || typeof body.dataUrl !== 'string' || !body.dataUrl.startsWith('data:image/')) {
+    if (!body || typeof body.dataUrl !== 'string') {
       return c.json({ error: 'A valid image dataUrl is required.' }, 400);
     }
-
-    const matches = body.dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
-    if (!matches) {
-      return c.json({ error: 'Malformed image dataUrl format.' }, 400);
-    }
-
-    const MAX_ATTACHMENT_BASE64_CHARS = Math.ceil((20 * 1024 * 1024 * 4) / 3);
-    if (matches[2].length > MAX_ATTACHMENT_BASE64_CHARS) {
-      return c.json({ error: 'Image attachment exceeds maximum allowed size of 20MB.' }, 413);
-    }
-
-    const rawExt = matches[1].toLowerCase();
-    const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'png';
-    const buffer = Buffer.from(matches[2], 'base64');
+    const { buffer, extension } = decodeImageAttachment(body.dataUrl);
     const imageId = crypto.randomUUID();
     const config = await loadConfig();
     const workspaceDir = typeof body.workspacePath === 'string'
@@ -657,16 +647,17 @@ app.post('/api/chat/upload-attachment', async (c) => {
       : path.join(getConfigDir(), 'attachments');
 
     await fs.mkdir(targetDir, { recursive: true });
-    const targetFile = path.join(targetDir, `${imageId}.${ext}`);
+    const targetFile = path.join(targetDir, `${imageId}.${extension}`);
     await fs.writeFile(targetFile, buffer);
 
     return c.json({
       id: imageId,
-      filename: typeof body.filename === 'string' ? body.filename : `image-${imageId}.${ext}`,
+      filename: typeof body.filename === 'string' ? body.filename : `image-${imageId}.${extension}`,
       path: targetFile,
       size: buffer.length,
     });
   } catch (error) {
+    if (error instanceof InvalidImageAttachment) return c.json({ error: error.message }, error.status === 413 ? 413 : 400);
     return errorResponse(c, error);
   }
 });
@@ -2058,48 +2049,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
       const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
-        const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
-        const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
-
-        // Get numstat to determine additions and deletions per file
-        const numstatMap = new Map<string, { additions: number; deletions: number }>();
-        try {
-          const { stdout: numstatRaw } = await execa('git', ['diff', 'HEAD', '--numstat'], {
-            cwd: worktreePath,
-          });
-          const numstatLines = numstatRaw.split('\n').filter(Boolean);
-          for (const numLine of numstatLines) {
-            const match = numLine.trim().match(/^(\d+|-)\s+(\d+|-)\s+(.*)$/);
-            if (match) {
-              const [, add, del, file] = match;
-              numstatMap.set(file.trim(), {
-                additions: add === '-' ? 0 : parseInt(add, 10) || 0,
-                deletions: del === '-' ? 0 : parseInt(del, 10) || 0,
-              });
-            }
-          }
-        } catch (e) {
-          // Ignore diff errors
-        }
-
-        const files = lines.map((line) => {
-          const status = line.slice(0, 2).trim();
-          const file = line.slice(2).trim();
-
-          let type = 'modified';
-          if (status === 'A' || status === '??') type = 'added';
-          else if (status === 'D') type = 'deleted';
-
-          const stats = numstatMap.get(file) || { additions: 0, deletions: 0 };
-
-          return {
-            file,
-            type,
-            rawStatus: status,
-            additions: stats.additions,
-            deletions: stats.deletions,
-          };
-        });
+        const files = await listRepositoryChanges(worktreePath, c.req.query('include') === 'all');
 
         results.push({
           repoName,

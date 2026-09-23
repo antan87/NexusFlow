@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { apiFetch } from '../../lib/api/client.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import type { LifecycleStep, WorkDocument, WorkGuidance, WorkspaceLifecycle } from '../../types.js';
 
 type WorkContext = { guidance: WorkGuidance; projectId?: string; sharedDocuments?: Array<WorkDocument & { workspaceId: string }>; lifecycle: WorkspaceLifecycle | null; assignment: string };
@@ -107,7 +108,10 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
         <label className="block text-sm">Stop when<Textarea className="mt-1" value={draft.assignment.stopCondition} onChange={(event) => patchAssignment({ stopCondition: event.target.value })} placeholder="The proposal is ready for review. Stop before implementation." /></label>
         <div className="flex flex-wrap gap-2">
           <Button disabled={busy} onClick={() => void saveAssignment()}>Save AI assignment</Button>
-          <Button variant="outline" disabled={busy || Boolean(assignmentDirty)} onClick={() => void perform(async () => { await navigator.clipboard.writeText(context.assignment); setMessage('AI assignment copied.'); })}>Copy AI assignment</Button>
+          <Button variant="outline" disabled={busy || Boolean(assignmentDirty)} onClick={() => void perform(async () => {
+            if (!await safeCopyToClipboard(context.assignment)) throw new Error('Could not copy the AI assignment. Check browser clipboard permissions.');
+            setMessage('AI assignment copied.');
+          })}>Copy AI assignment</Button>
         </div>
         {assignmentDirty && <p className="text-xs text-muted-foreground">Save your changes before copying the assignment.</p>}
       </div>}

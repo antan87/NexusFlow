@@ -1,4 +1,4 @@
-import { TerminalPane } from '../terminal/TerminalPane.js';
+import { TerminalWorkspace } from '../terminal/TerminalWorkspace.js';
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   MessagesSquare,
@@ -415,7 +415,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 className={cn('h-full flex flex-col', !isTabActive && 'hidden')}
               >
                 <div className={cn('h-full min-h-0', modes[branchName] === 'chat' && 'hidden')}>
-                  <TerminalPane workspace={branchName} active={isOpen && !isMinimized && isTabActive && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)} />
+                  <TerminalWorkspace workspace={branchName} active={isOpen && !isMinimized && isTabActive && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)} />
                 </div>
                 <RetainedChat visible={modes[branchName] === 'chat'} ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
               </div>

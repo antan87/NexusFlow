@@ -177,15 +177,30 @@ export async function clearRemoteChatStore(branchName: string): Promise<void> {
 }
 
 export function saveChatStore(branchName: string, store: ChatStore): void {
+  const trimmed = store.messages.length > MAX_PERSISTED_MESSAGES
+    ? { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
+    : store;
+
   try {
-    const trimmed = store.messages.length > MAX_PERSISTED_MESSAGES
-      ? { ...store, messages: store.messages.slice(-MAX_PERSISTED_MESSAGES) }
-      : store;
     localStorage.setItem(chatStorageKey(branchName), JSON.stringify(trimmed));
-    void syncRemoteChatStore(branchName, trimmed);
-  } catch (e) {
-    console.error('Failed to save chat to localStorage', e);
+  } catch (error) {
+    // A pasted 20MB image can exceed the browser quota even though the
+    // server-side thread store can still persist it. Retain the transcript
+    // and metadata locally without inline image bytes, then always attempt the
+    // remote sync below. A quota failure must not block durable persistence.
+    try {
+      const lightweight = {
+        ...trimmed,
+        messages: trimmed.messages.map(({ images: _images, ...message }) => message),
+      };
+      localStorage.removeItem(chatStorageKey(branchName));
+      localStorage.setItem(chatStorageKey(branchName), JSON.stringify(lightweight));
+    } catch {
+      console.error('Failed to save chat to localStorage', error);
+    }
   }
+
+  void syncRemoteChatStore(branchName, trimmed);
 }
 
 export function clearChatStore(branchName: string): void {
