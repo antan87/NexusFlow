@@ -55,6 +55,13 @@ describe('Brand Configuration System', () => {
     expect(BRAND_CONFIG.theme.dark.background).toBe('#0A0812');
   });
 
+  it('defines extended atmospheric color palettes (Aurora, Forest, Nebula, Glacier)', () => {
+    expect(BRAND_CONFIG.theme.aurora?.first).toBe('#5EEAD4');
+    expect(BRAND_CONFIG.theme.forest?.middle).toBe('#22C55E');
+    expect(BRAND_CONFIG.theme.nebula?.first).toBe('#F472B6');
+    expect(BRAND_CONFIG.theme.glacier?.middle).toBe('#38BDF8');
+  });
+
   it('resolves first defined environment variable in priority order', () => {
     delete process.env.CONTEXTSPACE_HOME;
     delete process.env.NEXUSFLOW_HOME;
