@@ -45,7 +45,7 @@ import {
   SUPPORTED_ASSISTANTS,
 } from '../../src/utils/terminal-launch.js';
 
-import { createDefaultSteps } from '../../src/core/lifecycle.js';
+import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';
 import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
 import { findTool, enabledTools } from '../../src/mcp/tools.js';
 import { resourceIdSchema } from '../../src/resources/contracts.js';
@@ -423,32 +423,19 @@ This is the instructions content.`;
 
   // ─── Feature 6: CLI Inception with Tags & Flow Sizing (R1, R6) ────────
   describe('F6: Development Flow Sizing & Inception', () => {
-    it('F6.1: quick flow creates 2-step fast-track lifecycle', () => {
-      const steps = createDefaultSteps('quick', 'bug-fix-1', 'fix/bug-1');
-      expect(steps.length).toBe(2);
-      expect(steps[0].id).toBe('reproduce_and_fix');
-      expect(steps[1].id).toBe('verify_and_ship');
-      expect(steps[1].dependsOn).toContain('reproduce_and_fix');
+    it('F6.1: quick flow starts without milestones', async () => {
+      ws = await createTestWorkspace({ flow: 'quick' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
-    it('F6.2: feature flow creates standard 4-step milestone lifecycle', () => {
-      const steps = createDefaultSteps('feature', 'feat-login', 'feat/login');
-      expect(steps.length).toBe(4);
-      expect(steps.map((s) => s.id)).toEqual([
-        'step_discovery',
-        'step_implementation',
-        'step_verification',
-        'step_ship',
-      ]);
+    it('F6.2: feature flow starts without milestones', async () => {
+      ws = await createTestWorkspace({ flow: 'feature' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
-    it('F6.3: epic flow creates 4 multi-slice cross-repo milestones', () => {
-      const steps = createDefaultSteps('epic', 'epic-billing', 'feat/billing');
-      expect(steps.length).toBe(4);
-      expect(steps[0].id).toBe('epic_slice_1');
-      expect(steps[1].id).toBe('epic_slice_2');
-      expect(steps[2].id).toBe('epic_slice_3');
-      expect(steps[3].id).toBe('epic_slice_4');
+    it('F6.3: epic flow starts without milestones', async () => {
+      ws = await createTestWorkspace({ flow: 'epic' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
     it('F6.4: in-place mode sets workspace isolation instructions in AGENTS.md', async () => {

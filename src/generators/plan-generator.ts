@@ -6,7 +6,8 @@
 
 import chalk from 'chalk';
 import { loadWorkspaceState } from '../core/workspace-state.js';
-import { renderLifecyclePlan } from '../core/lifecycle.js';
+import { loadWorkspaceLifecycle, renderLifecyclePlan } from '../core/lifecycle.js';
+import { isUnusedLegacyPlan } from '../core/legacy-lifecycle.js';
 import { writeWorkspaceFile } from '../core/storage.js';
 import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
 import type {
@@ -153,7 +154,9 @@ export async function generateImplementationPlan(
   try {
     const { feature, repos, analysis } = ctx;
     const state = await loadWorkspaceState(workspacePath);
-    const milestonePlan = state.lifecycle ? renderLifecyclePlan(state.lifecycle, false) : '';
+    const lifecycle = state.lifecycle && isUnusedLegacyPlan(state.lifecycle)
+      ? await loadWorkspaceLifecycle(workspacePath) : state.lifecycle;
+    const milestonePlan = lifecycle ? renderLifecyclePlan(lifecycle, false) : '';
 
 
     // ── Fallback: no analysis available ─────────────────────────────────

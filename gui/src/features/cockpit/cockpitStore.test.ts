@@ -91,9 +91,7 @@ test('upcastWorkspaceToCockpit provides clean fallback with ZERO mock data leaka
   // Upcasting with null lifecycle and null plan
   const cockpitData = upcastWorkspaceToCockpit(feature, null, status);
 
-  assert.equal(cockpitData.iterations.length, 1);
-  assert.equal(cockpitData.iterations[0].title, 'Inventory Synchronization Microservice');
-  assert.equal(cockpitData.iterations[0].status, 'planned');
+  assert.deepEqual(cockpitData.iterations, []);
 
   // Crucial anti-cheat & leakage assertion: "Vacation Agreement Calc" must NOT exist
   const titles = cockpitData.iterations.map((it) => it.title);
@@ -105,28 +103,12 @@ test('upcastWorkspaceToCockpit provides clean fallback with ZERO mock data leaka
   assert.ok(!serialized.includes('Vacation Debt'));
 });
 
-test('upcastWorkspaceToCockpit parses markdown milestones from planContent as secondary fallback', () => {
-  const feature = {
-    branchName: 'feature-plan-based',
-    description: 'Plan based workspace',
-    repos: ['/src/repos/app'],
-    isolatedRepos: {},
-  } as unknown as Feature;
-
-  const planMarkdown = `
-# Workspace Plan
-1. **Database Schema Setup** — [x] done complete
-2. **API Endpoint Handlers** — in progress implementation
-3. **Integration Verification** — pending e2e tests
-`;
-
-  const cockpitData = upcastWorkspaceToCockpit(feature, null, undefined, planMarkdown);
-
-  assert.equal(cockpitData.iterations.length, 3);
-  assert.ok(cockpitData.iterations[0].title.includes('Database Schema Setup'));
-  assert.equal(cockpitData.iterations[0].status, 'done');
-  assert.ok(cockpitData.iterations[1].title.includes('API Endpoint Handlers'));
-  assert.ok(cockpitData.iterations[2].title.includes('Integration Verification'));
+test('does not invent milestones from Markdown or the feature name', () => {
+  const feature = { branchName: 'feature-docs', description: 'Document browser', repos: [] } as unknown as Feature;
+  const plan = '1. **Vertical slice**\n2. **Verification**';
+  assert.deepEqual(upcastWorkspaceToCockpit(feature, null, undefined, plan).iterations, []);
+  const empty: WorkspaceLifecycle = { workspaceId: 'feature-docs', flowType: 'feature', steps: [], updatedAt: '' };
+  assert.deepEqual(upcastWorkspaceToCockpit(feature, empty, undefined, plan).iterations, []);
 });
 
 test('upcastWorkspaceToCockpit calculates mechanical gateStatus from verificationReport', () => {
@@ -313,7 +295,7 @@ test('cockpitStore preserves selection during same-workspace updates', () => {
   assert.equal(cockpitStore.getState().activeWorktreeId, 'wt-a2');
 });
 
-test('upcastWorkspaceToCockpit sets fallback iteration to agent_running when assistants are active', () => {
+test('upcastWorkspaceToCockpit does not infer milestones from active assistants', () => {
   const feature = {
     branchName: 'feat-running-agent',
     description: 'Active agent worker',
@@ -331,8 +313,7 @@ test('upcastWorkspaceToCockpit sets fallback iteration to agent_running when ass
   };
 
   const data = upcastWorkspaceToCockpit(feature, null, status);
-  assert.equal(data.iterations.length, 1);
-  assert.equal(data.iterations[0].status, 'agent_running');
+  assert.deepEqual(data.iterations, []);
 });
 
 test('upcastWorkspaceToCockpit pairs lifecycle steps with matching branch-keyed worktrees', () => {

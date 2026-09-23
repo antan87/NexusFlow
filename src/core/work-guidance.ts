@@ -9,6 +9,7 @@ import { loadFeatureConfig, listWorkspaces } from './workspace.js';
 import { readWorkspaceFile, writeWorkspaceFile, resolveWorkspaceFileUrl, workspaceFileExists } from './storage.js';
 import { assertNoLinkedPathComponents } from '../resources/fs-safety.js';
 import { loadWorkspaceState } from './workspace-state.js';
+import { isUnusedLegacyPlan } from './legacy-lifecycle.js';
 
 export const WORK_GUIDANCE_FILE = 'contextspace-work.json';
 export const WORK_ASSIGNMENT_FILE = 'contextspace-assignment.md';
@@ -19,11 +20,12 @@ export const documentRoles = ['requirements', 'design', 'evidence', 'reference']
 export const documentStatuses = ['draft', 'approved', 'superseded'] as const;
 const scopeSchema = z.object({ milestoneId: z.string().min(1).optional(), project: z.boolean().optional() })
   .refine((scope) => !scope.project || !scope.milestoneId, 'Choose project or milestone scope, not both.');
-const metadataSchema = z.object({
+export const documentMetadataSchema = z.object({
   title: z.string().trim().min(1).max(200).regex(/^[^\r\n]+$/),
   role: z.enum(documentRoles), status: z.enum(documentStatuses).default('draft'),
   scope: scopeSchema.default({}), summary: z.string().trim().max(4000).default(''),
 });
+const metadataSchema = documentMetadataSchema;
 const documentSchema = metadataSchema.extend({
   id: z.string().uuid(), filename: z.string().regex(/^contextspace-document-[a-f0-9-]+\.md$/).optional(),
   url: z.string().url().refine((url) => ['http:', 'https:'].includes(new URL(url).protocol)).optional(),
@@ -85,14 +87,20 @@ export async function ensureWorkGuidance(workspacePath: string): Promise<void> {
   await mutateGuidance(workspacePath, undefined, async () => undefined);
 }
 
+/** Shared with plan edits so removing a milestone cannot race a new document scope. */
+export async function lockWorkGuidance(workspacePath: string) {
+  const root = await fs.realpath(workspacePath);
+  return acquireLock(path.join(root, '.contextspace-work.lock'), {
+    staleMs: 60_000, timeoutMs: 10_000, timeoutMessage: 'Workspace brief is busy. Retry the operation.',
+  });
+}
+
 async function mutateGuidance<T>(workspacePath: string, revision: number | undefined, change: (guidance: WorkGuidance) => Promise<T>): Promise<{ guidance: WorkGuidance; result: T }> {
   return runMutation(async () => {
     const root = await fs.realpath(workspacePath);
     await assertNoLinkedPathComponents(root, path.join(root, WORK_GUIDANCE_FILE));
     await assertNoLinkedPathComponents(root, path.join(root, WORK_ASSIGNMENT_FILE));
-    const release = await acquireLock(path.join(root, '.contextspace-work.lock'), {
-      staleMs: 60_000, timeoutMs: 10_000, timeoutMessage: 'Workspace brief is busy. Retry the operation.',
-    });
+    const release = await lockWorkGuidance(root);
     try {
       const feature = await requireFeature(root);
       const guidance = await loadWorkGuidance(root);
@@ -114,8 +122,8 @@ async function mutateGuidance<T>(workspacePath: string, revision: number | undef
 
 export async function updateWorkGuidance(workspacePath: string, input: unknown): Promise<WorkGuidance> {
   const update = guidanceUpdateSchema.parse(input);
-  await checkScope(workspacePath, update.assignment.milestoneId);
   const { guidance } = await mutateGuidance(workspacePath, update.revision, async (current) => {
+    await checkScope(workspacePath, update.assignment.milestoneId);
     current.workType = update.workType; current.size = update.size; current.assignment = update.assignment;
   });
   return guidance;
@@ -123,9 +131,9 @@ export async function updateWorkGuidance(workspacePath: string, input: unknown):
 
 export async function addWorkDocument(workspacePath: string, revision: number, input: unknown): Promise<WorkGuidance> {
   const doc = documentInputSchema.parse(input);
-  await checkScope(workspacePath, doc.scope.milestoneId, doc.scope.project);
   if (doc.url && !['http:', 'https:'].includes(new URL(doc.url).protocol)) throw new Error('Document links must use HTTP or HTTPS.');
   const { guidance } = await mutateGuidance(workspacePath, revision, async (current) => {
+    await checkScope(workspacePath, doc.scope.milestoneId, doc.scope.project);
     if (current.documents.length >= 100) throw new Error('This workspace already has 100 documents.');
     const id = randomUUID();
     const feature = await requireFeature(workspacePath);
@@ -144,8 +152,8 @@ export async function addWorkDocument(workspacePath: string, revision: number, i
 
 export async function updateWorkDocument(workspacePath: string, id: string, revision: number, input: unknown): Promise<WorkGuidance> {
   const update = metadataSchema.parse(input);
-  await checkScope(workspacePath, update.scope.milestoneId, update.scope.project);
   const { guidance } = await mutateGuidance(workspacePath, revision, async (current) => {
+    await checkScope(workspacePath, update.scope.milestoneId, update.scope.project);
     const doc = current.documents.find((item) => item.id === id);
     if (!doc) throw new Error('Document not found.');
     Object.assign(doc, update, { updatedAt: new Date().toISOString() });
@@ -214,9 +222,15 @@ export async function getWorkContext(workspacePath: string) {
   const feature = await requireFeature(workspacePath);
   const guidance = await loadWorkGuidance(workspacePath);
   const state = await loadWorkspaceState(workspacePath);
+  // Read-only consumers must not receive obsolete template steps while waiting
+  // for the lifecycle loader to persist the migration.
+  const lifecycle = state.lifecycle && isUnusedLegacyPlan(state.lifecycle)
+    && !guidance.assignment.milestoneId && !guidance.documents.some((doc) => doc.scope.milestoneId)
+    ? { ...state.lifecycle, steps: [], currentStepId: undefined }
+    : state.lifecycle;
   const shared = await sharedProjectDocuments(workspacePath);
   const sources = new Map(shared.map((item) => [item.document.id, documentLocation(item.workspacePath, item.workspaceId, item.document)]));
-  return { guidance, projectId: feature.projectId, lifecycle: state.lifecycle ?? null,
+  return { guidance, projectId: feature.projectId, lifecycle: lifecycle ?? null,
     sharedDocuments: shared.map((item) => ({ ...item.document, workspaceId: item.workspaceId })),
     assignment: renderWorkAssignment({ ...guidance, documents: [...guidance.documents, ...shared.map((item) => item.document)] },
       (doc) => sources.get(doc.id) ?? documentLocation(workspacePath, feature.id, doc)),

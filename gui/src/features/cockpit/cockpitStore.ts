@@ -227,7 +227,7 @@ export function upcastWorkspaceToCockpit(
   feature: Feature,
   lifecycle: WorkspaceLifecycle | null,
   status?: WorkspaceStatus,
-  planContent?: string | null,
+  _planContent?: string | null,
   verificationReport?: WorkspaceVerificationReport | null
 ): {
   workspaceTitle: string;
@@ -281,74 +281,6 @@ export function upcastWorkspaceToCockpit(
         changesCount: step.status === 'in_progress' ? (status?.changedFiles ?? 0) : 0,
       };
     });
-  }
-
-  // 2. Secondary: parse markdown milestones from planContent if no lifecycle steps
-  if (iterations.length === 0 && planContent && planContent.trim().length > 0) {
-    const parsedMilestones: DevelopmentIteration[] = [];
-    const lineRegex = /^[\t ]*(?:-|\*|\d+\.|#{2,4})[\t ]+(?:\[([ xX])\][\t ]+)?(?:\*\*(?:Milestone[\t ]*\d+:?[\t ]*)?([^*]+)\*\*|Milestone[\t ]*(\d+):?[\t ]*(.+?))(?:[\t ]+[-—–:][\t ]+(.+))?[\t ]*$/i;
-    let counter = 1;
-    for (const line of planContent.split(/\r?\n/)) {
-      const match = line.match(lineRegex);
-      if (!match) continue;
-      const isChecked = Boolean(match[1] && match[1].toLowerCase() === 'x');
-      const rawTitle = (match[2] || match[4] || '').trim();
-      const lower = rawTitle.toLowerCase();
-      if (!rawTitle || /(?:^|:\s*)(?:acceptance criteria|verification|verification method)$/.test(lower)) {
-        continue;
-      }
-      const goal = match[5]?.trim();
-      const isDone = isChecked || /\b(done|completed|verified|merged)\b/i.test(goal || '');
-      let iterStatus: IterationStatus = isDone ? 'done' : 'planned';
-      if (!isDone && parsedMilestones.filter((p) => p.status !== 'done').length === 0) {
-        iterStatus = (status?.changedFiles ?? 0) > 0
-          ? 'review_ready'
-          : (status?.activeAssistants && status.activeAssistants.length > 0 ? 'agent_running' : 'planned');
-      }
-
-      const num = counter++;
-      const title = rawTitle.toLowerCase().startsWith('iteration') || rawTitle.toLowerCase().startsWith('milestone')
-        ? rawTitle
-        : `Iteration ${num}: ${rawTitle}`;
-
-      parsedMilestones.push({
-        id: `iter-plan-${num}`,
-        number: num,
-        title,
-        goal,
-        status: iterStatus,
-        worktreeId: defaultWtId,
-        branchName: feature.branchName,
-        changesCount: iterStatus === 'review_ready' ? (status?.changedFiles ?? 0) : 0,
-      });
-    }
-
-    if (parsedMilestones.length > 0) {
-      iterations = parsedMilestones;
-    }
-  }
-
-  // 3. Clean Fallback: When workspace has no plan or lifecycle steps yet, derive a clean initial step from feature
-  if (iterations.length === 0) {
-    const initialTitle = feature.description && feature.description.length > 3 && feature.description.length < 50
-      ? feature.description
-      : formatBranchTitle(feature.branchName);
-    iterations = [
-      {
-        id: `iter-${feature.branchName}-init`,
-        number: 1,
-        title: initialTitle,
-        goal: feature.description || `Deliver changes for ${feature.branchName}`,
-        status: (status?.changedFiles ?? 0) > 0
-          ? 'review_ready'
-          : (status?.activeAssistants && status.activeAssistants.length > 0)
-            ? 'agent_running'
-            : 'planned',
-        worktreeId: defaultWtId,
-        branchName: feature.branchName,
-        changesCount: status?.changedFiles ?? 0,
-      },
-    ];
   }
 
   // Compute Gate Status

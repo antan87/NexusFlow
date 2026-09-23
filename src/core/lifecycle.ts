@@ -7,6 +7,8 @@
  */
 
 import { z } from 'zod';
+import { loadWorkGuidance, lockWorkGuidance } from './work-guidance.js';
+import { isUnusedLegacyPlan } from './legacy-lifecycle.js';
 import { execa } from 'execa';
 import type {
   BranchFleetMember,
@@ -113,119 +115,6 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
 }
 
 /**
- * Creates a default structured lifecycle if none exists for the workspace.
- */
-export function createDefaultSteps(
-  flowType: 'quick' | 'feature' | 'epic',
-  featureId: string,
-  branchName?: string,
-): LifecycleStep[] {
-  if (flowType === 'quick') {
-    return [
-      {
-        id: 'reproduce_and_fix',
-        title: 'Scope & Implement Focused Change',
-        description: 'Confirm the expected behavior or baseline, then make a focused change.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'in_progress',
-      },
-      {
-        id: 'verify_and_ship',
-        requiresVerification: true,
-        title: 'Mechanical Verification Gate & Ship',
-        description: 'Execute automated tests, anchor commit SHA proof, and publish PR.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'pending',
-        dependsOn: ['reproduce_and_fix'],
-      },
-    ];
-  }
-
-  if (flowType === 'epic') {
-    return [
-      {
-        id: 'epic_slice_1',
-        title: 'Define Outcomes & Constraints',
-        description: 'Agree the intended outcome, scope, constraints, and acceptance criteria.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'in_progress',
-      },
-      {
-        id: 'epic_slice_2',
-        title: 'Deliver First Increment',
-        description: 'Implement and test the first independently reviewable deliverable.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'pending',
-        dependsOn: ['epic_slice_1'],
-      },
-      {
-        id: 'epic_slice_3',
-        title: 'Deliver Follow-up Increments',
-        description: 'Add milestones for the remaining deliverables and their dependencies.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'pending',
-        dependsOn: ['epic_slice_2'],
-      },
-      {
-        id: 'epic_slice_4',
-        requiresVerification: true,
-        title: 'Cross-Repo Integration & E2E Gate',
-        description: 'End-to-end integration tests, mechanical verification, and milestone signoff.',
-        branch: branchName,
-        owner: 'Developer',
-        status: 'blocked',
-        dependsOn: ['epic_slice_2', 'epic_slice_3'],
-      },
-    ];
-  }
-
-  // Standard Feature flow
-  return [
-    {
-      id: 'step_discovery',
-      title: 'Explore Architecture & Design Test Skeleton',
-      description: 'Survey relevant modules, inspect interfaces, and create verification skeleton.',
-      branch: branchName,
-      owner: 'Developer',
-      status: 'in_progress',
-    },
-    {
-      id: 'step_implementation',
-      title: 'Core Implementation',
-      description: 'Implement feature changes across affected workspace repositories.',
-      branch: branchName,
-      owner: 'Developer',
-      status: 'pending',
-      dependsOn: ['step_discovery'],
-    },
-    {
-      id: 'step_verification',
-      requiresVerification: true,
-      title: 'Mechanical Verification Gate',
-      description: 'Run automated test suites and anchor clean commit SHA proof in state.',
-      branch: branchName,
-      owner: 'Developer',
-      status: 'pending',
-      dependsOn: ['step_implementation'],
-    },
-    {
-      id: 'step_ship',
-      title: 'Review, Create PR & Clean Workspace',
-      description: 'Surface compare links, create GitHub pull request, and conclude workspace loop.',
-      branch: branchName,
-      owner: 'Developer',
-      status: 'pending',
-      dependsOn: ['step_verification'],
-    },
-  ];
-}
-
-/**
  * Loads or initializes the active lifecycle for a workspace.
  */
 export async function loadWorkspaceLifecycle(workspacePath: string): Promise<WorkspaceLifecycle> {
@@ -233,6 +122,22 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   const feature = await loadFeatureConfig(workspacePath);
 
   if (state.lifecycle) {
+    if (isUnusedLegacyPlan(state.lifecycle)) {
+      const release = await lockWorkGuidance(workspacePath);
+      try {
+        const guidance = await loadWorkGuidance(workspacePath);
+        const referenced = Boolean(guidance.assignment.milestoneId || guidance.documents.some((doc) => doc.scope.milestoneId));
+        state.lifecycle = await mutateWorkspaceState(workspacePath, (current) => {
+          if (!referenced && current.lifecycle && isUnusedLegacyPlan(current.lifecycle)) {
+            current.lifecycle.steps = [];
+            current.lifecycle.currentStepId = undefined;
+            current.lifecycle.revision = (current.lifecycle.revision ?? 0) + 1;
+            current.lifecycle.updatedAt = new Date().toISOString();
+          }
+          return current.lifecycle!;
+        });
+      } finally { await release(); }
+    }
     // Refresh branch fleet asynchronously
     try {
       state.lifecycle.fleet = await getBranchFleet(workspacePath);
@@ -261,19 +166,10 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
     // Best-effort
   }
 
-  const branches = [...new Set(fleet.filter((member) => member.isCurrent).map((member) => member.branch))];
-  const branch = feature?.mode !== 'in-place' && branches.length === 1 && branches[0] !== 'detached'
-    ? branches[0]
-    : !branches.length && feature?.mode !== 'in-place' && !feature?.repoBranches
-      ? feature?.branchName
-      : undefined;
-  const steps = createDefaultSteps(flowType, feature?.id ?? 'workspace', branch);
-
   const lifecycle: WorkspaceLifecycle = {
     workspaceId: feature?.id ?? 'workspace',
     flowType,
-    currentStepId: steps.find((s) => s.status === 'in_progress')?.id,
-    steps,
+    steps: [],
     fleet,
     updatedAt: new Date().toISOString(),
   };
@@ -379,59 +275,72 @@ const planStepSchema = z.object({
   dependsOn: z.array(z.string()).max(100).optional(),
   requiresVerification: z.boolean().optional(), verificationCommand: z.string().max(2000).optional(),
 });
+export const lifecyclePlanSchema = z.object({ revision: z.number().int().nonnegative(), steps: z.array(planStepSchema).max(100) });
 
 /** Update definitions while retaining the authoritative milestone progress and proofs. */
 export async function updateLifecyclePlan(workspacePath: string, input: unknown): Promise<WorkspaceLifecycle> {
-  const update = z.object({ revision: z.number().int().nonnegative(), steps: z.array(planStepSchema).min(1).max(100) }).parse(input);
+  const update = lifecyclePlanSchema.parse(input);
   await loadWorkspaceLifecycle(workspacePath);
-  return mutateWorkspaceState(workspacePath, (state) => {
-    const lifecycle = state.lifecycle!;
-    if ((lifecycle.revision ?? 0) !== update.revision) throw new Error('The plan changed in another session. Reload before saving.');
-    const definitions = update.steps.map((definition) => ({
-      ...lifecycle.steps.find((step) => step.id === definition.id), ...definition,
-      ...(definition.verificationCommand === '' ? { verificationCommand: undefined } : {}),
-    }));
-    const byId = new Map(definitions.map((step) => [step.id, step]));
-    if (byId.size !== definitions.length) throw new Error('Milestone IDs must be unique.');
-    if (lifecycle.steps.some((step) => !byId.has(step.id))) throw new Error('Existing milestones must be retained; edit their details or add a new milestone.');
-    // Validate the merged definitions: omitted optional fields retain their saved values.
-    const visiting = new Set<string>();
-    const visited = new Set<string>();
-    const visit = (id: string) => {
-      if (visiting.has(id)) throw new Error('Milestone dependencies contain a cycle.');
-      if (visited.has(id)) return;
-      const step = byId.get(id);
-      if (!step) throw new Error(`Dependency "${id}" does not name a milestone.`);
-      visiting.add(id);
-      for (const dependency of step.dependsOn ?? []) visit(dependency);
-      visiting.delete(id); visited.add(id);
-    };
-    for (const step of definitions) visit(step.id);
-    lifecycle.steps = definitions.map((definition) => {
-      const existing = lifecycle.steps.find((step) => step.id === definition.id);
-      if (!existing) return { ...definition, status: 'pending' as const };
-      const gateChanged = Boolean(existing.requiresVerification) !== Boolean(definition.requiresVerification)
-        || existing.verificationCommand !== definition.verificationCommand;
-      const dependenciesChanged = JSON.stringify(existing.dependsOn ?? []) !== JSON.stringify(definition.dependsOn ?? []);
-      if (existing.status === 'completed' && (gateChanged || dependenciesChanged)) {
-        throw new Error(`Completed milestone "${existing.title}" cannot change its gate or dependencies.`);
+  const release = await lockWorkGuidance(workspacePath);
+  try {
+    const guidance = await loadWorkGuidance(workspacePath);
+    return await mutateWorkspaceState(workspacePath, (state) => {
+      const lifecycle = state.lifecycle!;
+      if ((lifecycle.revision ?? 0) !== update.revision) throw new Error('The plan changed in another session. Reload before saving.');
+      const definitions = update.steps.map((definition) => ({
+        ...lifecycle.steps.find((step) => step.id === definition.id), ...definition,
+        ...(definition.verificationCommand === '' ? { verificationCommand: undefined } : {}),
+      }));
+      const byId = new Map(definitions.map((step) => [step.id, step]));
+      if (byId.size !== definitions.length) throw new Error('Milestone IDs must be unique.');
+      const removed = new Set(lifecycle.steps.filter((step) => !byId.has(step.id)).map((step) => step.id));
+      if ((guidance.assignment.milestoneId && removed.has(guidance.assignment.milestoneId)) ||
+        guidance.documents.some((doc) => doc.scope.milestoneId && removed.has(doc.scope.milestoneId))) {
+        throw new Error('Move the assignment and document scopes to the workspace or another milestone before removing their milestone.');
       }
-      if (['in_progress', 'verified'].includes(existing.status) &&
-        (definition.dependsOn ?? []).some((id) => lifecycle.steps.find((step) => step.id === id)?.status !== 'completed')) {
-        throw new Error(`Active milestone "${existing.title}" cannot depend on unfinished work.`);
-      }
-      return { ...existing, ...definition,
-        ...(gateChanged ? { lastVerificationSha: undefined, lastVerificationStatus: undefined,
-          status: existing.status === 'verified' ? 'in_progress' as const : existing.status } : {}),
+      // Validate the merged definitions: omitted optional fields retain their saved values.
+      const visiting = new Set<string>();
+      const visited = new Set<string>();
+      const visit = (id: string) => {
+        if (visiting.has(id)) throw new Error('Milestone dependencies contain a cycle.');
+        if (visited.has(id)) return;
+        const step = byId.get(id);
+        if (!step) throw new Error(`Dependency "${id}" does not name a milestone.`);
+        visiting.add(id);
+        for (const dependency of step.dependsOn ?? []) visit(dependency);
+        visiting.delete(id); visited.add(id);
       };
+      for (const step of definitions) visit(step.id);
+      lifecycle.steps = definitions.map((definition) => {
+        const existing = lifecycle.steps.find((step) => step.id === definition.id);
+        if (!existing) return { ...definition, status: 'pending' as const };
+        const gateChanged = Boolean(existing.requiresVerification) !== Boolean(definition.requiresVerification)
+          || existing.verificationCommand !== definition.verificationCommand;
+        const dependenciesChanged = JSON.stringify(existing.dependsOn ?? []) !== JSON.stringify(definition.dependsOn ?? []);
+        if (existing.status === 'completed' && (gateChanged || dependenciesChanged)) {
+          throw new Error(`Completed milestone "${existing.title}" cannot change its gate or dependencies.`);
+        }
+        if (['in_progress', 'verified'].includes(existing.status) &&
+          (definition.dependsOn ?? []).some((id) => lifecycle.steps.find((step) => step.id === id)?.status !== 'completed')) {
+          throw new Error(`Active milestone "${existing.title}" cannot depend on unfinished work.`);
+        }
+        return { ...existing, ...definition,
+          ...(gateChanged ? { lastVerificationSha: undefined, lastVerificationStatus: undefined,
+            status: existing.status === 'verified' ? 'in_progress' as const : existing.status } : {}),
+        };
+      });
+      if (!lifecycle.steps.some((step) => step.id === lifecycle.currentStepId)) {
+        lifecycle.currentStepId = lifecycle.steps.find((step) => ['in_progress', 'verified'].includes(step.status))?.id;
+      }
+      lifecycle.revision = (lifecycle.revision ?? 0) + 1;
+      lifecycle.updatedAt = new Date().toISOString();
+      return lifecycle;
     });
-    lifecycle.revision = (lifecycle.revision ?? 0) + 1;
-    lifecycle.updatedAt = new Date().toISOString();
-    return lifecycle;
-  });
+  } finally { await release(); }
 }
 
 export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true): string {
+  if (!lifecycle.steps.length) return '';
   const lines = ['<!-- CONTEXTSPACE:MILESTONES:START -->', '## Milestone plan', '',
     live ? 'Current progress from the workspace lifecycle.' : 'Milestone definitions from the workspace lifecycle. Run `ctxspace flow` for current progress.', ''];
   for (const [index, step] of lifecycle.steps.entries()) {

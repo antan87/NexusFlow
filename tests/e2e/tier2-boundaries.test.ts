@@ -38,7 +38,7 @@ import {
 } from '../../src/utils/terminal-launch.js';
 import { isValidSessionId } from '../../src/agent/session.js';
 
-import { createDefaultSteps } from '../../src/core/lifecycle.js';
+import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';
 import {
   reconcileWorkspaceResources,
   ResourceConflictError,
@@ -282,28 +282,19 @@ invalid: {broken yaml
 
   // ─── F6-B: CLI Inception & Flow Preset Boundaries ────────────────────
   describe('F6-B: Development Flow Preset Boundaries', () => {
-    it('F6-B.1: quick flow produces exactly 2 sequential steps', () => {
-      const steps = createDefaultSteps('quick', 'test-quick', 'fix/quick');
-      expect(steps.length).toBe(2);
-      expect(steps[0].status).toBe('in_progress');
-      expect(steps[1].status).toBe('pending');
+    it('F6-B.1: quick flow does not require steps', async () => {
+      ws = await createTestWorkspace({ flow: 'quick' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
-    it('F6-B.2: feature flow produces 4 standard milestones with proper dependencies', () => {
-      const steps = createDefaultSteps('feature', 'test-feat', 'feat/test');
-      expect(steps.length).toBe(4);
-      expect(steps[1].dependsOn).toContain('step_discovery');
-      expect(steps[2].dependsOn).toContain('step_implementation');
-      expect(steps[3].dependsOn).toContain('step_verification');
+    it('F6-B.2: feature flow does not infer dependencies', async () => {
+      ws = await createTestWorkspace({ flow: 'feature' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
-    it('F6-B.3: epic flow starts foundation work without claiming completed slices', () => {
-      const steps = createDefaultSteps('epic', 'test-epic', 'feat/epic');
-      expect(steps[0].id).toBe('epic_slice_1');
-      expect(steps[0].status).toBe('in_progress');
-      expect(steps[1].id).toBe('epic_slice_2');
-      expect(steps[1].status).toBe('pending');
-      expect(steps.every((step) => !step.completedAt && step.branch === 'feat/epic')).toBe(true);
+    it('F6-B.3: epic flow does not invent deliverables', async () => {
+      ws = await createTestWorkspace({ flow: 'epic' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
 
     it('F6-B.4: empty repo list in workspace feature is handled safely in markdown generation', async () => {
@@ -312,9 +303,9 @@ invalid: {broken yaml
       expect(agentsMd).toContain('Where to look');
     });
 
-    it('F6-B.5: branch names with nested slashes format cleanly in lifecycle steps', () => {
-      const steps = createDefaultSteps('feature', 'nested-branch', 'feat/subsystem/module-x');
-      expect(steps[0].branch).toBe('feat/subsystem/module-x');
+    it('F6-B.5: feature branch names do not create milestones', async () => {
+      ws = await createTestWorkspace({ flow: 'feature' });
+      expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
     });
   });
 

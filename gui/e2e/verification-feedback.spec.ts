@@ -22,8 +22,8 @@ for (const status of ['no-tests', 'timeout', 'fail'] as const) {
       return route.fulfill({ json: { report } });
     });
     await page.goto('/#/workspaces/demo/plan');
-    await page.getByRole('button', { name: 'Visual Flow' }).click();
-    await page.getByRole('button', { name: 'Run Mechanical Gate' }).click();
+    await expect(page.getByRole('button', { name: 'Visual Flow' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Run verification', exact: true }).click();
     const message = status === 'no-tests' ? 'No test command was found.'
       : status === 'timeout' ? 'Verification timed out.' : 'Verification failed.';
     await expect(page.getByRole('status').filter({ hasText: message })).toBeVisible();

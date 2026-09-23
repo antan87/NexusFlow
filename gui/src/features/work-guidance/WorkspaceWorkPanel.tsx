@@ -78,12 +78,12 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
       <h3 className="font-semibold">Work brief & sources</h3>
       <Button size="sm" variant="outline" disabled={busy} onClick={() => void load()}>Reload brief</Button>
     </div>
-    <p className="text-sm text-muted-foreground">Keep source documents here, set the AI’s current assignment, and split larger work into milestones. Knowledge holds the decisions and lessons discovered along the way.</p>
+    <p className="text-sm text-muted-foreground">Keep source documents here and set the AI’s current assignment. Add milestones only when this feature needs them.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error} Your draft is kept. Reload to review the latest saved version.</p>}
     {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
     {!context || !draft ? <p className="text-sm">{error ? 'Work brief unavailable.' : 'Loading work brief…'}</p> : <>
       <div className="flex flex-wrap gap-2" aria-label="Brief sections">
-        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? 'Edit milestones' : 'Delivery notes & questions'}</Button>)}
+        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? (context.lifecycle?.steps.length ? 'Edit milestones' : 'Add milestones') : 'Delivery notes & questions'}</Button>)}
       </div>
       {notesOpened && <div hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} /></div>}
       {panel === 'assignment' && <div className="space-y-4">
@@ -99,9 +99,9 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           </select></label>
         </div>
         <p className="text-xs text-muted-foreground">Work type and size describe the task; they do not reset progress. Edit milestones to adapt the plan.</p>
-        <label className="block text-sm">Assignment scope<select aria-label="Assignment scope" className={selectClass} value={draft.assignment.milestoneId ?? ''} onChange={(event) => patchAssignment({ milestoneId: event.target.value || undefined })}>
+        {Boolean(context.lifecycle?.steps.length) && <label className="block text-sm">Assignment scope<select aria-label="Assignment scope" className={selectClass} value={draft.assignment.milestoneId ?? ''} onChange={(event) => patchAssignment({ milestoneId: event.target.value || undefined })}>
           <option value="">Whole workspace</option>{milestoneOptions}
-        </select></label>
+        </select></label>}
         <label className="block text-sm">Current objective<Textarea className="mt-1" value={draft.assignment.objective} onChange={(event) => patchAssignment({ objective: event.target.value })} placeholder="Investigate why invoice totals differ from line items." /></label>
         <label className="block text-sm">Expected output<Textarea className="mt-1" value={draft.assignment.expectedOutput} onChange={(event) => patchAssignment({ expectedOutput: event.target.value })} placeholder="A reproduction, likely cause, and proposed test plan." /></label>
         <label className="block text-sm">Stop when<Textarea className="mt-1" value={draft.assignment.stopCondition} onChange={(event) => patchAssignment({ stopCondition: event.target.value })} placeholder="The proposal is ready for review. Stop before implementation." /></label>
@@ -173,9 +173,10 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
         </div>
       </div>}
       {panel === 'milestones' && <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">Name deliverable milestones, assign branches, and choose dependencies. Saved progress and completed verification remain intact.</p>
+        <p className="text-sm text-muted-foreground">Milestones are optional and unique to this feature. Name the outcomes you need, or remove all milestones to hide the flow.</p>
         {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
           <legend className="px-1 text-xs text-muted-foreground">Milestone {index + 1} · {step.status.replaceAll('_', ' ')}</legend>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSteps(steps.filter((item) => item.id !== step.id).map((item) => ({ ...item, dependsOn: item.dependsOn?.filter((id) => id !== step.id) })))}>Remove milestone {index + 1}</Button>
           <label className="block text-sm">Milestone {index + 1} title<Input value={step.title} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, title: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} outcome<Textarea value={step.description ?? ''} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} branch (optional)<Input value={step.branch ?? ''} placeholder="feature/invoice-calculation" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, branch: event.target.value } : item))} /></label>
@@ -192,7 +193,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(step.requiresVerification || step.verificationCommand)} disabled={step.status === 'completed'} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, requiresVerification: event.target.checked, ...(!event.target.checked ? { verificationCommand: '' } : {}) } : item))} />Verify before completing milestone {index + 1}</label>
           {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification command (optional)<Input value={step.verificationCommand ?? ''} disabled={step.status === 'completed'} placeholder="Uses the workspace test command unless overridden" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationCommand: event.target.value } : item))} /></label>}
         </fieldset>)}
-        <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: steps.length ? [steps[steps.length - 1].id] : [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>
       </div>}
     </>}
   </section>;

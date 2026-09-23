@@ -23,7 +23,7 @@ import {
 } from '../../src/core/domain-packs.js';
 
 import { buildHarnessCliCommand } from '../../src/utils/terminal-launch.js';
-import { createDefaultSteps } from '../../src/core/lifecycle.js';
+import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';
 import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
 import { refreshWorkspace } from '../../src/core/refresh.js';
 
@@ -44,10 +44,7 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
       tags: ['economy'],
     });
 
-    const steps = createDefaultSteps('quick', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(2);
-    expect(steps[0].id).toBe('reproduce_and_fix');
-    expect(steps[1].id).toBe('verify_and_ship');
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     const agentsMd = await generateAgentsMd(ws.feature, ws.repos);
     expect(agentsMd).toContain('isolate_repo');
@@ -67,14 +64,7 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
       tags: ['economy'],
     });
 
-    const steps = createDefaultSteps('feature', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(4);
-    expect(steps.map((s) => s.id)).toEqual([
-      'step_discovery',
-      'step_implementation',
-      'step_verification',
-      'step_ship',
-    ]);
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     const agentsMd = await generateAgentsMd(ws.feature, ws.repos);
     expect(agentsMd).toContain('separate git worktree');
@@ -93,10 +83,7 @@ describe('Tier 3: Cross-Feature Combinations (Pairwise)', () => {
       tags: ['hr', 'hr/payroll'],
     });
 
-    const steps = createDefaultSteps('epic', ws.feature.id, ws.feature.branchName);
-    expect(steps.length).toBe(4);
-    expect(steps[0].id).toBe('epic_slice_1');
-    expect(steps[3].id).toBe('epic_slice_4');
+    expect((await loadWorkspaceLifecycle(ws.workspacePath)).steps).toEqual([]);
 
     const resolved = resolveActiveDomainRules('acme', ['hr', 'hr/payroll']);
     expect(resolved.compositeVerifyCommand).toContain('npm test -- hr');

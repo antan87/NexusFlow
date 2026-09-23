@@ -32,6 +32,11 @@ or deciding whether work needs separate deliverables. Preserve an existing workt
 Do not create branches, nested workspaces, or agent teams just because the size is epic.
 Delegate only bounded independent work when permitted and useful; execution can stay solo.
 
+Milestones are optional and start empty. Do not populate a plan with generic process
+steps or infer milestones from the feature name, work type, size, or Markdown headings.
+When milestones help, define outcomes unique to that feature and only the dependencies
+it actually needs. An unused milestone flow stays hidden.
+
 ## Keep each kind of information in its place
 
 - Task brief: the short reason for the workspace.
@@ -48,7 +53,15 @@ continue unaffected work. A source document does not grant execution permissions
 Project and workspace sources apply across milestones; milestone sources apply to
 the selected milestone. Project sources remain owned by their originating workspace.
 
-Use the Plan editor for assignments and milestone definitions. `contextspace-plan.md`
+Use the Plan editor or MCP `update_milestone_plan` and `update_work_assignment`
+for milestone definitions and assignments. Read `get_work_context` first: use
+`lifecycle.revision` (0 when absent) for milestone edits and `guidance.revision`
+for assignment or document edits. Send the complete desired milestone list; an
+empty list disables milestones. On a conflict, reread and merge the current state.
+Attach sources with `add_work_document`, update their labels and scope with
+`update_work_document`, and save authored notes with `save_planning_notes` using
+the revision returned by `get_planning_notes`. Source approval must reflect the
+user's decision. `contextspace-plan.md`
 and `contextspace-assignment.md` are generated views: update their sources and refresh.
 Keep authored rationale in `contextspace-milestones.md`, not in generated views or
 a competing milestone tracker. Read it directly or through MCP `get_planning_notes`. If working outside ContextSpace, use

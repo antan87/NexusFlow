@@ -46,7 +46,6 @@ import {
   SUPPORTED_ASSISTANTS,
 } from '../../src/utils/terminal-launch.js';
 import { buildContextContent } from '../../src/generators/base.js';
-import { createDefaultSteps, getWorkflowFlow } from '../../src/core/lifecycle.js';
 import { refreshWorkspace } from '../../src/core/refresh.js';
 import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
 import { findTool, enabledTools } from '../../src/mcp/tools.js';

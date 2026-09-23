@@ -24,6 +24,12 @@ const READONLY_MCP_TOOLS = new Set([
   'run_doctor', 'get_service_logs', 'list_workspaces', 'list_repos',
   'add_knowledge', 'promote_knowledge', 'search_knowledge',
   'read_workroom_stream', 'refresh_context',
+  'get_work_context', 'get_planning_notes', 'read_work_document',
+]);
+
+const WORKSPACE_EDIT_MCP_TOOLS = new Set([
+  'update_milestone_plan', 'update_work_assignment', 'add_work_document',
+  'update_work_document', 'save_planning_notes',
 ]);
 
 const MUTATING_LIFECYCLE_TOOLS = new Set([
@@ -163,7 +169,7 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               const toolPrefixPattern = new RegExp(`^(?:mcp__)?(?:${MCP_ADAPTER_SERVER_NAME}|${LEGACY_MCP_ADAPTER_SERVER_NAME}|${MCP_SERVER_NAME}|${LEGACY_MCP_SERVER_NAME})__`);
               const toolName = event.tool.replace(toolPrefixPattern, '');
 
-              if (this.currentExecutionProfile === 'workspace-write' && (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName))) {
+              if (this.currentExecutionProfile === 'workspace-write' && (CORE_ALLOWED_TOOLS.has(toolName) || READONLY_MCP_TOOLS.has(toolName) || WORKSPACE_EDIT_MCP_TOOLS.has(toolName))) {
                 handle.respondToApproval(event.requestId, { behavior: 'allow' });
               } else if (this.listenerCount('approval_request') > 0) {
                 // Interactive human-in-the-loop approval: forward to UI client

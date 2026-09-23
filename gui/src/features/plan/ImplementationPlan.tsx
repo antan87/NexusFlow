@@ -94,7 +94,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       const report = data.report;
       setVerificationReport(report);
       const messages: Record<WorkspaceVerificationReport['overallStatus'], string> = {
-        pass: `Tests passed (${(report.durationMs / 1000).toFixed(1)}s, ${report.repos.length} repositories). Use Verify & Complete on the active gate to advance.`,
+        pass: `Tests passed (${(report.durationMs / 1000).toFixed(1)}s, ${report.repos.length} repositories).${lifecycle?.steps.some((step) => step.id === lifecycle.currentStepId && step.requiresVerification) ? ' Use Verify & Complete on the active gate to advance.' : ''}`,
         pass_dirty: report.canProgress
           ? 'Tests passed with uncommitted changes. Review the changes before continuing.'
           : 'Tests passed with uncommitted changes. Commit them and rerun verification before advancing.',
@@ -135,9 +135,12 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   };
 
   const milestoneMarker = /<!-- CONTEXTSPACE:MILESTONES:START -->[\s\S]*?<!-- CONTEXTSPACE:MILESTONES:END -->/;
-  const currentPlanContent = milestoneMarkdown
+  const currentPlanContent = milestoneMarkdown !== null
     ? milestoneMarker.test(planContent) ? planContent.replace(milestoneMarker, () => milestoneMarkdown) : `${milestoneMarkdown}\n\n${planContent}`
     : planContent;
+
+  const hasMilestones = Boolean(lifecycle?.steps.length);
+  const displayedView = viewMode === 'flow' && !hasMilestones ? 'preview' : viewMode;
 
   return (
     <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
@@ -145,9 +148,9 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         <div className="flex items-center gap-2">
           <Workflow size={18} className="text-primary" />
           <h4 className="text-sm font-bold text-foreground">
-            Lifecycle Flow & Implementation Plan
+            {hasMilestones ? 'Lifecycle Flow & Implementation Plan' : 'Plan & verification'}
           </h4>
-          {lifecycle && (
+          {hasMilestones && lifecycle && (
             <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-primary/10 text-primary border border-primary/20 uppercase tracking-wider">
               {lifecycle.flowType} flow
             </span>
@@ -156,17 +159,17 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
 
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-md border border-border/60">
-            <Button
+            {hasMilestones && <Button
               size="xs"
-              variant={viewMode === 'flow' ? 'secondary' : 'ghost'}
+              variant={displayedView === 'flow' ? 'secondary' : 'ghost'}
               onClick={() => setViewMode('flow')}
               className="text-[11px] gap-1 px-2.5 font-medium"
             >
               <Workflow size={12} /> Visual Flow
-            </Button>
+            </Button>}
             <Button
               size="xs"
-              variant={viewMode === 'preview' ? 'secondary' : 'ghost'}
+              variant={displayedView === 'preview' ? 'secondary' : 'ghost'}
               onClick={() => setViewMode('preview')}
               className="text-[11px] gap-1 px-2.5"
             >
@@ -174,7 +177,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
             </Button>
             <Button
               size="xs"
-              variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
+              variant={displayedView === 'raw' ? 'secondary' : 'ghost'}
               onClick={() => setViewMode('raw')}
               className="text-[11px] gap-1 px-2"
             >
@@ -258,43 +261,25 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
         </div>
       )}
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {hasMilestones && <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">Active Step:</span>
+          <span>{lifecycle?.currentStepId ?? 'none'}</span>
+        </div>}
+        <div className="flex items-center gap-2">
+          {hasMilestones && <Button size="xs" variant="outline" onClick={() => void loadLifecycle()} disabled={lifecycleLoading}>
+            <RefreshCw size={12} className={lifecycleLoading ? 'animate-spin' : ''} /> Refresh Radar
+          </Button>}
+          <Button size="xs" onClick={() => void handleVerify()} disabled={!workspaceId || verifying || actionLoading !== null}>
+            <ShieldCheck size={14} className={verifying ? 'animate-spin' : ''} />
+            {verifying ? 'Running Tests...' : 'Run verification'}
+          </Button>
+        </div>
+      </div>
+
       {/* VISUAL FLOW MODE */}
-      {viewMode === 'flow' ? (
+      {displayedView === 'flow' ? (
         <div className="space-y-6">
-          {/* Action Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">Active Step:</span>
-              <span className="font-mono text-primary bg-primary/10 px-2 py-0.5 rounded text-[11px]">
-                {lifecycle?.currentStepId ?? 'none'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => void loadLifecycle()}
-                disabled={lifecycleLoading}
-                className="gap-1 text-xs"
-              >
-                <RefreshCw size={12} className={lifecycleLoading ? 'animate-spin' : ''} />
-                Refresh Radar
-              </Button>
-
-              <Button
-                size="xs"
-                variant="default"
-                onClick={() => void handleVerify()}
-                disabled={verifying || actionLoading !== null}
-                className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-              >
-                <ShieldCheck size={14} className={verifying ? 'animate-spin' : ''} />
-                {verifying ? 'Running Tests...' : 'Run Mechanical Gate'}
-              </Button>
-            </div>
-          </div>
-
           {/* Stepper Pipeline */}
           <div className="space-y-3">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -558,7 +543,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
             <div className="rounded-md border border-dashed border-border/80 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               No implementation plan generated yet.
             </div>
-          ) : viewMode === 'preview' ? (
+          ) : displayedView === 'preview' ? (
             <div className="max-h-[550px] overflow-auto rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4">
               <ChatMarkdown content={currentPlanContent} />
             </div>

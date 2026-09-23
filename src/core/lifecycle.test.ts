@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  createDefaultSteps,
   loadWorkspaceLifecycle,
   advanceLifecycleStep,
   getBranchFleet,
 } from './lifecycle.js';
+import { legacyDefaultSteps } from './legacy-lifecycle.js';
 import * as workspaceState from './workspace-state.js';
 import * as workspaceCore from './workspace.js';
 import * as featureUtils from '../utils/feature.js';
@@ -24,9 +24,9 @@ describe('core/lifecycle', () => {
     vi.mocked(workspaceState.mutateWorkspaceState).mockImplementation(async (workspacePath, mutation) => mutation(await workspaceState.loadWorkspaceState(workspacePath)));
   });
 
-  describe('createDefaultSteps', () => {
+  describe('legacyDefaultSteps', () => {
     it('creates 2-step pipeline for quick flow', () => {
-      const steps = createDefaultSteps('quick', 'ws-quick', 'fix/typo');
+      const steps = legacyDefaultSteps('quick', 'ws-quick', 'fix/typo');
       expect(steps).toHaveLength(2);
       expect(steps[0]!.id).toBe('reproduce_and_fix');
       expect(steps[0]!.status).toBe('in_progress');
@@ -35,7 +35,7 @@ describe('core/lifecycle', () => {
     });
 
     it('creates phased steps for standard feature flow', () => {
-      const steps = createDefaultSteps('feature', 'ws-feat', 'feat/auth');
+      const steps = legacyDefaultSteps('feature', 'ws-feat', 'feat/auth');
       expect(steps).toHaveLength(4);
       expect(steps[0]!.status).toBe('in_progress');
       expect(steps[1]!.status).toBe('pending');
@@ -43,7 +43,7 @@ describe('core/lifecycle', () => {
     });
 
     it('creates vertical slices for epic flow', () => {
-      const steps = createDefaultSteps('epic', 'ws-epic', 'epic/redesign');
+      const steps = legacyDefaultSteps('epic', 'ws-epic', 'epic/redesign');
       expect(steps).toHaveLength(4);
       expect(steps[0]!.title).toContain('Outcomes');
       expect(steps[3]!.status).toBe('blocked');
@@ -79,7 +79,7 @@ describe('core/lifecycle', () => {
       expect(lifecycle.steps).toHaveLength(1);
     });
 
-    it('initializes and persists default lifecycle when absent', async () => {
+    it('initializes an empty lifecycle when absent', async () => {
       vi.mocked(workspaceState.loadWorkspaceState).mockResolvedValue({
         workspacePath: '/ws',
         repos: {},
@@ -93,7 +93,8 @@ describe('core/lifecycle', () => {
 
       const lifecycle = await loadWorkspaceLifecycle('/ws');
       expect(lifecycle.workspaceId).toBe('ws-new');
-      expect(lifecycle.steps.length).toBeGreaterThan(0);
+      expect(lifecycle.steps).toEqual([]);
+      expect(lifecycle.currentStepId).toBeUndefined();
       expect(workspaceState.mutateWorkspaceState).toHaveBeenCalled();
     });
   });
@@ -197,8 +198,8 @@ describe('core/lifecycle', () => {
       vi.mocked(workspaceCore.loadFeatureConfig).mockResolvedValue({ id: 'ws', branchName: 'fix/example', repos: [] } as any);
       vi.mocked(workspaceState.loadWorkspaceState).mockResolvedValue({
         workspacePath: '/ws', repos: {}, updatedAt: '',
-        lifecycle: { workspaceId: 'ws', flowType: 'quick', currentStepId: 'reproduce_and_fix',
-          steps: createDefaultSteps('quick', 'ws', 'fix/example'), updatedAt: '' },
+        lifecycle: { workspaceId: 'ws', flowType: 'quick', revision: 1, currentStepId: 'reproduce_and_fix',
+          steps: legacyDefaultSteps('quick', 'ws', 'fix/example'), updatedAt: '' },
       });
     });
 
