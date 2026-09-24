@@ -66,6 +66,46 @@ export interface WorkspaceLaunchTarget {
 
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
 
+export interface QuotaWindow {
+  unit: 'tokens' | 'requests' | 'percent';
+  remaining?: number;
+  limit?: number;
+  used?: number;
+  resetsAt?: string;
+  resetInSeconds?: number;
+  status?: 'ok' | 'approaching_limit' | 'exceeded';
+}
+
+export interface NormalizedRemainingQuota {
+  requests?: QuotaWindow;
+  tokens?: QuotaWindow;
+  contextWindow?: {
+    usedTokens: number;
+    maxTokens: number;
+    utilizationPercent?: number;
+  };
+  creditsRemainingUsd?: number;
+  planType?: 'per-token' | 'plan-included' | 'free-tier';
+  label?: string;
+  isEstimated?: boolean;
+  warningMessage?: string;
+}
+
+export type CostConfidence = 'authoritative' | 'estimated' | 'absent';
+
+export type NormalizedUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+  costUsdEstimate?: number;
+  costConfidence?: CostConfidence;
+  remainingQuota?: NormalizedRemainingQuota;
+};
+
 /** Metadata about a local AI session (mirrors src/types.ts). */
 export interface AISession {
   id: string;
@@ -82,6 +122,8 @@ export interface AISession {
     targetId: 'codex-desktop' | 'claude-desktop';
     method: 'direct' | 'guided';
   };
+  usage?: NormalizedUsage;
+  quota?: NormalizedRemainingQuota;
 }
 
 /** A single chat message in a session transcript (mirrors src/types.ts ChatMessage). */
@@ -89,6 +131,7 @@ export interface TranscriptMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: string;
+  usage?: NormalizedUsage;
 }
 
 export interface RepoInfo {

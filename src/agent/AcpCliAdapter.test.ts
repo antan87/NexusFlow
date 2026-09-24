@@ -7,10 +7,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AcpCliAdapter,
   decideReadOnlyPermission,
+  extractAcpUsage,
   isSafeAcpSessionId,
   type AcpConnection,
   type AcpTransportFactory,
 } from './AcpCliAdapter.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 import { buildCopilotAcpArgs, CopilotAcpAdapter } from './CopilotAcpAdapter.js';
 
 const SESSION_ID = '123e4567-e89b-12d3-a456-426614174000';
@@ -347,3 +349,175 @@ describe('CopilotAcpAdapter session id validation', () => {
     expect(validate('')).toBe(false);
   });
 });
+
+describe('ACP usage extraction', () => {
+  it('extracts complete ACP token telemetry including thoughts and cache', () => {
+    const usage = extractAcpUsage({
+      totalTokens: 2200,
+      inputTokens: 1500,
+      outputTokens: 700,
+      thoughtTokens: 250,
+      cachedReadTokens: 500,
+      cachedWriteTokens: 100,
+    });
+
+    expect(usage).toEqual({
+      inputTokens: 1500,
+      outputTokens: 700,
+      cachedInputTokens: 600,
+      cacheReadInputTokens: 500,
+      cacheWriteInputTokens: 100,
+      reasoningOutputTokens: 250,
+      totalTokens: 2200,
+      costConfidence: 'absent',
+    });
+  });
+
+  it('handles nullable thought and cache fields safely', () => {
+    const usage = extractAcpUsage({
+      totalTokens: 300,
+      inputTokens: 200,
+      outputTokens: 100,
+      thoughtTokens: null,
+      cachedReadTokens: null,
+      cachedWriteTokens: null,
+    });
+
+    expect(usage).toEqual({
+      inputTokens: 200,
+      outputTokens: 100,
+      totalTokens: 300,
+      costConfidence: 'absent',
+    });
+  });
+});
+
+describe('AcpCliAdapter usage and quota events', () => {
+  it('emits usage event when prompt response includes usage telemetry', async () => {
+    let client: acp.Client;
+    const connection = makeConnection({
+      prompt: vi.fn(async (): Promise<acp.PromptResponse> => {
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Response with usage' },
+          },
+        });
+        return {
+          stopReason: 'end_turn',
+          usage: {
+            totalTokens: 1250,
+            inputTokens: 1000,
+            outputTokens: 250,
+            thoughtTokens: 50,
+            cachedReadTokens: 200,
+            cachedWriteTokens: 50,
+          },
+        };
+      }),
+    });
+
+    const fixture = makeHarness(connection);
+    const usages: NormalizedUsage[] = [];
+    fixture.harness.on('usage', (u: NormalizedUsage) => usages.push(u));
+
+    const start = fixture.harness.start('C:\\workspace');
+    client = fixture.getClient();
+    await start;
+    await fixture.harness.send('Prompt needing usage');
+
+    expect(usages).toHaveLength(1);
+    expect(usages[0]).toEqual({
+      inputTokens: 1000,
+      outputTokens: 250,
+      cachedInputTokens: 250,
+      cacheReadInputTokens: 200,
+      cacheWriteInputTokens: 50,
+      reasoningOutputTokens: 50,
+      totalTokens: 1250,
+      costConfidence: 'absent',
+    });
+  });
+
+  it('emits quota event when receiving usage_update notification', async () => {
+    let client: acp.Client;
+    const connection = makeConnection({
+      prompt: vi.fn(async (): Promise<acp.PromptResponse> => {
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'usage_update',
+            used: 32000,
+            size: 128000,
+          } as any,
+        });
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Turn completed' },
+          },
+        });
+        return { stopReason: 'end_turn' };
+      }),
+    });
+
+    const fixture = makeHarness(connection);
+    const quotas: NormalizedRemainingQuota[] = [];
+    fixture.harness.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+
+    const start = fixture.harness.start('C:\\workspace');
+    client = fixture.getClient();
+    await start;
+    await fixture.harness.send('Check quota notification');
+
+    expect(quotas).toHaveLength(1);
+    expect(quotas[0]).toEqual({
+      contextWindow: {
+        usedTokens: 32000,
+        maxTokens: 128000,
+        utilizationPercent: 25,
+      },
+    });
+  });
+
+  it('handles usage_update with size=0 safely without NaN utilizationPercent', async () => {
+    let client: acp.Client;
+    const connection = makeConnection({
+      prompt: vi.fn(async (): Promise<acp.PromptResponse> => {
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'usage_update',
+            used: 0,
+            size: 0,
+          } as any,
+        });
+        await client.sessionUpdate({
+          sessionId: SESSION_ID,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Zero size check' },
+          },
+        });
+        return { stopReason: 'end_turn' };
+      }),
+    });
+
+    const fixture = makeHarness(connection);
+    const quotas: NormalizedRemainingQuota[] = [];
+    fixture.harness.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+
+    const start = fixture.harness.start('C:\\workspace');
+    client = fixture.getClient();
+    await start;
+    await fixture.harness.send('Test zero size');
+
+    expect(quotas).toHaveLength(1);
+    expect(quotas[0].contextWindow?.utilizationPercent).toBeUndefined();
+    expect(quotas[0].contextWindow?.usedTokens).toBe(0);
+    expect(quotas[0].contextWindow?.maxTokens).toBe(0);
+  });
+});
+

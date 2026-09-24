@@ -7,7 +7,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { cn } from '../../lib/utils.js';
-import type { Feature } from '../../types.js';
+import type { Feature, NormalizedUsage, NormalizedRemainingQuota } from '../../types.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { clipboardHtmlToText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
@@ -19,6 +19,32 @@ import { CHAT_LAUNCH_CONSUMED_KEY, LEGACY_CHAT_LAUNCH_CONSUMED_KEY } from '../..
 import AnsiImport from 'ansi-to-react';
 
 const Ansi = (AnsiImport as any).default || AnsiImport;
+
+export function formatCompact(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return n.toLocaleString();
+}
+
+export function formatHeaderQuota(quota?: NormalizedRemainingQuota): string {
+  if (!quota) return 'Quota: Unmonitored';
+  if (quota.planType === 'plan-included') return 'Plan: Included';
+  if (quota.contextWindow?.utilizationPercent !== undefined) {
+    return `Context: ${quota.contextWindow.utilizationPercent.toFixed(1)}%`;
+  }
+  if (quota.tokens?.remaining !== undefined) {
+    return `Quota: ${formatCompact(quota.tokens.remaining)}`;
+  }
+  if (quota.requests?.remaining !== undefined) {
+    return `Quota: ${quota.requests.remaining} req`;
+  }
+  if (quota.label) return quota.label;
+  return 'Quota: OK';
+}
 
 interface AttachedImage {
   id: string;
@@ -412,6 +438,25 @@ const MessageBubble = memo(function MessageBubble({
                 </div>
               </div>
             )}
+            {msg.usage && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
+                <span className="inline-flex items-center gap-1 bg-muted/60 px-1.5 py-0.5 rounded border border-border/40">
+                  <Zap size={10} className="text-amber-500 shrink-0" />
+                  <span>{msg.usage.inputTokens.toLocaleString()} in</span>
+                  {typeof msg.usage.cachedInputTokens === 'number' && msg.usage.cachedInputTokens > 0 && (
+                    <span className="text-muted-foreground/70">({msg.usage.cachedInputTokens.toLocaleString()} cached)</span>
+                  )}
+                  <span>·</span>
+                  <span>{msg.usage.outputTokens.toLocaleString()} out</span>
+                  {msg.usage.costUsdEstimate !== undefined && msg.usage.costUsdEstimate > 0 && (
+                    <>
+                      <span>·</span>
+                      <span>~${msg.usage.costUsdEstimate < 0.01 ? msg.usage.costUsdEstimate.toFixed(4) : msg.usage.costUsdEstimate.toFixed(3)}</span>
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
             <button
               onClick={() => onCopy(idx, msg.content)}
               className="absolute -right-2.5 -top-2.5 hidden h-6 w-6 cursor-pointer place-items-center rounded-md border border-border bg-card text-muted-foreground shadow-sm hover:text-foreground group-hover:grid"
@@ -465,6 +510,8 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
   const [sessions, setSessions] = useState(initialStore.sessions);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [sessionSwitching, setSessionSwitching] = useState(false);
+  const [sessionUsage, setSessionUsage] = useState<NormalizedUsage | null>(null);
+  const [sessionQuota, setSessionQuota] = useState<NormalizedRemainingQuota | null>(null);
   const [retryableKickoff, setRetryableKickoff] = useState<RetryableKickoff | null>(null);
   const [retryChecking, setRetryChecking] = useState(false);
   const [copiedRecoveryProvider, setCopiedRecoveryProvider] = useState<string | null>(null);
@@ -1119,6 +1166,31 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               }
             }
           }
+        } else if (payload.type === 'usage') {
+          const turnUsage: NormalizedUsage = payload.usage;
+          const cumulative: NormalizedUsage = payload.cumulative;
+          const quota: NormalizedRemainingQuota = payload.quota;
+
+          if (cumulative) setSessionUsage(cumulative);
+          if (quota) setSessionQuota(quota);
+
+          if (turnUsage) {
+            setMessages((prev) => {
+              for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].role === 'assistant') {
+                  const updated = [...prev];
+                  updated[i] = { ...updated[i], usage: turnUsage };
+                  return updated;
+                }
+              }
+              return prev;
+            });
+          }
+        } else if (payload.type === 'usage_summary') {
+          if (payload.cumulative) setSessionUsage(payload.cumulative);
+          if (payload.quota) setSessionQuota(payload.quota);
+        } else if (payload.type === 'quota') {
+          if (payload.quota) setSessionQuota(payload.quota);
         } else if (payload.type === 'status') {
           setBusy(payload.state === 'busy');
           if (payload.state !== 'busy') {
@@ -1631,7 +1703,34 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               : 'Disconnected'}
           </StatusBadge>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {sessionUsage && (sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (
+            <div
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-muted/60 border border-border/60 text-muted-foreground shrink-0"
+              title={`Session Total: ${sessionUsage.inputTokens.toLocaleString()} in${sessionUsage.cachedInputTokens ? ` (${sessionUsage.cachedInputTokens.toLocaleString()} cached)` : ''} · ${sessionUsage.outputTokens.toLocaleString()} out${sessionUsage.costUsdEstimate !== undefined ? ` · ~$${sessionUsage.costUsdEstimate.toFixed(3)}` : ''}`}
+            >
+              <Zap size={11} className="text-amber-500 shrink-0" />
+              <span>{formatCompact(sessionUsage.totalTokens ?? (sessionUsage.inputTokens + sessionUsage.outputTokens))}</span>
+            </div>
+          )}
+          {sessionQuota && (
+            <div
+              className={cn(
+                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border shrink-0",
+                sessionQuota.tokens?.status === 'exceeded' || sessionQuota.requests?.status === 'exceeded'
+                  ? "bg-destructive/10 border-destructive/30 text-destructive-foreground"
+                  : sessionQuota.tokens?.status === 'approaching_limit' || sessionQuota.requests?.status === 'approaching_limit'
+                  ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
+                  : "bg-muted/60 border-border/60 text-muted-foreground"
+              )}
+              title={
+                sessionQuota.warningMessage ||
+                (sessionQuota.tokens?.resetsAt ? `Resets at ${new Date(sessionQuota.tokens.resetsAt).toLocaleTimeString()}` : sessionQuota.label)
+              }
+            >
+              <span>{formatHeaderQuota(sessionQuota)}</span>
+            </div>
+          )}
           {activeSessionId && (
             <button
               onClick={() => copySessionId(activeSessionId)}

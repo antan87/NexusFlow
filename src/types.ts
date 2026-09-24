@@ -3,6 +3,20 @@
  * Shared interfaces and types for NexusFlow.
  */
 
+import type {
+  NormalizedUsage,
+  NormalizedRemainingQuota,
+  QuotaWindow,
+  CostConfidence,
+} from './harness/types.js';
+
+export type {
+  NormalizedUsage,
+  NormalizedRemainingQuota,
+  QuotaWindow,
+  CostConfidence,
+};
+
 /** Supported AI assistant identifiers. */
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
 
@@ -150,6 +164,10 @@ export interface AISession {
     targetId: 'codex-desktop' | 'claude-desktop';
     method: 'direct' | 'guided';
   };
+  /** Normalized token usage accumulated across the session, if parsed or available. */
+  usage?: NormalizedUsage;
+  /** Latest known remaining quota or context window limits, if available. */
+  quota?: NormalizedRemainingQuota;
 }
 
 /** A single chat message in a session transcript. */
@@ -157,6 +175,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: string;
+  /** Normalized token usage consumed during this turn, if available. */
+  usage?: NormalizedUsage;
 }
 
 

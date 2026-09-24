@@ -13,6 +13,7 @@ import { getWorkspaceStatusReport } from '../core/status.js';
 import { checkGenerationLock } from '../core/generation-lock.js';
 import { getLastVerificationReport } from '../core/workspace-state.js';
 import { BRAND_NAME } from '../core/constants.js';
+import { findSessions } from '../utils/session-finder.js';
 
 /**
  * Shows status of running services for a workspace.
@@ -57,6 +58,44 @@ export async function statusCommand(workspaceArg?: string, options?: { json?: bo
     console.log(statusColor(`Verification Gate: ${verification.overallStatus.toUpperCase()} (${timeAgo === 0 ? 'just now' : `${timeAgo}m ago`}, ${verification.repos.length} repo(s))`));
   } else {
     console.log(chalk.dim('Verification Gate: not run yet (run `ctxspace verify`)'));
+  }
+
+  console.log(chalk.bold('\nAI Assistant Sessions:'));
+  try {
+    const sessions = await findSessions(
+      workspacePath,
+      repositories.repos.map((r) => r.path),
+    );
+    if (!sessions || sessions.length === 0) {
+      console.log('  No active AI sessions found.');
+    } else {
+      for (const sess of sessions.slice(0, 5)) {
+        const provider = sess.assistant.endsWith('-cli') ? sess.assistant : `${sess.assistant}-cli`;
+        const input = sess.usage?.inputTokens ?? 0;
+        const output = sess.usage?.outputTokens ?? 0;
+        const cacheStr =
+          typeof sess.usage?.cachedInputTokens === 'number' && sess.usage.cachedInputTokens > 0
+            ? ` (${sess.usage.cachedInputTokens.toLocaleString()} cached)`
+            : '';
+        let quotaStatus: string | undefined;
+        if (sess.quota) {
+          quotaStatus =
+            sess.quota.tokens?.status ??
+            sess.quota.requests?.status ??
+            (sess.quota as any).status ??
+            sess.quota.planType ??
+            (sess.quota.label ? sess.quota.label.toLowerCase().replace(/\s+/g, '_') : 'ok');
+        }
+        const quotaStr = quotaStatus ? ` | Quota: ${quotaStatus}` : '';
+        const costStr =
+          typeof sess.usage?.costUsdEstimate === 'number'
+            ? ` | ~$${sess.usage.costUsdEstimate.toFixed(3)}`
+            : '';
+        console.log(`  [${provider}] ${sess.id}: ${input.toLocaleString()} in / ${output.toLocaleString()} out${cacheStr}${quotaStr}${costStr}`);
+      }
+    }
+  } catch {
+    console.log('  No active AI sessions found.');
   }
 
   console.log(chalk.bold('\nServices:'));

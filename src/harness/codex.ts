@@ -415,11 +415,37 @@ export class CodexAdapter implements HarnessAdapter {
     }
   }
 
-  private normalizeUsage(u?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number }): NormalizedUsage {
+  private normalizeUsage(u?: {
+    input_tokens?: number;
+    cached_input_tokens?: number;
+    cache_write_input_tokens?: number;
+    output_tokens?: number;
+    reasoning_output_tokens?: number;
+    total_tokens?: number;
+  }): NormalizedUsage {
+    const inputTokens = typeof u?.input_tokens === 'number' ? u.input_tokens : 0;
+    const outputTokens = typeof u?.output_tokens === 'number' ? u.output_tokens : 0;
+    const cachedRead = typeof u?.cached_input_tokens === 'number' ? u.cached_input_tokens : undefined;
+    const cachedWrite = typeof u?.cache_write_input_tokens === 'number' ? u.cache_write_input_tokens : undefined;
+    const cachedSum = (cachedRead ?? 0) + (cachedWrite ?? 0);
+    const hasCache = cachedRead !== undefined || cachedWrite !== undefined;
+    const cachedInputTokens = (hasCache && cachedSum > 0)
+      ? cachedSum
+      : (cachedRead !== undefined ? cachedRead : undefined);
+
+    const totalTokens = typeof u?.total_tokens === 'number'
+      ? u.total_tokens
+      : (inputTokens + outputTokens);
+
     return {
-      inputTokens: u?.input_tokens ?? 0,
-      outputTokens: u?.output_tokens ?? 0,
-      cachedInputTokens: u?.cached_input_tokens,
-    }; // costUsd unavailable on Codex — left undefined by design
+      inputTokens,
+      outputTokens,
+      ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+      ...(cachedRead !== undefined ? { cacheReadInputTokens: cachedRead } : {}),
+      ...(cachedWrite !== undefined ? { cacheWriteInputTokens: cachedWrite } : {}),
+      ...(typeof u?.reasoning_output_tokens === 'number' ? { reasoningOutputTokens: u.reasoning_output_tokens } : {}),
+      totalTokens,
+      costConfidence: 'absent',
+    };
   }
 }

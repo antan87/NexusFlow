@@ -12,8 +12,9 @@ import {
   decodeAntigravityLine,
   extractNormalizedUsage,
   findAntigravitySessionIdForWorkspace,
+  parseAntigravityQuotaError,
 } from './AntigravityCliAdapter.js';
-import type { NormalizedUsage } from '../harness/types.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 
 const SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 const CAPTURED_SESSION_ID = '987fcdeb-51a2-43d7-b654-321098765432';
@@ -210,7 +211,9 @@ describe('Antigravity stream-json decoding', () => {
           inputTokens: 1500,
           outputTokens: 250,
           cachedInputTokens: 300,
+          totalTokens: 1750,
           costUsdEstimate: 0.005,
+          costConfidence: 'estimated',
         },
       },
     ]);
@@ -248,6 +251,20 @@ describe('Antigravity stream-json decoding', () => {
       type: 'error',
       error: { message: 'Quota exceeded for gemini-2.5-pro' },
     }))).toEqual([
+      {
+        type: 'quota',
+        quota: {
+          requests: {
+            unit: 'requests',
+            remaining: 0,
+            status: 'exceeded',
+            resetInSeconds: undefined,
+            resetsAt: undefined,
+          },
+          warningMessage: 'Quota exceeded for gemini-2.5-pro',
+          isEstimated: false,
+        },
+      },
       { type: 'error', message: 'Quota exceeded for gemini-2.5-pro', source: 'provider' },
     ]);
 
@@ -271,7 +288,9 @@ describe('Antigravity stream-json decoding', () => {
       inputTokens: 100,
       outputTokens: 50,
       cachedInputTokens: 25,
+      totalTokens: 150,
       costUsdEstimate: 0.001,
+      costConfidence: 'estimated',
     });
 
     const usage2 = extractNormalizedUsage({
@@ -284,6 +303,10 @@ describe('Antigravity stream-json decoding', () => {
       inputTokens: 500,
       outputTokens: 80,
       cachedInputTokens: 150,
+      cacheReadInputTokens: 100,
+      cacheWriteInputTokens: 50,
+      totalTokens: 580,
+      costConfidence: 'absent',
     });
   });
 });
@@ -446,6 +469,8 @@ describe('AntigravityCliAdapter lifecycle', () => {
     expect(usageResult).toEqual({
       inputTokens: 200,
       outputTokens: 100,
+      totalTokens: 300,
+      costConfidence: 'absent',
     });
 
     child.emit('close', 0);
@@ -545,6 +570,133 @@ describe('AntigravityCliAdapter lifecycle', () => {
     expect(errors).toEqual([
       'Antigravity returned a conflicting session identity. The unexpected identity was rejected; the acknowledged session remains resumable.',
     ]);
+  });
+
+  describe('Antigravity telemetry, thinking tokens, and quota handling', () => {
+    it('extracts extended usage with cacheRead, cacheWrite, totalTokens, and reasoningOutputTokens', () => {
+      const usage = extractNormalizedUsage({
+        input_tokens: 400,
+        output_tokens: 150,
+        cache_read_input_tokens: 200,
+        cache_creation_input_tokens: 100,
+        thinking_tokens: 50,
+        cost_usd: 0.003,
+      });
+
+      expect(usage).toEqual({
+        inputTokens: 400,
+        outputTokens: 150,
+        cachedInputTokens: 300,
+        cacheReadInputTokens: 200,
+        cacheWriteInputTokens: 100,
+        reasoningOutputTokens: 50,
+        totalTokens: 550,
+        costUsdEstimate: 0.003,
+        costConfidence: 'estimated',
+      });
+    });
+
+    it('extracts usage with alternative Gemini field names (cacheWriteInputTokens, cached_content_token_count)', () => {
+      const usage = extractNormalizedUsage({
+        promptTokens: 600,
+        completionTokens: 200,
+        cached_content_token_count: 150,
+        cache_write_input_tokens: 50,
+      });
+
+      expect(usage).toEqual({
+        inputTokens: 600,
+        outputTokens: 200,
+        cachedInputTokens: 200,
+        cacheReadInputTokens: 150,
+        cacheWriteInputTokens: 50,
+        totalTokens: 800,
+        costConfidence: 'absent',
+      });
+    });
+
+    it('maps absent cost to costConfidence absent and does not set costUsdEstimate to 0', () => {
+      const usage = extractNormalizedUsage({
+        input_tokens: 120,
+        output_tokens: 30,
+      });
+
+      expect(usage.costUsdEstimate).toBeUndefined();
+      expect(usage.costConfidence).toBe('absent');
+      expect(usage.totalTokens).toBe(150);
+    });
+
+    it('maps RESOURCE_EXHAUSTED and Quota exceeded errors to quota exceeded event', async () => {
+      const line = JSON.stringify({
+        type: 'error',
+        error: { message: 'Quota exceeded for gemini-2.5-pro: RESOURCE_EXHAUSTED. Please retry after 20s' },
+      });
+      const events = decodeAntigravityLine(line);
+
+      expect(events).toContainEqual({
+        type: 'quota',
+        quota: expect.objectContaining({
+          requests: expect.objectContaining({
+            unit: 'requests',
+            remaining: 0,
+            status: 'exceeded',
+            resetInSeconds: 20,
+            resetsAt: expect.any(String),
+          }),
+          warningMessage: expect.stringMatching(/Quota exceeded/),
+          isEstimated: false,
+        }),
+      });
+
+      const adapter = new TestAntigravityCliAdapter();
+      const quotas: NormalizedRemainingQuota[] = [];
+      const errors: Error[] = [];
+      adapter.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+      adapter.on('error', (e: Error) => errors.push(e));
+
+      await adapter.start('/workspace', { id: SESSION_ID, resume: true });
+      await adapter.send('Trigger quota error');
+
+      adapter.processes[0].child.stdout.emit('data', line + '\n');
+      adapter.processes[0].child.emit('close', 1);
+
+      expect(quotas).toHaveLength(1);
+      expect(quotas[0].requests?.status).toBe('exceeded');
+      expect(quotas[0].requests?.resetInSeconds).toBe(20);
+    });
+
+    it('maps backoff step_update into approaching_limit quota event', async () => {
+      const line = JSON.stringify({
+        type: 'step_update',
+        message: 'Rate limit encountered, backing off for 12s...',
+      });
+      const events = decodeAntigravityLine(line);
+
+      expect(events).toContainEqual({
+        type: 'quota',
+        quota: expect.objectContaining({
+          requests: expect.objectContaining({
+            unit: 'requests',
+            status: 'approaching_limit',
+            resetInSeconds: 12,
+          }),
+        }),
+      });
+
+      const adapter = new TestAntigravityCliAdapter();
+      const quotas: NormalizedRemainingQuota[] = [];
+      adapter.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+
+      await adapter.start('/workspace', { id: SESSION_ID, resume: true });
+      await adapter.send('Trigger backoff');
+
+      adapter.processes[0].child.stdout.emit('data', line + '\n');
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(quotas).toHaveLength(1);
+      expect(quotas[0].requests?.status).toBe('approaching_limit');
+      expect(quotas[0].requests?.resetInSeconds).toBe(12);
+    });
   });
 });
 

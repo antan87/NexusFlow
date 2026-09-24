@@ -7,6 +7,7 @@ import {
   ClaudeJsonlDecoder,
   decodeClaudeLine,
 } from './ClaudeCliAdapter.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 
 const SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 const OTHER_SESSION_ID = '123e4567-e89b-42d3-a456-426614174001';
@@ -460,8 +461,13 @@ describe('ClaudeCliAdapter acknowledged session lifecycle', () => {
     expect(usages).toEqual([{
       inputTokens: 100,
       outputTokens: 25,
-      cachedInputTokens: 0,
+      cachedInputTokens: undefined,
+      cacheReadInputTokens: undefined,
+      cacheWriteInputTokens: undefined,
+      totalTokens: 125,
       costUsdEstimate: 0.001,
+      costConfidence: 'estimated',
+      remainingQuota: undefined,
     }]);
   });
 
@@ -487,5 +493,212 @@ describe('ClaudeCliAdapter acknowledged session lifecycle', () => {
     expect(errors).toEqual([
       expect.stringMatching(/Claude completed without a recognized text result/i),
     ]);
+  });
+
+  describe('Claude telemetry, rate limits, and quota handling', () => {
+    it('decodes extended token breakdown and cost confidence from result record', async () => {
+      const adapter = new TestClaudeCliAdapter();
+      const usages: NormalizedUsage[] = [];
+      adapter.on('usage', (u: NormalizedUsage) => usages.push(u));
+
+      await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+      await adapter.send('Calculate tokens');
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(
+        initRecord() +
+        `${JSON.stringify({
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Result' } },
+        })}\n` +
+        `${JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          session_id: SESSION_ID,
+          result: 'Done',
+          usage: {
+            input_tokens: 300,
+            output_tokens: 80,
+            cache_read_input_tokens: 120,
+            cache_creation_input_tokens: 60,
+          },
+          total_cost_usd: 0.005,
+        })}\n`,
+      ));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(usages).toHaveLength(1);
+      expect(usages[0]).toEqual({
+        inputTokens: 300,
+        outputTokens: 80,
+        cachedInputTokens: 180,
+        cacheReadInputTokens: 120,
+        cacheWriteInputTokens: 60,
+        totalTokens: 380,
+        costUsdEstimate: 0.005,
+        costConfidence: 'estimated',
+        remainingQuota: undefined,
+      });
+    });
+
+    it('handles missing cost estimate gracefully as costConfidence: absent', async () => {
+      const adapter = new TestClaudeCliAdapter();
+      const usages: NormalizedUsage[] = [];
+      adapter.on('usage', (u: NormalizedUsage) => usages.push(u));
+
+      await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+      await adapter.send('Calculate tokens without cost');
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(
+        initRecord() +
+        `${JSON.stringify({
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Result' } },
+        })}\n` +
+        `${JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          session_id: SESSION_ID,
+          result: 'Done',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 20,
+          },
+        })}\n`,
+      ));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(usages).toHaveLength(1);
+      expect(usages[0].costUsdEstimate).toBeUndefined();
+      expect(usages[0].costConfidence).toBe('absent');
+      expect(usages[0].totalTokens).toBe(120);
+    });
+
+    it('decodes api_retry with 429 and retry_delay_ms into quota event', async () => {
+      const events = decodeClaudeLine(JSON.stringify({
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 2,
+        max_retries: 5,
+        retry_delay_ms: 6000,
+        error_status: 429,
+      }));
+
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'quota',
+        quota: expect.objectContaining({
+          requests: expect.objectContaining({
+            unit: 'requests',
+            status: 'approaching_limit',
+            resetInSeconds: 6,
+            resetsAt: expect.any(String),
+          }),
+          warningMessage: 'Rate limit retry attempt 2 of 5',
+          isEstimated: true,
+        }),
+      }));
+
+      const adapter = new TestClaudeCliAdapter();
+      const quotas: NormalizedRemainingQuota[] = [];
+      adapter.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+
+      await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+      await adapter.send('Trigger retry');
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(
+        initRecord() +
+        `${JSON.stringify({
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 2,
+          max_retries: 5,
+          retry_delay_ms: 6000,
+          error_status: 429,
+        })}\n` +
+        `${JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          session_id: SESSION_ID,
+          result: 'Recovered after retry',
+          usage: { input_tokens: 50, output_tokens: 10 },
+        })}\n`,
+      ));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(quotas).toHaveLength(1);
+      expect(quotas[0].requests?.status).toBe('approaching_limit');
+      expect(quotas[0].requests?.resetInSeconds).toBe(6);
+    });
+
+    it('decodes rate_limit_event into percentage-based quota window', () => {
+      const events = decodeClaudeLine(JSON.stringify({
+        type: 'rate_limit_event',
+        rate_limit_info: {
+          status: 'allowed_warning',
+          rateLimitType: 'five_hour',
+          utilization: 85,
+          resetsAt: 1727164800,
+        },
+      }));
+
+      expect(events).toEqual([{
+        type: 'quota',
+        quota: {
+          requests: {
+            unit: 'percent',
+            used: 85,
+            limit: 100,
+            remaining: 15,
+            resetsAt: new Date(1727164800 * 1000).toISOString(),
+            status: 'approaching_limit',
+          },
+          planType: 'plan-included',
+          label: 'five_hour',
+          warningMessage: 'Rate limit status: allowed_warning',
+        },
+      }]);
+    });
+
+    it('emits quota exhaustion event on terminal rate limit provider error', async () => {
+      const events = decodeClaudeLine(JSON.stringify({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        errors: ['429 Too Many Requests: Rate limit exceeded'],
+      }));
+
+      expect(events).toContainEqual({
+        type: 'quota',
+        quota: {
+          requests: { unit: 'requests', remaining: 0, status: 'exceeded' },
+          creditsRemainingUsd: undefined,
+          warningMessage: '429 Too Many Requests: Rate limit exceeded',
+        },
+      });
+
+      const adapter = new TestClaudeCliAdapter();
+      const quotas: NormalizedRemainingQuota[] = [];
+      const errors: Error[] = [];
+      adapter.on('quota', (q: NormalizedRemainingQuota) => quotas.push(q));
+      adapter.on('error', (e: Error) => errors.push(e));
+
+      await adapter.start('C:\\workspace', { id: SESSION_ID, resume: false });
+      await adapter.send('Trigger 429');
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(
+        initRecord() +
+        `${JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          errors: ['429 Too Many Requests: Rate limit exceeded'],
+        })}\n`,
+      ));
+      adapter.processes[0].child.emit('close', 1);
+
+      expect(quotas).toHaveLength(1);
+      expect(quotas[0].requests?.status).toBe('exceeded');
+    });
   });
 });

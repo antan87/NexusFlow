@@ -6,6 +6,7 @@ import { Readable, Writable } from 'node:stream';
 import { killTree } from './CliAdapterBase.js';
 import type { AgentHarness } from './ProviderRegistry.js';
 import type { AgentSession } from './session.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 import { BRAND_NAME } from '../core/constants.js';
 
 export interface AcpConnection {
@@ -151,6 +152,36 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: strin
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+export function extractAcpUsage(u: acp.Usage): NormalizedUsage {
+  const inputTokens = typeof u?.inputTokens === 'number' && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
+  const outputTokens = typeof u?.outputTokens === 'number' && Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
+  const cachedRead = typeof u?.cachedReadTokens === 'number' && Number.isFinite(u.cachedReadTokens) ? u.cachedReadTokens : undefined;
+  const cachedWrite = typeof u?.cachedWriteTokens === 'number' && Number.isFinite(u.cachedWriteTokens) ? u.cachedWriteTokens : undefined;
+  const cachedSum = (cachedRead ?? 0) + (cachedWrite ?? 0);
+  const hasCache = cachedRead !== undefined || cachedWrite !== undefined;
+  const cachedInputTokens = (hasCache && cachedSum > 0)
+    ? cachedSum
+    : (cachedRead !== undefined ? cachedRead : undefined);
+
+  const reasoningOutputTokens = typeof u?.thoughtTokens === 'number' && Number.isFinite(u.thoughtTokens)
+    ? u.thoughtTokens
+    : undefined;
+  const totalTokens = typeof u?.totalTokens === 'number' && Number.isFinite(u.totalTokens)
+    ? u.totalTokens
+    : inputTokens + outputTokens;
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cachedRead !== undefined ? { cacheReadInputTokens: cachedRead } : {}),
+    ...(cachedWrite !== undefined ? { cacheWriteInputTokens: cachedWrite } : {}),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    totalTokens,
+    costConfidence: 'absent',
+  };
+}
+
 /**
  * Shared Agent Client Protocol lifecycle for local harnesses.
  *
@@ -276,6 +307,23 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
 
   private handleSessionUpdate(params: acp.SessionNotification): void {
     const update = params.update;
+
+    if (update.sessionUpdate === 'usage_update') {
+      const rawUsed = (update as any).used;
+      const rawSize = (update as any).size;
+      const used = typeof rawUsed === 'number' && Number.isFinite(rawUsed) ? rawUsed : 0;
+      const size = typeof rawSize === 'number' && Number.isFinite(rawSize) ? rawSize : 0;
+      const quota: NormalizedRemainingQuota = {
+        contextWindow: {
+          usedTokens: used,
+          maxTokens: size,
+          ...(size > 0 && Number.isFinite(used) ? { utilizationPercent: (used / size) * 100 } : {}),
+        },
+      };
+      this.emit('quota', quota);
+      return;
+    }
+
     if (
       this.acceptAgentMessages
       && (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk')
@@ -301,6 +349,11 @@ export class AcpCliAdapter extends EventEmitter implements AgentHarness {
         sessionId: this.sessionId,
         prompt: [{ type: 'text', text: data }],
       });
+
+      if (result.usage) {
+        this.emit('usage', extractAcpUsage(result.usage));
+      }
+
       if (result.stopReason !== 'end_turn' && result.stopReason !== 'cancelled') {
         this.emit('system', `${this.options.label} stopped the turn: ${result.stopReason}.`);
       } else if (result.stopReason === 'end_turn' && !this.turnProducedMessage) {
