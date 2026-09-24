@@ -35,7 +35,7 @@ export function registerWorkGuidanceRoutes(app: Hono, resolveWorkspace: (id: str
       c.header('X-Content-Type-Options', 'nosniff');
       c.header('Cache-Control', 'no-store');
       c.header('Content-Security-Policy', "sandbox; default-src 'none'");
-      c.header('Content-Disposition', `${download || document.kind === 'download' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(document.name).replace(/'/g, '%27')}`);
+      c.header('Content-Disposition', `${download || document.kind === 'download' || document.kind === 'html' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(document.name).replace(/'/g, '%27')}`);
       return c.body(new Uint8Array(document.bytes));
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : 'Unable to open document.' }, 400);

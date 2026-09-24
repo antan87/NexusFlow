@@ -8,6 +8,8 @@ export interface FloatingChatState {
   isMaximized: boolean;
   openTabs: string[];
   activeTab: string | null;
+  splitTab: string | null;
+  splitRatio: number;
   position: { x: number; y: number } | null;
   size: { width: number; height: number };
   modes: Record<string, 'cli' | 'chat'>;
@@ -22,6 +24,8 @@ const DEFAULT_STATE: FloatingChatState = {
   isMaximized: false,
   openTabs: [],
   activeTab: null,
+  splitTab: null,
+  splitRatio: 50,
   position: null,
   size: { width: 560, height: 680 },
   drafts: {},
@@ -45,6 +49,9 @@ function loadState(): FloatingChatState {
       isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : DEFAULT_STATE.isMaximized,
       openTabs: Array.isArray(parsed.openTabs) ? parsed.openTabs.filter((t: unknown) => typeof t === 'string') : [],
       activeTab: typeof parsed.activeTab === 'string' ? parsed.activeTab : null,
+      splitTab: typeof parsed.splitTab === 'string' && parsed.splitTab !== parsed.activeTab ? parsed.splitTab : null,
+      splitRatio: typeof parsed.splitRatio === 'number' && Number.isFinite(parsed.splitRatio)
+        ? Math.max(25, Math.min(75, parsed.splitRatio)) : 50,
       position: parsed.position && typeof parsed.position.x === 'number' && typeof parsed.position.y === 'number'
         ? { x: parsed.position.x, y: parsed.position.y }
         : null,
@@ -138,6 +145,7 @@ export const floatingChatStore = {
         isMinimized: false,
         openTabs,
         activeTab,
+        splitTab: activeTab === prev.splitTab ? prev.activeTab : prev.splitTab,
       };
     });
   },
@@ -184,6 +192,7 @@ export const floatingChatStore = {
         isMinimized: false,
         openTabs,
         activeTab: branchName,
+        splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
       };
     });
   },
@@ -192,13 +201,12 @@ export const floatingChatStore = {
     updateState((prev) => {
       const openTabs = prev.openTabs.filter((t) => t !== branchName);
       let activeTab = prev.activeTab;
-      if (activeTab === branchName) {
-        activeTab = openTabs.length > 0 ? openTabs[openTabs.length - 1] : null;
-      }
+      if (activeTab === branchName) activeTab = openTabs.find(tab => tab !== prev.splitTab) ?? openTabs[0] ?? null;
       return {
         ...prev,
         openTabs,
         activeTab,
+        splitTab: branchName === prev.splitTab || activeTab === prev.splitTab ? null : prev.splitTab,
         isOpen: openTabs.length > 0 ? prev.isOpen : false,
       };
     });
@@ -210,10 +218,21 @@ export const floatingChatStore = {
       return {
         ...prev,
         activeTab: branchName,
+        splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
         isMinimized: false,
       };
     });
   },
+
+  setSplitTab: (branchName: string | null) => {
+    updateState(prev => {
+      if (branchName === prev.activeTab) return prev;
+      const openTabs = branchName && !prev.openTabs.includes(branchName) ? [...prev.openTabs, branchName] : prev.openTabs;
+      return { ...prev, openTabs, splitTab: branchName, isMaximized: branchName ? true : prev.isMaximized };
+    });
+  },
+
+  setSplitRatio: (ratio: number) => updateState(prev => ({ ...prev, splitRatio: Math.max(25, Math.min(75, ratio)) })),
 
   setPosition: (position: { x: number; y: number } | null) => {
     updateState((prev) => ({

@@ -49,6 +49,7 @@ import { ScaffoldRepoInline } from '../components/ScaffoldRepoInline.js';
 import { useCreationStream, type CreationStep } from '../lib/api/useCreationStream.js';
 import type { RepoInfo, RepoFreshness, WorkspaceMode, WorkGuidance } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
+import { floatingChatStore } from '../features/chat/floatingChatStore.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
@@ -158,6 +159,15 @@ export function StartWorkPage() {
   const createWorkspace = useCreateWorkspace();
   const { progress, start, reset } = useCreationStream();
   const creationJobId = searchParams.get('job');
+  const openInChat = searchParams.get('from') === 'chat';
+  const openedChatWorkspace = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!openInChat || progress.status !== 'completed' || !progress.workspaceId || openedChatWorkspace.current === progress.workspaceId) return;
+    openedChatWorkspace.current = progress.workspaceId;
+    floatingChatStore.open(progress.workspaceId);
+    navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
+  }, [openInChat, progress.status, progress.workspaceId, navigate]);
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');

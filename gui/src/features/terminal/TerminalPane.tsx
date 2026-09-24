@@ -14,8 +14,8 @@ import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean }
-export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible }: Props) {
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; onStatusChange?: (status: 'idle' | 'running' | 'exited' | 'disconnected') => void; onBackgroundOutput?: () => void }
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, onStatusChange, onBackgroundOutput }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -41,8 +41,15 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const [retryLaunch, setRetryLaunch] = useState<TerminalLaunch | undefined>(undefined);
   const activeRef = useRef(active);
   const openFileRef = useRef(onOpenFileReference);
+  const statusChangeRef = useRef(onStatusChange);
+  const backgroundOutputRef = useRef(onBackgroundOutput);
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
+  useEffect(() => { statusChangeRef.current = onStatusChange; backgroundOutputRef.current = onBackgroundOutput; }, [onStatusChange, onBackgroundOutput]);
+  useEffect(() => {
+    const status = state.startsWith('Connected') ? 'running' : state.startsWith('Exited') ? 'exited' : state.startsWith('Disconnected') ? 'disconnected' : 'idle';
+    statusChangeRef.current?.(status);
+  }, [state]);
   const send = useCallback((message: object) => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)); }, []);
   const refresh = useCallback(async () => {
     try {
@@ -177,6 +184,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     let cancelled = false;
     let ws: WebSocket | undefined;
     let ended = terminal.state === 'exited';
+    let replayed = false;
     const term = renderer.current;
     if (!term) return;
     term.reset(); term.options.disableStdin = true; setState('Connecting…');
@@ -192,8 +200,10 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           setError(message.truncated ? 'Earlier output was trimmed. This is a partial screen replay; use the harness redraw command if needed.' : '');
           setState('Restoring terminal…');
         } else if (message.type === 'output' && typeof message.data === 'string') {
+          if (replayed && !activeRef.current) backgroundOutputRef.current?.();
           term.write(message.data, () => { if (!cancelled && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ack', count: message.data.length })); });
         } else if (message.type === 'replayed') {
+          replayed = true;
           term.write('', () => {
             if (cancelled) return;
             term.options.disableStdin = ended;
@@ -294,14 +304,15 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>
     </div>}
     {!terminal && <div className="flex-1 px-3 py-3 text-xs text-muted-foreground">Choose a harness for a new session, or resume a saved conversation above. The harness keeps its own login and permissions. Shell opens PowerShell or your Unix shell. Existing API conversations remain under Chat.</div>}
-    <div className={`relative min-h-0 flex-1 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
+    <div className={`relative min-h-0 flex-1 bg-[#111b18] p-2 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
       if (event.button === 2) menuSelection.current = renderer.current?.getSelection() ?? '';
     }} onContextMenu={event => {
       event.preventDefault();
       const bounds = event.currentTarget.getBoundingClientRect();
       setClipboardMenu({ x: Math.min(event.clientX - bounds.left, Math.max(0, bounds.width - 150)), y: Math.min(event.clientY - bounds.top, Math.max(0, bounds.height - 80)) });
     }}>
-      <div ref={host} className="h-full overflow-hidden bg-[#111b18] p-2" aria-label="Interactive CLI terminal" />
+      {/* FitAddon measures this element's height; keep padding on its parent so the last row fits. */}
+      <div ref={host} className="h-full overflow-hidden" aria-label="Interactive CLI terminal" />
       {clipboardMenu && <div className="absolute z-20 min-w-36 rounded border border-border bg-card p-1 shadow-lg" style={{ left: clipboardMenu.x, top: clipboardMenu.y }} role="menu" onKeyDown={event => { if (event.key === 'Escape') setClipboardMenu(null); }}>
         <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { setClipboardMenu(null); void copySelection(menuSelection.current); menuSelection.current = ''; }}>Copy selection</button>
         <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => void pasteClipboard()}>Paste</button>

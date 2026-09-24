@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { FileText, RefreshCw } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
-import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { API_BASE } from '../../lib/apiBase.js';
+import { DocumentPreview, type DocumentKind, type DocumentPreviewData } from './DocumentPreview.js';
 
-type RootDocument = { name: string; size: number; modifiedAt: string; kind: 'markdown' | 'text' | 'pdf' | 'image' | 'download' };
-type Preview = Pick<RootDocument, 'name' | 'kind'> & { content?: string };
+type RootDocument = { name: string; size: number; modifiedAt: string; kind: DocumentKind };
+type Preview = DocumentPreviewData;
 
 export function RootDocumentsPanel({ workspaceId }: { workspaceId: string }) {
   const [documents, setDocuments] = useState<RootDocument[]>([]);
@@ -70,16 +70,14 @@ export function RootDocumentsPanel({ workspaceId }: { workspaceId: string }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-semibold break-all">{selected}</h3>
             <div className="flex items-center gap-3 text-sm">
-              {preview?.kind === 'markdown' && <Button size="sm" variant="outline" onClick={() => setRaw((value) => !value)}>{raw ? 'Rendered view' : 'Raw text'}</Button>}
+              {(preview?.kind === 'markdown' || preview?.kind === 'html') && <Button size="sm" variant="outline" onClick={() => setRaw((value) => !value)}>{raw ? 'Rendered view' : 'Raw text'}</Button>}
               <a href={`${fileUrl}&download=1`} download={selected} className="text-primary underline">Download</a>
               <Button size="sm" variant="ghost" onClick={() => setSelected(null)}>Close document</Button>
             </div>
           </div>
           {opening && <p role="status" className="text-sm text-muted-foreground">Opening document…</p>}
           {previewError && <p role="alert" className="text-sm text-destructive">{previewError} <Button size="sm" variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry preview</Button></p>}
-          {preview && <div className="max-h-[70vh] overflow-auto">
-            {preview.kind === 'markdown' && !raw ? <ChatMarkdown content={preview.content ?? ''} /> : preview.content !== undefined ? <pre className="whitespace-pre-wrap break-words text-sm">{preview.content}</pre> : preview.kind === 'pdf' ? <iframe key={`${selected}-${revision}`} title={`Preview of ${selected}`} src={fileUrl} className="h-[65vh] w-full rounded border-0" /> : preview.kind === 'image' ? <img src={`${fileUrl}&revision=${revision}`} alt={selected} className="max-w-full h-auto" onError={() => setPreviewError('The image could not be displayed.')} /> : <p className="text-sm text-muted-foreground">Preview is unavailable for this format. Download the document to open it in its application.</p>}
-          </div>}
+          {preview && <div className="max-h-[70vh] overflow-auto"><DocumentPreview preview={preview} fileUrl={`${fileUrl}&revision=${revision}`} raw={raw} /></div>}
         </>}
       </article>
     </div>

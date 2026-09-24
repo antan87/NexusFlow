@@ -1,5 +1,6 @@
 import { TerminalWorkspace } from '../terminal/TerminalWorkspace.js';
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   MessagesSquare,
   TerminalSquare,
@@ -12,6 +13,7 @@ import {
   GripHorizontal,
   FolderGit2,
   MessageSquare,
+  Columns2,
 } from 'lucide-react';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { Button } from '../../components/ui/button.js';
@@ -20,6 +22,7 @@ import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { AgentChat } from './AgentChat.js';
 import { useFloatingChat } from './floatingChatStore.js';
+import { WorkspaceServicesControl } from './WorkspaceServicesControl.js';
 
 interface FloatingChatModalProps {
   workspaces: Feature[];
@@ -28,18 +31,21 @@ interface FloatingChatModalProps {
 function RetainedChat({ visible, ...props }: React.ComponentProps<typeof AgentChat> & { visible: boolean }) {
   const [opened, setOpened] = useState(visible);
   useEffect(() => { if (visible) setOpened(true); }, [visible]);
-  return <div className={cn('h-full min-h-0', !visible && 'hidden')}>
+  return <div className={cn('min-h-0 flex-1', !visible && 'hidden')}>
     {(opened || visible) && <AgentChat {...props} />}
   </div>;
 }
 
 export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
+  const navigate = useNavigate();
   const {
     isOpen,
     isMinimized,
     isMaximized,
     openTabs,
     activeTab,
+    splitTab,
+    splitRatio,
     position,
     size,
     close,
@@ -49,6 +55,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     addTab,
     removeTab,
     setActiveTab,
+    setSplitTab,
+    setSplitRatio,
     setPosition,
     setSize,
     drafts,
@@ -57,9 +65,36 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
   } = useFloatingChat();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [terminalStates, setTerminalStates] = useState<Record<string, 'idle' | 'running' | 'exited' | 'disconnected'>>({});
+  const [unreadOutput, setUnreadOutput] = useState<Record<string, boolean>>({});
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const splitDragRef = useRef(false);
+  const [wideEnough, setWideEnough] = useState(() => window.innerWidth >= 900);
+  useEffect(() => {
+    const update = () => setWideEnough(window.innerWidth >= 900);
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  const showSplit = Boolean(splitTab && activeTab && splitTab !== activeTab && wideEnough && isMaximized);
+  useEffect(() => {
+    if (!isOpen || isMinimized) return;
+    const visible = [activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value));
+    setUnreadOutput(current => {
+      if (!visible.some(tab => current[tab] && modes[tab] !== 'chat')) return current;
+      const next = { ...current };
+      for (const tab of visible) if (modes[tab] !== 'chat') next[tab] = false;
+      return next;
+    });
+  }, [isOpen, isMinimized, activeTab, splitTab, showSplit, modes]);
+
+  const moveSplit = useCallback((event: React.PointerEvent) => {
+    if (!splitDragRef.current || !bodyRef.current) return;
+    const bounds = bodyRef.current.getBoundingClientRect();
+    setSplitRatio(((event.clientX - bounds.left) / bounds.width) * 100);
+  }, [setSplitRatio]);
 
   // Map open branch names to workspace objects
   const workspaceMap = useMemo(() => {
@@ -235,9 +270,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           </div>
           <span className="text-xs font-bold text-foreground shrink-0">ContextSpace</span>
           <span className="text-muted-foreground/70" aria-hidden="true">/</span>
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">
-            {activeTab && modes[activeTab] === 'chat' ? 'Agent chat' : 'CLI chat'}
-          </span>
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">Chat & CLI</span>
           {activeWorkspace && <span className="truncate text-[11px] text-muted-foreground" title={activeWorkspace.branchName}>{activeWorkspace.branchName}</span>}
         </div>
 
@@ -278,27 +311,28 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           return (
             <div
               key={branchName}
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setActiveTab(branchName)}
               className={cn(
                 'group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer border shrink-0 max-w-[170px]',
-                isActive
+                isActive || splitTab === branchName
                   ? 'bg-card border-border shadow-xs text-foreground font-semibold'
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
               )}
-              title={branchName}
             >
-              <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{branchName}</span>
-              {modes[branchName] !== 'chat' && harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
+              <button type="button" aria-pressed={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
+                className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
+                <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{branchName}</span>
+                {modes[branchName] !== 'chat' && harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
+                {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
+                {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
+              </button>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeTab(branchName);
                 }}
-                className="size-3.5 rounded grid place-items-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity ml-0.5"
+                className="size-3.5 rounded grid place-items-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity ml-0.5"
                 title={`Close ${branchName} tab`}
                 aria-label={`Close ${branchName} tab`}
               >
@@ -315,6 +349,10 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
             <span>Add Workspace</span>
           </MenuTrigger>
           <MenuPopup align="start" className="w-64 p-1.5">
+            <MenuItem onClick={() => { minimize(); navigate('/new?from=chat'); }} className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold">
+              <Plus className="size-3" />New workspace
+            </MenuItem>
+            <p className="border-t border-border px-2 pt-2 text-[10px] text-muted-foreground">Open existing</p>
             <div className="px-2 py-1 mb-1">
               <div className="relative">
                 <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -371,17 +409,26 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
             </div>
           </MenuPopup>
         </Menu>
+        {activeTab && <Menu>
+          <MenuTrigger className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border/70 cursor-pointer shrink-0">
+            <Columns2 className="size-3" /><span>{splitTab ? 'Split view' : 'Split right'}</span>
+          </MenuTrigger>
+          <MenuPopup align="start" className="w-56 max-h-72 overflow-y-auto p-1.5">
+            {splitTab && <MenuItem onClick={() => setSplitTab(null)} className="text-xs">Close split</MenuItem>}
+            {workspaces.filter(workspace => workspace.branchName !== activeTab).map(workspace => <MenuItem key={workspace.branchName}
+              onClick={() => setSplitTab(workspace.branchName)} className="flex items-center gap-2 text-xs">
+              <FolderGit2 className="size-3" /><span className="truncate">{workspace.branchName}</span>{splitTab === workspace.branchName && <span className="ml-auto text-primary">Right</span>}
+            </MenuItem>)}
+            {workspaces.length < 2 && <p className="p-2 text-xs text-muted-foreground">Open another workspace to split the view.</p>}
+          </MenuPopup>
+        </Menu>}
       </div>
 
-      {activeTab && <div className="flex items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
-        <Button size="xs" variant={(modes[activeTab] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[activeTab] ?? 'cli') === 'cli'} onClick={() => setMode(activeTab, 'cli')}><TerminalSquare className="size-3" />CLI</Button>
-        <Button size="xs" variant={modes[activeTab] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[activeTab] === 'chat'} onClick={() => setMode(activeTab, 'chat')}><MessageSquare className="size-3" />Chat</Button>
-        <span className="text-[10px] text-muted-foreground">{(modes[activeTab] ?? 'cli') === 'cli' ? 'Direct harness sessions' : 'Existing API and structured chat'}</span>
-      </div>}
+      {splitTab && (!wideEnough || !isMaximized) && <p className="border-b border-border px-3 py-1 text-xs text-muted-foreground">Split view is paused. Maximize the window on a wide screen to resume it.</p>}
       {/* Main Chat Body (Multi-Tab Mounted Execution) */}
-      <div className="flex-1 min-h-0 relative overflow-hidden bg-card" data-no-drag>
+      <div ref={bodyRef} className="flex flex-1 min-h-0 relative overflow-hidden bg-card" data-no-drag>
         {openTabs.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground gap-3">
+          <div className="h-full w-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground gap-3">
             <div className="size-12 rounded-2xl bg-muted/50 border border-border grid place-items-center text-muted-foreground">
               <MessageSquare className="size-6 text-primary" />
             </div>
@@ -404,27 +451,48 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   <span>{ws.branchName}</span>
                 </Button>
               ))}
+              <Button variant="outline" size="sm" onClick={() => { minimize(); navigate('/new?from=chat'); }} className="text-xs h-7 gap-1.5"><Plus className="size-3" />New workspace</Button>
             </div>
           </div>
         ) : (
           openTabs.map((branchName) => {
             const ws = workspaceMap.get(branchName);
-            if (!ws) return null;
-            const isTabActive = branchName === activeTab;
+            const isPrimary = branchName === activeTab;
+            const isSecondary = showSplit && branchName === splitTab;
+            const visible = isPrimary || isSecondary;
 
             return (
               <div
                 key={branchName}
-                className={cn('h-full flex flex-col', !isTabActive && 'hidden')}
+                className={cn('h-full min-w-0 flex-col', visible ? 'flex' : 'hidden', isSecondary && 'border-l border-border')}
+                style={visible ? { order: isPrimary ? 1 : 3, flex: showSplit ? isPrimary ? `0 0 ${splitRatio}%` : '1 1 0%' : '1 1 100%' } : undefined}
               >
-                <div className={cn('h-full min-h-0', modes[branchName] === 'chat' && 'hidden')}>
-                  <TerminalWorkspace workspace={branchName} active={isOpen && !isMinimized && isTabActive && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)} />
+                <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
+                  <span className="max-w-[32%] truncate text-[10px] font-semibold" title={branchName}>{branchName}</span>
+                  <Button size="xs" variant={(modes[branchName] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[branchName] ?? 'cli') === 'cli'} onClick={() => setMode(branchName, 'cli')}><TerminalSquare className="size-3" />Terminal</Button>
+                  <Button size="xs" variant={modes[branchName] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[branchName] === 'chat'} onClick={() => setMode(branchName, 'chat')}><MessageSquare className="size-3" />Message chat</Button>
+                  {ws && <WorkspaceServicesControl workspace={branchName} active={visible && isOpen && !isMinimized} />}
+                  {isSecondary && <Button size="xs" variant="ghost" aria-label="Close split view" onClick={() => setSplitTab(null)}><X className="size-3" /></Button>}
                 </div>
-                <RetainedChat visible={modes[branchName] === 'chat'} ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
+                {!ws ? <div role="status" className="space-y-2 p-4 text-xs text-muted-foreground"><p>This workspace is unavailable. It may have been removed or is still loading.</p><Button size="xs" variant="outline" onClick={() => removeTab(branchName)}>Close unavailable tab</Button></div> : <>
+                  <div className={cn('flex-1 min-h-0', modes[branchName] === 'chat' && 'hidden')}>
+                    <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} active={isOpen && !isMinimized && visible && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
+                      onStatusChange={status => setTerminalStates(current => current[branchName] === status ? current : { ...current, [branchName]: status })}
+                      onBackgroundOutput={() => setUnreadOutput(current => current[branchName] ? current : { ...current, [branchName]: true })} />
+                  </div>
+                  <RetainedChat visible={modes[branchName] === 'chat'} ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
+                </>}
               </div>
             );
           })
         )}
+        {showSplit && <div role="separator" aria-label="Resize workspace panes" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(splitRatio)} tabIndex={0}
+          className="order-2 z-10 w-1.5 shrink-0 cursor-col-resize bg-border/70 hover:bg-primary/40 focus-visible:bg-primary/40"
+          onPointerDown={event => { splitDragRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
+          onPointerMove={moveSplit}
+          onPointerUp={event => { splitDragRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onPointerCancel={() => { splitDragRef.current = false; }}
+          onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setSplitRatio(splitRatio + (event.key === 'ArrowRight' ? 5 : -5)); } }} />}
       </div>
 
       {/* Resize Handle (Bottom-Right Corner) */}
