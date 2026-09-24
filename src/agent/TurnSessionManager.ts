@@ -1,5 +1,6 @@
 import { ProviderRegistry, type AgentHarness, type ProviderAdapter, type AgentExecutionProfile } from './ProviderRegistry.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 
 export interface TurnClient {
   send(data: string): void;
@@ -38,6 +39,8 @@ export interface TurnSession {
   disconnectTimer: NodeJS.Timeout | null;
   createdAt: number;
   lastActiveAt: number;
+  cumulativeUsage: NormalizedUsage;
+  latestQuota?: NormalizedRemainingQuota;
 }
 
 export interface StartSessionOptions {
@@ -91,6 +94,11 @@ export class TurnSessionManager {
       const activeSession = await inFlight;
       if (activeSession.command === command) {
         activeSession.clients.add(client);
+        client.send(JSON.stringify({
+          type: 'usage_summary',
+          cumulative: activeSession.cumulativeUsage,
+          ...(activeSession.latestQuota ? { quota: activeSession.latestQuota } : {}),
+        }));
         if (activeSession.isBusy) {
           client.send(JSON.stringify({ type: 'status', state: 'busy' }));
           for (const evt of activeSession.bufferedTurnEvents) {
@@ -122,6 +130,12 @@ export class TurnSessionManager {
           existing.disconnectTimer = null;
         }
         existing.clients.add(client);
+
+        client.send(JSON.stringify({
+          type: 'usage_summary',
+          cumulative: existing.cumulativeUsage,
+          ...(existing.latestQuota ? { quota: existing.latestQuota } : {}),
+        }));
 
         if (existing.isBusy) {
           // Reconnect to active running turn: replay current state
@@ -164,6 +178,11 @@ export class TurnSessionManager {
         disconnectTimer: null,
         createdAt: Date.now(),
         lastActiveAt: Date.now(),
+        cumulativeUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+        },
       };
 
       const broadcast = (data: Record<string, any>) => {
@@ -222,8 +241,79 @@ export class TurnSessionManager {
       this.sessions.delete(workspaceCwd);
     });
 
-    startedAgent.on('usage', (usage: any) => {
-      broadcast({ type: 'usage', usage });
+    startedAgent.on('usage', (usageData: any) => {
+      turnSession.lastActiveAt = Date.now();
+      const normalizedUsage: NormalizedUsage = usageData?.turn || usageData;
+      const quota = usageData?.quota || usageData?.remainingQuota;
+      if (quota) {
+        turnSession.latestQuota = quota;
+      }
+
+      const input = typeof normalizedUsage?.inputTokens === 'number' ? normalizedUsage.inputTokens : 0;
+      const output = typeof normalizedUsage?.outputTokens === 'number' ? normalizedUsage.outputTokens : 0;
+      const cached = typeof normalizedUsage?.cachedInputTokens === 'number' ? normalizedUsage.cachedInputTokens : 0;
+      const cacheRead = typeof normalizedUsage?.cacheReadInputTokens === 'number' ? normalizedUsage.cacheReadInputTokens : undefined;
+      const cacheWrite = typeof normalizedUsage?.cacheWriteInputTokens === 'number' ? normalizedUsage.cacheWriteInputTokens : undefined;
+      const reasoning = typeof normalizedUsage?.reasoningOutputTokens === 'number' ? normalizedUsage.reasoningOutputTokens : undefined;
+      const cost = typeof normalizedUsage?.costUsdEstimate === 'number' ? normalizedUsage.costUsdEstimate : undefined;
+
+      turnSession.cumulativeUsage.inputTokens += input;
+      turnSession.cumulativeUsage.outputTokens += output;
+      if (cached > 0 || (turnSession.cumulativeUsage.cachedInputTokens ?? 0) > 0) {
+        turnSession.cumulativeUsage.cachedInputTokens =
+          (turnSession.cumulativeUsage.cachedInputTokens ?? 0) + cached;
+      }
+      if (cacheRead !== undefined) {
+        turnSession.cumulativeUsage.cacheReadInputTokens =
+          (turnSession.cumulativeUsage.cacheReadInputTokens ?? 0) + cacheRead;
+      }
+      if (cacheWrite !== undefined) {
+        turnSession.cumulativeUsage.cacheWriteInputTokens =
+          (turnSession.cumulativeUsage.cacheWriteInputTokens ?? 0) + cacheWrite;
+      }
+      if (reasoning !== undefined) {
+        turnSession.cumulativeUsage.reasoningOutputTokens =
+          (turnSession.cumulativeUsage.reasoningOutputTokens ?? 0) + reasoning;
+      }
+      if (cost !== undefined) {
+        turnSession.cumulativeUsage.costUsdEstimate =
+          (turnSession.cumulativeUsage.costUsdEstimate ?? 0) + cost;
+        turnSession.cumulativeUsage.costConfidence = normalizedUsage.costConfidence ?? 'estimated';
+      }
+      turnSession.cumulativeUsage.totalTokens =
+        turnSession.cumulativeUsage.inputTokens + turnSession.cumulativeUsage.outputTokens;
+
+      const evt: {
+        type: 'usage';
+        usage: NormalizedUsage;
+        cumulative: NormalizedUsage;
+        quota?: NormalizedRemainingQuota;
+      } = {
+        type: 'usage',
+        usage: normalizedUsage,
+        cumulative: turnSession.cumulativeUsage,
+        ...(turnSession.latestQuota ? { quota: turnSession.latestQuota } : {}),
+      };
+
+      if (turnSession.isBusy) {
+        turnSession.bufferedTurnEvents.push(evt);
+      }
+      broadcast(evt);
+    });
+
+    startedAgent.on('quota', (quotaData: any) => {
+      turnSession.lastActiveAt = Date.now();
+      if (quotaData) {
+        turnSession.latestQuota = quotaData;
+      }
+      const evt = {
+        type: 'quota',
+        quota: turnSession.latestQuota,
+      };
+      if (turnSession.isBusy) {
+        turnSession.bufferedTurnEvents.push(evt);
+      }
+      broadcast(evt);
     });
 
     startedAgent.on('approval_request', (approval: any) => {

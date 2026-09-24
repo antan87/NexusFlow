@@ -4,12 +4,13 @@ import * as os from 'node:os';
 import { CliAdapterBase } from './CliAdapterBase.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
-import type { NormalizedUsage } from '../harness/types.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 
 export type AntigravityOutputEvent =
   | { type: 'session'; id: string }
   | { type: 'message'; text: string }
   | { type: 'step_update'; message: string }
+  | { type: 'quota'; quota: NormalizedRemainingQuota }
   | { type: 'result'; text?: string; usage?: NormalizedUsage }
   | { type: 'error'; message: string; source: 'protocol' | 'provider' };
 
@@ -48,8 +49,22 @@ export function extractNormalizedUsage(raw: Record<string, unknown>): Normalized
     ? raw.candidates_token_count
     : 0;
 
-  const cacheRead = typeof raw.cache_read_input_tokens === 'number' ? raw.cache_read_input_tokens : 0;
-  const cacheCreation = typeof raw.cache_creation_input_tokens === 'number' ? raw.cache_creation_input_tokens : 0;
+  const cacheRead = typeof raw.cache_read_input_tokens === 'number'
+    ? raw.cache_read_input_tokens
+    : typeof raw.cacheReadInputTokens === 'number'
+    ? raw.cacheReadInputTokens
+    : typeof raw.cached_content_token_count === 'number'
+    ? raw.cached_content_token_count
+    : undefined;
+
+  const cacheCreation = typeof raw.cache_creation_input_tokens === 'number'
+    ? raw.cache_creation_input_tokens
+    : typeof raw.cache_write_input_tokens === 'number'
+    ? raw.cache_write_input_tokens
+    : typeof raw.cacheWriteInputTokens === 'number'
+    ? raw.cacheWriteInputTokens
+    : undefined;
+
   let cachedInputTokens: number | undefined;
   if (typeof raw.cached_input_tokens === 'number') {
     cachedInputTokens = raw.cached_input_tokens;
@@ -57,11 +72,29 @@ export function extractNormalizedUsage(raw: Record<string, unknown>): Normalized
     cachedInputTokens = raw.cachedInputTokens;
   } else if (typeof raw.cached_tokens === 'number') {
     cachedInputTokens = raw.cached_tokens;
+  } else if (cacheRead !== undefined || cacheCreation !== undefined) {
+    cachedInputTokens = (cacheRead ?? 0) + (cacheCreation ?? 0);
   } else if (typeof raw.cached_content_token_count === 'number') {
     cachedInputTokens = raw.cached_content_token_count;
-  } else if (cacheRead > 0 || cacheCreation > 0) {
-    cachedInputTokens = cacheRead + cacheCreation;
   }
+
+  const reasoningOutputTokens = typeof raw.reasoning_output_tokens === 'number'
+    ? raw.reasoning_output_tokens
+    : typeof raw.reasoningOutputTokens === 'number'
+    ? raw.reasoningOutputTokens
+    : typeof raw.thinking_tokens === 'number'
+    ? raw.thinking_tokens
+    : typeof raw.thoughts_token_count === 'number'
+    ? raw.thoughts_token_count
+    : undefined;
+
+  const totalTokens = typeof raw.total_tokens === 'number'
+    ? raw.total_tokens
+    : typeof raw.totalTokens === 'number'
+    ? raw.totalTokens
+    : typeof raw.total_token_count === 'number'
+    ? raw.total_token_count
+    : (inputTokens + outputTokens);
 
   const costUsd = typeof raw.cost_usd === 'number'
     ? raw.cost_usd
@@ -77,7 +110,54 @@ export function extractNormalizedUsage(raw: Record<string, unknown>): Normalized
     inputTokens,
     outputTokens,
     ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheRead !== undefined ? { cacheReadInputTokens: cacheRead } : {}),
+    ...(cacheCreation !== undefined ? { cacheWriteInputTokens: cacheCreation } : {}),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    totalTokens,
     ...(costUsd !== undefined ? { costUsdEstimate: costUsd } : {}),
+    costConfidence: costUsd !== undefined ? 'estimated' : 'absent',
+  };
+}
+
+export function safeToIsoString(timestamp: number | undefined): string | undefined {
+  if (timestamp === undefined || !Number.isFinite(timestamp)) {
+    return undefined;
+  }
+  if (timestamp < -8.64e15 || timestamp > 8.64e15) {
+    return undefined;
+  }
+  try {
+    return new Date(timestamp).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseAntigravityQuotaError(message: string): NormalizedRemainingQuota | null {
+  const isResourceExhausted = /RESOURCE_EXHAUSTED/i.test(message);
+  const is429 = /429/.test(message);
+  const isRateLimit = isResourceExhausted || is429 || /rate[- ]limit/i.test(message);
+  const isQuotaExceeded = /quota exceeded|quota limit|daily quota|credit balance/i.test(message);
+
+  if (!isRateLimit && !isQuotaExceeded) {
+    return null;
+  }
+
+  const retryMatch = message.match(/retry(?:ing)? after (\d+)(?:\s*(?:s|seconds?|ms))?/i)
+    || message.match(/wait (\d+)\s*(?:s|seconds?)/i)
+    || message.match(/retry in (\d+)\s*(?:s|seconds?)/i);
+  const retrySec = retryMatch ? parseInt(retryMatch[1], 10) : undefined;
+
+  return {
+    requests: {
+      unit: 'requests',
+      remaining: 0,
+      status: 'exceeded',
+      resetInSeconds: retrySec,
+      resetsAt: retrySec !== undefined ? safeToIsoString(Date.now() + retrySec * 1000) : undefined,
+    },
+    warningMessage: message,
+    isEstimated: false,
   };
 }
 
@@ -180,7 +260,26 @@ export function decodeAntigravityLine(line: string): AntigravityOutputEvent[] {
       (typeof value.details === 'string' && value.details) ||
       null;
     if (stepMessage) {
-      return [{ type: 'step_update', message: stepMessage }];
+      const events: AntigravityOutputEvent[] = [{ type: 'step_update', message: stepMessage }];
+      const backoffMatch = stepMessage.match(/backing off for (\d+)\s*(?:s|seconds?)/i)
+        || stepMessage.match(/rate[- ]limit.*?(?:wait|retry).*?(\d+)\s*(?:s|seconds?)/i);
+      if (backoffMatch) {
+        const sec = parseInt(backoffMatch[1], 10);
+        events.push({
+          type: 'quota',
+          quota: {
+            requests: {
+              unit: 'requests',
+              status: 'approaching_limit',
+              resetInSeconds: sec,
+              resetsAt: safeToIsoString(Date.now() + sec * 1000),
+            },
+            warningMessage: stepMessage,
+            isEstimated: true,
+          },
+        });
+      }
+      return events;
     }
     return [];
   }
@@ -215,9 +314,14 @@ export function decodeAntigravityLine(line: string): AntigravityOutputEvent[] {
         ?? undefined;
       events.push({ type: 'result', text, usage });
     } else {
+      const errMsg = (resultObj && typeof resultObj.error === 'string' ? resultObj.error : null) || antigravityFailureMessage(value);
+      const quota = parseAntigravityQuotaError(errMsg);
+      if (quota) {
+        events.push({ type: 'quota', quota });
+      }
       events.push({
         type: 'error',
-        message: (resultObj && typeof resultObj.error === 'string' ? resultObj.error : null) || antigravityFailureMessage(value),
+        message: errMsg,
         source: 'provider',
       });
     }
@@ -225,11 +329,18 @@ export function decodeAntigravityLine(line: string): AntigravityOutputEvent[] {
   }
 
   if (eventType === 'error') {
-    return [{
+    const errMsg = antigravityFailureMessage(value);
+    const events: AntigravityOutputEvent[] = [];
+    const quota = parseAntigravityQuotaError(errMsg);
+    if (quota) {
+      events.push({ type: 'quota', quota });
+    }
+    events.push({
       type: 'error',
-      message: antigravityFailureMessage(value),
+      message: errMsg,
       source: 'provider',
-    }];
+    });
+    return events;
   }
 
   return [];
@@ -469,6 +580,8 @@ export class AntigravityCliAdapter extends CliAdapterBase {
         this.emit('data', event.text);
       } else if (event.type === 'step_update') {
         this.emit('system', event.message);
+      } else if (event.type === 'quota') {
+        this.emit('quota', event.quota);
       } else if (event.type === 'result') {
         this.turnFinished = true;
         this.sawTurnOutcome = true;

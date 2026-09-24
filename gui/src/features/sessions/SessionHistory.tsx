@@ -27,6 +27,7 @@ import { useWorkspaceLaunchTargets, useLaunchTerminal, useAiDetect } from '../..
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { cn } from '../../lib/utils.js';
+import { formatCompact, formatHeaderQuota } from '../chat/AgentChat.js';
 
 export type SessionSortOption =
   | 'created-desc'
@@ -568,6 +569,25 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                       <span className="font-mono">
                         {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
                       </span>
+                      {sess.usage && ((sess.usage.totalTokens ?? 0) > 0 || (sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0) > 0) && (
+                        <>
+                          <span>•</span>
+                          <span
+                            className="font-mono text-muted-foreground/90"
+                            title={`Input: ${(sess.usage.inputTokens ?? 0).toLocaleString()} (${(sess.usage.cachedInputTokens ?? 0).toLocaleString()} cached) · Output: ${(sess.usage.outputTokens ?? 0).toLocaleString()}`}
+                          >
+                            {formatCompact(sess.usage.totalTokens ?? ((sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0)))} tokens
+                          </span>
+                        </>
+                      )}
+                      {sess.quota && (
+                        <>
+                          <span>•</span>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted/60 text-muted-foreground border border-border/40">
+                            {formatHeaderQuota(sess.quota)}
+                          </span>
+                        </>
+                      )}
                     </div>
                     <p className="text-xs font-semibold text-foreground truncate" title={sess.title}>
                       {sess.title}
@@ -740,6 +760,25 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                               <span>
                                 {sess.messageCount} {sess.messageCount === 1 ? 'turn' : 'turns'}
                               </span>
+                              {sess.usage && ((sess.usage.totalTokens ?? 0) > 0 || (sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0) > 0) && (
+                                <>
+                                  <span>•</span>
+                                  <span
+                                    className="text-muted-foreground/90"
+                                    title={`Input: ${(sess.usage.inputTokens ?? 0).toLocaleString()} (${(sess.usage.cachedInputTokens ?? 0).toLocaleString()} cached) · Output: ${(sess.usage.outputTokens ?? 0).toLocaleString()}`}
+                                  >
+                                    {formatCompact(sess.usage.totalTokens ?? ((sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0)))} tokens
+                                  </span>
+                                </>
+                              )}
+                              {sess.quota && (
+                                <>
+                                  <span>•</span>
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-muted/60 text-muted-foreground border border-border/40">
+                                    {formatHeaderQuota(sess.quota)}
+                                  </span>
+                                </>
+                              )}
                             </div>
                             <p className="text-xs font-semibold text-foreground truncate" title={sess.title}>
                               {sess.title}

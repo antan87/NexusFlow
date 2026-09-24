@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ClaudeCodeAdapter } from './claude.js';
 import { CodexAdapter } from './codex.js';
-import type { HarnessEvent } from './types.js';
+import type {
+  HarnessEvent,
+  NormalizedUsage,
+  NormalizedRemainingQuota,
+  QuotaWindow,
+  CostConfidence,
+} from './types.js';
+import type { AgentEvent } from '../agent/ProviderRegistry.js';
 
 describe('Harness Contract Test Suite (Issue #174)', () => {
   describe('ClaudeCodeAdapter Contract', () => {
@@ -74,7 +81,12 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
           inputTokens: 120,
           outputTokens: 30,
           cachedInputTokens: 40,
+          cacheReadInputTokens: 40,
+          cacheWriteInputTokens: undefined,
+          totalTokens: 150,
           costUsdEstimate: 0.002,
+          costConfidence: 'estimated',
+          remainingQuota: undefined,
         },
       });
 
@@ -426,6 +438,9 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
           inputTokens: 200,
           outputTokens: 50,
           cachedInputTokens: 100,
+          cacheReadInputTokens: 100,
+          totalTokens: 250,
+          costConfidence: 'absent',
         },
       });
 
@@ -787,6 +802,107 @@ describe('Harness Contract Test Suite (Issue #174)', () => {
       expect(runStreamed).toHaveBeenCalledTimes(1);
 
       await handle.dispose();
+    });
+  });
+
+  describe('Normalized Usage & Quota Contracts (Milestone 1)', () => {
+    it('supports minimal NormalizedUsage with only inputTokens and outputTokens', () => {
+      const minimalUsage: NormalizedUsage = {
+        inputTokens: 100,
+        outputTokens: 50,
+      };
+
+      expect(minimalUsage.inputTokens).toBe(100);
+      expect(minimalUsage.outputTokens).toBe(50);
+      expect(minimalUsage.cachedInputTokens).toBeUndefined();
+      expect(minimalUsage.costUsdEstimate).toBeUndefined();
+      expect(minimalUsage.costConfidence).toBeUndefined();
+      expect(minimalUsage.remainingQuota).toBeUndefined();
+    });
+
+    it('supports complete NormalizedUsage with cache breakdown, reasoning, and quota', () => {
+      const quota: NormalizedRemainingQuota = {
+        requests: {
+          unit: 'requests',
+          remaining: 950,
+          limit: 1000,
+          used: 50,
+          resetsAt: '2026-09-24T12:00:00.000Z',
+          resetInSeconds: 3600,
+          status: 'ok',
+        },
+        tokens: {
+          unit: 'tokens',
+          remaining: 90000,
+          limit: 100000,
+          status: 'ok',
+        },
+        contextWindow: {
+          usedTokens: 12000,
+          maxTokens: 128000,
+          utilizationPercent: 9.375,
+        },
+        creditsRemainingUsd: 45.5,
+        planType: 'per-token',
+        label: 'Tier 4',
+        isEstimated: false,
+      };
+
+      const usage: NormalizedUsage = {
+        inputTokens: 500,
+        outputTokens: 120,
+        cachedInputTokens: 200,
+        cacheReadInputTokens: 150,
+        cacheWriteInputTokens: 50,
+        reasoningOutputTokens: 30,
+        totalTokens: 620,
+        costUsdEstimate: 0.0035,
+        costConfidence: 'estimated',
+        remainingQuota: quota,
+      };
+
+      expect(usage.inputTokens).toBe(500);
+      expect(usage.outputTokens).toBe(120);
+      expect(usage.cachedInputTokens).toBe(200);
+      expect(usage.cacheReadInputTokens).toBe(150);
+      expect(usage.cacheWriteInputTokens).toBe(50);
+      expect(usage.reasoningOutputTokens).toBe(30);
+      expect(usage.totalTokens).toBe(620);
+      expect(usage.costUsdEstimate).toBe(0.0035);
+      expect(usage.costConfidence).toBe('estimated');
+      expect(usage.remainingQuota?.requests?.remaining).toBe(950);
+      expect(usage.remainingQuota?.contextWindow?.utilizationPercent).toBeCloseTo(9.375);
+    });
+
+    it('emits and discriminates quota_updated event on HarnessEvent', () => {
+      const quota: NormalizedRemainingQuota = {
+        requests: {
+          unit: 'percent',
+          used: 85,
+          limit: 100,
+          remaining: 15,
+          status: 'approaching_limit',
+        },
+        planType: 'plan-included',
+        label: 'five_hour',
+        warningMessage: 'Rate limit approaching',
+      };
+
+      const event: HarnessEvent = {
+        type: 'quota_updated',
+        quota,
+      };
+
+      expect(event.type).toBe('quota_updated');
+      if (event.type === 'quota_updated') {
+        expect(event.quota.requests?.status).toBe('approaching_limit');
+        expect(event.quota.planType).toBe('plan-included');
+      }
+    });
+
+    it('ensures AgentEvent union accepts quota', () => {
+      const eventName: AgentEvent = 'quota';
+      expect(eventName).toBe('quota');
     });
   });
 });

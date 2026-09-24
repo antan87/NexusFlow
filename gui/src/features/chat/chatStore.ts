@@ -5,6 +5,7 @@
 import { isChatExecutionProfile, type ChatExecutionProfile } from './executionProfile.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { CHAT_STORAGE_PREFIX, LEGACY_CHAT_STORAGE_PREFIX } from '../../brand.js';
+import type { NormalizedUsage } from '../../types.js';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -19,6 +20,8 @@ export interface ChatMessage {
   images?: string[];
   /** Files modified during this assistant turn. */
   filesChanged?: string[];
+  /** Normalized token usage consumed during this turn. */
+  usage?: NormalizedUsage;
 }
 
 export interface ChatStore {
@@ -63,7 +66,7 @@ export function loadChatStore(branchName: string): ChatStore {
         ...emptyStore(),
         messages: parsed
           .filter((m) => m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant'))
-          .map((m) => ({ role: m.role, content: m.content })),
+          .map((m) => ({ role: m.role, content: m.content, ...(m.usage ? { usage: m.usage } : {}) })),
       };
     }
     if (parsed && parsed.v === 4 && parsed.sessions && Array.isArray(parsed.messages)) {

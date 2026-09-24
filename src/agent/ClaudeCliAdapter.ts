@@ -1,6 +1,7 @@
 import { CliAdapterBase } from './CliAdapterBase.js';
 import { buildClaudeTurnArgs, isValidSessionUuid, type AgentSession } from './session.js';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
+import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 import { findExecutable } from '../utils/user-paths.js';
 
 export type ClaudeOutputEvent =
@@ -8,6 +9,7 @@ export type ClaudeOutputEvent =
   | { type: 'message'; text: string }
   | { type: 'complete'; text: string; usage?: Record<string, unknown>; totalCostUsd?: number }
   | { type: 'system'; message: string }
+  | { type: 'quota'; quota: NormalizedRemainingQuota }
   | { type: 'error'; message: string; source: 'protocol' | 'provider' };
 
 const MAX_JSONL_RECORD_CHARS = 8 * 1024 * 1024;
@@ -16,6 +18,20 @@ const OVERSIZED_RECORD_MESSAGE =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function safeToIsoString(timestamp: number | undefined): string | undefined {
+  if (timestamp === undefined || !Number.isFinite(timestamp)) {
+    return undefined;
+  }
+  if (timestamp < -8.64e15 || timestamp > 8.64e15) {
+    return undefined;
+  }
+  try {
+    return new Date(timestamp).toISOString();
+  } catch {
+    return undefined;
+  }
 }
 
 function claudeFailureMessage(value: Record<string, unknown>): string {
@@ -55,12 +71,66 @@ export function decodeClaudeLine(line: string): ClaudeOutputEvent[] {
   if (value.type === 'system' && value.subtype === 'api_retry') {
     const attempt = Number.isInteger(value.attempt) ? value.attempt : null;
     const maxRetries = Number.isInteger(value.max_retries) ? value.max_retries : null;
-    return [{
+    const retryDelayMs = typeof value.retry_delay_ms === 'number' ? value.retry_delay_ms : undefined;
+    const errorStatus = typeof value.error_status === 'number' ? value.error_status : undefined;
+    const isRateLimit = errorStatus === 429 || value.error_type === 'rate_limit';
+
+    const events: ClaudeOutputEvent[] = [{
       type: 'system',
       message: attempt !== null && maxRetries !== null
         ? `Claude is retrying the request (attempt ${attempt} of ${maxRetries}).`
         : 'Claude is retrying the request.',
     }];
+
+    if (isRateLimit || retryDelayMs !== undefined) {
+      const resetInSeconds = typeof retryDelayMs === 'number' && Number.isFinite(retryDelayMs)
+        ? Math.ceil(retryDelayMs / 1000)
+        : undefined;
+      const resetsAt = typeof retryDelayMs === 'number'
+        ? safeToIsoString(Date.now() + retryDelayMs)
+        : undefined;
+      events.push({
+        type: 'quota',
+        quota: {
+          requests: {
+            unit: 'requests',
+            status: 'approaching_limit',
+            resetInSeconds,
+            resetsAt,
+          },
+          warningMessage: attempt !== null && maxRetries !== null
+            ? `Rate limit retry attempt ${attempt} of ${maxRetries}`
+            : 'Claude request retry in progress',
+          isEstimated: true,
+        },
+      });
+    }
+    return events;
+  }
+
+  if (value.type === 'rate_limit_event' && isRecord(value.rate_limit_info)) {
+    const info = value.rate_limit_info;
+    const status: 'ok' | 'approaching_limit' | 'exceeded' =
+      info.status === 'rejected' ? 'exceeded' :
+      info.status === 'allowed_warning' ? 'approaching_limit' : 'ok';
+    const resetsAt = typeof info.resetsAt === 'number'
+      ? safeToIsoString(info.resetsAt > 1e11 ? info.resetsAt : info.resetsAt * 1000)
+      : undefined;
+    const utilization = typeof info.utilization === 'number' ? info.utilization : undefined;
+    const quota: NormalizedRemainingQuota = {
+      requests: utilization !== undefined ? {
+        unit: 'percent',
+        used: utilization,
+        limit: 100,
+        remaining: Math.max(0, 100 - utilization),
+        resetsAt,
+        status,
+      } : undefined,
+      planType: 'plan-included',
+      label: typeof info.rateLimitType === 'string' ? info.rateLimitType : undefined,
+      warningMessage: status !== 'ok' ? `Rate limit status: ${info.status}` : undefined,
+    };
+    return [{ type: 'quota', quota }];
   }
 
   if (value.type === 'stream_event') {
@@ -100,7 +170,20 @@ export function decodeClaudeLine(line: string): ClaudeOutputEvent[] {
       };
       events.push(completeEvent);
     } else {
-      events.push({ type: 'error', message: claudeFailureMessage(value), source: 'provider' });
+      const errMsg = claudeFailureMessage(value);
+      const isRateLimit = /429|rate[- ]limit/i.test(errMsg);
+      const isQuotaExceeded = /quota|credits? required|credit balance|overage/i.test(errMsg);
+      if (isRateLimit || isQuotaExceeded) {
+        events.push({
+          type: 'quota',
+          quota: {
+            requests: isRateLimit ? { unit: 'requests', remaining: 0, status: 'exceeded' } : undefined,
+            creditsRemainingUsd: isQuotaExceeded ? 0 : undefined,
+            warningMessage: errMsg,
+          },
+        });
+      }
+      events.push({ type: 'error', message: errMsg, source: 'provider' });
     }
     return events;
   }
@@ -162,6 +245,7 @@ export class ClaudeCliAdapter extends CliAdapterBase {
   private sawTurnOutcome = false;
   private acknowledgedThisTurn = false;
   private turnFinished = false;
+  private latestQuota: NormalizedRemainingQuota | undefined;
 
   public async start(cwd: string, session?: AgentSession) {
     await super.start(cwd);
@@ -171,6 +255,7 @@ export class ClaudeCliAdapter extends CliAdapterBase {
     this.sawTurnOutcome = false;
     this.acknowledgedThisTurn = false;
     this.turnFinished = false;
+    this.latestQuota = undefined;
   }
 
   protected override buildEnv(): NodeJS.ProcessEnv {
@@ -243,6 +328,9 @@ export class ClaudeCliAdapter extends CliAdapterBase {
         this.emit('data', event.text);
       } else if (event.type === 'system') {
         this.emit('system', event.message);
+      } else if (event.type === 'quota') {
+        this.latestQuota = event.quota;
+        this.emit('quota', event.quota);
       } else if (event.type === 'complete') {
         this.turnFinished = true;
         this.sawTurnOutcome = true;
@@ -263,13 +351,27 @@ export class ClaudeCliAdapter extends CliAdapterBase {
 
         if (event.usage || event.totalCostUsd !== undefined) {
           const u: any = event.usage;
-          const normalizedUsage = {
-            inputTokens: typeof u?.input_tokens === 'number' ? u.input_tokens : 0,
-            outputTokens: typeof u?.output_tokens === 'number' ? u.output_tokens : 0,
-            cachedInputTokens:
-              (typeof u?.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0) +
-              (typeof u?.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0),
+          const inputTokens = typeof u?.input_tokens === 'number' ? u.input_tokens : 0;
+          const outputTokens = typeof u?.output_tokens === 'number' ? u.output_tokens : 0;
+          const cacheRead = typeof u?.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : undefined;
+          const cacheWrite = typeof u?.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : undefined;
+          let cachedInputTokens: number | undefined;
+          if (cacheRead !== undefined || cacheWrite !== undefined) {
+            cachedInputTokens = (cacheRead ?? 0) + (cacheWrite ?? 0);
+          } else if (typeof u?.cached_input_tokens === 'number') {
+            cachedInputTokens = u.cached_input_tokens;
+          }
+
+          const normalizedUsage: NormalizedUsage = {
+            inputTokens,
+            outputTokens,
+            cachedInputTokens,
+            cacheReadInputTokens: cacheRead,
+            cacheWriteInputTokens: cacheWrite,
+            totalTokens: typeof u?.total_tokens === 'number' ? u.total_tokens : (inputTokens + outputTokens),
             costUsdEstimate: event.totalCostUsd,
+            costConfidence: event.totalCostUsd !== undefined ? 'estimated' : 'absent',
+            remainingQuota: this.latestQuota,
           };
           this.emit('usage', normalizedUsage);
         }

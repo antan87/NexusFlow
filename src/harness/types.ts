@@ -19,13 +19,69 @@ export type WorkspaceRef = {
   additionalDirectories?: string[];
 };
 
+export interface QuotaWindow {
+  /** Unit of measurement for the quota window. */
+  unit: 'tokens' | 'requests' | 'percent';
+  /** Number of units remaining in current window, if reported. */
+  remaining?: number;
+  /** Total limit capacity in current window, if reported. */
+  limit?: number;
+  /** Units consumed in the current window. */
+  used?: number;
+  /** ISO timestamp when the current window resets (e.g. '2026-09-24T12:00:00.000Z'). */
+  resetsAt?: string;
+  /** Remaining seconds until reset. */
+  resetInSeconds?: number;
+  /** Status classification of the quota window. */
+  status?: 'ok' | 'approaching_limit' | 'exceeded';
+}
+
+export interface NormalizedRemainingQuota {
+  /** Request-rate limit window (RPM). */
+  requests?: QuotaWindow;
+  /** Token-rate limit window (TPM / TPD). */
+  tokens?: QuotaWindow;
+  /** Context window utilization telemetry for the active session. */
+  contextWindow?: {
+    usedTokens: number;
+    maxTokens: number;
+    utilizationPercent?: number; // 0.0 - 100.0
+  };
+  /** Provider-reported account or credit balance remaining in USD/credits. */
+  creditsRemainingUsd?: number;
+  /** Plan / billing classification if known. */
+  planType?: 'per-token' | 'plan-included' | 'free-tier';
+  /** Human-readable quota or tier label (e.g. "Pro tier", "Rate limit tier 4"). */
+  label?: string;
+  /** Whether the quota numbers are calculated client-side estimates vs authoritative vendor signals. */
+  isEstimated?: boolean;
+  /** Warning or error message if approaching limit or quota exhausted. */
+  warningMessage?: string;
+}
+
+export type CostConfidence = 'authoritative' | 'estimated' | 'absent';
+
 export type NormalizedUsage = {
+  /** Prompt / input tokens consumed in this turn. Always present (or 0). */
   inputTokens: number;
+  /** Completion / output tokens consumed in this turn. Always present (or 0). */
   outputTokens: number;
-  /** cache reads + cache creation, summed */
+  /** Total cached input tokens (cache reads + cache writes/creation). Optional. */
   cachedInputTokens?: number;
-  /** Client-side ESTIMATE of equivalent API cost. Never authoritative. Never use for chargeback. */
+  /** Tokens read from cache (prompt cache hits). Optional. */
+  cacheReadInputTokens?: number;
+  /** Tokens written to cache (prompt cache creation). Optional. */
+  cacheWriteInputTokens?: number;
+  /** Internal reasoning / thought / thinking tokens. Optional. */
+  reasoningOutputTokens?: number;
+  /** Total tokens consumed in this turn (input + output). Optional. */
+  totalTokens?: number;
+  /** Client-side or vendor-reported estimate of equivalent cost in USD. Optional. */
   costUsdEstimate?: number;
+  /** Confidence classification for cost estimation. Optional. */
+  costConfidence?: CostConfidence;
+  /** Vendor-reported or derived remaining quota and limits snapshot. Optional. */
+  remainingQuota?: NormalizedRemainingQuota;
 };
 
 /** Derived from auth method: plan-included sessions render tokens prominently and suppress or label dollar estimates. */
@@ -115,5 +171,6 @@ export type HarnessEvent =
   | { type: "file_changed"; kind: PatchKind; paths: string[] }
   | { type: "approval_required"; requestId: string; tool: string; input?: unknown }
   | { type: "turn_completed"; usage: NormalizedUsage }
+  | { type: "quota_updated"; quota: NormalizedRemainingQuota }
   | { type: "turn_failed"; error: SerializedError; fatal: boolean }
   | { type: "raw"; vendor: Vendor; payload: unknown };

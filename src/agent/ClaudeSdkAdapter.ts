@@ -203,6 +203,10 @@ export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
               break;
             }
 
+            case 'quota_updated':
+              this.emit('quota', event.quota);
+              break;
+
             case 'turn_completed':
               sawDeltaThisTurn = false;
               this.emit('usage', event.usage);

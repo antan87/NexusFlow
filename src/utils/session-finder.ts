@@ -6,7 +6,105 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { AIAssistant, AISession, ChatMessage } from '../types.js';
+import type { AIAssistant, AISession, ChatMessage, NormalizedUsage, NormalizedRemainingQuota } from '../types.js';
+
+export function extractRecordUsage(record: any): { usage?: NormalizedUsage; quota?: NormalizedRemainingQuota } {
+  if (!record || typeof record !== 'object') return {};
+
+  const rawUsage = record.usage || record.message?.usage || record.payload?.usage;
+  const rawQuota = record.quota || record.payload?.quota || rawUsage?.remainingQuota;
+
+  let usage: NormalizedUsage | undefined;
+
+  if (rawUsage && typeof rawUsage === 'object') {
+    const input = typeof rawUsage.inputTokens === 'number'
+      ? rawUsage.inputTokens
+      : (typeof rawUsage.input_tokens === 'number' ? rawUsage.input_tokens : 0);
+    const output = typeof rawUsage.outputTokens === 'number'
+      ? rawUsage.outputTokens
+      : (typeof rawUsage.output_tokens === 'number' ? rawUsage.output_tokens : 0);
+
+    const cacheRead = typeof rawUsage.cacheReadInputTokens === 'number'
+      ? rawUsage.cacheReadInputTokens
+      : (typeof rawUsage.cache_read_input_tokens === 'number' ? rawUsage.cache_read_input_tokens : undefined);
+    const cacheWrite = typeof rawUsage.cacheWriteInputTokens === 'number'
+      ? rawUsage.cacheWriteInputTokens
+      : (typeof rawUsage.cache_creation_input_tokens === 'number'
+          ? rawUsage.cache_creation_input_tokens
+          : (typeof rawUsage.cache_write_input_tokens === 'number' ? rawUsage.cache_write_input_tokens : undefined));
+
+    let cached: number | undefined;
+    if (typeof rawUsage.cachedInputTokens === 'number') {
+      cached = rawUsage.cachedInputTokens;
+    } else if (typeof rawUsage.cached_input_tokens === 'number') {
+      cached = rawUsage.cached_input_tokens;
+    } else if (cacheRead !== undefined || cacheWrite !== undefined) {
+      cached = (cacheRead ?? 0) + (cacheWrite ?? 0);
+    }
+
+    const reasoning = typeof rawUsage.reasoningOutputTokens === 'number'
+      ? rawUsage.reasoningOutputTokens
+      : (typeof rawUsage.reasoning_output_tokens === 'number' ? rawUsage.reasoning_output_tokens : undefined);
+
+    const cost = typeof rawUsage.costUsdEstimate === 'number'
+      ? rawUsage.costUsdEstimate
+      : (typeof rawUsage.cost_usd_estimate === 'number'
+          ? rawUsage.cost_usd_estimate
+          : (typeof record.totalCostUsd === 'number' ? record.totalCostUsd : undefined));
+
+    if (input > 0 || output > 0 || (cached !== undefined && cached > 0) || cost !== undefined) {
+      usage = {
+        inputTokens: input,
+        outputTokens: output,
+        ...(cached !== undefined ? { cachedInputTokens: cached } : {}),
+        ...(cacheRead !== undefined ? { cacheReadInputTokens: cacheRead } : {}),
+        ...(cacheWrite !== undefined ? { cacheWriteInputTokens: cacheWrite } : {}),
+        ...(reasoning !== undefined ? { reasoningOutputTokens: reasoning } : {}),
+        totalTokens: input + output,
+        ...(cost !== undefined ? { costUsdEstimate: cost } : {}),
+      };
+    }
+  } else if (typeof record.totalCostUsd === 'number') {
+    usage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      costUsdEstimate: record.totalCostUsd,
+    };
+  }
+
+  let quota: NormalizedRemainingQuota | undefined;
+  if (rawQuota && typeof rawQuota === 'object') {
+    quota = rawQuota;
+  }
+
+  return { usage, quota };
+}
+
+export function accumulateUsage(acc: NormalizedUsage | undefined, turn: NormalizedUsage): NormalizedUsage {
+  const next: NormalizedUsage = {
+    inputTokens: (acc?.inputTokens ?? 0) + turn.inputTokens,
+    outputTokens: (acc?.outputTokens ?? 0) + turn.outputTokens,
+  };
+  const cached = (acc?.cachedInputTokens ?? 0) + (turn.cachedInputTokens ?? 0);
+  if (cached > 0 || acc?.cachedInputTokens !== undefined || turn.cachedInputTokens !== undefined) {
+    next.cachedInputTokens = cached;
+  }
+  if (acc?.cacheReadInputTokens !== undefined || turn.cacheReadInputTokens !== undefined) {
+    next.cacheReadInputTokens = (acc?.cacheReadInputTokens ?? 0) + (turn.cacheReadInputTokens ?? 0);
+  }
+  if (acc?.cacheWriteInputTokens !== undefined || turn.cacheWriteInputTokens !== undefined) {
+    next.cacheWriteInputTokens = (acc?.cacheWriteInputTokens ?? 0) + (turn.cacheWriteInputTokens ?? 0);
+  }
+  if (acc?.reasoningOutputTokens !== undefined || turn.reasoningOutputTokens !== undefined) {
+    next.reasoningOutputTokens = (acc?.reasoningOutputTokens ?? 0) + (turn.reasoningOutputTokens ?? 0);
+  }
+  if (acc?.costUsdEstimate !== undefined || turn.costUsdEstimate !== undefined) {
+    next.costUsdEstimate = (acc?.costUsdEstimate ?? 0) + (turn.costUsdEstimate ?? 0);
+  }
+  next.totalTokens = next.inputTokens + next.outputTokens;
+  return next;
+}
 
 export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -413,6 +511,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       const times = sessionTimes();
       for (const entry of convData.entries) times.add(entry.timestamp);
       let title = convData.title;
+      let sessionUsage: NormalizedUsage | undefined;
+      let latestQuota: NormalizedRemainingQuota | undefined;
 
       try {
         const transcriptContent = await fs.readFile(transcriptPath, 'utf-8');
@@ -429,6 +529,9 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
                 firstUserMessage = tObj.content;
               }
             }
+            const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(tObj);
+            if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+            if (turnQuota) latestQuota = turnQuota;
           } catch {}
         }
 
@@ -449,6 +552,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         workspacePath: resolveTargetCwd(convData.entries[0]?.workspace),
         recordedCwd: convData.entries[0]?.workspace,
         threadKind: 'unknown',
+        ...(sessionUsage ? { usage: sessionUsage } : {}),
+        ...(latestQuota ? { quota: latestQuota } : {}),
       });
     }
   } catch {}
@@ -482,6 +587,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             let title = 'Claude Session';
             let recordedCwd: string | undefined;
             let threadKind: AISession['threadKind'] = file.startsWith('agent-') ? 'subagent' : 'unknown';
+            let sessionUsage: NormalizedUsage | undefined;
+            let latestQuota: NormalizedRemainingQuota | undefined;
 
             for (const line of lines) {
               let record: any;
@@ -507,6 +614,9 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
                   title = text.trim();
                 }
               }
+              const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
+              if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+              if (turnQuota) latestQuota = turnQuota;
             }
 
             sessions.push({
@@ -518,6 +628,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               workspacePath: targetPath,
               recordedCwd,
               threadKind,
+              ...(sessionUsage ? { usage: sessionUsage } : {}),
+              ...(latestQuota ? { quota: latestQuota } : {}),
             });
           } catch {}
         }
@@ -547,6 +659,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         const times = sessionTimes();
         let title = 'Codex Session';
         let identity: Pick<AISession, 'threadKind' | 'parentSessionId'> = { threadKind: 'unknown' };
+        let sessionUsage: NormalizedUsage | undefined;
+        let latestQuota: NormalizedRemainingQuota | undefined;
 
         for (const line of lines) {
           let record: any;
@@ -569,6 +683,9 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
               title = text;
             }
           }
+          const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
+          if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+          if (turnQuota) latestQuota = turnQuota;
         }
 
         // Match on the recorded cwd; fall back to a content scan for older files.
@@ -591,6 +708,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           workspacePath: resolveTargetCwd(sessionCwd || undefined),
           recordedCwd: sessionCwd ?? undefined,
           ...identity,
+          ...(sessionUsage ? { usage: sessionUsage } : {}),
+          ...(latestQuota ? { quota: latestQuota } : {}),
         });
       } catch {}
     }
@@ -649,6 +768,66 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       try { copilotDb.close(); } catch {}
     }
   }
+
+  // ─── 5. Scan Workspace .sessions Directory ───────────────────────────────
+  try {
+    const wsSessionsDir = path.join(workspacePath, '.sessions');
+    const sessionFiles = await getFilesRecursively(wsSessionsDir, '.jsonl').catch(() => []);
+    for (const filePath of sessionFiles) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        const lines = content.split('\n').filter(Boolean);
+        if (lines.length === 0) continue;
+
+        let sessionId = path.basename(filePath, '.jsonl');
+        let assistant: AIAssistant = 'claude';
+        let title = 'AI Session';
+        let messageCount = 0;
+        const times = sessionTimes();
+        let sessionUsage: NormalizedUsage | undefined;
+        let latestQuota: NormalizedRemainingQuota | undefined;
+
+        for (const line of lines) {
+          let record: any;
+          try { record = JSON.parse(line); } catch { continue; }
+          times.add(record.timestamp);
+
+          if (record.sessionId) sessionId = record.sessionId;
+          if (record.provider) {
+            const p = String(record.provider).toLowerCase();
+            if (p.includes('claude')) assistant = 'claude';
+            else if (p.includes('codex')) assistant = 'codex';
+            else if (p.includes('antigravity') || p.includes('gemini')) assistant = 'antigravity';
+            else if (p.includes('copilot')) assistant = 'copilot';
+          }
+          if (record.userPrompt && title === 'AI Session') {
+            title = String(record.userPrompt).trim();
+          }
+          if (record.userPrompt || record.assistantResponse) {
+            messageCount += (record.userPrompt ? 1 : 0) + (record.assistantResponse ? 1 : 0);
+          }
+
+          const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
+          if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+          if (turnQuota) latestQuota = turnQuota;
+        }
+
+        if (!sessions.some((s) => s.id === sessionId)) {
+          sessions.push({
+            id: sessionId,
+            assistant,
+            title: sanitizeSessionTitle(title),
+            ...times.values(),
+            messageCount: messageCount || lines.length,
+            workspacePath,
+            threadKind: 'unknown',
+            ...(sessionUsage ? { usage: sessionUsage } : {}),
+            ...(latestQuota ? { quota: latestQuota } : {}),
+          });
+        }
+      } catch {}
+    }
+  } catch {}
 
   // Sort by updatedAt descending
   sessions.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
@@ -872,10 +1051,12 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
         } else if (obj.type === 'PLANNER_RESPONSE') {
           const content = (typeof obj.content === 'string' ? obj.content : '').trim();
           if (content) {
+            const { usage } = extractRecordUsage(obj);
             messages.push({
               role: 'assistant',
               content,
               timestamp: obj.created_at || obj.timestamp,
+              ...(usage ? { usage } : {}),
             });
           }
         }
@@ -926,10 +1107,12 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
           timestamp: record.timestamp || record.created_at,
         });
       } else {
+        const { usage } = extractRecordUsage(record);
         messages.push({
           role: 'assistant',
           content: cleanText,
           timestamp: record.timestamp || record.created_at,
+          ...(usage ? { usage } : {}),
         });
       }
     }
@@ -985,10 +1168,12 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
         if (role === 'user' && isInjectedContextText(text)) continue;
         if (!text) continue;
         const ts = record.timestamp || record.payload?.timestamp;
+        const { usage } = extractRecordUsage(record);
         messages.push({
           role: role as 'user' | 'assistant',
           content: text,
           timestamp: ts ? new Date(ts).toISOString() : undefined,
+          ...(role === 'assistant' && usage ? { usage } : {}),
         });
       }
     }
@@ -1013,6 +1198,39 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
     } finally {
       try { copilotDb.close(); } catch {}
     }
+  }
+
+  if (messages.length === 0) {
+    try {
+      const wsSessionsDir = path.join(process.cwd(), '.sessions');
+      const sessionFiles = await getFilesRecursively(wsSessionsDir, '.jsonl').catch(() => []);
+      const matchFile = sessionFiles.find((f) => path.basename(f, '.jsonl') === sessionId);
+      if (matchFile) {
+        const content = await fs.readFile(matchFile, 'utf-8');
+        const lines = content.split('\n').filter(Boolean);
+        for (const line of lines) {
+          try {
+            const record = JSON.parse(line);
+            if (record.userPrompt) {
+              messages.push({
+                role: 'user',
+                content: String(record.userPrompt).trim(),
+                timestamp: record.timestamp,
+              });
+            }
+            if (record.assistantResponse) {
+              const { usage } = extractRecordUsage(record);
+              messages.push({
+                role: 'assistant',
+                content: String(record.assistantResponse).trim(),
+                timestamp: record.timestamp,
+                ...(usage ? { usage } : {}),
+              });
+            }
+          } catch {}
+        }
+      }
+    } catch {}
   }
 
   return messages;

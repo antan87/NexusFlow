@@ -2,11 +2,12 @@ import { CliAdapterBase } from './CliAdapterBase.js';
 import { isValidSessionUuid, type AgentSession } from './session.js';
 import { findExecutable } from './cliAvailability.js';
 import type { AgentExecutionProfile } from './ProviderRegistry.js';
+import type { NormalizedUsage } from '../harness/types.js';
 
 export type CodexOutputEvent =
   | { type: 'session'; id: string }
   | { type: 'message'; text: string }
-  | { type: 'complete' }
+  | { type: 'complete'; usage?: NormalizedUsage }
   | { type: 'error'; message: string; source: 'protocol' | 'provider' };
 
 const MAX_JSONL_RECORD_CHARS = 8 * 1024 * 1024;
@@ -63,6 +64,29 @@ function failureMessage(value: Record<string, unknown>): string {
   return message?.trim().slice(0, 2_000) ?? 'Codex could not complete the turn.';
 }
 
+export function extractCodexUsage(u: Record<string, unknown>): NormalizedUsage {
+  const inputTokens = typeof u.input_tokens === 'number' ? u.input_tokens : 0;
+  const outputTokens = typeof u.output_tokens === 'number' ? u.output_tokens : 0;
+  const cachedRead = typeof u.cached_input_tokens === 'number' ? u.cached_input_tokens : 0;
+  const cachedWrite = typeof u.cache_write_input_tokens === 'number' ? u.cache_write_input_tokens : 0;
+  const cachedSum = cachedRead + cachedWrite;
+  const hasCache = typeof u.cached_input_tokens === 'number' || typeof u.cache_write_input_tokens === 'number';
+  const cachedInputTokens = (hasCache && cachedSum > 0)
+    ? cachedSum
+    : (typeof u.cached_input_tokens === 'number' ? u.cached_input_tokens : undefined);
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(typeof u.cached_input_tokens === 'number' ? { cacheReadInputTokens: u.cached_input_tokens } : {}),
+    ...(typeof u.cache_write_input_tokens === 'number' ? { cacheWriteInputTokens: u.cache_write_input_tokens } : {}),
+    ...(typeof u.reasoning_output_tokens === 'number' ? { reasoningOutputTokens: u.reasoning_output_tokens } : {}),
+    totalTokens: typeof u.total_tokens === 'number' ? u.total_tokens : inputTokens + outputTokens,
+    costConfidence: 'absent',
+  };
+}
+
 /** Decode one complete Codex JSONL record into the small chat protocol. */
 export function decodeCodexLine(line: string): CodexOutputEvent[] {
   let value: unknown;
@@ -92,7 +116,8 @@ export function decodeCodexLine(line: string): CodexOutputEvent[] {
   }
 
   if (value.type === 'turn.completed') {
-    return [{ type: 'complete' }];
+    const usage = isRecord(value.usage) ? extractCodexUsage(value.usage) : undefined;
+    return [{ type: 'complete', ...(usage ? { usage } : {}) }];
   }
 
   if (value.type === 'turn.failed' || value.type === 'error') {
@@ -252,6 +277,8 @@ export class CodexCliAdapter extends CliAdapterBase {
           this.failCurrentTurn(new Error(
             'Codex completed without a recognizable assistant response. The active session remains resumable.',
           ), true);
+        } else if (event.usage) {
+          this.emit('usage', event.usage);
         }
       } else {
         handled = true;

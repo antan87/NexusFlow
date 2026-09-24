@@ -18,6 +18,7 @@ import type {
   ApprovalDecision,
   AuthStatus,
   HarnessEvent,
+  NormalizedRemainingQuota,
   NormalizedUsage,
   PatchKind,
   ResumeSpec,
@@ -36,6 +37,20 @@ interface SDKUserMessage {
 }
 
 type BaseSpec = Omit<StartSpec, "prompt"> & { prompt?: string };
+
+function safeToIsoString(timestamp: number | undefined): string | undefined {
+  if (timestamp === undefined || !Number.isFinite(timestamp)) {
+    return undefined;
+  }
+  if (timestamp < -8.64e15 || timestamp > 8.64e15) {
+    return undefined;
+  }
+  try {
+    return new Date(timestamp).toISOString();
+  } catch {
+    return undefined;
+  }
+}
 
 function serializeError(err: unknown): SerializedError {
   if (err instanceof Error) {
@@ -402,9 +417,12 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         options,
       });
 
+      const quotaState: { current?: NormalizedRemainingQuota } = {};
+      const messageArgs = { ...args, quotaState };
+
       for await (const msg of queryHandle) {
         if (isDisposed()) break;
-        this.mapMessage(msg, safePush, args);
+        this.mapMessage(msg, safePush, messageArgs);
       }
     } catch (err) {
       try {
@@ -424,6 +442,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
       resolveId: (s: string) => void;
       rejectId: (e: Error) => void;
       spec: BaseSpec;
+      quotaState?: { current?: NormalizedRemainingQuota };
     },
   ): void {
     switch (msg.type) {
@@ -431,8 +450,65 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         if (msg.subtype === "init") {
           args.resolveId(msg.session_id);
           push({ type: "session_started", sessionId: msg.session_id });
+        } else if (msg.subtype === "api_retry") {
+          const attempt = Number.isInteger((msg as any).attempt) ? (msg as any).attempt : null;
+          const maxRetries = Number.isInteger((msg as any).max_retries) ? (msg as any).max_retries : null;
+          const retryDelayMs = typeof (msg as any).retry_delay_ms === 'number' ? (msg as any).retry_delay_ms : undefined;
+          const errorStatus = typeof (msg as any).error_status === 'number' ? (msg as any).error_status : undefined;
+          const isRateLimit = errorStatus === 429 || (msg as any).error_type === 'rate_limit';
+          if (isRateLimit || retryDelayMs !== undefined) {
+            const resetInSeconds = typeof retryDelayMs === 'number' && Number.isFinite(retryDelayMs)
+              ? Math.ceil(retryDelayMs / 1000)
+              : undefined;
+            const resetsAt = typeof retryDelayMs === 'number'
+              ? safeToIsoString(Date.now() + retryDelayMs)
+              : undefined;
+            const quota: NormalizedRemainingQuota = {
+              requests: {
+                unit: 'requests',
+                status: 'approaching_limit',
+                resetInSeconds,
+                resetsAt,
+              },
+              warningMessage: attempt !== null && maxRetries !== null
+                ? `Rate limit retry attempt ${attempt} of ${maxRetries}`
+                : 'Claude request retry in progress',
+              isEstimated: true,
+            };
+            if (args.quotaState) args.quotaState.current = quota;
+            push({ type: "quota_updated", quota });
+          }
         }
         break;
+
+      case "rate_limit_event" as any: {
+        const info = (msg as any).rate_limit_info;
+        if (info && typeof info === 'object') {
+          const status: 'ok' | 'approaching_limit' | 'exceeded' =
+            info.status === 'rejected' ? 'exceeded' :
+            info.status === 'allowed_warning' ? 'approaching_limit' : 'ok';
+          const resetsAt = typeof info.resetsAt === 'number'
+            ? safeToIsoString(info.resetsAt > 1e11 ? info.resetsAt : info.resetsAt * 1000)
+            : undefined;
+          const utilization = typeof info.utilization === 'number' ? info.utilization : undefined;
+          const quota: NormalizedRemainingQuota = {
+            requests: utilization !== undefined ? {
+              unit: 'percent',
+              used: utilization,
+              limit: 100,
+              remaining: Math.max(0, 100 - utilization),
+              resetsAt,
+              status,
+            } : undefined,
+            planType: 'plan-included',
+            label: typeof info.rateLimitType === 'string' ? info.rateLimitType : undefined,
+            warningMessage: status !== 'ok' ? `Rate limit status: ${info.status}` : undefined,
+          };
+          if (args.quotaState) args.quotaState.current = quota;
+          push({ type: "quota_updated", quota });
+        }
+        break;
+      }
 
       case "stream_event": {
         // Partial assistant text deltas (requires includePartialMessages).
@@ -483,7 +559,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         if (msg.subtype === "success") {
           push({
             type: "turn_completed",
-            usage: this.normalizeUsage((msg as any).usage, (msg as any).total_cost_usd),
+            usage: this.normalizeUsage((msg as any).usage, (msg as any).total_cost_usd, args.quotaState?.current),
           });
         } else {
           push({
@@ -501,14 +577,25 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     }
   }
 
-  private normalizeUsage(u: any, costUsdEstimate?: number): NormalizedUsage {
+  private normalizeUsage(u: any, costUsdEstimate?: number, quota?: NormalizedRemainingQuota): NormalizedUsage {
+    const inputTokens = typeof u?.input_tokens === 'number' ? u.input_tokens : 0;
+    const outputTokens = typeof u?.output_tokens === 'number' ? u.output_tokens : 0;
+    const cacheRead = typeof u?.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : undefined;
+    const cacheWrite = typeof u?.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : undefined;
+    const cachedInput = (cacheRead !== undefined || cacheWrite !== undefined)
+      ? (cacheRead ?? 0) + (cacheWrite ?? 0)
+      : (typeof u?.cached_input_tokens === 'number' ? u.cached_input_tokens : undefined);
+
     return {
-      inputTokens: u?.input_tokens ?? 0,
-      outputTokens: u?.output_tokens ?? 0,
-      cachedInputTokens:
-        (u?.cache_read_input_tokens ?? 0) +
-        (u?.cache_creation_input_tokens ?? 0),
+      inputTokens,
+      outputTokens,
+      cachedInputTokens: cachedInput,
+      cacheReadInputTokens: cacheRead,
+      cacheWriteInputTokens: cacheWrite,
+      totalTokens: typeof u?.total_tokens === 'number' ? u.total_tokens : (inputTokens + outputTokens),
       costUsdEstimate,
+      costConfidence: costUsdEstimate !== undefined ? 'estimated' : 'absent',
+      remainingQuota: quota,
     };
   }
 }

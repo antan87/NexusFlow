@@ -7,7 +7,9 @@ import {
   CodexCliAdapter,
   CodexJsonlDecoder,
   decodeCodexLine,
+  extractCodexUsage,
 } from './CodexCliAdapter.js';
+import type { NormalizedUsage } from '../harness/types.js';
 
 const ID = '0199a213-81c0-7800-8aa1-bbab2a035a53';
 const OTHER_ID = '0199a213-81c0-7800-8aa1-bbab2a035a54';
@@ -111,7 +113,15 @@ describe('Codex JSONL decoding', () => {
     expect(decoder.push(stream.slice(17))).toEqual([
       { type: 'session', id: ID },
       { type: 'message', text: 'Done' },
-      { type: 'complete' },
+      {
+        type: 'complete',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 0,
+          totalTokens: 1,
+          costConfidence: 'absent',
+        },
+      },
     ]);
   });
 
@@ -399,5 +409,154 @@ describe('Codex acknowledged thread lifecycle', () => {
     adapter.processes[0].child.emit('close', 1);
 
     expect(errors).toEqual(['Codex CLI exited with code 1']);
+  });
+
+  describe('Codex usage extraction & decoding', () => {
+    it('extracts complete token breakdown with reasoning and cache creation', () => {
+      const usage = extractCodexUsage({
+        input_tokens: 1200,
+        cached_input_tokens: 400,
+        cache_write_input_tokens: 150,
+        output_tokens: 250,
+        reasoning_output_tokens: 80,
+        total_tokens: 1450,
+      });
+
+      expect(usage).toEqual({
+        inputTokens: 1200,
+        outputTokens: 250,
+        cachedInputTokens: 550,
+        cacheReadInputTokens: 400,
+        cacheWriteInputTokens: 150,
+        reasoningOutputTokens: 80,
+        totalTokens: 1450,
+        costConfidence: 'absent',
+      });
+    });
+
+    it('handles minimal usage and falls back totalTokens to sum of input + output', () => {
+      const usage = extractCodexUsage({
+        input_tokens: 42,
+        output_tokens: 10,
+      });
+
+      expect(usage).toEqual({
+        inputTokens: 42,
+        outputTokens: 10,
+        totalTokens: 52,
+        costConfidence: 'absent',
+      });
+    });
+
+    it('decodes turn.completed with usage payload into a complete event', () => {
+      const events = decodeCodexLine(JSON.stringify({
+        type: 'turn.completed',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cached_input_tokens: 10,
+          reasoning_output_tokens: 5,
+        },
+      }));
+
+      expect(events).toEqual([{
+        type: 'complete',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cachedInputTokens: 10,
+          cacheReadInputTokens: 10,
+          reasoningOutputTokens: 5,
+          totalTokens: 120,
+          costConfidence: 'absent',
+        },
+      }]);
+    });
+
+    it('decodes turn.completed without usage gracefully with usage undefined', () => {
+      const events = decodeCodexLine(JSON.stringify({ type: 'turn.completed' }));
+      expect(events).toEqual([{ type: 'complete' }]);
+    });
+  });
+
+  describe('Codex CLI adapter usage event emission', () => {
+    it('emits usage event on successful turn completion with telemetry', async () => {
+      const adapter = new TestCodexCliAdapter();
+      const usages: NormalizedUsage[] = [];
+      adapter.on('usage', (u: NormalizedUsage) => usages.push(u));
+
+      await adapter.start('C:\\workspace');
+      await adapter.send('Summarize codebase');
+
+      const turnPayload = threadRecord() +
+        messageRecord('Summary ready.') +
+        `${JSON.stringify({
+          type: 'turn.completed',
+          usage: {
+            input_tokens: 800,
+            cached_input_tokens: 200,
+            cache_write_input_tokens: 100,
+            output_tokens: 150,
+            reasoning_output_tokens: 40,
+          },
+        })}\n`;
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(turnPayload));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(usages).toHaveLength(1);
+      expect(usages[0]).toEqual({
+        inputTokens: 800,
+        outputTokens: 150,
+        cachedInputTokens: 300,
+        cacheReadInputTokens: 200,
+        cacheWriteInputTokens: 100,
+        reasoningOutputTokens: 40,
+        totalTokens: 950,
+        costConfidence: 'absent',
+      });
+    });
+
+    it('does not emit usage if turn.completed omits usage record', async () => {
+      const adapter = new TestCodexCliAdapter();
+      const usages: NormalizedUsage[] = [];
+      adapter.on('usage', (u: NormalizedUsage) => usages.push(u));
+
+      await adapter.start('C:\\workspace');
+      await adapter.send('Summarize codebase');
+
+      const turnPayload = threadRecord() +
+        messageRecord('Summary ready.') +
+        `${JSON.stringify({ type: 'turn.completed' })}\n`;
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(turnPayload));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(usages).toEqual([]);
+    });
+
+    it('does not emit usage if turn fails or assistant message is missing', async () => {
+      const adapter = new TestCodexCliAdapter();
+      const usages: NormalizedUsage[] = [];
+      const errors: Error[] = [];
+      adapter.on('usage', (u: NormalizedUsage) => usages.push(u));
+      adapter.on('error', (e: Error) => errors.push(e));
+
+      await adapter.start('C:\\workspace');
+      await adapter.send('Summarize codebase');
+
+      // Missing messageRecord before turn.completed
+      const turnPayload = threadRecord() +
+        `${JSON.stringify({
+          type: 'turn.completed',
+          usage: { input_tokens: 50, output_tokens: 0 },
+        })}\n`;
+
+      adapter.processes[0].child.stdout.emit('data', Buffer.from(turnPayload));
+      adapter.processes[0].child.emit('close', 0);
+
+      expect(usages).toEqual([]);
+      expect(errors).toHaveLength(1);
+    });
   });
 });

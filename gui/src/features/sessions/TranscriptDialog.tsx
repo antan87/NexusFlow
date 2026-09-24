@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { Copy, ExternalLink, Terminal } from 'lucide-react';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Button } from '../../components/ui/button.js';
@@ -83,6 +83,18 @@ export function TranscriptDialog({
   const [openingDesktop, setOpeningDesktop] = useState(false);
   const [resumingTerminal, setResumingTerminal] = useState(false);
 
+  const totalTokens = useMemo(() => {
+    const fromTranscript = transcript.reduce(
+      (sum, m) => sum + (m.usage?.totalTokens ?? ((m.usage?.inputTokens ?? 0) + (m.usage?.outputTokens ?? 0))),
+      0,
+    );
+    if (fromTranscript > 0) return fromTranscript;
+    if (activeSession?.usage) {
+      return activeSession.usage.totalTokens ?? ((activeSession.usage.inputTokens ?? 0) + (activeSession.usage.outputTokens ?? 0));
+    }
+    return 0;
+  }, [transcript, activeSession?.usage]);
+
   // Auto-scroll to the bottom (last message) when transcript finishes loading
   useEffect(() => {
     if (!transcriptLoading && transcript.length > 0) {
@@ -156,7 +168,7 @@ export function TranscriptDialog({
                 {assistantLabel(activeSession.assistant)}
               </StatusBadge>
               <span className="text-[10px] font-mono bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded">
-                Read-Only Transcript · {transcript.length} turns
+                Read-Only Transcript · {transcript.length} turns{totalTokens > 0 ? ` · ${totalTokens.toLocaleString()} tokens` : ''}
               </span>
               <span className="text-[10px] text-muted-foreground font-mono">ID: {activeSession.id.slice(0, 8)}</span>
             </div>
@@ -193,6 +205,22 @@ export function TranscriptDialog({
                     : 'rounded-tl-none border-border bg-card text-foreground shadow-xs dark:bg-muted/30'
                 }`}>
                   <ChatMarkdown content={msg.content} />
+                  {msg.usage && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground font-mono">
+                      <span>{(msg.usage.inputTokens ?? 0).toLocaleString()} in</span>
+                      <span>/</span>
+                      <span>{(msg.usage.outputTokens ?? 0).toLocaleString()} out</span>
+                      {typeof msg.usage.cachedInputTokens === 'number' && msg.usage.cachedInputTokens > 0 && (
+                        <span>({msg.usage.cachedInputTokens.toLocaleString()} cached)</span>
+                      )}
+                      {typeof msg.usage.costUsdEstimate === 'number' && (
+                        <>
+                          <span>•</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">~${msg.usage.costUsdEstimate.toFixed(3)}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))
