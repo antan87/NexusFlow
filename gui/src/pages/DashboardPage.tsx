@@ -29,6 +29,7 @@ import { repoName, syncMeta } from '../lib/status.js';
 import { BRAND_NAME } from '../brand.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
 import { cn } from '../lib/utils.js';
+import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 
 export interface HarnessOption {
   id: string;
@@ -204,6 +205,7 @@ export function DashboardPage({
   const aiDetect = useAiDetect();
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
+  const { openCli } = useFloatingChat();
 
   const [search, setSearch] = useState('');
   const [changesOnly, setChangesOnly] = useState(false);
@@ -530,8 +532,17 @@ export function DashboardPage({
                     </div>
 
                     {/* Bottom Row: Actions */}
-                    <div className="border-t border-border/70 pt-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5">
+                    <div className="border-t border-border/70 pt-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="secondary"
+                          onClick={() => openCli(ws.branchName)}
+                          className="h-7 gap-1 px-2.5 text-xs font-semibold cursor-pointer"
+                          aria-label={`Open CLI chat for ${ws.branchName}`}
+                        >
+                          <Terminal size={12} /> CLI chat
+                        </Button>
                         {hasChanges && (
                           <Button
                             size="xs"

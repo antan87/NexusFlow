@@ -15,7 +15,7 @@ import {
   Check,
   Activity,
   Users,
-  MessagesSquare,
+  Terminal,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
@@ -82,7 +82,7 @@ function SidebarContents({
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
-  const { open: openFloatingChat } = useFloatingChat();
+  const { openCli } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [toolsExpanded, setToolsExpanded] = useState<boolean>(false);
@@ -378,72 +378,65 @@ function SidebarContents({
                     const hasChanges = Boolean(st && st.changedFiles > 0);
 
                     return (
-                      <Link
+                      <div
                         key={w.id}
-                        to={`/workspaces/${encodeURIComponent(w.branchName)}`}
-                        onClick={() => onSelectWorkspace?.(w.branchName)}
                         className={cn(
-                          'group flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-xs transition-colors cursor-pointer border',
+                          'group flex items-start gap-1 rounded-md px-2.5 py-1.5 text-xs transition-colors border',
                           isSelected
                             ? 'bg-accent text-foreground font-medium border-border/70 shadow-2xs'
                             : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground border-transparent'
                         )}
                       >
-                        <div className="flex items-center justify-between gap-1.5 min-w-0">
-                          <span className="truncate font-mono tracking-tight font-medium text-foreground">
+                        <Link
+                          to={`/workspaces/${encodeURIComponent(w.branchName)}`}
+                          onClick={() => onSelectWorkspace?.(w.branchName)}
+                          className="flex min-w-0 flex-1 flex-col gap-0.5"
+                        >
+                          <span className="truncate font-mono tracking-tight font-medium text-foreground" title={w.branchName}>
                             {w.branchName}
                           </span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {st?.activeAssistants && st.activeAssistants.length > 0 && (
-                              <div className="flex items-center gap-1">
-                                {st.activeAssistants.map((ast) => (
-                                  <span key={ast} className="inline-flex size-3.5 opacity-75">
-                                    {ast === 'antigravity' ? (
-                                      <AntigravityIcon className="size-3" />
-                                    ) : ast === 'claude' ? (
-                                      <SiClaude className="size-2.5 text-[#D97757]" />
-                                    ) : ast === 'codex' ? (
-                                      <BsOpenai className="size-2.5 text-foreground" />
-                                    ) : ast === 'cursor' ? (
-                                      <SiCursor className="size-2.5 text-foreground" />
-                                    ) : (
-                                      <SiGithubcopilot className="size-2.5 text-blue-400" />
-                                    )}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                openFloatingChat(w.branchName);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-background text-muted-foreground"
-                              title="Open floating chat"
-                            >
-                              <MessagesSquare size={11} />
-                            </button>
-                            <span
-                              className={cn(
-                                'size-1.5 rounded-full shrink-0',
-                                hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
-                              )}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground/80 font-mono">
-                          <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
-                          {hasChanges && (
-                            <>
-                              <span>•</span>
-                              <span className="text-amber-500 font-semibold">±{st!.changedFiles}</span>
-                            </>
+                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground/80 font-mono">
+                            <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                            {hasChanges && <span className="text-amber-500 font-semibold">• ±{st!.changedFiles}</span>}
+                          </span>
+                        </Link>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {st?.activeAssistants && st.activeAssistants.length > 0 && (
+                            <div className="flex items-center gap-1">
+                              {st.activeAssistants.map((ast) => (
+                                <span key={ast} className="inline-flex size-3.5 opacity-75">
+                                  {ast === 'antigravity' ? (
+                                    <AntigravityIcon className="size-3" />
+                                  ) : ast === 'claude' ? (
+                                    <SiClaude className="size-2.5 text-[#D97757]" />
+                                  ) : ast === 'codex' ? (
+                                    <BsOpenai className="size-2.5 text-foreground" />
+                                  ) : ast === 'cursor' ? (
+                                    <SiCursor className="size-2.5 text-foreground" />
+                                  ) : (
+                                    <SiGithubcopilot className="size-2.5 text-blue-400" />
+                                  )}
+                                </span>
+                              ))}
+                            </div>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => openCli(w.branchName)}
+                            className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                            title={`Open CLI chat for ${w.branchName}`}
+                            aria-label={`Open CLI chat for ${w.branchName}`}
+                          >
+                            <Terminal size={12} aria-hidden="true" />
+                          </button>
+                          <span
+                            className={cn(
+                              'size-1.5 rounded-full shrink-0',
+                              hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
+                            )}
+                          />
                         </div>
-                      </Link>
+                      </div>
                     );
                   })
                 )}

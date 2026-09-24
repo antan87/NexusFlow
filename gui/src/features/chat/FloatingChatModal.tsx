@@ -53,6 +53,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     restore,
     toggleMaximize,
     addTab,
+    openCli,
     removeTab,
     setActiveTab,
     setSplitTab,
@@ -270,7 +271,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           </div>
           <span className="text-xs font-bold text-foreground shrink-0">ContextSpace</span>
           <span className="text-muted-foreground/70" aria-hidden="true">/</span>
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">Chat & CLI</span>
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">{activeTab && modes[activeTab] === 'chat' ? 'Chat' : 'CLI chat'}</span>
           {activeWorkspace && <span className="truncate text-[11px] text-muted-foreground" title={activeWorkspace.branchName}>{activeWorkspace.branchName}</span>}
         </div>
 
@@ -433,9 +434,9 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               <MessageSquare className="size-6 text-primary" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-foreground">No Workspace Tab Open</h3>
+              <h3 className="text-sm font-semibold text-foreground">Choose a workspace for CLI chat</h3>
               <p className="text-xs text-muted-foreground max-w-xs">
-                Select a workspace to run a CLI harness or open your existing chat.
+                Open an existing workspace or create one. A session starts only when you choose to start or resume it.
               </p>
             </div>
             <div className="flex flex-wrap justify-center gap-1.5 mt-2 max-w-sm">
@@ -444,14 +445,14 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   key={ws.branchName}
                   variant="outline"
                   size="sm"
-                  onClick={() => addTab(ws.branchName)}
+                  onClick={() => openCli(ws.branchName)}
                   className="text-xs h-7 gap-1.5"
                 >
                   <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                   <span>{ws.branchName}</span>
                 </Button>
               ))}
-              <Button variant="outline" size="sm" onClick={() => { minimize(); navigate('/new?from=chat'); }} className="text-xs h-7 gap-1.5"><Plus className="size-3" />New workspace</Button>
+              <Button variant="outline" size="sm" onClick={() => { minimize(); navigate('/new?from=chat'); }} className="text-xs h-7 gap-1.5"><Plus className="size-3" />Create workspace for CLI chat</Button>
             </div>
           </div>
         ) : (
