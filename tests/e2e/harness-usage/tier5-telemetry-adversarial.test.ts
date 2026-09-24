@@ -22,9 +22,6 @@ import type * as acp from '@agentclientprotocol/sdk';
 
 // ── Target Production Modules ──────────────────────────────────────────────────
 import {
-  ClaudeCodeAdapter,
-} from '../../../src/harness/claude.js';
-import {
   ClaudeCliAdapter,
   ClaudeJsonlDecoder,
   decodeClaudeLine,
@@ -33,40 +30,30 @@ import {
 import { ClaudeSdkAdapter } from '../../../src/agent/ClaudeSdkAdapter.js';
 
 import {
-  CodexAdapter,
-} from '../../../src/harness/codex.js';
-import {
   CodexCliAdapter,
   CodexJsonlDecoder,
-  decodeCodexLine,
   extractCodexUsage,
 } from '../../../src/agent/CodexCliAdapter.js';
-import { CodexSdkAdapter } from '../../../src/agent/CodexSdkAdapter.js';
 
 import {
   AntigravityCliAdapter,
   AntigravityJsonlDecoder,
   decodeAntigravityLine,
   extractNormalizedUsage,
-  parseAntigravityQuotaError,
   findAntigravitySessionIdForWorkspace,
-  safeToIsoString as agSafeToIsoString,
 } from '../../../src/agent/AntigravityCliAdapter.js';
 
 import {
   AcpCliAdapter,
   extractAcpUsage,
   decideReadOnlyPermission,
-  isSafeAcpSessionId,
   type AcpConnection,
   type AcpTransportFactory,
 } from '../../../src/agent/AcpCliAdapter.js';
-import { CopilotAcpAdapter, buildCopilotAcpArgs } from '../../../src/agent/CopilotAcpAdapter.js';
+import { buildCopilotAcpArgs } from '../../../src/agent/CopilotAcpAdapter.js';
 
 import {
   TurnSessionManager,
-  AgentTurnGate,
-  dispatchAgentInput,
   type TurnClient,
 } from '../../../src/agent/TurnSessionManager.js';
 import type { ProviderAdapter, AgentHarness } from '../../../src/agent/ProviderRegistry.js';
@@ -97,15 +84,6 @@ class TestableClaudeCliAdapter extends ClaudeCliAdapter {
 }
 
 class TestableCodexCliAdapter extends CodexCliAdapter {
-  public spawned: MockSubprocess[] = [];
-  protected override spawnProcess(args: string[]): ChildProcess {
-    const child = new MockSubprocess();
-    this.spawned.push(child);
-    return child as unknown as ChildProcess;
-  }
-}
-
-class TestableAntigravityCliAdapter extends AntigravityCliAdapter {
   public spawned: MockSubprocess[] = [];
   protected override spawnProcess(args: string[]): ChildProcess {
     const child = new MockSubprocess();
