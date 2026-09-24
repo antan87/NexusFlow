@@ -125,7 +125,9 @@ export const floatingChatStore = {
     });
   },
 
-  open: (branchName?: string) => {
+  openCli: (branchName: string) => floatingChatStore.open(branchName, 'cli'),
+
+  open: (branchName?: string, mode?: 'cli' | 'chat') => {
     updateState((prev) => {
       const openTabs = [...prev.openTabs];
       let activeTab = prev.activeTab;
@@ -145,6 +147,7 @@ export const floatingChatStore = {
         isMinimized: false,
         openTabs,
         activeTab,
+        modes: branchName && mode ? { ...prev.modes, [branchName]: mode } : prev.modes,
         splitTab: activeTab === prev.splitTab ? prev.activeTab : prev.splitTab,
       };
     });

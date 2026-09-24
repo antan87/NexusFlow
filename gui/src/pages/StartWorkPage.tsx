@@ -165,7 +165,7 @@ export function StartWorkPage() {
   useEffect(() => {
     if (!openInChat || progress.status !== 'completed' || !progress.workspaceId || openedChatWorkspace.current === progress.workspaceId) return;
     openedChatWorkspace.current = progress.workspaceId;
-    floatingChatStore.open(progress.workspaceId);
+    floatingChatStore.openCli(progress.workspaceId);
     navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
   }, [openInChat, progress.status, progress.workspaceId, navigate]);
 
