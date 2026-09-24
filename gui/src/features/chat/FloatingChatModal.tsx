@@ -80,6 +80,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     return () => window.removeEventListener('resize', update);
   }, []);
   const showSplit = Boolean(splitTab && activeTab && splitTab !== activeTab && wideEnough && isMaximized);
+  const runningTabs = openTabs.filter(tab => terminalStates[tab] === 'running');
+  const disconnectedTabs = openTabs.filter(tab => terminalStates[tab] === 'disconnected');
   useEffect(() => {
     if (!isOpen || isMinimized) return;
     const visible = [activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value));
@@ -237,7 +239,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               )}
             </span>
             <span className="text-[10px] text-muted-foreground leading-tight max-w-[140px] truncate">
-              {activeWorkspace?.branchName || 'No active tab'}
+              {runningTabs.length ? `CLI running · hidden${runningTabs.length > 1 ? ` (${runningTabs.length})` : ''}` : disconnectedTabs.length ? 'CLI disconnected · hidden' : activeWorkspace?.branchName || 'No active tab'}
             </span>
           </div>
           <Maximize2 className="size-3.5 text-muted-foreground group-hover:text-foreground ml-1" />
@@ -280,7 +282,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           <button
             onClick={minimize}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
-            title="Minimize"
+            title="Minimize window; CLI sessions keep running"
             aria-label="Minimize floating chat"
           >
             <Minus className="size-3.5" />
@@ -296,7 +298,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           <button
             onClick={close}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-            title="Close"
+            title="Hide window; CLI sessions keep running"
             aria-label="Close floating chat"
           >
             <X className="size-3.5" />

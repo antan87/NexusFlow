@@ -307,7 +307,7 @@ export function WorkspaceCodePanel({
             {!selection ? (
               <div className="h-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground gap-2">
                 <FileCode className="size-8 opacity-35" />
-                <p className="p-3 text-xs text-muted-foreground">Select a file to inspect its code and changes alongside the CLI chat.</p>
+                <p className="p-3 text-xs text-muted-foreground">Select a file to inspect its code and changes.</p>
               </div>
             ) : diffError ? (
               <p role="alert" className="p-3 text-xs text-destructive">
