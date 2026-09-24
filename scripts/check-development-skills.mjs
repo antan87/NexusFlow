@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, readdir, lstat, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { open, readFile, readdir, lstat, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,8 +16,21 @@ export async function readDevelopmentSkills(root = repositoryRoot) {
     const base = path.join(root, 'resources/skills', id);
     if (!(await lstat(base)).isDirectory()) throw new Error(`Skill directory is not a regular directory: ${id}`);
     const markdownPath = path.join(base, 'SKILL.md');
-    if (!(await lstat(markdownPath)).isFile()) throw new Error(`Invalid skill entrypoint: ${id}`);
-    const raw = await readFile(markdownPath, 'utf8');
+    let handle;
+    let raw;
+    try {
+      handle = await open(markdownPath, 'r');
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw new Error(`Invalid skill entrypoint: ${id}`);
+      raw = await handle.readFile('utf8');
+    } catch (error) {
+      if (error.code === 'EISDIR') {
+        throw new Error(`Invalid skill entrypoint: ${id}`);
+      }
+      throw error;
+    } finally {
+      await handle?.close();
+    }
     const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
     if (!match) throw new Error(`Missing frontmatter: ${id}`);
     const metadata = load(match[1]);
