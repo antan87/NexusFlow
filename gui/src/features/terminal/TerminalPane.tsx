@@ -5,9 +5,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../components/ui/button.js';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { Select, SelectTrigger, SelectPopup, SelectItem } from '../../components/ui/select.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
-import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff } from 'lucide-react';
+import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff, MoreHorizontal } from 'lucide-react';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
 import { SessionUsageDetails } from './SessionUsage.js';
@@ -38,6 +39,8 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
   const [screenReader, setScreenReader] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [endedTerminalId, setEndedTerminalId] = useState<string | null>(null);
   const [clipboardMenu, setClipboardMenu] = useState<{ x: number; y: number } | null>(null);
   const menuSelection = useRef('');
   const launchSeen = useRef('');
@@ -253,7 +256,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
 
   const stop = async () => {
     if (!terminal || !window.confirm('End this terminal and its running commands?')) return;
-    try { await terminalRequest(workspace, `${terminal.id}/stop`); await refresh(); }
+    try { await terminalRequest(workspace, `${terminal.id}/stop`); setEndedTerminalId(terminal.id); await refresh(); }
     catch (e) { setError((e as Error).message); }
   };
   const copySelection = async (captured?: string) => {
@@ -310,7 +313,12 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     <SelectTrigger aria-label="CLI harness" size="sm" className="w-auto min-w-40 text-xs">{target ? <span className="flex items-center gap-2"><HarnessIcon harness={target} />{harnessName(target)}</span> : 'Choose a CLI tool'}</SelectTrigger>
     <SelectPopup popupClassName="w-60 max-w-[calc(100vw-2rem)]">{(status?.targets ?? []).map(item => <SelectItem key={item.id} value={item.id} disabled={!item.available} title={item.reason || undefined}><span className="flex min-w-0 items-center gap-2"><HarnessIcon harness={item.id} /><span className="truncate">{harnessName(item.id)}</span>{!item.available && <span className="text-[10px] text-muted-foreground">· Unavailable<span className="sr-only">: {item.reason || 'Not installed'}</span></span>}</span></SelectItem>)}</SelectPopup>
   </Select>;
-  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart}><Plus className="size-3" />{busy ? 'Starting…' : 'Start session'}</Button>;
+  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart} title={terminal ? 'Start another terminal; the current one keeps running' : undefined}><Plus className="size-3" />{busy ? 'Starting…' : terminal ? 'Start another' : 'Start session'}</Button>;
+  const disconnected = state.startsWith('Disconnected');
+  const exited = state.startsWith('Exited');
+  const running = state.startsWith('Connected');
+  const stateLabel = exited && endedTerminalId === terminal?.id ? 'Ended' : running ? 'Running' : disconnected ? 'Disconnected' : exited ? state : 'Connecting…';
+  const stateHelp = exited ? 'The terminal has stopped. Its output stays available.' : disconnected ? 'Input is paused; the CLI may still be running.' : running ? 'Input is ready. Hiding this window keeps the CLI running.' : 'Input is paused while the terminal connects.';
   return <div className="flex h-full min-h-0 flex-col" data-testid="terminal-pane">
     {!terminal && <div className="border-b border-border px-3 py-3">
       <p className="mb-2 text-xs font-semibold text-foreground">What would you like to do in {workspace}?</p>
@@ -323,11 +331,20 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       {harnessSelect}
       {startButton}
       <Button size="xs" variant={showHistory ? 'secondary' : 'ghost'} aria-pressed={showHistory} onClick={() => setShowHistory(value => !value)}><History className="size-3" />Resume session</Button>
-      <Button size="xs" variant="ghost" title="Refresh installed harnesses" onClick={() => void refresh()}><RefreshCw className="size-3" />Refresh</Button>
-      <Button size="xs" variant="ghost" disabled={!target} onClick={() => void external()}><ExternalLink className="size-3" />External terminal</Button>
-      <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End session</Button>
+      <Menu>
+        <MenuTrigger className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"><MoreHorizontal className="size-3" />More</MenuTrigger>
+        <MenuPopup align="end" className="w-48 p-1">
+          <MenuItem onClick={() => void refresh()} className="flex items-center gap-2 text-xs"><RefreshCw className="size-3" />Refresh CLI tools</MenuItem>
+          <MenuItem disabled={!target} onClick={() => void external()} className="flex items-center gap-2 text-xs"><ExternalLink className="size-3" />External terminal</MenuItem>
+        </MenuPopup>
+      </Menu>
     </div>}
-    {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
+    {error && (!terminal || !disconnected) && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
+    {terminal && <div data-testid={disconnected ? 'terminal-disconnected' : 'terminal-state'} role={disconnected ? 'alert' : undefined} className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-xs ${disconnected ? 'border-amber-500/40 bg-amber-500/10' : exited ? 'border-border bg-muted/30' : 'border-border bg-card'}`}>
+      <span className="flex items-center gap-1.5 font-semibold" role="status">{disconnected ? <WifiOff className="size-3.5 text-amber-600" aria-hidden="true" /> : <span aria-hidden="true" className={`size-1.5 rounded-full ${running ? 'bg-emerald-500' : exited ? 'bg-muted-foreground' : 'bg-amber-500'}`} />}{stateLabel}</span>
+      <span className="min-w-0 flex-1 text-muted-foreground">{stateHelp}{disconnected && error ? ` ${error}` : ''}</span>
+      <div className="flex items-center gap-1">{disconnected && <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>}{!exited && terminal.state !== 'exited' && <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End session</Button>}</div>
+    </div>}
     {showHistory && <ResumeSessions workspace={workspace} active={active} busy={busy} status={status} fill={!terminal} onStartNew={() => setShowHistory(false)} onResume={session => void start({ id: crypto.randomUUID(), target: session.assistant, sessionId: session.id, cwd: session.workspacePath })} />}
     {!terminal && !showHistory && <section aria-label="Start a new CLI session" className="flex-1 space-y-3 overflow-auto px-3 py-4">
       <div>
@@ -345,11 +362,6 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       <select aria-label="Terminal sessions" className="max-w-full bg-card text-xs" value={terminal?.id ?? ''} onChange={e => { const selected = status.sessions.find(s => s.id === e.target.value) ?? null; setTerminal(selected); if (selected) setTarget(selected.target); }}>
         <option value="" disabled>Select a terminal</option>{status.sessions.map(s => <option key={s.id} value={s.id}>{s.label} · {s.state} · {s.id.slice(0, 8)}</option>)}
       </select>
-    </div>}
-    {terminal && state.startsWith('Disconnected') && <div data-testid="terminal-disconnected" role="alert" className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
-      <WifiOff className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
-      <span className="min-w-0 flex-1"><strong>CLI chat disconnected.</strong> Input is paused; the session may still be running.</span>
-      <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>
     </div>}
     {terminal && terminal.target !== 'shell' && <section aria-label="CLI session usage" className="border-b border-border px-3 py-1.5">
       <div className="flex items-center gap-2 text-[11px]"><strong className="font-semibold">{terminal.sessionId ? 'Saved conversation usage' : 'Session usage'}</strong>{terminal.sessionId && <Button size="xs" variant="ghost" aria-label="Refresh session usage" title="Refresh saved usage (also updates every minute while connected)" onClick={() => void usageHistory.refetch()}><RefreshCw className="size-3" /></Button>}</div>
@@ -369,14 +381,15 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => void pasteClipboard()}>Paste</button>
       </div>}
     </div>
-    {terminal && <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1 text-xs">
-      <span role="status">{state}</span>
-      <Button size="xs" variant="ghost" onClick={() => setRetry(n => n + 1)}><PlugZap className="size-3" />Reconnect</Button>
-      <input aria-label="Search terminal output" placeholder="Search output" className="w-28 rounded border border-border bg-card px-1" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
-      <Button size="xs" variant="ghost" onClick={() => search.current?.findNext(query)}><Search className="size-3" />Find</Button>
-      <Button size="xs" variant="ghost" onClick={() => void copySelection()}><Copy className="size-3" />Copy selection</Button>
-      <label className="flex items-center gap-1"><input type="checkbox" checked={screenReader} onChange={e => setScreenReader(e.target.checked)} />Screen reader</label>
+    {terminal && <div className="border-t border-border px-3 py-1 text-xs">
+      <Button size="xs" variant="ghost" aria-expanded={showTools} onClick={() => setShowTools(value => !value)}><Search className="size-3" />Terminal tools</Button>
+      {showTools && <div className="flex flex-wrap items-center gap-2 pb-1">
+        <input aria-label="Search terminal output" placeholder="Search output" className="w-28 rounded border border-border bg-card px-1" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
+        <Button size="xs" variant="ghost" onClick={() => search.current?.findNext(query)}><Search className="size-3" />Find</Button>
+        <Button size="xs" variant="ghost" onClick={() => void copySelection()}><Copy className="size-3" />Copy selection</Button>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={screenReader} onChange={e => setScreenReader(e.target.checked)} />Screen reader</label>
+        <span className="max-w-full truncate text-[10px] text-muted-foreground" title={terminal.cwd}>Local terminal · {terminal.cwd}</span>
+      </div>}
     </div>}
-    {terminal && <div className="truncate px-3 pb-1 text-[10px] text-muted-foreground" title={terminal.cwd}>Local user permissions · {terminal.cwd} · Hide keeps running; End session stops it.</div>}
   </div>;
 }
