@@ -36,3 +36,16 @@ it('fails on missing linked guidance rather than silently installing a broken re
   await appendFile(path.join(root, 'resources/skills/nexusflow-dev/SKILL.md'), '\nRead [missing guidance](references/missing.md).\n');
   await expect(checkDevelopmentSkills(root)).rejects.toMatchObject({ code: 'ENOENT' });
 });
+
+it('rejects invalid skill entrypoint when SKILL.md is not a regular file', async () => {
+  const entrypoint = path.join(root, 'resources/skills/nexusflow-dev/SKILL.md');
+  await rm(entrypoint);
+  await cp(path.join(root, 'resources/skills/nexusflow-dev/references'), entrypoint, { recursive: true });
+  await expect(readDevelopmentSkills(root)).rejects.toThrow('Invalid skill entrypoint: nexusflow-dev');
+});
+
+it('fails when SKILL.md is missing from a maintained skill directory', async () => {
+  await rm(path.join(root, 'resources/skills/nexusflow-dev/SKILL.md'));
+  await expect(readDevelopmentSkills(root)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
