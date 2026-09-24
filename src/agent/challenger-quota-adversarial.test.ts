@@ -8,7 +8,6 @@ import {
   decodeClaudeLine,
 } from './ClaudeCliAdapter.js';
 import {
-  AntigravityCliAdapter,
   decodeAntigravityLine,
   parseAntigravityQuotaError,
 } from './AntigravityCliAdapter.js';
@@ -31,16 +30,6 @@ class FakeChild extends EventEmitter {
 }
 
 class TestClaudeCliAdapter extends ClaudeCliAdapter {
-  readonly processes: Array<{ args: string[]; child: FakeChild }> = [];
-
-  protected override spawnProcess(args: string[]): ChildProcess {
-    const child = new FakeChild();
-    this.processes.push({ args, child });
-    return child as unknown as ChildProcess;
-  }
-}
-
-class TestAntigravityCliAdapter extends AntigravityCliAdapter {
   readonly processes: Array<{ args: string[]; child: FakeChild }> = [];
 
   protected override spawnProcess(args: string[]): ChildProcess {

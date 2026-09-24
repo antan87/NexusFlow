@@ -15,12 +15,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  validateNormalizedUsage,
-  validateNormalizedRemainingQuota,
   OpaqueTurnSessionSimulator,
   createTemporaryWorkspace,
   writeSyntheticSessionTranscript,
-  parseCliHumanStatus,
   type NormalizedUsage,
   type NormalizedRemainingQuota,
   type WebSocketUsageBroadcast,
