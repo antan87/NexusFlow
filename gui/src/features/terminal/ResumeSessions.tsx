@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { SessionActivity } from '../sessions/SessionActivity.js';
 import { SessionKind, mainSessionFor } from '../sessions/SessionKind.js';
+import { SessionUsageDetails } from './SessionUsage.js';
 import type { AISession } from '../../types.js';
 import type { TerminalStatus } from './client.js';
 
@@ -33,7 +34,7 @@ export function ResumeSessions({ workspace, active, busy, status, fill, onStartN
         const available = !!status?.available && !!tool?.available;
         return <div key={`${session.assistant}:${session.id}`} className="flex items-center gap-2 py-2" data-testid="resume-session-row">
           <HarnessIcon harness={session.assistant} className="size-5 shrink-0" />
-          <div className="min-w-0 flex-1"><div className="truncate text-xs font-medium" title={session.title}>{session.title}</div><div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"><span>{harnessName(session.assistant)}</span><SessionKind session={session} /><SessionActivity session={session} /><span>{session.messageCount} messages</span><span className="font-mono">{session.id.slice(0, 8)}</span></div>{status && !available && <p className="text-[10px] text-amber-600">{tool?.reason || status.reason || `${harnessName(session.assistant)} is unavailable on this device.`}</p>}{!main && <p className="text-[10px] text-amber-600">Main conversation unavailable in saved history.</p>}</div>
+          <div className="min-w-0 flex-1"><div className="truncate text-xs font-medium" title={session.title}>{session.title}</div><div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"><span>{harnessName(session.assistant)}</span><SessionKind session={session} /><SessionActivity session={session} /><span>{session.messageCount} messages</span><span className="font-mono">{session.id.slice(0, 8)}</span></div><SessionUsageDetails session={session} />{status && !available && <p className="text-[10px] text-amber-600">{tool?.reason || status.reason || `${harnessName(session.assistant)} is unavailable on this device.`}</p>}{!main && <p className="text-[10px] text-amber-600">Main conversation unavailable in saved history.</p>}</div>
           <Button size="xs" variant="outline" disabled={busy || !available || !main} title={!main ? 'Continue the main conversation from the harness' : !available ? 'Install this harness, then refresh the harness list' : `Continue ${main.title} in ${harnessName(main.assistant)}`} onClick={() => main && onResume(main)}><ArrowRight className="size-3" />{session.threadKind === 'subagent' ? 'Main thread' : 'Continue'}</Button>
         </div>;
       })}
