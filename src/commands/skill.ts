@@ -180,7 +180,7 @@ export async function skillDeleteCommand(
     return;
   }
 
-  let scope: 'workspace' | 'global' = options.scope ?? 'global';
+  let scope: 'workspace' | 'global';
   let workspacePath: string | null = null;
 
   if (options.scope === 'global') {

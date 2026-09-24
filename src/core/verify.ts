@@ -258,7 +258,7 @@ export async function verifyRepo(
 ): Promise<RepoVerificationReport> {
   const verifiedAt = new Date().toISOString();
   let headSha = 'unknown';
-  let clean = true;
+  let clean: boolean;
   let dirtyFiles: string[] = [];
 
   let before: RepositorySnapshot | undefined;
