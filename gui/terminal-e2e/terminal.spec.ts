@@ -40,6 +40,8 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.reload();
   await expect(pane.getByRole('status')).toHaveText('Connected');
   await expect(pane.getByLabel('Terminal sessions')).toHaveValue(session);
+  await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
   await pane.getByLabel('Screen reader', { exact: true }).check();
   await input.focus();
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : "printf 'CS_ALIVE_%s\\n' \"$CS_KEEP\"");

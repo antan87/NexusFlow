@@ -28,6 +28,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const [showHistory, setShowHistory] = useState(true);
   useEffect(() => { if (codeVisible) setShowHistory(false); }, [codeVisible]);
   const [terminal, setTerminal] = useState<TerminalInfo | null>(null);
+  useEffect(() => { if (terminal) setShowHistory(false); }, [terminal]);
   const [state, setState] = useState('Choose a harness or shell');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
