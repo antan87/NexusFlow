@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import * as path from 'node:path';
 import { assertFileHandleMatchesPath, assertNoLinkedPathComponents, readFileHandleAtMost } from '../resources/fs-safety.js';
 
-const textExtensions = new Set(['.md', '.markdown', '.txt', '.rst', '.adoc', '.csv', '.tsv', '.log', '.html', '.htm', '.svg']);
+const textExtensions = new Set(['.md', '.markdown', '.txt', '.rst', '.adoc', '.csv', '.tsv', '.log', '.svg']);
 const images: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 const officeExtensions = new Set(['.doc', '.docx', '.odt', '.rtf', '.xls', '.xlsx', '.ods', '.ppt', '.pptx', '.odp']);
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -11,6 +11,7 @@ const MAX_TEXT_BYTES = 1024 * 1024;
 
 function format(name: string) {
   const extension = path.extname(name).toLowerCase();
+  if (extension === '.html' || extension === '.htm') return { kind: 'html', mime: 'text/html; charset=utf-8' } as const;
   if (textExtensions.has(extension)) return { kind: extension === '.md' || extension === '.markdown' ? 'markdown' : 'text', mime: 'text/plain; charset=utf-8' } as const;
   if (extension === '.pdf') return { kind: 'pdf', mime: 'application/pdf' } as const;
   if (images[extension]) return { kind: 'image', mime: images[extension] } as const;
@@ -49,7 +50,7 @@ export async function readRootDocument(root: string, name: string, download = fa
   try {
     const stat = await assertFileHandleMatchesPath(handle, target);
     const details = format(name)!;
-    const isText = details.kind === 'markdown' || details.kind === 'text';
+    const isText = details.kind === 'markdown' || details.kind === 'text' || details.kind === 'html';
     const limit = isText && !download ? MAX_TEXT_BYTES : MAX_FILE_BYTES;
     if (stat.size > BigInt(limit)) throw new Error(`This document exceeds the ${limit / 1024 / 1024} MB ${download ? 'download' : 'preview'} limit.`);
     const bytes = await readFileHandleAtMost(handle, limit + 1);

@@ -1,7 +1,7 @@
 {
   "name": "gui",
   "private": true,
-  "version": "2.17.0",
+  "version": "2.18.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,6 +23,7 @@
     "ansi-to-react": "^6.2.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dompurify": "^3.4.16",
     "lucide-react": "^1.39.0",
     "monaco-editor": "^0.56.0",
     "parse5": "^8.0.1",

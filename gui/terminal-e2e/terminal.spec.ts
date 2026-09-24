@@ -22,6 +22,11 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
   const box = await page.getByRole('region', { name: 'Workspace Chat', exact: true }).boundingBox();
   expect(box?.width).toBe(page.viewportSize()!.width);
+  await expect.poll(() => pane.getByLabel('Interactive CLI terminal').evaluate(host => {
+    const screen = host.querySelector('.xterm-screen');
+    if (!screen) return Infinity;
+    return screen.getBoundingClientRect().bottom - host.getBoundingClientRect().bottom;
+  })).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'Restore down floating chat' }).click();
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await page.getByRole('region', { name: 'Workspace Chat', exact: true }).getByRole('button', { name: 'CLI', exact: true }).click();
@@ -35,6 +40,8 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.reload();
   await expect(pane.getByRole('status')).toHaveText('Connected');
   await expect(pane.getByLabel('Terminal sessions')).toHaveValue(session);
+  await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
   await pane.getByLabel('Screen reader', { exact: true }).check();
   await input.focus();
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : "printf 'CS_ALIVE_%s\\n' \"$CS_KEEP\"");
