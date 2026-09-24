@@ -318,7 +318,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
               )}
             >
-              <button type="button" aria-pressed={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
+              <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
                 className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
                 <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                 <span className="truncate">{branchName}</span>
@@ -469,8 +469,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               >
                 <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
                   <span className="max-w-[32%] truncate text-[10px] font-semibold" title={branchName}>{branchName}</span>
-                  <Button size="xs" variant={(modes[branchName] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[branchName] ?? 'cli') === 'cli'} onClick={() => setMode(branchName, 'cli')}><TerminalSquare className="size-3" />Terminal</Button>
-                  <Button size="xs" variant={modes[branchName] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[branchName] === 'chat'} onClick={() => setMode(branchName, 'chat')}><MessageSquare className="size-3" />Message chat</Button>
+                  <Button size="xs" variant={(modes[branchName] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[branchName] ?? 'cli') === 'cli'} onClick={() => setMode(branchName, 'cli')}><TerminalSquare className="size-3" />CLI</Button>
+                  <Button size="xs" variant={modes[branchName] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[branchName] === 'chat'} onClick={() => setMode(branchName, 'chat')}><MessageSquare className="size-3" />Chat</Button>
                   {ws && <WorkspaceServicesControl workspace={branchName} active={visible && isOpen && !isMinimized} />}
                   {isSecondary && <Button size="xs" variant="ghost" aria-label="Close split view" onClick={() => setSplitTab(null)}><X className="size-3" /></Button>}
                 </div>

@@ -22,6 +22,11 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
   const box = await page.getByRole('region', { name: 'Workspace Chat', exact: true }).boundingBox();
   expect(box?.width).toBe(page.viewportSize()!.width);
+  await expect.poll(() => pane.getByLabel('Interactive CLI terminal').evaluate(host => {
+    const screen = host.querySelector('.xterm-screen');
+    if (!screen) return Infinity;
+    return screen.getBoundingClientRect().bottom - host.getBoundingClientRect().bottom;
+  })).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'Restore down floating chat' }).click();
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await page.getByRole('region', { name: 'Workspace Chat', exact: true }).getByRole('button', { name: 'CLI', exact: true }).click();

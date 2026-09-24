@@ -586,7 +586,7 @@ Tauri and friends), see [docs/desktop-platform.md](docs/desktop-platform.md). Th
 - **Open with…** — launch the workspace directly in a detected Codex Desktop, Claude Desktop, VS Code, VS Code Insiders, Cursor, JetBrains IDE, or other supported editor; unavailable apps stay out of the primary picker
 - **AI & Sessions (GA)** — use the embedded first-party Claude/Codex SDK or local CLI harnesses with provider-owned model selection, then inspect and resume recorded sessions; subscription sign-ins are reused when available
 - **Chat & CLI** — create a workspace from the floating chat, keep multiple workspace sessions open, and choose a second workspace for a resizable side-by-side view. The CLI inspector opens repository code, workspace documents, and linked source documents without leaving the conversation.
-- **Document previews** — read Markdown, text, HTML, images, and PDF files from the workspace root. HTML is sanitized and sandboxed; PDF pages use React-PDF and Mozilla PDF.js. Office files remain downloadable.
+- **Document previews** — read Markdown, text, HTML, images, and PDF files from the workspace root. HTML is sanitized and sandboxed; PDFs use the browser's built-in viewer. Office files remain downloadable.
 - **Logs panel** — real-time aggregated service log output
 - **Config panel** — edit ContextSpace settings from the browser
 

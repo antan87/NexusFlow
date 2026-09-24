@@ -67,7 +67,7 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
 
   return <div className="flex h-full min-h-0 flex-col">
     <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/10 px-2 py-1">
-      <span className="text-[11px] font-semibold text-foreground">Interactive terminal</span>
+      <span className="text-[11px] font-semibold text-foreground">CLI chat</span>
       <div className="flex items-center gap-1">
         {inspector && <Button size="xs" variant={isExpanded ? 'secondary' : 'ghost'}
           onClick={() => setIsExpanded(value => !value)}
@@ -76,7 +76,7 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
           {isExpanded ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
           {isExpanded ? 'Split view' : 'Expand'}
         </Button>}
-        <Button size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} onClick={() => setInspector(value => value === 'code' ? null : 'code')}><ListTree className="size-3" />Code</Button>
+        <Button size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} onClick={() => setInspector(value => value === 'code' ? null : 'code')}><ListTree className="size-3" />{inspector === 'code' ? 'Hide code' : 'Show code'}</Button>
         <Button size="xs" variant={inspector === 'documents' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'documents'} onClick={() => setInspector(value => value === 'documents' ? null : 'documents')}><FileText className="size-3" />Documents</Button>
       </div>
     </div>
@@ -85,7 +85,7 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
       <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} codeVisible={inspector !== null} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
         <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? 85 : splitPercent}
-          aria-valuemin={20} aria-valuemax={85} aria-label="Resize inspector panel" onPointerDown={handleSplitDrag}
+          aria-valuemin={20} aria-valuemax={85} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}
           onKeyDown={event => {
             if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
               event.preventDefault();
