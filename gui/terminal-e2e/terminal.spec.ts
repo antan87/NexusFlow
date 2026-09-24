@@ -9,6 +9,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   });
   await page.goto('/');
   const pane = page.getByTestId('terminal-pane').filter({ visible: true });
+  await pane.getByRole('button', { name: 'Start new session', exact: true }).click();
   await pane.getByRole('combobox', { name: 'CLI harness' }).click();
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
@@ -16,7 +17,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   const session = await pane.getByLabel('Terminal sessions').inputValue();
   await pane.getByLabel('Screen reader', { exact: true }).check();
   const input = pane.locator('.xterm-helper-textarea');
-  const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : "export CS_KEEP=42; printf 'CS_%s\\n' STARTED";
+  const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
   await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
@@ -34,7 +35,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByTitle('Restore floating workspace chat').click();
   await page.getByRole('button', { name: 'Add Workspace' }).click();
   await page.getByRole('menuitem').filter({ hasText: 'terminal-other' }).click();
-  await expect(pane.getByRole('status')).toHaveText('Choose a harness or shell');
+  await expect(pane.getByRole('button', { name: 'Continue a conversation', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'terminal-test', exact: false }).click();
   await expect(pane.getByRole('status')).toHaveText('Connected');
   await page.reload();
@@ -44,7 +45,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
   await pane.getByLabel('Screen reader', { exact: true }).check();
   await input.focus();
-  await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : "printf 'CS_ALIVE_%s\\n' \"$CS_KEEP\"");
+  await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : 'echo CS_ALIVE_$CS_KEEP');
   await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_ALIVE_42');
   expect(launches).toBe(1);
