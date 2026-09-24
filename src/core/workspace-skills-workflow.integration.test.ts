@@ -10,7 +10,6 @@ import {
   saveSkill,
   saveWorkspaceSkillsConfig,
   getAllSkills,
-  DEFAULT_SKILLS,
 } from '../utils/skills-catalog.js';
 import type { WorkspaceContext, AIAssistant, ProjectAnalysis } from '../types.js';
 

@@ -11,20 +11,15 @@ import fse from 'fs-extra';
 
 import {
   createTestWorkspace,
-  readAgentsMd,
-  listMaterializedSkills,
   generateAgentsMd,
   invokeMcpTool,
   validateCreateWorkspacePayload,
-  featureGates,
   type TestWorkspace,
 } from './test-harness.js';
 
 import {
   saveSkill,
   parseSkillMarkdown,
-  serializeSkillMarkdown,
-  DEFAULT_SKILLS,
 } from '../../src/utils/skills-catalog.js';
 
 import {
@@ -44,10 +39,7 @@ import {
   ResourceConflictError,
 } from '../../src/resources/materializer.js';
 import { enabledTools, findTool } from '../../src/mcp/tools.js';
-import {
-  resourceIdSchema,
-  skillFrontmatterSchema,
-} from '../../src/resources/contracts.js';
+import { resourceIdSchema } from '../../src/resources/contracts.js';
 import { refreshWorkspace } from '../../src/core/refresh.js';
 
 describe('Tier 2: Boundary Value Analysis & Edge Cases', () => {

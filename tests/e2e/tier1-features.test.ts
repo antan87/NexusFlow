@@ -4,7 +4,7 @@
  * Opaque-box verification of all 9 core features.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import fse from 'fs-extra';
@@ -16,7 +16,6 @@ import {
   generateAgentsMd,
   invokeMcpTool,
   validateCreateWorkspacePayload,
-  expectAgentsMdContainsRules,
   validateSkillStructure,
   featureGates,
   type TestWorkspace,
@@ -26,7 +25,6 @@ import {
   getAllSkills,
   saveSkill,
   deleteSkill,
-  parseSkillMarkdown,
   serializeSkillMarkdown,
   getWorkspaceSkillsConfig,
   saveWorkspaceSkillsConfig,
@@ -35,19 +33,14 @@ import {
 
 import {
   getDomainPack,
-  getAvailableDomainPacks,
   resolveActiveDomainRules,
 } from '../../src/core/domain-packs.js';
 
-import {
-  buildHarnessCliCommand,
-  isValidSessionId,
-  SUPPORTED_ASSISTANTS,
-} from '../../src/utils/terminal-launch.js';
+import { buildHarnessCliCommand } from '../../src/utils/terminal-launch.js';
 
 import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';
 import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
-import { findTool, enabledTools } from '../../src/mcp/tools.js';
+import { enabledTools } from '../../src/mcp/tools.js';
 import { resourceIdSchema } from '../../src/resources/contracts.js';
 import { refreshWorkspace } from '../../src/core/refresh.js';
 
@@ -539,7 +532,7 @@ This is the instructions content.`;
         description: 'Base task',
         tags: ['economy'],
       });
-      const originalMd = await generateAgentsMd(ws.feature, ws.repos);
+      await generateAgentsMd(ws.feature, ws.repos);
 
       ws.feature.description = 'Base task\n- [ ] AC 1: New requirement\n- [ ] AC 2: Another criterion';
       const updatedMd = await generateAgentsMd(ws.feature, ws.repos);
