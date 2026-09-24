@@ -26,10 +26,10 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const target = harnesses[workspace] ?? '';
   const setTarget = useCallback((value: string) => setHarness(workspace, value), [workspace, setHarness]);
   const [showHistory, setShowHistory] = useState(true);
-  useEffect(() => { if (codeVisible) setShowHistory(false); }, [codeVisible]);
   const [terminal, setTerminal] = useState<TerminalInfo | null>(null);
+  useEffect(() => { if (codeVisible && terminal) setShowHistory(false); }, [codeVisible, terminal]);
   useEffect(() => { if (terminal) setShowHistory(false); }, [terminal]);
-  const [state, setState] = useState('Choose a harness or shell');
+  const [state, setState] = useState('Choose a CLI tool');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -280,31 +280,66 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       await apiFetch(`/api/workspace/${encodeURIComponent(workspace)}/terminal`, { method: 'POST', body: JSON.stringify({ ...(target !== 'shell' ? { assistant: target } : {}), ...(request?.target === target ? { sessionId: request.sessionId, cwd: request.cwd } : {}) }) });
     } catch (e) { setError((e as Error).message); }
   };
+  const chosenTool = status?.targets.find(item => item.id === target);
+  const canStart = !busy && !!status?.available && !!chosenTool?.available;
+  const toolHint = !status
+    ? 'Checking available CLI tools…'
+    : !status.available
+      ? status.reason || 'The local terminal service is unavailable. Refresh after it is ready.'
+      : !status.targets.length
+        ? 'No CLI tools were found. Install a CLI harness, then refresh the list.'
+        : target && !chosenTool
+          ? 'The saved CLI tool is no longer listed. Choose another tool for this workspace.'
+          : chosenTool && !chosenTool.available
+            ? `${harnessName(target)} is unavailable: ${chosenTool.reason || 'not installed'}. Choose another tool or refresh after installing it.`
+            : target
+              ? `${harnessName(target)} is ready. The session starts only when you press Start session.`
+              : 'Choose a CLI tool to start a new session. Your choice is remembered for this workspace.';
+  const harnessSelect = <Select value={target || null} onValueChange={value => { if (typeof value === 'string') setTarget(value); }}>
+    <SelectTrigger aria-label="CLI harness" size="sm" className="w-auto min-w-40 text-xs">{target ? <span className="flex items-center gap-2"><HarnessIcon harness={target} />{harnessName(target)}</span> : 'Choose a CLI tool'}</SelectTrigger>
+    <SelectPopup popupClassName="w-60 max-w-[calc(100vw-2rem)]">{(status?.targets ?? []).map(item => <SelectItem key={item.id} value={item.id} disabled={!item.available} title={item.reason || undefined}><span className="flex min-w-0 items-center gap-2"><HarnessIcon harness={item.id} /><span className="truncate">{harnessName(item.id)}</span>{!item.available && <span className="text-[10px] text-muted-foreground">· Unavailable<span className="sr-only">: {item.reason || 'Not installed'}</span></span>}</span></SelectItem>)}</SelectPopup>
+  </Select>;
+  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart}><Plus className="size-3" />{busy ? 'Starting…' : 'Start session'}</Button>;
   return <div className="flex h-full min-h-0 flex-col" data-testid="terminal-pane">
-    <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-      <Select value={target || null} onValueChange={value => { if (typeof value === 'string') setTarget(value); }}>
-        <SelectTrigger aria-label="CLI harness" size="sm" className="w-auto min-w-40 text-xs">{target ? <span className="flex items-center gap-2"><HarnessIcon harness={target} />{harnessName(target)}</span> : 'Choose a harness'}</SelectTrigger>
-        <SelectPopup>{(status?.targets ?? []).map(t => <SelectItem key={t.id} value={t.id}><span className="flex items-center gap-2"><HarnessIcon harness={t.id} />{harnessName(t.id)}{!t.available && <span className="text-muted-foreground">· Not installed</span>}</span></SelectItem>)}</SelectPopup>
-      </Select>
-      <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={busy || !status?.available || !target || !status.targets.find(t => t.id === target)?.available}><Plus className="size-3" />{busy ? 'Starting…' : 'Start session'}</Button>
+    {!terminal && <div className="border-b border-border px-3 py-3">
+      <p className="mb-2 text-xs font-semibold text-foreground">What would you like to do in {workspace}?</p>
+      <div role="group" aria-label="Choose a CLI chat path" className="flex flex-wrap gap-2">
+        <Button size="sm" variant={showHistory ? 'secondary' : 'outline'} aria-pressed={showHistory} onClick={() => setShowHistory(true)}><History className="size-3.5" />Continue a conversation</Button>
+        <Button size="sm" variant={!showHistory ? 'secondary' : 'outline'} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}><Plus className="size-3.5" />Start new session</Button>
+      </div>
+    </div>}
+    {terminal && <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+      {harnessSelect}
+      {startButton}
       <Button size="xs" variant={showHistory ? 'secondary' : 'ghost'} aria-pressed={showHistory} onClick={() => setShowHistory(value => !value)}><History className="size-3" />Resume session</Button>
       <Button size="xs" variant="ghost" title="Refresh installed harnesses" onClick={() => void refresh()}><RefreshCw className="size-3" />Refresh</Button>
       <Button size="xs" variant="ghost" disabled={!target} onClick={() => void external()}><ExternalLink className="size-3" />External terminal</Button>
-      {terminal && <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End session</Button>}
-    </div>
-    {showHistory && <ResumeSessions workspace={workspace} active={active} busy={busy} status={status} onResume={session => void start({ id: crypto.randomUUID(), target: session.assistant, sessionId: session.id, cwd: session.workspacePath })} />}
+      <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End session</Button>
+    </div>}
+    {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
+    {showHistory && <ResumeSessions workspace={workspace} active={active} busy={busy} status={status} fill={!terminal} onStartNew={() => setShowHistory(false)} onResume={session => void start({ id: crypto.randomUUID(), target: session.assistant, sessionId: session.id, cwd: session.workspacePath })} />}
+    {!terminal && !showHistory && <section aria-label="Start a new CLI session" className="flex-1 space-y-3 overflow-auto px-3 py-4">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Start a new session</h3>
+        <p className="mt-1 text-xs text-muted-foreground">Use a CLI tool in this workspace. It keeps its own login and permissions.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">{harnessSelect}{startButton}</div>
+      <p role="status" className="text-xs text-muted-foreground">{toolHint}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="xs" variant="ghost" onClick={() => void refresh()}><RefreshCw className="size-3" />Refresh tools</Button>
+        <Button size="xs" variant="ghost" disabled={!target} onClick={() => void external()}><ExternalLink className="size-3" />External terminal</Button>
+      </div>
+    </section>}
     {!!status?.sessions.length && <div className="px-3 py-1 border-b border-border">
       <select aria-label="Terminal sessions" className="max-w-full bg-card text-xs" value={terminal?.id ?? ''} onChange={e => { const selected = status.sessions.find(s => s.id === e.target.value) ?? null; setTerminal(selected); if (selected) setTarget(selected.target); }}>
         <option value="" disabled>Select a terminal</option>{status.sessions.map(s => <option key={s.id} value={s.id}>{s.label} · {s.state} · {s.id.slice(0, 8)}</option>)}
       </select>
     </div>}
-    {error && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-amber-600 break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
     {terminal && state.startsWith('Disconnected') && <div data-testid="terminal-disconnected" role="alert" className="flex flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
       <WifiOff className="size-4 shrink-0 text-amber-600" aria-hidden="true" />
       <span className="min-w-0 flex-1"><strong>CLI chat disconnected.</strong> Input is paused; the session may still be running.</span>
       <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>
     </div>}
-    {!terminal && <div className="flex-1 px-3 py-3 text-xs text-muted-foreground">Choose a harness for a new session, or resume a saved conversation above. The harness keeps its own login and permissions. Shell opens PowerShell or your Unix shell. Existing API conversations remain under Chat.</div>}
     <div className={`relative min-h-0 flex-1 bg-[#111b18] p-2 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
       if (event.button === 2) menuSelection.current = renderer.current?.getSelection() ?? '';
     }} onContextMenu={event => {
@@ -319,14 +354,14 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         <button role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => void pasteClipboard()}>Paste</button>
       </div>}
     </div>
-    <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1 text-xs">
+    {terminal && <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1 text-xs">
       <span role="status">{state}</span>
-      {terminal && <Button size="xs" variant="ghost" onClick={() => setRetry(n => n + 1)}><PlugZap className="size-3" />Reconnect</Button>}
+      <Button size="xs" variant="ghost" onClick={() => setRetry(n => n + 1)}><PlugZap className="size-3" />Reconnect</Button>
       <input aria-label="Search terminal output" placeholder="Search output" className="w-28 rounded border border-border bg-card px-1" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
       <Button size="xs" variant="ghost" onClick={() => search.current?.findNext(query)}><Search className="size-3" />Find</Button>
       <Button size="xs" variant="ghost" onClick={() => void copySelection()}><Copy className="size-3" />Copy selection</Button>
       <label className="flex items-center gap-1"><input type="checkbox" checked={screenReader} onChange={e => setScreenReader(e.target.checked)} />Screen reader</label>
-    </div>
-    <div className="truncate px-3 pb-1 text-[10px] text-muted-foreground" title={terminal?.cwd}>Local user permissions · {terminal?.cwd ?? workspace} · Hide keeps running; End session stops it.</div>
+    </div>}
+    {terminal && <div className="truncate px-3 pb-1 text-[10px] text-muted-foreground" title={terminal.cwd}>Local user permissions · {terminal.cwd} · Hide keeps running; End session stops it.</div>}
   </div>;
 }

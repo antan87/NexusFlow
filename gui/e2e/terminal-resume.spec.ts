@@ -29,9 +29,12 @@ test('resumes every indexed harness in the chat window using its recorded identi
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
-  await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toHaveText('Choose a harness');
+  await expect(chat.getByRole('button', { name: 'Continue a conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
+  await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toHaveText('Choose a CLI tool');
   await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
-  const history = chat.getByRole('region', { name: 'Resume a conversation' });
+  await chat.getByRole('button', { name: 'Continue a conversation', exact: true }).click();
+  const history = chat.getByRole('region', { name: 'Continue a conversation' });
   await expect(history.getByTestId('resume-session-row')).toHaveCount(4);
   await expect(history.getByText(child.title)).toHaveCount(0);
   await expect(history.getByText('Main thread', { exact: true })).toHaveCount(2);
@@ -42,9 +45,15 @@ test('resumes every indexed harness in the chat window using its recorded identi
   await page.screenshot({ path: '../scratch/harness-ux/03-chat-after.png' });
   for (const session of sessions) {
     const request = page.waitForRequest('**/api/terminals/feature-x/create');
-    await history.getByTestId('resume-session-row').filter({ hasText: session.title }).getByRole('button', { name: 'Resume', exact: true }).click();
-    expect((await request).postDataJSON()).toMatchObject({ target: session.assistant, sessionId: session.id });
+    await history.getByTestId('resume-session-row').filter({ hasText: session.title }).getByRole('button', { name: 'Continue', exact: true }).click();
+    const launch = (await request).postDataJSON();
+    expect(launch).toMatchObject({ target: session.assistant, sessionId: session.id });
     await expect(chat.getByRole('alert')).toContainText('Test launch intercepted');
+    if (session === sessions[0]) {
+      const retry = page.waitForRequest('**/api/terminals/feature-x/create');
+      await chat.getByRole('button', { name: 'Retry launch' }).click();
+      expect((await retry).postDataJSON()).toEqual(launch);
+    }
   }
   await history.getByRole('checkbox', { name: /Include subagent/ }).check();
   const childRow = history.getByTestId('resume-session-row').filter({ hasText: child.title });
@@ -52,6 +61,31 @@ test('resumes every indexed harness in the chat window using its recorded identi
   const parentRequest = page.waitForRequest('**/api/terminals/feature-x/create');
   await childRow.getByRole('button', { name: 'Main thread', exact: true }).click();
   expect((await parentRequest).postDataJSON()).toMatchObject({ target: 'codex', sessionId: sessions[0].id });
+});
+
+test('unavailable tools explain why start is disabled and a selected tool stays with the workspace', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({ harnesses: { 'feature-x': 'codex' } }));
+  });
+  await page.route('**/api/terminals/feature-x/status', route => route.fulfill({ json: {
+    available: true, sessions: [], targets: [
+      { id: 'codex', name: 'Codex', available: false, reason: 'Codex CLI is not installed' },
+      { id: 'claude', name: 'Claude', available: true, reason: null },
+    ],
+  } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
+  await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+  await expect(chat.getByRole('status').filter({ hasText: /Codex is unavailable/ })).toContainText('Codex CLI is not installed');
+  await chat.getByRole('combobox', { name: 'CLI harness' }).click();
+  await expect(page.getByRole('option', { name: /Codex.*not installed/i })).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('option', { name: 'Claude Code' }).click();
+  await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+  await chat.getByRole('button', { name: 'Close floating chat' }).click();
+  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toContainText('Claude Code');
 });
 
 test('Sessions tab defaults to conversations and can reveal delegated tasks', async ({ page }) => {
