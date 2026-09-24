@@ -14,7 +14,6 @@ import {
   validateNormalizedRemainingQuota,
   createClaudeCliStream,
   createCodexCliStream,
-  createAntigravityCliStream,
   createCopilotAcpMessages,
   OpaqueTurnSessionSimulator,
   createTemporaryWorkspace,

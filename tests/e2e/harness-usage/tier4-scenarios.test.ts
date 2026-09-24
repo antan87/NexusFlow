@@ -12,8 +12,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  validateNormalizedUsage,
-  validateNormalizedRemainingQuota,
   createClaudeCliStream,
   createCodexCliStream,
   createAntigravityCliStream,
@@ -212,16 +210,18 @@ describe('Tier 4: Real-World Application Scenarios', () => {
       completionTokens: 2500,
       quotaWarning: 'Quota threshold reached: 92% of daily limit consumed',
     });
+    const t2Stats = JSON.parse(turn2Stream.find((l) => l.includes('"stats"'))!);
+    const t2Warning = JSON.parse(turn2Stream.find((l) => l.includes('"warning"'))!);
 
     session.startTurn();
     session.recordTurnUsage(
       {
-        inputTokens: 12000,
-        outputTokens: 2500,
+        inputTokens: t2Stats.input_token_count,
+        outputTokens: t2Stats.candidates_token_count,
       },
       {
         tokens: { unit: 'tokens', remaining: 2000, limit: 35000, status: 'approaching_limit' },
-        warningMessage: 'Quota threshold reached: 92% of daily limit consumed',
+        warningMessage: t2Warning.warning,
       },
     );
     session.endTurn();
