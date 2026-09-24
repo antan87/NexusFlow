@@ -17,10 +17,7 @@ import {
   type TestWorkspace,
 } from './test-harness.js';
 
-import {
-  getDomainPack,
-  resolveActiveDomainRules,
-} from '../../src/core/domain-packs.js';
+import { resolveActiveDomainRules } from '../../src/core/domain-packs.js';
 
 import { buildHarnessCliCommand } from '../../src/utils/terminal-launch.js';
 import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';

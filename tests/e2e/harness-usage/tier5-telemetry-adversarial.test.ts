@@ -36,7 +36,6 @@ import {
 } from '../../../src/agent/CodexCliAdapter.js';
 
 import {
-  AntigravityCliAdapter,
   AntigravityJsonlDecoder,
   decodeAntigravityLine,
   extractNormalizedUsage,

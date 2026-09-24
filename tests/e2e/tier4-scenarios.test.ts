@@ -7,23 +7,15 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import fse from 'fs-extra';
-import { execa } from 'execa';
-
 import {
   createTestWorkspace,
   readAgentsMd,
-  readWorkspacePlan,
   listMaterializedSkills,
   generateAgentsMd,
-  featureGates,
   type TestWorkspace,
 } from './test-harness.js';
 
-import {
-  getDomainPack,
-  resolveActiveDomainRules,
-} from '../../src/core/domain-packs.js';
+import { resolveActiveDomainRules } from '../../src/core/domain-packs.js';
 
 import { buildHarnessCliCommand } from '../../src/utils/terminal-launch.js';
 import { loadWorkspaceLifecycle } from '../../src/core/lifecycle.js';

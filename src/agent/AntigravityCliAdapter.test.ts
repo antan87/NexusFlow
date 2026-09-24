@@ -12,7 +12,6 @@ import {
   decodeAntigravityLine,
   extractNormalizedUsage,
   findAntigravitySessionIdForWorkspace,
-  parseAntigravityQuotaError,
 } from './AntigravityCliAdapter.js';
 import type { NormalizedUsage, NormalizedRemainingQuota } from '../harness/types.js';
 
