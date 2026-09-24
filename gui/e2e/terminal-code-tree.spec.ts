@@ -216,7 +216,11 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => screen.evaluate(element => element.clientHeight)).toBeGreaterThan(100);
   await expect.poll(() => screen.evaluate(element => element.clientWidth)).toBeLessThan(400);
-  await clickRow(1);
+  const wrappedLinkRow = screen.locator('.xterm-rows > div').filter({ hasText: 'really-long' }).first();
+  await expect(wrappedLinkRow).toBeVisible();
+  const wrappedLinkBounds = await wrappedLinkRow.boundingBox();
+  expect(wrappedLinkBounds).not.toBeNull();
+  await page.mouse.click(wrappedLinkBounds!.x + 30, wrappedLinkBounds!.y + wrappedLinkBounds!.height / 2);
   await expect(code.getByText(`repo/${longPath}:42`)).toBeVisible();
 });
 
