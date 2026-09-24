@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Terminal, type IBufferLine } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -9,10 +10,12 @@ import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js'
 import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff } from 'lucide-react';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
+import { SessionUsageDetails } from './SessionUsage.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
+import type { AISession } from '../../types.js';
 
 interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; onStatusChange?: (status: 'idle' | 'running' | 'exited' | 'disconnected') => void; onBackgroundOutput?: () => void }
 export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, onStatusChange, onBackgroundOutput }: Props) {
@@ -40,6 +43,14 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const launchSeen = useRef('');
   const lastLaunch = useRef<TerminalLaunch | undefined>(undefined);
   const [retryLaunch, setRetryLaunch] = useState<TerminalLaunch | undefined>(undefined);
+  const usageHistory = useQuery({
+    queryKey: ['terminal-resume-sessions', workspace],
+    queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions`),
+    enabled: active && !!terminal?.sessionId,
+    staleTime: 15_000,
+    refetchInterval: active && terminal?.sessionId && state.startsWith('Connected') ? 60_000 : false,
+  });
+  const usageSession = usageHistory.data?.sessions.find(session => session.id === terminal?.sessionId && session.assistant === terminal.target);
   const activeRef = useRef(active);
   const openFileRef = useRef(onOpenFileReference);
   const statusChangeRef = useRef(onStatusChange);
@@ -340,6 +351,10 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       <span className="min-w-0 flex-1"><strong>CLI chat disconnected.</strong> Input is paused; the session may still be running.</span>
       <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect CLI</Button>
     </div>}
+    {terminal && terminal.target !== 'shell' && <section aria-label="CLI session usage" className="border-b border-border px-3 py-1.5">
+      <div className="flex items-center gap-2 text-[11px]"><strong className="font-semibold">{terminal.sessionId ? 'Saved conversation usage' : 'Session usage'}</strong>{terminal.sessionId && <Button size="xs" variant="ghost" aria-label="Refresh session usage" title="Refresh saved usage (also updates every minute while connected)" onClick={() => void usageHistory.refetch()}><RefreshCw className="size-3" /></Button>}</div>
+      {terminal.sessionId ? usageHistory.isPending ? <p className="text-[11px] text-muted-foreground">Checking saved conversation usage…</p> : usageHistory.isError ? <p className="text-[11px] text-muted-foreground">Usage could not be loaded. Refresh to try again.</p> : usageSession ? <SessionUsageDetails session={usageSession} /> : <p className="text-[11px] text-muted-foreground">Saved conversation usage is unavailable in the session index.</p> : <p className="text-[11px] text-muted-foreground">Usage unavailable: this new terminal has no saved conversation ID to match yet.</p>}
+    </section>}
     <div className={`relative min-h-0 flex-1 bg-[#111b18] p-2 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
       if (event.button === 2) menuSelection.current = renderer.current?.getSelection() ?? '';
     }} onContextMenu={event => {
