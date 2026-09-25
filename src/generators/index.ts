@@ -52,7 +52,7 @@ const GENERATORS: Record<
  * context: that lives in `AGENTS.md`, and a second copy would only be a file to
  * keep in sync.
  */
-function buildWorkspaceIndex(ctx: WorkspaceContext): string {
+export function buildWorkspaceIndex(ctx: WorkspaceContext): string {
   const { feature } = ctx;
   const repos = ctx.repos.map((repo) => `- \`${repo.name}\` — ${repo.path}`).join('\n');
 
@@ -61,7 +61,7 @@ function buildWorkspaceIndex(ctx: WorkspaceContext): string {
 ${feature.description}
 
 > Assistant context lives in **AGENTS.md**. Most agent tools read that file
-> directly; Claude Code reads \`CLAUDE.md\`, which imports it. This file is just
+> directly; Claude Code falls back to it or reads \`CLAUDE.md\` (which imports it). This file is just
 > an index for people.
 
 ## Repositories

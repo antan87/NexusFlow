@@ -2,14 +2,21 @@
  * @module generators/claude
  * Generates `CLAUDE.md` as a thin import of the canonical `AGENTS.md`.
  *
- * Claude Code reads `CLAUDE.md`, not `AGENTS.md` — but its documented pattern for
- * a repo that already has `AGENTS.md` is a `CLAUDE.md` that imports it, "so both
- * tools read the same instructions without duplicating them".
+ * In Claude Code v2.1.277+, Claude Code natively supports `AGENTS.md` as a fallback
+ * when no `CLAUDE.md` is present. However, when `CLAUDE.md` exists, Claude Code
+ * prioritizes it over `AGENTS.md`.
+ *
+ * `CLAUDE.md` is maintained in the workspace to:
+ * 1. Provide Claude-specific guidance (such as preferring `/plan` for multi-repo changes
+ *    and recording durable findings via the CLI).
+ * 2. Use `@AGENTS.md` to import the canonical workspace context, ensuring `AGENTS.md`
+ *    remains the single source of truth without duplicating instructions.
+ * 3. Preserve compatibility with older Claude Code releases (< v2.1.277) that only
+ *    read `CLAUDE.md`.
  *
  * The import costs nothing: `@path` files are expanded into context at launch,
  * so this is an include rather than a link — Claude gets the full body without a
- * tool call. That is what makes `AGENTS.md` the single source of truth while
- * still being read by the one tool that will not look at it.
+ * tool call.
  *
  * A symlink would also work, but creating one on Windows needs Administrator
  * rights or Developer Mode, so the import is the portable choice.
@@ -39,11 +46,6 @@ export async function generateClaudeConfig(
   const content = `${GENERATED_VIEW_HEADER}
 
 @AGENTS.md
-
-<!-- AGENTS.md holds the workspace context and is read by every other agent
-     tool. Claude Code does not read it, so this file imports it: @-imports are
-     expanded into context at launch, so nothing is duplicated and nothing costs
-     an extra read. Put Claude-only instructions below, not above. -->
 
 ## Claude Code
 

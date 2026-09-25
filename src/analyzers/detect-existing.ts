@@ -17,6 +17,8 @@ const PREVIEW_LENGTH = 500;
 const AI_CONFIG_FILES = [
   { assistant: 'claude' as const, relativePath: 'CLAUDE.md' },
   { assistant: 'claude' as const, relativePath: 'CLAUDE.local.md' },
+  { assistant: 'claude' as const, relativePath: '.claude/CLAUDE.md' },
+  { assistant: 'claude' as const, relativePath: '.claude/CLAUDE.local.md' },
   { assistant: 'agents' as const, relativePath: 'AGENTS.md' },
   { assistant: 'copilot' as const, relativePath: '.github/copilot-instructions.md' },
   { assistant: 'cursor' as const, relativePath: '.cursorrules' },
