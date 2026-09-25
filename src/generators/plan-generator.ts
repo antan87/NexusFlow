@@ -7,6 +7,7 @@
 import chalk from 'chalk';
 import { loadWorkspaceState } from '../core/workspace-state.js';
 import { loadWorkspaceLifecycle, renderLifecyclePlan } from '../core/lifecycle.js';
+import { loadWorkGuidance } from '../core/work-guidance.js';
 import { isUnusedLegacyPlan } from '../core/legacy-lifecycle.js';
 import { writeWorkspaceFile } from '../core/storage.js';
 import { findInterRepoDependencies } from '../analyzers/detect-deps.js';
@@ -16,6 +17,7 @@ import type {
   RepoInfo,
   DependencyNode,
   DependencyGraph,
+  WorkspaceLifecycle,
 } from '../types.js';
 import { GENERATED_SNAPSHOT_HEADER, renderFreshnessBanner } from '../core/generation-lock.js';
 import { PRIMARY_PLAN_FILE, PRIMARY_KNOWLEDGE_FILE, PRIMARY_CHAT_LEDGER_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
@@ -134,6 +136,47 @@ export function topologicalSort(graph: DependencyGraph): string[][] {
 
 // ─── Plan Generator ───────────────────────────────────────────────────────
 
+function workspaceWorkGuidance(
+  ctx: WorkspaceContext,
+  lifecycle: WorkspaceLifecycle | undefined,
+  guidance: Awaited<ReturnType<typeof loadWorkGuidance>>,
+): string[] {
+  const assignment = guidance.assignment;
+  const inline = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const objective = inline(assignment.objective || ctx.feature.description);
+  const current = lifecycle?.steps.find((step) => step.id === lifecycle.currentStepId && step.status !== 'completed')
+    ?? lifecycle?.steps.find((step) => step.status === 'in_progress' || step.status === 'verified')
+    ?? lifecycle?.steps.find((step) => step.status !== 'completed');
+  const lines = ['## Current work and next action', ''];
+  lines.push(`- **Assignment (${assignment.stage}):** ${objective || 'Define the current objective in the AI assignment.'}`);
+  lines.push(`- **Expected output:** ${inline(assignment.expectedOutput) || 'Define this in the AI assignment before starting work.'}`);
+  lines.push(`- **Stop when:** ${inline(assignment.stopCondition) || 'Define this in the AI assignment before starting work.'}`);
+  if (!ctx.repos.length) lines.push(`- **Repository:** None attached. Add one with \`${CLI_NAME} add-repo\`, then refresh before implementation.`);
+  if (current) {
+    const milestoneTitle = inline(current.title);
+    lines.push(`- **Milestone:** ${milestoneTitle} (${current.status.replaceAll('_', ' ')}).`);
+    const action = current.status === 'blocked'
+      ? `Resolve the milestone blocker before continuing: ${inline(current.unblockCondition || '') || 'review the unblock condition in Visual Flow'}.`
+      : current.status === 'pending'
+        ? `Review ${milestoneTitle}, then start it in Visual Flow or with \`${CLI_NAME} flow --step ${current.id} --action start\`. Starting records progress; it does not run the work.`
+        : current.status === 'verified'
+          ? `Review the verification evidence, then complete ${milestoneTitle} in Visual Flow or with \`${CLI_NAME} flow --step ${current.id} --action complete\`.`
+          : `Work toward ${milestoneTitle}; check the assignment's stop condition, then verify before completing the milestone.`;
+    lines.push(`- **Next action:** ${action}`);
+  } else if (lifecycle?.steps.length) {
+    lines.push('- **Next action:** All saved milestones are complete. Review the assignment and add another outcome only if work remains.');
+  } else {
+    const title = objective ? `${objective.slice(0, 100).trimEnd()}${objective.length > 100 ? '…' : ''}` : 'Define the first reviewable outcome';
+    lines.push('- **Next action:** Check the live Visual Flow. If no milestone is saved, review the example below and use Plan → Add milestones to draft one.');
+    lines.push('', '### Example first milestone draft', '');
+    lines.push(`- **Title:** ${title}`);
+    lines.push('- **Outcome and check:** Describe one observable result and how you will verify it.');
+    lines.push('- This example is not a saved milestone. Saving your edited draft creates a pending milestone; it does not start work or approve any source document.');
+  }
+  lines.push('', `Run ${CLI_NAME} flow for live milestone progress. Read contextspace-assignment.md or run ${CLI_NAME} flow --assignment for the full, current brief.`, '');
+  return lines;
+}
+
 /**
  * Generate a `nexusflow-plan.md` implementation plan for the workspace.
  *
@@ -157,15 +200,17 @@ export async function generateImplementationPlan(
     const lifecycle = state.lifecycle && isUnusedLegacyPlan(state.lifecycle)
       ? await loadWorkspaceLifecycle(workspacePath) : state.lifecycle;
     const milestonePlan = lifecycle ? renderLifecyclePlan(lifecycle, false) : '';
+    const soloGuidance = repos.length <= 1
+      ? workspaceWorkGuidance(ctx, lifecycle, await loadWorkGuidance(workspacePath)) : [];
 
 
     // ── Fallback: no analysis available ─────────────────────────────────
-    if (!analysis || analysis.size === 0) {
+    if (!analysis || analysis.size === 0 || repos.length === 0) {
       const lines = [
         GENERATED_SNAPSHOT_HEADER,
         '',
         `# Implementation Plan — ${feature.id}`,
-        '', milestonePlan, '',
+        '', milestonePlan, '', ...soloGuidance,
         ...(ctx.generation ? [renderFreshnessBanner(ctx.generation), ''] : []),
         `> Auto-generated by ${BRAND_NAME}.`,
         '> No project analysis data was available, so repos are listed alphabetically.',
@@ -177,6 +222,7 @@ export async function generateImplementationPlan(
           .map((r) => r.name)
           .sort()
           .map((n) => `- ${n}`),
+        ...(!repos.length ? ['- No repository attached yet.'] : []),
         '',
       ];
       await writeWorkspaceFile(
@@ -234,23 +280,20 @@ export async function generateImplementationPlan(
       // repos to another" both read as nonsense for a one-repo workspace.
       md.push(
         repos.length === 1
-          ? 'This workspace has one repo, so there is no cross-repo build order to describe.'
+          ? 'This workspace has one repo. Follow the assignment and milestone below; cross-repo build order does not apply.'
           : `No package dependencies were detected between the ${repos.length} repos in this workspace, so no build order is forced — work in whichever order suits the task.`,
       );
       md.push('');
-      md.push(
-        repos.length === 1
-          ? `Add another repo with \`${CLI_NAME} add-repo\`, then run \`${CLI_NAME} refresh\`, and this plan will describe any order between them.`
-          : `If you add a dependency from one of these repos to another, run \`${CLI_NAME} refresh\` and this plan will describe the resulting order.`,
-      );
-      md.push('');
       if (repos.length === 1) {
+        md.push(...soloGuidance);
         md.push('## Implementation Guidance');
         md.push('');
         md.push('- **Vertical Slice**: Implement in small, testable increments and verify tests pass after each step.');
         md.push(`- **Non-Linear Iteration**: If unexpected constraints or gotchas emerge, record them with \`${CLI_NAME} knowledge add\` or MCP \`add_knowledge\` (or read/append \`${PRIMARY_KNOWLEDGE_FILE}\` directly if MCP is not connected or CLI is not on PATH).`);
         md.push(`- **Cross-Harness Handoff**: If the MCP server is connected, use \`post_workroom_handoff\` to post milestone updates; otherwise record handoffs in \`${PRIMARY_CHAT_LEDGER_FILE}\` or generate a bundle with \`${CLI_NAME} handoff\`.`);
         md.push('');
+      } else {
+        md.push(`If you add a dependency from one of these repos to another, run \`${CLI_NAME} refresh\` and this plan will describe the resulting order.`, '');
       }
       await writeWorkspaceFile(workspacePath, feature.id, PRIMARY_PLAN_FILE, md.join('\n'));
       console.log(chalk.green('  ✔'), `Generated ${PRIMARY_PLAN_FILE}`);

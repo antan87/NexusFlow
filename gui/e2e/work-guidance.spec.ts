@@ -166,3 +166,22 @@ test('hides unused milestones and supports an empty plan after removing custom o
   expect(state.lifecycle().steps).toEqual([]);
   await page.screenshot({ path: 'test-results/optional-milestones.png', fullPage: true });
 });
+
+test('offers an unsaved first milestone from the assignment without starting work', async ({ page }) => {
+  const state = await setupWork(page, true);
+  await expect(page.getByText('No milestones saved yet')).toBeVisible();
+  await page.getByLabel('Current objective').fill('Unsaved objective');
+  await expect(page.getByRole('button', { name: 'Draft first milestone' })).toBeDisabled();
+  await expect(page.getByText('Save the AI assignment before drafting from it.')).toBeVisible();
+  await page.getByLabel('Current objective').fill('Find the bottleneck');
+  await page.getByRole('button', { name: 'Draft first milestone' }).click();
+  await expect(page.getByLabel('Milestone 1 title')).toHaveValue('Find the bottleneck');
+  await expect(page.getByText('This milestone is an unsaved draft')).toBeVisible();
+  expect(state.lifecycle().steps).toEqual([]);
+  await page.getByLabel('Milestone 1 outcome').fill('A measured latency profile');
+  await page.getByRole('heading', { name: 'Work brief & sources' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'test-results/first-milestone-draft.png', fullPage: true });
+  await page.getByRole('button', { name: 'Save milestones' }).click();
+  expect(state.lifecycle().steps[0]).toMatchObject({ title: 'Find the bottleneck', description: 'A measured latency profile', status: 'pending' });
+  await expect(page.getByRole('button', { name: 'Visual Flow' })).toBeVisible();
+});

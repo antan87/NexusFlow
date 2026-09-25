@@ -73,7 +73,13 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
     onPlanChanged(); setMessage('Milestones saved. Visual Flow and the Markdown plan use these same steps.');
   });
   const assignmentDirty = draft && context && (draft.workType !== context.guidance.workType || draft.size !== context.guidance.size || JSON.stringify(draft.assignment) !== JSON.stringify(context.guidance.assignment));
-
+  const draftFirstMilestone = () => {
+    if (!context?.lifecycle || steps.length || assignmentDirty) return;
+    const objective = context.guidance.assignment.objective.replace(/\s+/g, ' ').trim();
+    setSteps([{ id: `milestone-${crypto.randomUUID()}`, title: objective.slice(0, 100) || 'Define the first reviewable outcome', description: context.guidance.assignment.expectedOutput.trim(), status: 'pending', dependsOn: [] }]);
+    setPanel('milestones');
+    setMessage('First milestone drafted locally. Review its title and outcome, then save it when ready.');
+  };
   return <section className="mb-5 rounded-xl border border-border bg-card p-5 space-y-4" aria-label="Work brief and sources">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h3 className="font-semibold">Work brief & sources</h3>
@@ -114,6 +120,12 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           })}>Copy AI assignment</Button>
         </div>
         {assignmentDirty && <p className="text-xs text-muted-foreground">Save your changes before copying the assignment.</p>}
+        {!steps.length && <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+          <h4 className="text-sm font-semibold">No milestones saved yet</h4>
+          <p className="text-xs text-muted-foreground">Turn the current assignment into a first reviewable outcome. The draft stays on this page until you save it; saving creates a pending milestone and does not start work.</p>
+          <Button size="sm" variant="outline" disabled={busy || !context.lifecycle || Boolean(assignmentDirty)} onClick={draftFirstMilestone}>Draft first milestone</Button>
+          {assignmentDirty && <p className="text-xs text-muted-foreground">Save the AI assignment before drafting from it.</p>}
+        </div>}
       </div>}
       {panel === 'documents' && <div className="space-y-4">
         <p className="text-sm text-muted-foreground">Attach Markdown/text or link to a document. Approved requirements define intended behavior; drafts remain proposals. Superseded documents stay available as history.</p>
@@ -178,6 +190,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
       </div>}
       {panel === 'milestones' && <div className="space-y-4">
         <p className="text-sm text-muted-foreground">Milestones are optional and unique to this feature. Name the outcomes you need, or remove all milestones to hide the flow.</p>
+        {!context.lifecycle?.steps.length && steps.length > 0 && <p className="text-xs text-muted-foreground">This milestone is an unsaved draft. Review its title and outcome; Save milestones creates it as pending and does not start work.</p>}
         {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
           <legend className="px-1 text-xs text-muted-foreground">Milestone {index + 1} · {step.status.replaceAll('_', ' ')}</legend>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSteps(steps.filter((item) => item.id !== step.id).map((item) => ({ ...item, dependsOn: item.dependsOn?.filter((id) => id !== step.id) })))}>Remove milestone {index + 1}</Button>
