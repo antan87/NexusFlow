@@ -7,7 +7,15 @@ import { apiFetch } from '../../lib/api/client.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import type { LifecycleStep, WorkDocument, WorkGuidance, WorkspaceLifecycle } from '../../types.js';
 
-type WorkContext = { guidance: WorkGuidance; projectId?: string; sharedDocuments?: Array<WorkDocument & { workspaceId: string }>; lifecycle: WorkspaceLifecycle | null; assignment: string };
+type WorkContext = {
+  guidance: WorkGuidance;
+  projectId?: string;
+  sharedDocuments?: Array<WorkDocument & { workspaceId: string }>;
+  lifecycle: WorkspaceLifecycle | null;
+  assignment: string;
+  contextRefreshed?: boolean;
+  contextRefreshError?: string;
+};
 type DocumentDraft = Pick<WorkDocument, 'title' | 'role' | 'status' | 'scope' | 'summary'>;
 const emptyDocument = (): DocumentDraft => ({ title: '', role: 'requirements', status: 'draft', scope: {}, summary: '' });
 const selectClass = 'mt-1 w-full rounded-md border border-border bg-background p-2 text-sm';
@@ -44,6 +52,10 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
     catch (error) { setError(error instanceof Error ? error.message : 'The operation failed.'); }
     finally { setBusy(false); }
   };
+  const savedMessage = (baseMessage: string, result: { contextRefreshed?: boolean; contextRefreshError?: string }) => {
+    if (result.contextRefreshed === false) return `${baseMessage} Generated context refresh failed: ${result.contextRefreshError ?? 'run refresh and retry.'}`;
+    return result.contextRefreshed === true ? `${baseMessage} Generated context refreshed.` : baseMessage;
+  };
   const milestoneOptions = <>{context?.lifecycle?.steps.map((step) => <option key={step.id} value={step.id}>{step.title}</option>)}</>;
   const patchAssignment = (patch: Partial<WorkGuidance['assignment']>) => setDraft((current) => current ? { ...current, assignment: { ...current.assignment, ...patch } } : current);
   const saveAssignment = () => perform(async () => {
@@ -51,7 +63,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
     const result = await apiFetch<WorkContext>(`${base}/work`, { method: 'PUT', body: JSON.stringify({
       revision: context.guidance.revision, workType: draft.workType, size: draft.size, assignment: draft.assignment,
     }) });
-    setContext(result); setDraft(result.guidance); setMessage('AI assignment saved.');
+    setContext(result); setDraft(result.guidance); setMessage(savedMessage('AI assignment saved.', result));
   });
   const saveDocument = () => perform(async () => {
     if (!context) return;
@@ -62,16 +74,34 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
       }),
     });
     setContext(result); setDocument(emptyDocument()); setEditingDocumentId(null); setContent(''); setUrl('');
-    setMessage('Document saved. Its role, status, and scope now appear in AI context.');
+    setMessage(savedMessage('Document saved. Its role, status, and scope now appear in AI context.', result));
   });
   const saveMilestones = () => perform(async () => {
     if (!context?.lifecycle) return;
-    const result = await apiFetch<{ lifecycle: WorkspaceLifecycle }>(`${base}/lifecycle/plan`, {
+    const result = await apiFetch<{ lifecycle: WorkspaceLifecycle; contextRefreshed?: boolean; contextRefreshError?: string }>(`${base}/lifecycle/plan`, {
       method: 'PUT', body: JSON.stringify({ revision: context.lifecycle.revision ?? 0, steps }),
     });
     setContext({ ...context, lifecycle: result.lifecycle }); setSteps(result.lifecycle.steps);
-    onPlanChanged(); setMessage('Milestones saved. Visual Flow and the Markdown plan use these same steps.');
+    onPlanChanged(); setMessage(savedMessage('Milestones saved. Visual Flow and the Markdown plan use these same steps.', result));
   });
+  const removeMilestone = (stepId: string) => {
+    const step = steps.find((candidate) => candidate.id === stepId);
+    if (!step) return;
+    const dependents = steps.filter((candidate) => candidate.id !== stepId && candidate.dependsOn?.includes(stepId));
+    if (dependents.length) {
+      setError(`Cannot remove “${step.title}” because ${dependents.map((candidate) => `“${candidate.title}”`).join(', ')} depend on it. Remove the dependency first.`);
+      setMessage('The milestone draft was kept.');
+      return;
+    }
+    const scopedDocuments = context?.guidance.documents.filter((document) => document.scope.milestoneId === stepId) ?? [];
+    if (draft?.assignment.milestoneId === stepId || scopedDocuments.length) {
+      setError(`Move the assignment${scopedDocuments.length ? ' and source document' : ''} scope away from “${step.title}” before removing it.`);
+      setMessage('The milestone draft was kept.');
+      return;
+    }
+    setError('');
+    setSteps(steps.filter((candidate) => candidate.id !== stepId));
+  };
   const assignmentDirty = draft && context && (draft.workType !== context.guidance.workType || draft.size !== context.guidance.size || JSON.stringify(draft.assignment) !== JSON.stringify(context.guidance.assignment));
   const draftFirstMilestone = () => {
     if (!context?.lifecycle || steps.length || assignmentDirty) return;
@@ -193,7 +223,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
         {!context.lifecycle?.steps.length && steps.length > 0 && <p className="text-xs text-muted-foreground">This milestone is an unsaved draft. Review its title and outcome; Save milestones creates it as pending and does not start work.</p>}
         {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
           <legend className="px-1 text-xs text-muted-foreground">Milestone {index + 1} · {step.status.replaceAll('_', ' ')}</legend>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSteps(steps.filter((item) => item.id !== step.id).map((item) => ({ ...item, dependsOn: item.dependsOn?.filter((id) => id !== step.id) })))}>Remove milestone {index + 1}</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => removeMilestone(step.id)}>Remove milestone {index + 1}</Button>
           <label className="block text-sm">Milestone {index + 1} title<Input value={step.title} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, title: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} outcome<Textarea value={step.description ?? ''} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
           <label className="block text-sm">Milestone {index + 1} branch (optional)<Input value={step.branch ?? ''} placeholder="feature/invoice-calculation" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, branch: event.target.value } : item))} /></label>

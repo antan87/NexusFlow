@@ -1,9 +1,13 @@
-import { beforeEach, afterEach, expect, it } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { registerWorkGuidanceRoutes } from './work-guidance-routes.js';
+
+vi.mock('../core/refresh.js', () => ({
+  refreshWorkspace: vi.fn().mockResolvedValue({ workspacePath: '/tmp/test', analyzedRepos: [], reusedRepos: [], refreshedHandoff: false }),
+}));
 let root: string;
 let app: Hono;
 beforeEach(async () => {
@@ -19,8 +23,24 @@ it('serves source labels, original text, and an updated scoped assignment', asyn
   expect(saved.status).toBe(200);
   const result = await saved.json();
   expect(result.assignment).toContain('requirements, approved');
+  expect(result.contextRefreshed).toBe(true);
   const read = await app.request(`/api/workspace/test/work/documents/${result.guidance.documents[0].id}`);
   expect((await read.json()).content).toBe('Original requirements');
+});
+
+it('reports a saved plan conflict and refresh result without hiding the mutation', async () => {
+  const first = await app.request('/api/workspace/test/work', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revision: 0, workType: 'feature', size: 'small', assignment: { stage: 'design', objective: 'Shape the change', expectedOutput: 'A proposal', stopCondition: 'Before implementation' } }),
+  });
+  expect(first.status).toBe(200);
+  expect((await first.json()).contextRefreshed).toBe(true);
+  const stale = await app.request('/api/workspace/test/work', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revision: 0, workType: 'feature', size: 'small', assignment: { stage: 'design', objective: 'Stale', expectedOutput: 'A proposal', stopCondition: 'Before implementation' } }),
+  });
+  expect(stale.status).toBe(409);
+  expect((await stale.json()).error).toContain('another session');
 });
 it('rejects absent workspaces, malformed metadata, oversized input, and stale writes', async () => {
   expect((await app.request('/api/workspace/missing/work')).status).toBe(404);

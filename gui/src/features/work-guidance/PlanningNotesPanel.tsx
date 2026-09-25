@@ -24,8 +24,11 @@ export function PlanningNotesPanel({ workspaceId }: { workspaceId: string }) {
     if (!saved) return;
     setBusy(true); setError(''); setMessage('');
     try {
-      const result = await apiFetch<{ content: string; revision: string }>(endpoint, { method: 'PUT', body: JSON.stringify({ revision: saved.revision, content: draft }) });
-      setSaved(result); setMessage('Delivery notes saved. Refresh will preserve them.');
+      const result = await apiFetch<{ content: string; revision: string; contextRefreshed?: boolean; contextRefreshError?: string }>(endpoint, { method: 'PUT', body: JSON.stringify({ revision: saved.revision, content: draft }) });
+      setSaved(result);
+      setMessage(result.contextRefreshed === false
+        ? `Delivery notes saved, but generated context refresh failed: ${result.contextRefreshError ?? 'run refresh and retry.'}`
+        : result.contextRefreshed === true ? 'Delivery notes saved. Generated context refreshed.' : 'Delivery notes saved. Refresh will preserve them.');
     } catch (error) { setError(`${error instanceof Error ? error.message : 'Could not save.'} Your draft is kept.`); }
     finally { setBusy(false); }
   };
