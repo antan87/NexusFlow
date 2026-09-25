@@ -93,6 +93,9 @@ test('saves independent type, size, stage, scope, and stopping point', async ({ 
 test('adds a dependent milestone without resetting existing progress', async ({ page }) => {
   const state = await setupWork(page);
   await page.getByRole('button', { name: 'Edit milestones' }).click();
+  await page.getByRole('button', { name: 'Remove milestone 1', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('depend on it');
+  await expect(page.getByLabel('Milestone 1 title')).toHaveValue('Measure baseline');
   await page.getByRole('button', { name: 'Add milestone', exact: true }).click();
   await page.getByLabel('Milestone 3 title').fill('Roll out gradually');
   await page.getByLabel('Milestone 3 outcome').fill('Compare production timings');

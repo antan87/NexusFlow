@@ -1,9 +1,13 @@
-import { beforeEach, afterEach, expect, it } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { enabledTools, findTool, type ToolContext } from './tools.js';
 import { planningTools } from './planning-tools.js';
+
+vi.mock('../core/refresh.js', () => ({
+  refreshWorkspace: vi.fn().mockResolvedValue({ workspacePath: '/tmp/test', analyzedRepos: [], reusedRepos: [], refreshedHandoff: false }),
+}));
 import { getWorkContext } from '../core/work-guidance.js';
 import { advanceLifecycleStep } from '../core/lifecycle.js';
 
@@ -27,6 +31,7 @@ it('creates a feature plan, scopes an assignment and source, edits notes, then c
   expect(context.guidance.revision).toBe(0);
   expect(context.guidance.documents).toEqual([]);
   const plan = await call('update_milestone_plan', { revision: 0, steps: [{ id: 'reports', title: 'Open root reports' }] });
+  expect(plan.contextRefreshed).toBe(true);
   context = await call('update_work_assignment', { revision: context.guidance.revision, workType: 'feature', size: 'small', assignment: {
     stage: 'implement', objective: 'Open agent-created reports', expectedOutput: 'A working report viewer', stopCondition: 'Tests pass', milestoneId: 'reports',
   } });
@@ -39,6 +44,7 @@ it('creates a feature plan, scopes an assignment and source, edits notes, then c
   expect((await call('read_work_document', { documentId: document.id })).content).toBe('# Keep formatting');
   const notes = await call('get_planning_notes');
   const saved = await call('save_planning_notes', { revision: notes.revision, content: '# Delivery\nOpen reports from the root.' });
+  expect(saved.contextRefreshed).toBe(true);
   expect((await call('get_planning_notes')).revision).toBe(saved.revision);
   const { milestoneId: _scope, ...assignment } = context.guidance.assignment;
   await call('update_work_assignment', { revision: context.guidance.revision, workType: 'feature', size: 'small', assignment });
