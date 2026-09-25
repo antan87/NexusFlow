@@ -281,11 +281,11 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   // ── 6. Core Artifacts ──────────────────────────────────────────────────
   const featureId = path.basename(workspacePath);
   const coreFiles: Array<{ name: string; exists: () => Promise<boolean> }> = [
-    // AGENTS.md first: it is the one file an assistant actually loads, and
-    // CLAUDE.md is only an `@AGENTS.md` import of it. Without it a workspace has
-    // no context at all, and the import fails silently — so a doctor run that
-    // did not check it reported a clean bill of health on a workspace that could
-    // tell an assistant nothing.
+    // AGENTS.md first: it is the canonical file assistants load (which Claude
+    // Code supports as fallback or via CLAUDE.md's `@AGENTS.md` import). Without
+    // it a workspace has no context at all, and an import in CLAUDE.md fails
+    // silently — so a doctor run that did not check it reported a clean bill of
+    // health on a workspace that could tell an assistant nothing.
     { name: 'AGENTS.md', exists: () => workspaceFileExists(workspacePath, featureId, 'AGENTS.md') },
     { name: 'WORKSPACE.md', exists: () => workspaceFileExists(workspacePath, featureId, 'WORKSPACE.md') },
     { name: 'contextspace-knowledge.md', exists: () => workspaceFileExists(workspacePath, featureId, 'contextspace-knowledge.md') },
