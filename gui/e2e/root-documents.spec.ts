@@ -104,18 +104,26 @@ test('maximizes a document inside the app borders and restores focus on Escape',
   await expect(page.getByTitle('Preview of page.html')).toBeVisible();
 });
 
+/**
+ * Deliberately a full document with a real <head>, because that is what an AI writes. DOMPurify
+ * returns only the <body>, so head assets are hoisted by the viewer rather than sanitized in place;
+ * a body-only fixture silently fails to cover that.
+ */
 const STYLED_PAGE = [
-  '<h1>Styled report</h1>',
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Report</title>',
   '<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">',
   '<link rel="preload" as="script" href="https://cdn.example.com/app.js">',
+  '<script src="https://cdn.tailwindcss.com"></script>',
+  '</head><body>',
+  '<h1>Styled report</h1>',
   '<style>h1 { color: rebeccapurple; }</style>',
   '<svg width="16" height="16"><circle cx="8" cy="8" r="7" /></svg>',
-  '<script src="https://cdn.tailwindcss.com"></script>',
   '<script>window.unsafe = true</script>',
   '<img src="https://cdn.example.com/hero.png" onerror="window.unsafe = true" onclick="window.unsafe = true">',
   '<a href="javascript:window.unsafe=true">bad link</a>',
   '<iframe src="https://evil.example.com"></iframe>',
   '<button onclick="window.unsafe=true">handler</button>',
+  '</body></html>',
 ].join('');
 
 async function openStyledPage(page: import('@playwright/test').Page) {
@@ -135,8 +143,9 @@ test('keeps presentational markup and strips active content from agent HTML by d
   const { frame, srcdoc } = await openStyledPage(page);
   const html = await srcdoc();
 
-  // Styling survives: external stylesheet, inline <style>, inline SVG.
+  // Styling survives, hoisted from the source <head> into the head the viewer builds.
   expect(html).toContain('<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">');
+  expect(html.indexOf('<link rel="stylesheet"')).toBeLessThan(html.indexOf('<body>'));
   expect(html).toContain('color: rebeccapurple');
   expect(html).toContain('<svg');
   expect(html).toContain('<circle');
@@ -168,13 +177,16 @@ test('runs a trusted document in an opaque-origin frame', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
   const trusted = await srcdoc();
-  expect(trusted).toContain('https://cdn.tailwindcss.com');
+  // The URL is normalised through `new URL`, hence the trailing slash on a bare origin.
+  expect(trusted).toMatch(/<script src="https:\/\/cdn\.tailwindcss\.com\/"><\/script>/);
   expect(trusted).toContain('script-src');
   // Scripts are allowed but the frame is never given the app's origin, and other escapes stay shut.
   expect(await frame.getAttribute('sandbox')).toBe('allow-scripts');
   expect(trusted).not.toContain('<iframe');
   expect(trusted).not.toContain('onclick');
   expect(trusted).not.toContain('javascript:');
+  // Trusting a document readmits remote scripts, never inline ones.
+  expect(trusted).not.toContain('window.unsafe = true');
   expect(trusted).toContain("default-src 'none'");
   await expect(page.getByText('remote code is running in a sandboxed frame', { exact: false })).toBeVisible();
 });
@@ -200,6 +212,8 @@ test('rejects a second document that tries to inherit trust', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Trust this document', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toHaveCount(0);
   expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).not.toContain('script-src');
+  // The stylesheet is still hoisted, because that is Q1 and not gated on trust.
+  expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).toContain('bootstrap.min.css');
 });
 
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {

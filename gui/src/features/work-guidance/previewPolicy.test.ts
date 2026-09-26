@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPreviewDocument,
   dependsOnExternalScript,
-  isStyleSheetLink,
-  LOCKED_FORBID_TAGS,
+  isStyleSheetHref,
   previewCsp,
+  safeAssetUrl,
   sanitizeOptions,
-  TRUSTED_FORBID_TAGS,
 } from './previewPolicy.js';
 
 /**
@@ -14,14 +13,6 @@ import {
  * gui/e2e/root-documents.spec.ts; this file pins the decisions themselves so a regression in the
  * rules fails fast under `npm test`.
  */
-function attr(tag: string, rel?: string, href?: string) {
-  const node = {
-    tagName: tag.toUpperCase(),
-    getAttribute: (name: string) => (name === 'rel' ? rel : name === 'href' ? href : null),
-  } as unknown as Element;
-  return node;
-}
-
 describe('preview CSP', () => {
   it('never allows script in the default locked mode', () => {
     expect(previewCsp(false)).not.toContain('script-src');
@@ -51,68 +42,72 @@ describe('preview CSP', () => {
   });
 
   it('never leaks a frame or media capability that the assets policy did not intend', () => {
-    for (const trusted of [false, true]) {
-      expect(previewCsp(trusted)).not.toContain('frame-src');
-      expect(previewCsp(trusted)).not.toContain('connect-src');
-    }
+    expect(previewCsp(false)).not.toContain('frame-src');
+    // Locked mode runs no script, so it needs no outbound fetch capability at all.
+    expect(previewCsp(false)).not.toContain('connect-src');
+  });
+
+  it('grants a trusted document the fetch capability its scripts need to work', () => {
+    // Tailwind's Play CDN fetches its engine; without connect-src it runs and styles nothing.
+    expect(previewCsp(true)).toContain('connect-src https: http:');
+    expect(previewCsp(true)).toContain("'wasm-unsafe-eval'");
   });
 });
 
 describe('sanitize options', () => {
-  it('forbids script in the locked mode', () => {
-    expect(sanitizeOptions(false).FORBID_TAGS).toContain('script');
-  });
-
-  it('readmits stylesheet links in both modes, because Q1 covers styles', () => {
-    expect(sanitizeOptions(false).ADD_TAGS).toEqual(['link']);
-    expect(sanitizeOptions(true).ADD_TAGS).toEqual(['link', 'script']);
-  });
-
-  it('admits script only for a trusted document, via ADD_TAGS', () => {
-    const trusted = sanitizeOptions(true);
-    expect(trusted.FORBID_TAGS).not.toContain('script');
-    expect(trusted.ADD_TAGS).toContain('script');
-    expect(sanitizeOptions(false).ADD_TAGS).not.toContain('script');
-  });
-
-  it('still forbids the embedded-content tags when trusted', () => {
-    for (const tag of ['iframe', 'object', 'embed', 'form']) {
-      expect(sanitizeOptions(true).FORBID_TAGS).toContain(tag);
+  it('forbids script and link in both modes, since head assets are hoisted instead', () => {
+    for (const options of [sanitizeOptions(), sanitizeOptions()]) {
+      expect(options.FORBID_TAGS).toContain('script');
+      expect(options.FORBID_TAGS).toContain('link');
     }
+  });
+
+  it('never uses ADD_TAGS, which would let head markup back in through the body', () => {
+    expect(sanitizeOptions()).not.toHaveProperty('ADD_TAGS');
   });
 
   it('always forbids iframe, object, embed, form, meta and base', () => {
     for (const tag of ['iframe', 'object', 'embed', 'form', 'meta', 'base']) {
-      expect(LOCKED_FORBID_TAGS).toContain(tag);
-      expect(TRUSTED_FORBID_TAGS).toContain(tag);
+      expect(sanitizeOptions().FORBID_TAGS).toContain(tag);
     }
   });
 
   it('keeps inline SVG, which AI output uses for icons and charts', () => {
-    expect(sanitizeOptions(false).USE_PROFILES).toMatchObject({ svg: true });
+    expect(sanitizeOptions().USE_PROFILES).toMatchObject({ svg: true });
   });
 
   it('returns fresh arrays so a caller cannot mutate the shared policy', () => {
-    const first = sanitizeOptions(false);
+    const first = sanitizeOptions();
     first.FORBID_TAGS.push('style');
-    first.ADD_TAGS.push('script');
-    expect(sanitizeOptions(false).FORBID_TAGS).not.toContain('style');
-    expect(sanitizeOptions(false).ADD_TAGS).not.toContain('script');
+    expect(sanitizeOptions().FORBID_TAGS).not.toContain('style');
+  });
+});
+
+describe('asset URL admission', () => {
+  it('accepts absolute http and https', () => {
+    expect(safeAssetUrl('https://cdn.example.com/a.css')).toBe('https://cdn.example.com/a.css');
+    expect(safeAssetUrl('http://cdn.example.com/a.css')).toBe('http://cdn.example.com/a.css');
+  });
+
+  it('rejects every other scheme and anything not absolute', () => {
+    for (const value of ['javascript:alert(1)', 'data:text/css,body{}', 'blob:https://x/y', 'file:///etc/passwd', '/local.css', '//cdn.example.com/a.css', '', null, undefined]) {
+      expect(safeAssetUrl(value)).toBeNull();
+    }
   });
 });
 
 describe('stylesheet link admission', () => {
   it('admits a remote stylesheet', () => {
-    expect(isStyleSheetLink(attr('link', 'stylesheet', 'https://cdn.example/bootstrap.css'))).toBe(true);
-    expect(isStyleSheetLink(attr('link', 'stylesheet', '//cdn.example/bootstrap.css'))).toBe(true);
+    expect(isStyleSheetHref('https://cdn.example.com/a.css', 'stylesheet')).toBe(true);
+    expect(isStyleSheetHref('https://cdn.example.com/a.css', 'STYLESHEET')).toBe(true);
   });
 
   it('rejects every other link relation and non-remote hrefs', () => {
-    expect(isStyleSheetLink(attr('link', 'preload', 'https://cdn.example/app.js'))).toBe(false);
-    expect(isStyleSheetLink(attr('link', 'prefetch', 'https://cdn.example/app.js'))).toBe(false);
-    expect(isStyleSheetLink(attr('link', 'import', 'https://cdn.example/x.html'))).toBe(false);
-    expect(isStyleSheetLink(attr('link', undefined, 'https://cdn.example/app.css'))).toBe(false);
-    expect(isStyleSheetLink(attr('link', 'stylesheet', 'data:text/css,body{}'))).toBe(false);
+    expect(isStyleSheetHref('https://cdn.example.com/app.js', 'preload')).toBe(false);
+    expect(isStyleSheetHref('https://cdn.example.com/app.js', 'prefetch')).toBe(false);
+    expect(isStyleSheetHref('https://cdn.example.com/x.html', 'import')).toBe(false);
+    expect(isStyleSheetHref('https://cdn.example.com/a.css', null)).toBe(false);
+    expect(isStyleSheetHref('data:text/css,body{}', 'stylesheet')).toBe(false);
   });
 });
 
@@ -147,5 +142,40 @@ describe('preview document assembly', () => {
     const document = buildPreviewDocument({ body: '<h1>ok</h1>', trusted: false });
     expect(document.startsWith('<!doctype html>')).toBe(true);
     expect(document).toContain('<body><h1>ok</h1></body>');
+  });
+  it('hoists stylesheets into the head in both modes', () => {
+    const assets = { stylesheets: ['https://cdn.example.com/a.css'], scripts: [] };
+    for (const trusted of [false, true]) {
+      const document = buildPreviewDocument({ body: '<p>hi</p>', trusted, assets });
+      expect(document).toContain('<link rel="stylesheet" href="https://cdn.example.com/a.css">');
+      expect(document.indexOf('<link rel="stylesheet"')).toBeLessThan(document.indexOf('<body>'));
+    }
+  });
+
+  it('emits hoisted scripts only for a trusted document', () => {
+    const assets = { stylesheets: [], scripts: ['https://cdn.tailwindcss.com'] };
+    expect(buildPreviewDocument({ body: '', trusted: true, assets })).toContain('<script src="https://cdn.tailwindcss.com">');
+    expect(buildPreviewDocument({ body: '', trusted: false, assets })).not.toContain('cdn.tailwindcss.com');
+  });
+
+  it('places hoisted scripts in the head, before the body, so parser-blocking works', () => {
+    // Tailwind's Play CDN injects CSS via document.write, which only lands from a
+    // parser-blocking head script. End-of-body placement runs but styles nothing.
+    const document = buildPreviewDocument({ body: '<p>hi</p>', trusted: true, assets: { stylesheets: [], scripts: ['https://cdn.tailwindcss.com'] } });
+    expect(document.indexOf('<script src=')).toBeLessThan(document.indexOf('<body>'));
+  });
+
+  it('escapes a hoisted URL so it cannot break out of the attribute', () => {
+    const document = buildPreviewDocument({
+      body: '',
+      trusted: false,
+      assets: { stylesheets: ['https://cdn.example.com/a.css"><script>alert(1)</script>'], scripts: [] },
+    });
+    expect(document).not.toContain('"><script>');
+    expect(document).toContain('&quot;');
+  });
+
+  it('tolerates a missing asset list', () => {
+    expect(buildPreviewDocument({ body: '<p>hi</p>', trusted: true })).toContain('<body><p>hi</p></body>');
   });
 });
