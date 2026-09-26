@@ -27,7 +27,9 @@ test.beforeEach(async ({ page }) => {
 
 test('overview and sidebar reopen the existing workspace CLI tab', async ({ page }) => {
   await page.goto('/#/overview');
-  await page.getByRole('article').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+  const card = page.getByRole('article');
+  await expect(card).toContainText('Last chat: Codex · codex saved conversation');
+  await card.getByRole('button', { name: /^Open CLI chat for feature-x/ }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
@@ -52,7 +54,7 @@ test('saved conversations appear as their sources finish', async ({ page }) => {
   });
   try {
     await page.goto('/#/overview');
-    await page.getByRole('article').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+    await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
     const history = page.getByRole('region', { name: 'Continue a conversation' });
     await expect(history.getByText(sessions[1].title)).toBeVisible();
     await expect(history.getByText(sessions[0].title)).toHaveCount(0);
@@ -66,6 +68,30 @@ test('saved conversations appear as their sources finish', async ({ page }) => {
   }
 });
 
+test('overview updates its recent chat label as sources arrive', async ({ page }) => {
+  let releaseCodex!: () => void;
+  const codexReady = new Promise<void>(resolve => { releaseCodex = resolve; });
+  await page.route('**/api/workspace/feature-x/sessions?source=*', async route => {
+    const source = new URL(route.request().url()).searchParams.get('source');
+    if (source === 'codex') await codexReady;
+    const result = source === 'claude' ? [sessions[1]] : source === 'codex'
+      ? [{ ...sessions[0], updatedAt: '2026-09-22T00:00:00Z' }] : [];
+    await route.fulfill({ json: { sessions: result } });
+  });
+  try {
+    await page.goto('/#/overview');
+    const card = page.getByRole('article');
+    await expect(card).toContainText('Last chat: Claude Code · claude saved conversation');
+    releaseCodex();
+    await expect(card).toContainText('Last chat: Codex · codex saved conversation');
+    await card.getByRole('button', { name: /recent conversation: codex saved conversation/ }).click();
+    const history = page.getByRole('region', { name: 'CLI Chat' }).getByRole('region', { name: 'Continue a conversation' });
+    await expect(history.getByText(sessions[0].title)).toBeVisible();
+  } finally {
+    releaseCodex();
+  }
+});
+
 test.describe('workspace tab selection', () => {
   const other = { ...feature, id: 'feature-y', branchName: 'feature-y', description: 'Other work', workspacePath: 'C:/ws/feature-y' };
   test.use({ workspacesData: [[feature, other], { scope: 'test' }] });
@@ -73,7 +99,7 @@ test.describe('workspace tab selection', () => {
   test('resume action focuses an existing tab without resetting it', async ({ page }) => {
     await page.goto('/#/overview');
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-    await page.getByRole('article').filter({ hasText: 'Harness resume' }).getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+    await page.getByRole('article').filter({ hasText: 'Harness resume' }).getByRole('button', { name: /^Open CLI chat for feature-x/ }).click();
     await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
     await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-y' }).click();
     await expect(chat.getByRole('tab', { name: 'Show feature-y in the left pane' })).toHaveAttribute('aria-selected', 'true');

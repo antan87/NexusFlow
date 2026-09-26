@@ -9,7 +9,6 @@ import {
   Plus,
   ArrowRight,
   Terminal,
-  History,
   Sparkles,
   Search,
   ExternalLink,
@@ -26,7 +25,7 @@ import { useAiDetect, useWorkspaceLaunchTargets, useLaunchTerminal } from '../li
 import { apiFetch } from '../lib/api/client.js';
 import { repoName } from '../lib/status.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
-import { useFloatingChat } from '../features/chat/floatingChatStore.js';
+import { WorkspaceChatResume } from '../features/chat/WorkspaceChatResume.js';
 
 export interface HarnessOption {
   id: string;
@@ -202,7 +201,6 @@ export function DashboardPage({
   const aiDetect = useAiDetect();
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
-  const { openCli } = useFloatingChat();
 
   const [search, setSearch] = useState('');
   const [changesOnly, setChangesOnly] = useState(false);
@@ -429,17 +427,14 @@ export function DashboardPage({
                       {changedFiles > 0 ? `${changedFiles} modified ${changedFiles === 1 ? 'file' : 'files'}` : 'Clean'}
                     </div>
                   )}
-                  <div className="mt-auto flex min-w-0 flex-wrap items-center justify-end gap-1 border-t border-border pt-3">
-                    {changedFiles > 0 && (
-                      <Button size="xs" onClick={() => navigate(`/workspaces/${encodeURIComponent(ws.branchName)}/changes`)} className="h-7 px-2">
-                        <FileDiff size={13} /> Review diffs
-                      </Button>
-                    )}
-                    <div className="flex items-center gap-1">
-                      <Button size="xs" variant="ghost" onClick={() => openCli(ws.branchName)}
-                        aria-label={`Resume CLI chat for ${ws.branchName}`} title="Open this workspace's CLI chat" className="h-7 px-2">
-                        <History size={13} /> Resume chat
-                      </Button>
+                  <div className="mt-auto min-w-0 border-t border-border pt-2">
+                    <WorkspaceChatResume workspace={ws.branchName} />
+                    <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
+                      {changedFiles > 0 && (
+                        <Button size="xs" onClick={() => navigate(`/workspaces/${encodeURIComponent(ws.branchName)}/changes`)} className="h-7 px-2">
+                          <FileDiff size={13} /> Review diffs
+                        </Button>
+                      )}
                       <Button size="xs" variant="outline" onClick={() => onOpenWorkspace(ws.branchName)} className="h-7 px-3">
                         Open workspace <ArrowRight size={12} />
                       </Button>
