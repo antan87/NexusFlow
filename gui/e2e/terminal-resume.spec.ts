@@ -27,8 +27,8 @@ test.beforeEach(async ({ page }) => {
 
 test('resumes every indexed harness in the chat window using its recorded identity', async ({ page }) => {
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await expect(chat.getByRole('button', { name: 'Continue a conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
   await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toHaveText('Choose a CLI tool');
@@ -74,8 +74,8 @@ test('unavailable tools explain why start is disabled and a selected tool stays 
     ],
   } }));
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
   await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
   await expect(chat.getByRole('status').filter({ hasText: /Codex is unavailable/ })).toContainText('Codex CLI is not installed');
@@ -84,7 +84,7 @@ test('unavailable tools explain why start is disabled and a selected tool stays 
   await page.getByRole('option', { name: 'Claude Code' }).click();
   await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
   await chat.getByRole('button', { name: 'Close floating chat' }).click();
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toContainText('Claude Code');
 });
 

@@ -283,6 +283,21 @@ describe('Empirical Stress Tests: session-finder and statusCommand', () => {
       expect(codexSess?.usage?.costUsdEstimate).toBe(0.02);
     });
 
+    it('uses the latest cumulative token count from an interactive Codex rollout', async () => {
+      const codexSessionsDir = path.join(process.env.CODEX_HOME!, 'sessions');
+      await fs.mkdir(codexSessionsDir, { recursive: true });
+      const codexId = '523e4567-e89b-42d3-a456-426614174014';
+      await fs.writeFile(path.join(codexSessionsDir, 'rollout-token-count.jsonl'), [
+        { type: 'session_meta', payload: { id: codexId, cwd: workspaceDir, source: 'cli' }, timestamp: '2026-09-01T10:00:00Z' },
+        { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Measure usage' }] }, timestamp: '2026-09-01T10:01:00Z' },
+        { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 40, total_tokens: 120 } } }, timestamp: '2026-09-01T10:02:00Z' },
+        { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 180, output_tokens: 35, cached_input_tokens: 60, cache_write_input_tokens: 10, total_tokens: 215 } } }, timestamp: '2026-09-01T10:03:00Z' },
+      ].map(record => JSON.stringify(record)).join('\n'));
+
+      const session = (await findSessions(workspaceDir)).find(s => s.id === codexId);
+      expect(session?.usage).toMatchObject({ inputTokens: 180, outputTokens: 35, cachedInputTokens: 70, totalTokens: 215 });
+    });
+
     it('handles corrupted .sessions directory files', async () => {
       const wsSessionsDir = path.join(workspaceDir, '.sessions');
       await fs.mkdir(wsSessionsDir, { recursive: true });

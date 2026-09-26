@@ -200,7 +200,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       await onRequestRefine({ ...currentHunk, type: 'refine' }, refineFeedback.trim());
       setRefineModalOpen(false);
     } catch (error) {
-      showToast?.(error instanceof Error ? error.message : 'Could not open refinement in chat.', 'error');
+      showToast?.(error instanceof Error ? error.message : 'Could not copy the refinement request.', 'error');
     }
   };
 
@@ -637,7 +637,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             </div>
 
             <p className="text-[11px] text-muted-foreground">
-              Add instructions for this hunk. They will open as a draft in AI chat for you to send:
+              Add instructions for this hunk. The request will be copied for you to paste into CLI chat:
             </p>
 
             <textarea
@@ -663,7 +663,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
                 onClick={() => void handleConfirmRefine()}
                 className="px-3 py-1 text-xs font-semibold text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 rounded-lg transition-colors"
               >
-                Open in AI chat
+                Copy for CLI chat
               </button>
             </div>
           </div>

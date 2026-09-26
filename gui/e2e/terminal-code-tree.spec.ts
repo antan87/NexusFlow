@@ -16,8 +16,8 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
   await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: 'export const changed = 1;\n', originalContent: 'export const changed = 0;\n' } }));
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Show code' }).click();
   const code = chat.getByRole('region', { name: 'Workspace code' });
   await expect(code.getByRole('navigation', { name: 'repo changes' })).toBeVisible();
@@ -45,8 +45,8 @@ test('labels the maximized CLI and exposes a disconnected session with a reconne
     });
   });
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByRole('status')).toHaveText('Running');
   await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(0);
@@ -81,7 +81,7 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context }
     });
   });
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const pane = page.getByTestId('terminal-pane');
   await expect(pane.getByRole('status')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
@@ -146,12 +146,10 @@ test('restores CLI input focus and opens terminal file references in the code tr
     });
   });
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByRole('status')).toHaveText('Running');
-  await chat.getByRole('button', { name: 'Chat', exact: true }).click();
-  await chat.getByRole('button', { name: 'CLI', exact: true }).click();
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
 
@@ -175,8 +173,6 @@ test('restores CLI input focus and opens terminal file references in the code tr
   await clickOutputRow(0);
   await expect(code.getByText('repo/src/nested/clean.ts:12')).toBeVisible();
   await expect(code.getByRole('alert')).toHaveCount(0);
-  await chat.getByRole('button', { name: 'Chat', exact: true }).click();
-  await chat.getByRole('button', { name: 'CLI', exact: true }).click();
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
 });
 
@@ -193,8 +189,8 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
     });
   });
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByRole('status')).toHaveText('Running');
@@ -230,8 +226,8 @@ test('renders file tree as a left sidebar alongside code panel and allows collap
   await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
   await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: 'diff --git a/demo.ts b/demo.ts\n--- a/demo.ts\n+++ b/demo.ts\n@@ -1 +1 @@\n-old\n+new\n', fileContent: 'new\n' } }));
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Show code' }).click();
   const code = chat.getByRole('region', { name: 'Workspace code' });
 
@@ -274,8 +270,8 @@ test('navigates through change sections using section tabs and Next Section butt
   await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
   await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: multiDiff, fileContent: 'const a = 1;\nconst b = 2;\nconst c = 3;\n' } }));
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Show code' }).click();
   const code = chat.getByRole('region', { name: 'Workspace code' });
 
@@ -306,8 +302,8 @@ test('navigates through change sections using section tabs and Next Section butt
 
 test('allows expanding code view to focused width and restoring split', async ({ page }) => {
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   await chat.getByRole('button', { name: 'Show code' }).click();
 
@@ -326,8 +322,8 @@ test('allows expanding code view to focused width and restoring split', async ({
 
 test('supports keyboard resizing of code panel using arrow keys on separator', async ({ page }) => {
   await page.goto('/#/workspaces/feature-x/sessions');
-  await page.getByRole('button', { name: 'Open Floating Chat', exact: true }).click();
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   await chat.getByRole('button', { name: 'Show code' }).click();
 

@@ -35,6 +35,7 @@ import { parseUnifiedDiff } from './utils/diffParser.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { useConfig } from '../../lib/api/queries.js';
 import { useCockpitStore } from '../cockpit/cockpitStore.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { floatingChatStore } from '../chat/floatingChatStore.js';
 
 interface ChangesViewerProps {
@@ -799,14 +800,17 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                       defaultEditor={defaultEditor}
                                       viewMode={cockpit.diffViewMode}
                                       onToggleViewMode={cockpit.toggleDiffMode}
-                                      onRequestRefine={(hunk, feedback) => {
-                                        floatingChatStore.openDraft(ws.branchName, [
+                                      onRequestRefine={async (hunk, feedback) => {
+                                        const prompt = [
                                           `Refine ${repo.repoName}/${fileInfo.file} at line ${hunk.startLineModified}.`,
                                           feedback,
                                           'Selected diff hunk:',
                                           hunk.patchHeader,
                                           ...hunk.lines,
-                                        ].join('\n'));
+                                        ].join('\n');
+                                        if (!await safeCopyToClipboard(prompt)) throw new Error('Could not copy the refinement request. Check clipboard permissions.');
+                                        floatingChatStore.openCli(ws.branchName);
+                                        showToast?.('Refinement request copied. Paste it into CLI chat.', 'success');
                                       }}
                                       initialTargetLine={targetLineMap[cacheKey]}
                                       onOpenFile={handleCrossFileOpen}

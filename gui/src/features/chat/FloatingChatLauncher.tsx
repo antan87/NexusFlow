@@ -25,10 +25,10 @@ export function FloatingChatLauncher() {
           'hover:scale-105 hover:shadow-xl hover:shadow-primary/35 active:scale-95',
           'transition-all duration-200 cursor-pointer border border-primary/20',
         )}
-        title="Open Floating Workspace Chat"
-        aria-label="Open Floating Workspace Chat"
+        title="Open CLI Chat launcher"
+        aria-label="Open CLI Chat launcher"
       >
-        <MessagesSquare className="size-4" aria-hidden="true" /><span className="text-xs font-medium">Chat & CLI</span>
+        <MessagesSquare className="size-4" aria-hidden="true" /><span className="text-xs font-medium">CLI Chat</span>
 
         {openTabs.length > 0 && (
           <span className="absolute -top-1 -right-1 size-5 rounded-full bg-emerald-500 text-white text-[10px] font-bold grid place-items-center shadow-md border-2 border-background">

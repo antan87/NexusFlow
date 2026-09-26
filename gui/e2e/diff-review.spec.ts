@@ -11,7 +11,8 @@ test.use({ workspacesData: [feature], workspacesStatusData: {
   review: { id: 'review', branchName: 'review', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 },
 } });
 
-test('reviews the actual worktree, shares diff mode, and preserves refinement feedback in a chat draft', async ({ page }) => {
+test('reviews the actual worktree, shares diff mode, and copies refinement feedback for CLI chat', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
   const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/workspace/review/lifecycle', route => route.fulfill(json({ lifecycle: { steps: [] }, report: null })));
   await page.route('**/api/workspace/review/changes', route => route.fulfill(json({ changes: [{ repoName: 'app', repoPath: feature.repos[0], files: [{ file: 'demo.ts', type: 'modified', additions: 1, deletions: 1 }] }] })));
@@ -31,11 +32,12 @@ test('reviews the actual worktree, shares diff mode, and preserves refinement fe
   await expect(page.getByRole('button', { name: 'Accept (a)', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refine', exact: true }).click();
   await page.getByPlaceholder('e.g. Ensure null safety when calculating vacation debt...').fill('Use answer 3 instead.');
-  await page.getByRole('button', { name: 'Open in AI chat', exact: true }).click();
-  const composer = page.locator('textarea').last();
-  await expect(composer).toHaveValue(/Use answer 3 instead\./);
-  await expect(composer).toHaveValue(/app\/demo.ts/);
-  await expect(composer).toHaveValue(/\+export const answer = 2;/);
+  await page.getByRole('button', { name: 'Copy for CLI chat', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'CLI Chat' })).toBeVisible();
+  const request = await page.evaluate(() => navigator.clipboard.readText());
+  expect(request).toContain('Use answer 3 instead.');
+  expect(request).toContain('app/demo.ts');
+  expect(request).toContain('+export const answer = 2;');
   const references = await page.evaluate(async () => {
     // Exercise the provider's search against real Monaco text models.
     const monaco = await import('/node_modules/monaco-editor/esm/vs/editor/editor.api.js');

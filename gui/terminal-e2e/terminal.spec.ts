@@ -25,7 +25,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
   await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
-  const chat = page.getByRole('region', { name: 'Workspace Chat', exact: true });
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Show code' }).click();
   await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(0);
   await expect(pane).toBeHidden();
@@ -42,7 +42,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_DOCS')" : 'echo CS_${CS_KEEP}_DOCS'); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_DOCS');
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
-  const box = await page.getByRole('region', { name: 'Workspace Chat', exact: true }).boundingBox();
+  const box = await page.getByRole('region', { name: 'CLI Chat', exact: true }).boundingBox();
   expect(box?.width).toBe(page.viewportSize()!.width);
   await chat.getByRole('button', { name: 'Show code' }).click();
   const separator = chat.getByRole('separator', { name: 'Resize code panel' });
@@ -59,11 +59,9 @@ test('one real shell survives window changes and reload, then stops explicitly',
     return screen.getBoundingClientRect().bottom - host.getBoundingClientRect().bottom;
   })).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'Restore down floating chat' }).click();
-  await page.getByRole('button', { name: 'Chat', exact: true }).click();
-  await page.getByRole('region', { name: 'Workspace Chat', exact: true }).getByRole('button', { name: 'CLI', exact: true }).click();
   await page.getByRole('button', { name: 'Minimize floating chat' }).click();
-  await expect(page.getByTitle('Restore floating workspace chat')).toContainText('CLI running · hidden');
-  await page.getByTitle('Restore floating workspace chat').click();
+  await expect(page.getByTitle('Restore floating CLI chat')).toContainText('CLI running · hidden');
+  await page.getByTitle('Restore floating CLI chat').click();
   await chat.getByRole('button', { name: 'Show code' }).click();
   await expect(pane).toBeHidden();
   await page.getByRole('button', { name: 'Add Workspace' }).click();

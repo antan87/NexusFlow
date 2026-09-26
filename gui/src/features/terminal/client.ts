@@ -1,7 +1,7 @@
 // Always same-origin, including Vite's terminal-only development proxy.
 const API_BASE = '';
 
-export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; state: 'running' | 'exited'; exitCode?: number }
+export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; startedAt?: string; state: 'running' | 'exited'; exitCode?: number }
 export interface TerminalLaunch { id: string; target: string; sessionId?: string; cwd?: string }
 export interface TerminalStatus { available: boolean; reason?: string; targets: { id: string; name: string; available: boolean; reason: string | null }[]; sessions: TerminalInfo[] }
 let bootstrap: Promise<string> | undefined;

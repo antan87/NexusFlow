@@ -118,7 +118,7 @@ const TABS: TabDef[] = [
   { value: 'documents', label: 'Documents', ariaLabel: 'Documents', icon: FileText },
   { value: 'changes', label: 'Git Diff', ariaLabel: 'Changes', icon: GitCompare },
   { value: 'services', label: 'Services', ariaLabel: 'Services', icon: Zap },
-  { value: 'sessions', label: 'AI & Chat', ariaLabel: 'AI & Sessions', icon: MessagesSquare },
+  { value: 'sessions', label: 'AI Sessions', ariaLabel: 'AI Sessions', icon: MessagesSquare },
   { value: 'knowledge', label: 'Knowledge', ariaLabel: 'Knowledge', icon: Brain },
   { value: 'skills', label: 'Skills', ariaLabel: 'Skills', icon: Puzzle },
 ];
@@ -1331,7 +1331,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         AI Sessions & History
                       </h2>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Inspect recorded session logs, turns, and token usage, or open active conversations in the floating chat.
+                        Inspect recorded session logs, turns, and token usage, or open active conversations in CLI chat.
                       </p>
                     </div>
                     <Button
@@ -1339,10 +1339,10 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       size="sm"
                       onClick={() => openFloatingChat(selected.branchName)}
                       className="text-xs h-8 gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
-                      title="Open floating multi-workspace chat"
+                      title="Open CLI chat for this workspace"
                     >
                       <MessagesSquare className="size-3.5" />
-                      <span>Open Floating Chat</span>
+                      <span>Open CLI Chat</span>
                     </Button>
                   </div>
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />

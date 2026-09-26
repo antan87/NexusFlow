@@ -1,6 +1,37 @@
 import type { AISession, NormalizedRemainingQuota } from '../../types.js';
+import type { TerminalInfo } from './client.js';
 
 const count = (value: number) => value.toLocaleString();
+
+/** Match a fresh terminal only when one provider session unambiguously belongs to it. */
+export function findTerminalUsageSession(terminal: TerminalInfo, sessions: AISession[], otherTerminals: TerminalInfo[] = []): AISession | undefined {
+  if (terminal.sessionId) {
+    return sessions.find(session => session.id === terminal.sessionId && session.assistant === terminal.target);
+  }
+  if (!terminal.startedAt) return undefined;
+  const started = Date.parse(terminal.startedAt);
+  if (!Number.isFinite(started)) return undefined;
+  const normalize = (value: string) => {
+    const normalized = value.replaceAll('\\', '/').replace(/\/$/, '');
+    return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+  };
+  const cwd = normalize(terminal.cwd);
+  const reserved = new Set(otherTerminals.filter(other => other.id !== terminal.id && other.sessionId).map(other => other.sessionId));
+  const competingStarts = otherTerminals
+    .filter(other => other.id !== terminal.id && !other.sessionId && other.target === terminal.target && normalize(other.cwd) === cwd)
+    .map(other => Date.parse(other.startedAt ?? ''))
+    .filter(Number.isFinite);
+  const candidates = sessions.filter(session => {
+    const created = Date.parse(session.createdAt);
+    return session.assistant === terminal.target
+      && session.threadKind !== 'subagent'
+      && !!session.recordedCwd && normalize(session.recordedCwd) === cwd
+      && Number.isFinite(created) && created >= started - 5_000
+      && !competingStarts.some(otherStarted => created >= otherStarted - 5_000)
+      && !reserved.has(session.id);
+  });
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
 
 export function quotaDetail(quota?: NormalizedRemainingQuota): string {
   if (!quota) return 'Remaining quota unavailable';
