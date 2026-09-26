@@ -104,6 +104,104 @@ test('maximizes a document inside the app borders and restores focus on Escape',
   await expect(page.getByTitle('Preview of page.html')).toBeVisible();
 });
 
+const STYLED_PAGE = [
+  '<h1>Styled report</h1>',
+  '<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">',
+  '<link rel="preload" as="script" href="https://cdn.example.com/app.js">',
+  '<style>h1 { color: rebeccapurple; }</style>',
+  '<svg width="16" height="16"><circle cx="8" cy="8" r="7" /></svg>',
+  '<script src="https://cdn.tailwindcss.com"></script>',
+  '<script>window.unsafe = true</script>',
+  '<img src="https://cdn.example.com/hero.png" onerror="window.unsafe = true" onclick="window.unsafe = true">',
+  '<a href="javascript:window.unsafe=true">bad link</a>',
+  '<iframe src="https://evil.example.com"></iframe>',
+  '<button onclick="window.unsafe=true">handler</button>',
+].join('');
+
+async function openStyledPage(page: import('@playwright/test').Page) {
+  const documents = [{ name: 'report.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'report.html', kind: 'html', content: STYLED_PAGE },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /report.html/ }).click();
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+  const srcdoc = () => page.getByTitle('Preview of report.html').evaluate((frame: HTMLIFrameElement) => frame.srcdoc);
+  return { frame: page.getByTitle('Preview of report.html'), srcdoc };
+}
+
+test('keeps presentational markup and strips active content from agent HTML by default', async ({ page }) => {
+  const { frame, srcdoc } = await openStyledPage(page);
+  const html = await srcdoc();
+
+  // Styling survives: external stylesheet, inline <style>, inline SVG.
+  expect(html).toContain('<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">');
+  expect(html).toContain('color: rebeccapurple');
+  expect(html).toContain('<svg');
+  expect(html).toContain('<circle');
+
+  // Everything that can execute or embed is gone.
+  expect(html).not.toContain('<script');
+  expect(html).not.toContain('cdn.tailwindcss.com');
+  expect(html).not.toContain('<iframe');
+  expect(html).not.toContain('evil.example.com');
+  expect(html).not.toContain('onclick');
+  expect(html).not.toContain('onerror');
+  expect(html).not.toContain('javascript:');
+  expect(html).not.toContain('rel="preload"');
+  expect(html).not.toContain('app.js');
+
+  // Locked by default, and declares a charset now that the document cannot carry its own.
+  expect(await frame.getAttribute('sandbox')).toBe('');
+  expect(html).toContain('<meta charset="utf-8">');
+  expect(html).toContain("default-src 'none'");
+  expect(html).toContain('style-src \'unsafe-inline\' https: http:');
+  expect(html).not.toContain('script-src');
+
+  // A page whose styling needs a script explains itself rather than looking broken.
+  await expect(page.getByText('This page loads styling from an external script, which is blocked.', { exact: false })).toBeVisible();
+});
+
+test('runs a trusted document in an opaque-origin frame', async ({ page }) => {
+  const { frame, srcdoc } = await openStyledPage(page);
+
+  await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
+  const trusted = await srcdoc();
+  expect(trusted).toContain('https://cdn.tailwindcss.com');
+  expect(trusted).toContain('script-src');
+  // Scripts are allowed but the frame is never given the app's origin, and other escapes stay shut.
+  expect(await frame.getAttribute('sandbox')).toBe('allow-scripts');
+  expect(trusted).not.toContain('<iframe');
+  expect(trusted).not.toContain('onclick');
+  expect(trusted).not.toContain('javascript:');
+  expect(trusted).toContain("default-src 'none'");
+  await expect(page.getByText('remote code is running in a sandboxed frame', { exact: false })).toBeVisible();
+});
+
+test('rejects a second document that tries to inherit trust', async ({ page }) => {
+  const documents = [
+    { name: 'report.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'other.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    return route.fulfill({ json: { name, kind: 'html', content: STYLED_PAGE } });
+  });
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /report.html/ }).click();
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+  await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: /other.html/ }).click();
+  await expect(page.getByTitle('Preview of other.html')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Trust this document', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toHaveCount(0);
+  expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).not.toContain('script-src');
+});
+
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {
   let listFails = true;
   let previewFails = true;
