@@ -7,7 +7,7 @@ import { preparePtyHelper } from './native.js';
 export type PtyProcess = Pick<IPty, 'pid' | 'write' | 'resize' | 'pause' | 'resume' | 'kill' | 'onData' | 'onExit'>;
 export type PtyFactory = (launch: LaunchSpec, cwd: string, cols: number, rows: number) => Promise<PtyProcess>;
 export interface TerminalClient { send(data: string): void; close(): void }
-export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; state: 'running' | 'exited'; exitCode?: number }
+export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; startedAt: string; state: 'running' | 'exited'; exitCode?: number }
 interface Session extends TerminalInfo {
   owner: string; launchId: string; pty: PtyProcess; chunks: string[]; length: number; truncated: boolean;
   client?: TerminalClient; unacked: number; paused: boolean; timer?: NodeJS.Timeout; stall?: NodeJS.Timeout;
@@ -49,8 +49,8 @@ export class TerminalManager {
   private resuming = new Set<string>();
   constructor(private factory: PtyFactory = spawnNativePty, private terminate = terminatePty, private graceMs = 5 * 60_000) {}
   private info(s: Session): TerminalInfo {
-    const { id, workspace, target, label, cwd, sessionId, state, exitCode } = s;
-    return { id, workspace, target, label, cwd, sessionId, state, exitCode };
+    const { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode } = s;
+    return { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode };
   }
   list(owner: string, workspace: string): TerminalInfo[] {
     return [...this.sessions.values()].filter(s => s.owner === owner && s.workspace === workspace).map(s => this.info(s));
@@ -75,10 +75,11 @@ export class TerminalManager {
     if (resumeKey && this.resuming.has(resumeKey)) throw new Error('This saved conversation is already starting.');
     if (input.sessionId && [...this.sessions.values()].some(s => s.state === 'running' && s.target === input.target && s.sessionId === input.sessionId)) throw new Error('This saved conversation already has a running terminal.');
     if (resumeKey) this.resuming.add(resumeKey);
+    const startedAt = new Date().toISOString();
     const promise = (async () => {
       const pty = await this.factory(input.launch, input.cwd, 80, 24);
       if (this.closing) { this.terminate(pty); throw new Error('Terminal service is shutting down.'); }
-      const s: Session = { id: randomUUID(), workspace: input.workspace, owner: input.owner, cwd: input.cwd, target: input.target, sessionId: input.sessionId, launchId: input.launchId, label: input.launch.label, pty, state: 'running', chunks: [], length: 0, truncated: false, unacked: 0, paused: false };
+      const s: Session = { id: randomUUID(), workspace: input.workspace, owner: input.owner, cwd: input.cwd, target: input.target, sessionId: input.sessionId, startedAt, launchId: input.launchId, label: input.launch.label, pty, state: 'running', chunks: [], length: 0, truncated: false, unacked: 0, paused: false };
       this.sessions.set(s.id, s);
       pty.onData(data => this.output(s, data));
       pty.onExit(({ exitCode }) => { s.state = 'exited'; s.exitCode = exitCode; this.send(s, { type: 'exit', exitCode }); this.expire(s); });

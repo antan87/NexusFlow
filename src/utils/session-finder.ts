@@ -292,6 +292,20 @@ async function getFilesRecursively(dir: string, extension: string): Promise<stri
   return result;
 }
 
+/** Read the first Codex record without loading a potentially large rollout. */
+async function codexSessionHeader(filePath: string): Promise<any | null> {
+  const file = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(256 * 1024);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const end = buffer.subarray(0, bytesRead).indexOf(10);
+    if (end < 0) return null;
+    try { return JSON.parse(buffer.toString('utf8', 0, end)); } catch { return null; }
+  } finally {
+    await file.close();
+  }
+}
+
 /**
  * Compare already-canonical paths without weakening case rules on POSIX.
  * Windows drive paths are case-insensitive; POSIX paths remain case-sensitive.
@@ -650,6 +664,11 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     const filesToScan = sortedCodexFiles.slice(0, MAX_CODEX_SCAN);
     for (const file of filesToScan) {
       try {
+        const header = await codexSessionHeader(file);
+        // Recent rollouts record cwd up front. Skip unrelated conversations
+        // before reading and parsing their full, sometimes very large logs.
+        if (header?.type === 'session_meta' && typeof header.payload?.cwd === 'string'
+          && !isPathMatch(header.payload.cwd)) continue;
         const content = await fs.readFile(file, 'utf-8');
         const lines = content.split('\n').filter(Boolean);
 
@@ -660,6 +679,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         let title = 'Codex Session';
         let identity: Pick<AISession, 'threadKind' | 'parentSessionId'> = { threadKind: 'unknown' };
         let sessionUsage: NormalizedUsage | undefined;
+        let reportedTotalUsage: NormalizedUsage | undefined;
         let latestQuota: NormalizedRemainingQuota | undefined;
 
         for (const line of lines) {
@@ -681,6 +701,22 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             messageCount++;
             if (role === 'user' && title === 'Codex Session' && text) {
               title = text;
+            }
+          }
+          // Interactive Codex writes cumulative totals in token_count events,
+          // rather than a top-level usage field. Keep the latest total instead
+          // of summing snapshots from each turn.
+          if (record.type === 'event_msg' && record.payload?.type === 'token_count') {
+            const total = record.payload.info?.total_token_usage;
+            if (total) {
+              const parsed = extractRecordUsage({ usage: total }).usage;
+              if (parsed) {
+                if (typeof total.cache_write_input_tokens === 'number') {
+                  parsed.cachedInputTokens = (typeof total.cached_input_tokens === 'number' ? total.cached_input_tokens : 0)
+                    + total.cache_write_input_tokens;
+                }
+                reportedTotalUsage = parsed;
+              }
             }
           }
           const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
@@ -708,7 +744,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           workspacePath: resolveTargetCwd(sessionCwd || undefined),
           recordedCwd: sessionCwd ?? undefined,
           ...identity,
-          ...(sessionUsage ? { usage: sessionUsage } : {}),
+          ...((reportedTotalUsage ?? sessionUsage) ? { usage: reportedTotalUsage ?? sessionUsage } : {}),
           ...(latestQuota ? { quota: latestQuota } : {}),
         });
       } catch {}
@@ -923,6 +959,11 @@ async function getCodexCwds(codexHome: string): Promise<string[]> {
     const cwds: string[] = [];
     for (const file of filesToScan) {
       try {
+        const header = await codexSessionHeader(file);
+        if (header?.type === 'session_meta' && typeof header.payload?.cwd === 'string') {
+          cwds.push(header.payload.cwd);
+          continue;
+        }
         const content = await fs.readFile(file, 'utf-8');
         const lines = content.split('\n').filter(Boolean);
         for (const line of lines) {

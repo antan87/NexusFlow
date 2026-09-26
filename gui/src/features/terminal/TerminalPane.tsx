@@ -11,7 +11,7 @@ import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js'
 import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff, MoreHorizontal } from 'lucide-react';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
-import { SessionUsageDetails } from './SessionUsage.js';
+import { findTerminalUsageSession, SessionUsageDetails } from './SessionUsage.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
@@ -49,11 +49,13 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const usageHistory = useQuery({
     queryKey: ['terminal-resume-sessions', workspace],
     queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions`),
-    enabled: active && !!terminal?.sessionId,
+    enabled: active && !!terminal && terminal.target !== 'shell',
     staleTime: 15_000,
-    refetchInterval: active && terminal?.sessionId && state.startsWith('Connected') ? 60_000 : false,
+    refetchInterval: active && terminal && state.startsWith('Connected') ? 30_000 : false,
   });
-  const usageSession = usageHistory.data?.sessions.find(session => session.id === terminal?.sessionId && session.assistant === terminal.target);
+  const usageSession = terminal && usageHistory.data
+    ? findTerminalUsageSession(terminal, usageHistory.data.sessions, status?.sessions)
+    : undefined;
   const activeRef = useRef(active);
   const openFileRef = useRef(onOpenFileReference);
   const statusChangeRef = useRef(onStatusChange);
@@ -110,7 +112,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         if (!term.options.disableStdin) term.paste(richText);
       } else if ([...clipboard.items].some(item => item.type.startsWith('image/')) || [...clipboard.files].some(file => file.type.startsWith('image/'))) {
         event.preventDefault(); event.stopPropagation();
-        setError('The clipboard contains an image but no text. Use Chat to attach the image, or copy text and paste again.');
+        setError('The clipboard contains an image but no text. Copy text and paste again.');
       }
     };
     terminalHost.addEventListener('paste', onPaste, true);
@@ -364,8 +366,8 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       </select>
     </div>}
     {terminal && terminal.target !== 'shell' && <section aria-label="CLI session usage" className="border-b border-border px-3 py-1.5">
-      <div className="flex items-center gap-2 text-[11px]"><strong className="font-semibold">{terminal.sessionId ? 'Saved conversation usage' : 'Session usage'}</strong>{terminal.sessionId && <Button size="xs" variant="ghost" aria-label="Refresh session usage" title="Refresh saved usage (also updates every minute while connected)" onClick={() => void usageHistory.refetch()}><RefreshCw className="size-3" /></Button>}</div>
-      {terminal.sessionId ? usageHistory.isPending ? <p className="text-[11px] text-muted-foreground">Checking saved conversation usage…</p> : usageHistory.isError ? <p className="text-[11px] text-muted-foreground">Usage could not be loaded. Refresh to try again.</p> : usageSession ? <SessionUsageDetails session={usageSession} /> : <p className="text-[11px] text-muted-foreground">Saved conversation usage is unavailable in the session index.</p> : <p className="text-[11px] text-muted-foreground">Usage unavailable: this new terminal has no saved conversation ID to match yet.</p>}
+      <div className="flex items-center gap-2 text-[11px]"><strong className="font-semibold">Session usage</strong><Button size="xs" variant="ghost" aria-label="Refresh session usage" title="Refresh usage from saved conversations" onClick={() => void usageHistory.refetch()}><RefreshCw className="size-3" /></Button></div>
+      {usageHistory.isPending ? <p className="text-[11px] text-muted-foreground">Checking session usage…</p> : usageHistory.isError ? <p className="text-[11px] text-muted-foreground">Usage could not be loaded. Refresh to try again.</p> : usageSession ? <SessionUsageDetails session={usageSession} /> : <p className="text-[11px] text-muted-foreground">No matching saved usage is available for this CLI session. Refresh after a turn.</p>}
     </section>}
     <div className={`relative min-h-0 flex-1 bg-[#111b18] p-2 ${terminal ? '' : 'hidden'}`} onPointerDownCapture={event => {
       if (event.button === 2) menuSelection.current = renderer.current?.getSelection() ?? '';

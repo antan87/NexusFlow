@@ -20,20 +20,11 @@ import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
-import { AgentChat } from './AgentChat.js';
 import { useFloatingChat } from './floatingChatStore.js';
 import { WorkspaceServicesControl } from './WorkspaceServicesControl.js';
 
 interface FloatingChatModalProps {
   workspaces: Feature[];
-}
-
-function RetainedChat({ visible, ...props }: React.ComponentProps<typeof AgentChat> & { visible: boolean }) {
-  const [opened, setOpened] = useState(visible);
-  useEffect(() => { if (visible) setOpened(true); }, [visible]);
-  return <div className={cn('min-h-0 flex-1', !visible && 'hidden')}>
-    {(opened || visible) && <AgentChat {...props} />}
-  </div>;
 }
 
 export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
@@ -60,9 +51,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     setSplitRatio,
     setPosition,
     setSize,
-    drafts,
-    consumeDraft,
-    modes, setMode, terminalLaunches, consumeTerminalLaunch, harnesses,
+    terminalLaunches, consumeTerminalLaunch, harnesses,
   } = useFloatingChat();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,12 +75,12 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     if (!isOpen || isMinimized) return;
     const visible = [activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value));
     setUnreadOutput(current => {
-      if (!visible.some(tab => current[tab] && modes[tab] !== 'chat')) return current;
+      if (!visible.some(tab => current[tab])) return current;
       const next = { ...current };
-      for (const tab of visible) if (modes[tab] !== 'chat') next[tab] = false;
+      for (const tab of visible) next[tab] = false;
       return next;
     });
-  }, [isOpen, isMinimized, activeTab, splitTab, showSplit, modes]);
+  }, [isOpen, isMinimized, activeTab, splitTab, showSplit]);
 
   const moveSplit = useCallback((event: React.PointerEvent) => {
     if (!splitDragRef.current || !bodyRef.current) return;
@@ -224,14 +213,14 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         <button
           onClick={restore}
           className="flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-card/95 backdrop-blur-md border border-border shadow-xl hover:border-primary/50 text-foreground transition-all duration-200 cursor-pointer group"
-          title="Restore floating workspace chat"
+          title="Restore floating CLI chat"
         >
           <div className="size-7 rounded-full bg-primary/10 grid place-items-center text-primary group-hover:scale-105 transition-transform">
             <MessagesSquare className="size-4" />
           </div>
           <div className="flex flex-col items-start text-left">
             <span className="text-xs font-semibold leading-tight flex items-center gap-1.5">
-              Workspace Chat
+              CLI Chat
               {openTabs.length > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-primary/20 text-primary text-[10px] font-bold">
                   {openTabs.length}
@@ -250,7 +239,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     <div
       ref={modalRef}
       style={{ ...stylePos, display: !isOpen || isMinimized ? 'none' : undefined }}
-      role="region" aria-label="Workspace Chat"
+      role="region" aria-label="CLI Chat"
       className={cn(
         'fixed z-50 flex flex-col overflow-hidden bg-card/98 backdrop-blur-xl border border-border/80 shadow-2xl rounded-2xl transition-[border-color] duration-150',
         isMaximized && 'inset-0 w-auto h-auto rounded-none',
@@ -273,7 +262,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           </div>
           <span className="text-xs font-bold text-foreground shrink-0">ContextSpace</span>
           <span className="text-muted-foreground/70" aria-hidden="true">/</span>
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">{activeTab && modes[activeTab] === 'chat' ? 'Chat' : 'CLI chat'}</span>
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">CLI chat</span>
           {activeWorkspace && <span className="truncate text-[11px] text-muted-foreground" title={activeWorkspace.branchName}>{activeWorkspace.branchName}</span>}
         </div>
 
@@ -325,7 +314,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
                 <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                 <span className="truncate">{branchName}</span>
-                {modes[branchName] !== 'chat' && harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
+                {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
                 {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
                 {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
               </button>
@@ -472,18 +461,16 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               >
                 <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
                   <span className="max-w-[32%] truncate text-[10px] font-semibold" title={branchName}>{branchName}</span>
-                  <Button size="xs" variant={(modes[branchName] ?? 'cli') === 'cli' ? 'secondary' : 'ghost'} aria-pressed={(modes[branchName] ?? 'cli') === 'cli'} onClick={() => setMode(branchName, 'cli')}><TerminalSquare className="size-3" />CLI</Button>
-                  <Button size="xs" variant={modes[branchName] === 'chat' ? 'secondary' : 'ghost'} aria-pressed={modes[branchName] === 'chat'} onClick={() => setMode(branchName, 'chat')}><MessageSquare className="size-3" />Chat</Button>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><TerminalSquare className="size-3" />CLI</span>
                   {ws && <WorkspaceServicesControl workspace={branchName} active={visible && isOpen && !isMinimized} />}
                   {isSecondary && <Button size="xs" variant="ghost" aria-label="Close split view" onClick={() => setSplitTab(null)}><X className="size-3" /></Button>}
                 </div>
                 {!ws ? <div role="status" className="space-y-2 p-4 text-xs text-muted-foreground"><p>This workspace is unavailable. It may have been removed or is still loading.</p><Button size="xs" variant="outline" onClick={() => removeTab(branchName)}>Close unavailable tab</Button></div> : <>
-                  <div className={cn('flex-1 min-h-0', modes[branchName] === 'chat' && 'hidden')}>
-                    <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} active={isOpen && !isMinimized && visible && modes[branchName] !== 'chat'} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
+                  <div className="flex-1 min-h-0">
+                    <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} active={isOpen && !isMinimized && visible} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
                       onStatusChange={status => setTerminalStates(current => current[branchName] === status ? current : { ...current, [branchName]: status })}
                       onBackgroundOutput={() => setUnreadOutput(current => current[branchName] ? current : { ...current, [branchName]: true })} />
                   </div>
-                  <RetainedChat visible={modes[branchName] === 'chat'} ws={ws} draft={drafts[branchName]} onDraftConsumed={(id) => consumeDraft(branchName, id)} />
                 </>}
               </div>
             );

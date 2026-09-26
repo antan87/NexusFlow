@@ -18,6 +18,8 @@ describe('backend-owned terminals', () => {
     const f = fixture();
     const [a, b] = await Promise.all([f.manager.create(f.input), f.manager.create(f.input)]);
     expect(a.id).toBe(b.id); expect(f.factory).toHaveBeenCalledTimes(1);
+    expect(Date.parse(a.startedAt)).not.toBeNaN();
+    expect(f.manager.list('alice', 'workspace')[0]?.startedAt).toBe(a.startedAt);
     expect(() => f.manager.attach('bob', 'workspace', a.id, f.client)).toThrow('not found');
     expect(() => f.manager.stop('alice', 'other', a.id)).toThrow('not found');
     expect(f.manager.list('bob', 'workspace')).toEqual([]);
