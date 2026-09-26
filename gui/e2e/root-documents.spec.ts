@@ -58,6 +58,52 @@ test('opens agent-created Markdown, HTML, PDF and Office documents from the root
   await page.screenshot({ path: 'test-results/root-documents.png', fullPage: true });
 });
 
+test('maximizes a document inside the app borders and restores focus on Escape', async ({ page }) => {
+  const documents = [{ name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'page.html', kind: 'html', content: '<h1>Rendered HTML</h1><style>h1{color:rgb(1,2,3)}</style>' },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /page.html/ }).click();
+
+  const inlineFrame = page.getByTitle('Preview of page.html');
+  await expect(inlineFrame).toBeVisible();
+  const inlineBox = await inlineFrame.boundingBox();
+
+  // Stable aria-label plus aria-pressed keeps the control assertable in both states.
+  const expand = page.getByRole('button', { name: 'Expand document' });
+  await expect(expand).toHaveAttribute('aria-pressed', 'false');
+  await expand.click();
+
+  const overlay = page.getByTestId('document-viewer-expanded');
+  await expect(overlay).toBeVisible();
+  const expandedToggle = overlay.getByRole('button', { name: 'Expand document' });
+  await expect(expandedToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(expandedToggle).toBeFocused();
+
+  // The frame is no longer the 65vh letterbox.
+  const expandedBox = await overlay.getByTitle('Preview of page.html').boundingBox();
+  expect(expandedBox!.height).toBeGreaterThan(inlineBox!.height);
+
+  // Download and the raw toggle stay reachable while expanded.
+  await expect(overlay.getByRole('link', { name: 'Download', exact: true })).toBeVisible();
+  await expect(overlay.getByRole('button', { name: 'Raw text', exact: true })).toBeVisible();
+
+  // Never the browser Fullscreen API: the overlay is bounded by the app viewport.
+  const viewport = page.viewportSize()!;
+  const overlayBox = await overlay.boundingBox();
+  expect(overlayBox!.width).toBeLessThanOrEqual(viewport.width);
+  expect(overlayBox!.height).toBeLessThanOrEqual(viewport.height);
+  expect(await overlay.evaluate((node: HTMLElement) => node.ownerDocument.fullscreenElement)).toBeNull();
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Expand document' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Expand document' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTitle('Preview of page.html')).toBeVisible();
+});
+
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {
   let listFails = true;
   let previewFails = true;
