@@ -46,6 +46,12 @@ the resulting remote state. For deployments or migrations, include the relevant
 rollout and recovery plan. Do not deploy to a test or production service merely
 to produce evidence unless that action is within the assignment.
 
+After a requested release, check the workflow's merged-main revision, tag target,
+published package version, and expected artifacts. If the user asks to close the
+workspace, inspect clean and unpushed state and run `ctxspace finish --dry-run`
+before cleanup. Account for durable changes and learnings first; do not create a
+second PR for work already merged.
+
 Conclude with the exact revision, verification outcome, unresolved blockers or
 limits, and which requested external actions actually completed. Link to CI/PR
 evidence. Avoid an unconditional merge-ready claim from tests alone.

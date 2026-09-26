@@ -74,6 +74,12 @@ and design produce their agreed outputs and stop before implementation unless th
 has explicitly authorized that transition. Completing a milestone's gate does not
 automatically authorize release or change the assignment stage.
 
+`ctxspace flow --step <id> --action verify` and `--action complete` may each run the
+milestone's verification command. Wait for one transition to finish before starting
+another, then check `ctxspace flow --json` for the recorded gate status and tested
+revision. A successful transition command can still record a failed verification;
+investigate the gate result before retrying or treating the milestone as complete.
+
 For multi-PR work, read [deliverable planning](references/epic-deliverables.md). Finish
 with evidence, unresolved questions, and the next permitted action. Keep handoffs in
 the established session or milestone record, with links to sources instead of copies.
