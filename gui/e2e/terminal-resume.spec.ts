@@ -25,6 +25,66 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/terminals/feature-x/create', route => route.fulfill({ status: 400, json: { error: 'Test launch intercepted' } }));
 });
 
+test('overview and sidebar reopen the existing workspace CLI tab', async ({ page }) => {
+  await page.goto('/#/overview');
+  await page.getByRole('article').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  await expect(chat).toBeVisible();
+  await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
+  await expect(chat.getByRole('button', { name: 'Continue a conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
+  await chat.getByRole('button', { name: 'Close floating chat' }).click();
+
+  await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+  await expect(chat).toBeVisible();
+  await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
+  await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('saved conversations appear as their sources finish', async ({ page }) => {
+  let releaseCodex!: () => void;
+  const codexReady = new Promise<void>(resolve => { releaseCodex = resolve; });
+  await page.route('**/api/workspace/feature-x/sessions?source=*', async route => {
+    const source = new URL(route.request().url()).searchParams.get('source');
+    if (source === 'codex') await codexReady;
+    const result = source === 'claude' ? [sessions[1]] : source === 'codex' ? [sessions[0]] : [];
+    await route.fulfill({ json: { sessions: result } });
+  });
+  try {
+    await page.goto('/#/overview');
+    await page.getByRole('article').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+    const history = page.getByRole('region', { name: 'Continue a conversation' });
+    await expect(history.getByText(sessions[1].title)).toBeVisible();
+    await expect(history.getByText(sessions[0].title)).toHaveCount(0);
+    await expect(history.getByRole('status')).toContainText('4 of 5 sources checked');
+    releaseCodex();
+    await expect(history.getByText(sessions[0].title)).toBeVisible();
+    await expect(history.getByRole('status')).toHaveCount(0);
+    await expect(history.getByTestId('resume-session-row')).toHaveCount(2);
+  } finally {
+    releaseCodex();
+  }
+});
+
+test.describe('workspace tab selection', () => {
+  const other = { ...feature, id: 'feature-y', branchName: 'feature-y', description: 'Other work', workspacePath: 'C:/ws/feature-y' };
+  test.use({ workspacesData: [[feature, other], { scope: 'test' }] });
+
+  test('resume action focuses an existing tab without resetting it', async ({ page }) => {
+    await page.goto('/#/overview');
+    const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+    await page.getByRole('article').filter({ hasText: 'Harness resume' }).getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+    await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
+    await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-y' }).click();
+    await expect(chat.getByRole('tab', { name: 'Show feature-y in the left pane' })).toHaveAttribute('aria-selected', 'true');
+
+    await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
+    await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveAttribute('aria-selected', 'true');
+    await expect(chat.getByRole('tab')).toHaveCount(2);
+    await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
 test('resumes every indexed harness in the chat window using its recorded identity', async ({ page }) => {
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();

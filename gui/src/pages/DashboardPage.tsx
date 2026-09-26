@@ -9,6 +9,7 @@ import {
   Plus,
   ArrowRight,
   Terminal,
+  History,
   Sparkles,
   Search,
   ExternalLink,
@@ -436,8 +437,8 @@ export function DashboardPage({
                     )}
                     <div className="flex items-center gap-1">
                       <Button size="xs" variant="ghost" onClick={() => openCli(ws.branchName)}
-                        aria-label={`Open CLI chat for ${ws.branchName}`} title="Open CLI chat" className="h-7 px-2">
-                        <Terminal size={13} />
+                        aria-label={`Resume CLI chat for ${ws.branchName}`} title="Open this workspace's CLI chat" className="h-7 px-2">
+                        <History size={13} /> Resume chat
                       </Button>
                       <Button size="xs" variant="outline" onClick={() => onOpenWorkspace(ws.branchName)} className="h-7 px-3">
                         Open workspace <ArrowRight size={12} />

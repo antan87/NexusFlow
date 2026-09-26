@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import { History, RefreshCw, ArrowRight } from 'lucide-react';
 import { apiFetch } from '../../lib/api/client.js';
 import { Button } from '../../components/ui/button.js';
@@ -10,23 +10,39 @@ import { SessionUsageDetails } from './SessionUsage.js';
 import type { AISession } from '../../types.js';
 import type { TerminalStatus } from './client.js';
 
+const SESSION_SOURCES = ['antigravity', 'claude', 'codex', 'copilot', 'workspace'] as const;
+
 export function ResumeSessions({ workspace, active, busy, status, fill, onStartNew, onResume }: { workspace: string; active: boolean; busy: boolean; status: TerminalStatus | null; fill: boolean; onStartNew: () => void; onResume: (session: AISession) => void }) {
   const [search, setSearch] = useState('');
   const [includeChildren, setIncludeChildren] = useState(false);
-  // The same endpoint and records used by the workspace Sessions tab.
-  const history = useQuery({ queryKey: ['terminal-resume-sessions', workspace], queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions`), enabled: active, staleTime: 15_000 });
-  const sessions = history.data?.sessions ?? [];
+  // Each source resolves independently so slow CLI history cannot hold up the rest.
+  const histories = useQueries({ queries: SESSION_SOURCES.map(source => ({
+    queryKey: ['terminal-resume-source', workspace, source],
+    queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions?source=${source}`),
+    enabled: active,
+    staleTime: 15_000,
+  })) });
+  const seen = new Set<string>();
+  const sessions = histories.flatMap(history => history.data?.sessions ?? []).filter(session => {
+    const key = `${session.assistant}:${session.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const sourcesChecked = histories.filter(history => history.isSuccess || history.isError).length;
+  const sourcesPending = histories.filter(history => history.isPending).length;
+  const sourcesFailed = histories.filter(history => history.isError).length;
   const children = sessions.filter(s => s.threadKind === 'subagent').length;
   const visible = sessions.filter(s => (includeChildren || s.threadKind !== 'subagent') && `${s.title} ${harnessName(s.assistant)} ${s.id}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
   return <section aria-label="Continue a conversation" className={`min-h-0 overflow-auto border-b border-border bg-card p-3 ${fill ? 'flex-1' : 'max-h-[45%]'}`}>
-    <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><History className="size-4" />Continue a conversation</h3><Button size="xs" variant="ghost" aria-label="Refresh saved sessions" onClick={() => void history.refetch()}><RefreshCw className="size-3" /></Button></div>
+    <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><History className="size-4" />Continue a conversation</h3><Button size="xs" variant="ghost" aria-label="Refresh saved sessions" onClick={() => { for (const history of histories) void history.refetch(); }}><RefreshCw className="size-3" /></Button></div>
     <p className="mt-1 text-xs text-muted-foreground">Choose a saved conversation. It opens in the CLI tool that created it.</p>
     {includeChildren && <p className="mt-1 text-[11px] text-muted-foreground">Subagents are delegated tasks. Continue their main conversation to pick up your work.</p>}
     <div className="my-2 flex flex-wrap items-center gap-2"><input aria-label="Search saved sessions" placeholder="Search conversations or harnesses" className="min-w-40 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" value={search} onChange={e => setSearch(e.target.value)} /><label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={includeChildren} onChange={e => setIncludeChildren(e.target.checked)} />Include subagent sessions{children > 0 ? ` (${children})` : ''}</label></div>
-    {history.isLoading && <p className="py-3 text-xs text-muted-foreground">Loading saved conversations…</p>}
-    {history.error && <p role="alert" className="py-3 text-xs text-destructive">Could not load sessions. Use Refresh to try again.</p>}
-    {!history.isLoading && !history.error && visible.length === 0 && <div className="space-y-2 py-3"><p className="text-xs text-muted-foreground">{search ? 'No matching conversations.' : children && !includeChildren ? 'Only subagent sessions were found. Include them to inspect their parent links.' : 'No saved conversations found for this workspace.'}</p>{!search && <Button size="xs" variant="outline" onClick={onStartNew}>Start a new session</Button>}</div>}
+    {active && sourcesPending > 0 && <p role="status" className="py-2 text-xs text-muted-foreground">Loading saved conversations… {sourcesChecked} of {SESSION_SOURCES.length} sources checked. Results appear as they arrive.</p>}
+    {sourcesFailed > 0 && <p role="alert" className="py-2 text-xs text-destructive">Could not load {sourcesFailed} {sourcesFailed === 1 ? 'source' : 'sources'}. Other conversations are shown; use Refresh to retry.</p>}
+    {sourcesPending === 0 && sourcesFailed === 0 && visible.length === 0 && <div className="space-y-2 py-3"><p className="text-xs text-muted-foreground">{search ? 'No matching conversations.' : children && !includeChildren ? 'Only subagent sessions were found. Include them to inspect their parent links.' : 'No saved conversations found for this workspace.'}</p>{!search && <Button size="xs" variant="outline" onClick={onStartNew}>Start a new session</Button>}</div>}
     <div className="max-h-72 divide-y divide-border">
       {visible.map(session => {
         const main = mainSessionFor(session, sessions);

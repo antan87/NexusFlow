@@ -15,7 +15,7 @@ import {
   Check,
   Activity,
   Users,
-  Terminal,
+  History,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
@@ -429,10 +429,10 @@ function SidebarContents({
                             type="button"
                             onClick={() => openCli(w.branchName)}
                             className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-                            title={`Open CLI chat for ${w.branchName}`}
-                            aria-label={`Open CLI chat for ${w.branchName}`}
+                            title={`Resume CLI chat for ${w.branchName}`}
+                            aria-label={`Resume CLI chat for ${w.branchName}`}
                           >
-                            <Terminal size={12} aria-hidden="true" />
+                            <History size={12} aria-hidden="true" />
                           </button>
                           <span
                             className={cn(

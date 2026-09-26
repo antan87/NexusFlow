@@ -871,6 +871,26 @@ describe('Server API Endpoints Unit Tests', () => {
       await expect(response.json()).resolves.toEqual({ error: 'Session limit must be an integer from 1 to 20.' });
     });
 
+    it('validates a source and scans only that source for progressive history requests', async () => {
+      const invalid = await app.request('/api/workspace/safe-workspace/sessions?source=unknown');
+      expect(invalid.status).toBe(400);
+      const combined = await app.request('/api/workspace/safe-workspace/sessions?source=codex&desktopHandoffOnly=true');
+      expect(combined.status).toBe(400);
+
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'safe-workspace', repos: [path.join(workspacePath, 'repo')], workspacePath,
+      } as any);
+      const find = vi.spyOn(sessionFinder, 'findSessions').mockResolvedValue([]);
+      try {
+        const response = await app.request('/api/workspace/safe-workspace/sessions?source=codex');
+        expect(response.status).toBe(200);
+        expect(find).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], 'codex');
+      } finally {
+        find.mockRestore();
+      }
+    });
+
     it('gates Claude Desktop transfer to supported subscription CLI environments', () => {
       const configured = () => true;
 

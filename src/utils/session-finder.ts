@@ -448,15 +448,19 @@ export async function canTransferClaudeSessionInWorkspace(
   return false;
 }
 
+export const SESSION_SOURCES = ['antigravity', 'claude', 'codex', 'copilot', 'workspace'] as const;
+export type SessionSource = typeof SESSION_SOURCES[number];
+
 /**
  * Scans the local filesystem for conversation histories belonging to Claude, Antigravity,
  * Codex, and Copilot that relate to the specified workspace.
  *
  * @param workspacePath - Root directory of the active workspace.
  * @param repoPaths - Directories of sub-repositories included in the workspace.
+ * @param source - Optional history source to scan independently for progressive loading.
  * @returns A promise that resolves to an array of {@link AISession} objects sorted by update time descending.
  */
-export async function findSessions(workspacePath: string, repoPaths: string[] = []): Promise<AISession[]> {
+export async function findSessions(workspacePath: string, repoPaths: string[] = [], source?: SessionSource): Promise<AISession[]> {
   const sessions: AISession[] = [];
   const wsFolderName = path.basename(workspacePath);
 
@@ -495,6 +499,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   };
 
   // ─── 1. Scan Antigravity Sessions ──────────────────────────────────────
+  if (!source || source === 'antigravity') {
   const agDir = getAntigravityDir();
   const agHistoryPath = path.join(agDir, 'history.jsonl');
   
@@ -571,8 +576,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       });
     }
   } catch {}
+  }
 
   // ─── 2. Scan Claude Code Sessions ──────────────────────────────────────
+  if (!source || source === 'claude') {
   const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const claudeProjectsDir = path.join(claudeConfigDir, 'projects');
   
@@ -650,8 +657,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // ─── 3. OpenAI Codex Sessions (rollout-*.jsonl) ──────────────────────────
+  if (!source || source === 'codex') {
   // Codex writes a `session_meta` record (payload.cwd) followed by
   // `response_item` records (payload.type==='message', role, content[].text).
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -750,8 +759,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // ─── 4. GitHub Copilot Sessions (SQLite session store) ───────────────────
+  if (!source || source === 'copilot') {
   // Copilot keeps sessions in ~/.copilot/session-store.db: a `sessions` table
   // (id, cwd, summary, timestamps) and a `turns` table (user_message /
   // assistant_response per turn). Match on `cwd` like the other harnesses.
@@ -804,8 +815,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       try { copilotDb.close(); } catch {}
     }
   }
+  }
 
   // ─── 5. Scan Workspace .sessions Directory ───────────────────────────────
+  if (!source || source === 'workspace') {
   try {
     const wsSessionsDir = path.join(workspacePath, '.sessions');
     const sessionFiles = await getFilesRecursively(wsSessionsDir, '.jsonl').catch(() => []);
@@ -864,6 +877,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // Sort by updatedAt descending
   sessions.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));

@@ -84,6 +84,7 @@ import {
   findActiveAssistants,
   findSessions,
   getSessionTranscript,
+  SESSION_SOURCES,
 } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import { isValidSessionId, isValidSessionUuid, type AgentSession } from './agent/session.js';
@@ -2918,6 +2919,14 @@ app.get('/api/workspace/:id/sessions', async (c) => {
     const id = decodeURIComponent(c.req.param('id'));
     const limitParam = c.req.query('limit');
     const desktopHandoffOnly = c.req.query('desktopHandoffOnly') === 'true';
+    const sourceParam = c.req.query('source');
+    const source = SESSION_SOURCES.find((candidate) => candidate === sourceParam);
+    if (sourceParam && !source) {
+      return c.json({ error: 'Choose a valid session source.' }, 400);
+    }
+    if (source && desktopHandoffOnly) {
+      return c.json({ error: 'Session source cannot be combined with desktop handoff.' }, 400);
+    }
     let limit: number | undefined;
     if (limitParam !== undefined) {
       limit = Number(limitParam);
@@ -2948,7 +2957,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    const discoveredSessions = await findSessions(workspacePath, feature.repos);
+    const discoveredSessions = await findSessions(workspacePath, feature.repos, source);
     if (!desktopHandoffOnly) {
       return c.json({ sessions: limit === undefined ? discoveredSessions : discoveredSessions.slice(0, limit) });
     }
