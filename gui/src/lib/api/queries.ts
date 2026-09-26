@@ -79,7 +79,7 @@ export interface CreateWorkspacePayload {
   workType?: 'bug' | 'feature' | 'performance' | 'refactor' | 'rewrite';
   mode?: WorkspaceMode;
   projectId?: string;
-  /** Workspace name — required for in-place mode. */
+  /** Human-readable workspace name; also used for the in-place workspace id. */
   name?: string;
   branchName?: string;
   description: string;

@@ -1365,6 +1365,7 @@ describe('Server API Endpoints Unit Tests', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchName: 'test-ws-creation-no-pack',
+          name: 'Readable workspace title',
           flowType: 'epic',
           description: 'A test workspace',
           repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
@@ -1381,6 +1382,7 @@ describe('Server API Endpoints Unit Tests', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].flowType).toBe('epic');
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].name).toBe('Readable workspace title');
       expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalled();
 
@@ -1523,6 +1525,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(feature.mode).toBe('in-place');
       expect(feature.id).toBe('my-quick-fix');
       expect(feature.projectId).toBe('billing');
+      expect(feature.name).toBe('My Quick Fix');
       // Repos stay at their source paths — no join(workspacePath, name) remap.
       expect(feature.repos).toEqual(['/mock/repo-1']);
       // Analysis also runs against the source repos.

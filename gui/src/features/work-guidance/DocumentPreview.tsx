@@ -6,8 +6,9 @@ export type DocumentKind = 'markdown' | 'text' | 'html' | 'pdf' | 'image' | 'dow
 export interface DocumentPreviewData { name: string; kind: DocumentKind; content?: string }
 
 export function DocumentPreview({ preview, fileUrl, raw }: { preview: DocumentPreviewData; fileUrl: string; raw: boolean }) {
+  // Preserve <head> styles when sanitizing a full document into the iframe body.
   const safeHtml = useMemo(() => preview.kind === 'html' && !raw
-    ? DOMPurify.sanitize(preview.content ?? '', { USE_PROFILES: { html: true }, FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'link', 'meta', 'base'] })
+    ? DOMPurify.sanitize(preview.content ?? '', { USE_PROFILES: { html: true }, FORCE_BODY: true, FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'link', 'meta', 'base'] })
     : '', [preview, raw]);
   const htmlDocument = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:"></head><body>${safeHtml}</body></html>`;
 

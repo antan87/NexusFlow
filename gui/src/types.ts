@@ -205,6 +205,7 @@ export interface Feature {
   /** Id of the project this feature was created from, if any. */
   projectId?: string;
   branchName: string;
+  name?: string;
   description: string;
   repos: string[];
   assistants: string[];

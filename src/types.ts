@@ -260,6 +260,9 @@ export interface Feature {
   /** Git branch name created for this feature. */
   branchName: string;
 
+  /** Human-readable workspace name, independent of its directory and Git branch. */
+  name?: string;
+
   /** Short human-readable description of the feature. */
   description: string;
 

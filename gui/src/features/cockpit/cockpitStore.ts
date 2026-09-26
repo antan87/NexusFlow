@@ -236,9 +236,9 @@ export function upcastWorkspaceToCockpit(
   iterations: DevelopmentIteration[];
   gateStatus: VerificationGateTelemetry;
 } {
-  const workspaceTitle = feature.description && feature.description.length > 3 && feature.description.length < 50
+  const workspaceTitle = feature.name || (feature.description && feature.description.length > 3 && feature.description.length < 50
     ? feature.description
-    : formatBranchTitle(feature.branchName);
+    : formatBranchTitle(feature.branchName));
   const workspaceIntent = feature.description || 'Workspace Process and Code Review Cockpit';
 
   // Normalize worktree groups from feature

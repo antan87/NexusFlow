@@ -32,7 +32,7 @@ test('opens agent-created Markdown, HTML, PDF and Office documents from the root
   await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
   await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
     const name = new URL(route.request().url()).searchParams.get('name');
-    return route.fulfill({ json: { ...documents.find((doc) => doc.name === name), ...(name?.endsWith('.md') ? { content: '# Agent findings\n\nRoot documents open here.' } : {}), ...(name?.endsWith('.html') ? { content: '<h1>Rendered HTML</h1><script>window.unsafe = true</script>' } : {}) } });
+    return route.fulfill({ json: { ...documents.find((doc) => doc.name === name), ...(name?.endsWith('.md') ? { content: '# Agent findings\n\nRoot documents open here.' } : {}), ...(name?.endsWith('.html') ? { content: '<!doctype html><html><head><style>h1 { color: rgb(18, 52, 86); }</style></head><body><h1>Rendered HTML</h1><script>window.unsafe = true</script></body></html>' } : {}) } });
   });
   await page.route('**/api/workspace/demo/documents/file?*', (route) => route.fulfill({ contentType: 'application/pdf', headers: { 'Access-Control-Allow-Origin': '*' }, body: blankPdf() }));
   await page.goto('/#/workspaces/demo/documents');
@@ -45,6 +45,7 @@ test('opens agent-created Markdown, HTML, PDF and Office documents from the root
   const html = page.getByTitle('Preview of page.html');
   await expect(html).toBeVisible();
   await expect.poll(() => html.evaluate((frame: HTMLIFrameElement) => frame.srcdoc)).toContain('Rendered HTML');
+  await expect(page.frameLocator('iframe[title="Preview of page.html"]').getByRole('heading', { name: 'Rendered HTML' })).toHaveCSS('color', 'rgb(18, 52, 86)');
   expect(await html.evaluate((frame: HTMLIFrameElement) => frame.srcdoc)).not.toContain('<script>');
   await page.getByRole('button', { name: /evidence.pdf/ }).click();
   await expect(page.getByTitle('Preview of evidence.pdf')).toBeVisible();

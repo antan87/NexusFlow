@@ -562,7 +562,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       <div className="flex flex-col min-w-0 pb-12 w-full">
         {/* L0 + L1 Process Cockpit Header */}
         <ProcessCockpitHeader
-          workspaceTitle={cockpit.workspaceTitle || selected.description || selected.branchName}
+          workspaceTitle={selected.name || cockpit.workspaceTitle || selected.description || selected.branchName}
           workspaceDescription={cockpit.workspaceIntent || selected.description}
           activeWorktree={activeWorktree}
           iterations={cockpit.iterations}
@@ -588,11 +588,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         {/* Compact Workspace Action Bar (collapsed in Zen Mode) */}
         {!cockpit.isZenMode && (
           <div className="border-b border-border bg-card/80 px-4 py-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
-            {/* Left: Branch Title & Telemetry */}
+            {/* Left: workspace name, branch, and telemetry */}
             <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <h1 className="font-mono font-bold text-foreground truncate" title={selected.branchName}>
-                {selected.branchName}
+              <h1 className="font-bold text-foreground truncate" title={selected.name || selected.branchName}>
+                {selected.name || selected.branchName}
               </h1>
+              {selected.name && <span className="font-mono text-[10px] text-muted-foreground" title={selected.branchName}>{selected.branchName}</span>}
               <button
                 type="button"
                 onClick={async () => {

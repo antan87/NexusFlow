@@ -1206,6 +1206,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       flowType: body.flowType,
       workType: body.workType,
       projectId: body.projectId,
+      name: body.name?.trim() || undefined,
       // In-place features never create a branch; keeping branchName populated
       // (= id) avoids breaking every consumer of the non-optional field.
       branchName: inPlace ? workspaceId : body.branchName,
@@ -1291,7 +1292,7 @@ app.post('/api/workspace', async (c) => {
     const body = await c.req.json() as {
       mode?: 'worktree' | 'in-place';
       projectId?: string;
-      /** Workspace name — required for in-place mode (there is no branch). */
+      /** Human-readable workspace name; required for in-place mode. */
       name?: string;
       branchName?: string;
       description: string;
