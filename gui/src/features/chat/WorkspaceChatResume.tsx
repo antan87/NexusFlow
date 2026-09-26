@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { History } from 'lucide-react';
+import { ArrowUpRight, History, LoaderCircle } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
-import { harnessName } from '../../components/icons/HarnessIcon.js';
+import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { useFloatingChat } from './floatingChatStore.js';
 import { useWorkspaceSessionSources } from '../terminal/useWorkspaceSessionSources.js';
 
 export function WorkspaceChatResume({ workspace }: { workspace: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
-  const { openTabs, openCli } = useFloatingChat();
-  const hasTab = openTabs.includes(workspace);
+  const { openCli, openTerminal } = useFloatingChat();
 
   useEffect(() => {
     if (inView) return;
@@ -28,28 +27,32 @@ export function WorkspaceChatResume({ workspace }: { workspace: string }) {
     return () => observer.disconnect();
   }, [inView]);
 
-  const { sessions, sourcesPending, sourcesFailed } = useWorkspaceSessionSources(workspace, inView && !hasTab);
-  const recent = sessions.filter(session => session.threadKind !== 'subagent')
-    .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))[0];
-  const details = hasTab
-    ? 'CLI chat tab open'
-    : recent
-      ? `Last chat: ${harnessName(recent.assistant)} · ${recent.title}`
-      : !inView || sourcesPending > 0
-        ? 'Finding recent chats…'
-        : sourcesFailed > 0
-          ? 'Recent chats unavailable'
-          : 'No saved chat yet';
-  const actionLabel = hasTab
-    ? `Open existing CLI chat tab for ${workspace}`
-    : recent
-      ? `Open CLI chat for ${workspace}; recent conversation: ${recent.title}`
-      : `Open CLI chat for ${workspace}`;
+  const { sessions, sourcesChecked, sourcesPending, sourcesFailed, sourceCount } = useWorkspaceSessionSources(workspace, inView);
+  const recent = sessions.filter(session => session.threadKind !== 'subagent' && session.recordedCwd)
+    .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
 
-  return <div ref={container} className="flex w-full min-w-0 items-center gap-1.5">
-    <Button size="icon-sm" variant="ghost" onClick={() => openCli(workspace)} aria-label={actionLabel} title={actionLabel} className="shrink-0 text-primary">
-      <History size={14} aria-hidden="true" />
-    </Button>
-    <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={details} aria-live="polite">{details}</span>
-  </div>;
+  return <section ref={container} aria-label={`Recent CLI sessions for ${workspace}`} className="w-full min-w-0">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] font-semibold text-muted-foreground">Recent CLI sessions</span>
+      <div className="flex items-center gap-1">
+        {(!inView || sourcesPending > 0) && <span role="status" className="flex items-center gap-1 text-[10px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" aria-hidden="true" />{sourcesChecked}/{sourceCount}</span>}
+        <Button size="icon-xs" variant="ghost" onClick={() => openCli(workspace)} aria-label={`View all CLI sessions for ${workspace}`} title="View all CLI sessions">
+          <History className="size-3.5" aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
+    {recent.length > 0 ? <div className="mt-0.5 space-y-0.5">
+      {recent.slice(0, 2).map(session => {
+        const label = `Open ${session.title} with ${harnessName(session.assistant)} in CLI chat`;
+        return <button key={`${session.assistant}:${session.id}`} type="button" onClick={() => openTerminal(workspace, session.assistant, session.id, session.workspacePath)}
+          aria-label={label} title={label} className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs text-foreground hover:bg-muted/70 focus-visible:outline-2 focus-visible:outline-primary">
+          <HarnessIcon harness={session.assistant} className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{harnessName(session.assistant)}</span>
+          <ArrowUpRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </button>;
+      })}
+    </div> : <p className="px-1.5 py-1 text-[11px] text-muted-foreground">{!inView || sourcesPending > 0 ? 'Finding saved conversations…' : sourcesFailed > 0 ? 'Could not load recent sessions.' : sessions.length > 0 ? 'Use the CLI session picker for these conversations.' : 'No saved conversations yet.'}</p>}
+    {sourcesFailed > 0 && recent.length > 0 && <p className="px-1.5 text-[10px] text-muted-foreground">Some session sources could not be loaded.</p>}
+  </section>;
 }
