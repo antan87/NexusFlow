@@ -148,6 +148,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   };
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
 
   const handleSelectHunk = useCallback((index: number) => {
     if (index >= 0 && index < hunks.length && hunks[index]) {
@@ -254,20 +255,30 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     activeTab?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }, [activeHunkIndex]);
 
-  // Keyboard shortcut listener for fast hunk triage
+  // Keyboard shortcut listener for fast hunk triage.
+  //
+  // Scoped to this viewer. It is also mounted inside the floating CLI chat, so a
+  // window-level listener would accept or reject a hunk while the user was
+  // typing somewhere else in the app entirely.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
+      if (!root.current?.contains(target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'j' || e.key === 'n') {
+        e.preventDefault();
         handleNextHunk();
       } else if (e.key === 'k' || e.key === 'p') {
+        e.preventDefault();
         handlePrevHunk();
       } else if (e.key === 'a') {
+        e.preventDefault();
         void handleAcceptHunk();
       } else if (e.key === 'r') {
+        e.preventDefault();
         void handleRejectHunk();
       }
     };
@@ -279,6 +290,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
 
   return (
     <div
+      ref={root}
       className={cn(
         'flex flex-col overflow-hidden',
         fillContainer

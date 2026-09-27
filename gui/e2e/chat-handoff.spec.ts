@@ -153,7 +153,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-    await expect(chat.getByText('CLI', { exact: true })).toBeVisible();
+    await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
     await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
     await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toBeVisible();
   });

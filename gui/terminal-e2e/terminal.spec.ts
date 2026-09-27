@@ -15,36 +15,43 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
   await expect(pane.getByRole('status')).toHaveText('Running');
-  const session = await pane.getByLabel('Terminal sessions').inputValue();
-  await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(0);
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  const openPaneOptions = () => chat.getByRole('button', { name: 'Pane options' }).click();
+  const toggleInspector = async (name) => { await openPaneOptions(); await page.getByRole('button', { name, exact: true }).click(); };
+  await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/terminal-compact.png' });
-  await expect(pane.getByRole('button', { name: 'Terminal tools' })).toHaveAttribute('aria-expanded', 'false');
-  await pane.getByRole('button', { name: 'Terminal tools' }).click();
-  await pane.getByLabel('Screen reader', { exact: true }).check();
+  // The raw session <select> and the always-on tools row were replaced by one
+  // overflow menu, so the saved session and its usage live behind it now.
+  await openPaneOptions();
+  await expect(page.getByRole('menuitem', { name: /bash/ })).toBeVisible();
+  await page.screenshot({ path: 'test-results/terminal-pane-options.png' });
+  await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
   const input = pane.locator('.xterm-helper-textarea');
   const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
   await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Show code' }).click();
-  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(0);
-  await expect(pane).toBeHidden();
+  // The default window is 760px, above the 520px compact threshold, so the
+  // inspector splits and the terminal stays visible beside it.
+  await toggleInspector('Code');
+  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
+  await expect(pane).toBeVisible();
   await page.screenshot({ path: 'test-results/terminal-compact-inspector.png' });
-  await chat.getByRole('button', { name: 'Back to CLI' }).click();
+  await toggleInspector('Code');
   await expect(pane).toBeVisible();
   await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_CODE')" : 'echo CS_${CS_KEEP}_CODE'); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_CODE');
-  await chat.getByRole('button', { name: 'Documents', exact: true }).click();
-  await expect(chat.getByRole('separator', { name: 'Resize documents panel' })).toHaveCount(0);
-  await expect(pane).toBeHidden();
-  await chat.getByRole('button', { name: 'Back to CLI' }).click();
+  await toggleInspector('Docs');
+  await expect(chat.getByRole('separator', { name: 'Resize documents panel' })).toHaveCount(1);
+  await expect(pane).toBeVisible();
+  await toggleInspector('Docs');
   await expect(pane).toBeVisible();
   await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_DOCS')" : 'echo CS_${CS_KEEP}_DOCS'); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_DOCS');
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
   const box = await page.getByRole('region', { name: 'CLI Chat', exact: true }).boundingBox();
   expect(box?.width).toBe(page.viewportSize()!.width);
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector('Code');
   const separator = chat.getByRole('separator', { name: 'Resize code panel' });
   await expect(separator).toHaveAttribute('aria-orientation', 'vertical');
   await separator.focus();
@@ -52,7 +59,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(separator).toHaveAttribute('aria-valuenow', '55');
   await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_WIDE')" : 'echo CS_${CS_KEEP}_WIDE'); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_WIDE');
-  await chat.getByRole('button', { name: 'Hide code' }).click();
+  await toggleInspector('Code');
   await expect.poll(() => pane.getByLabel('Interactive CLI terminal').evaluate(host => {
     const screen = host.querySelector('.xterm-screen');
     if (!screen) return Infinity;
@@ -62,22 +69,20 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('button', { name: 'Minimize floating chat' }).click();
   await expect(page.getByTitle('Restore floating CLI chat')).toContainText('CLI running · hidden');
   await page.getByTitle('Restore floating CLI chat').click();
-  await chat.getByRole('button', { name: 'Show code' }).click();
-  await expect(pane).toBeHidden();
+  await toggleInspector('Code');
+  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
+  await expect(pane).toBeVisible();
   await page.getByRole('button', { name: 'Add Workspace' }).click();
   await page.getByRole('menuitem').filter({ hasText: 'terminal-other' }).click();
   await expect(pane.getByRole('button', { name: 'Continue a conversation', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'terminal-test', exact: false }).click();
-  await expect(chat.getByRole('button', { name: 'Back to CLI' })).toBeVisible();
-  await chat.getByRole('button', { name: 'Back to CLI' }).click();
+  await toggleInspector('Code');
   await expect(pane.getByRole('status')).toHaveText('Running');
   await page.reload();
   await expect(pane.getByRole('status')).toHaveText('Running');
-  await expect(pane.getByLabel('Terminal sessions')).toHaveValue(session);
-  await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane.getByRole('region', { name: 'Continue a conversation' })).toHaveCount(0);
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
-  await pane.getByRole('button', { name: 'Terminal tools' }).click();
-  await pane.getByLabel('Screen reader', { exact: true }).check();
+  await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
   await input.focus();
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : 'echo CS_ALIVE_$CS_KEEP');
   await page.keyboard.press('Enter');
@@ -86,9 +91,9 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
   await page.screenshot({ path: 'test-results/terminal-maximized.png' });
   page.once('dialog', dialog => dialog.accept());
-  await pane.getByRole('button', { name: 'End session', exact: true }).click();
+  await pane.getByRole('button', { name: 'End', exact: true }).click();
   await expect(pane.getByRole('status')).toHaveText('Ended');
-  await expect(pane.getByRole('button', { name: 'End session' })).toHaveCount(0);
+  await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 
 test('a shell that quits on its own is labeled exited', async ({ page }) => {
@@ -106,7 +111,7 @@ test('a shell that quits on its own is labeled exited', async ({ page }) => {
   await page.keyboard.type('exit 3');
   await page.keyboard.press('Enter');
   await expect(pane.getByRole('status')).toContainText('Exited');
-  await expect(pane.getByRole('button', { name: 'End session' })).toHaveCount(0);
+  await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 
 test('cross-origin terminal creation and websocket attachment are rejected', async ({ request }) => {
