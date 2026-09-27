@@ -26,3 +26,13 @@ Use environment-specific workarounds only after establishing why they are needed
 For example, `npm test -- --configLoader native` can avoid Vite writing beside a
 read-only configuration cache; it is not a universal substitute for repository scripts.
 Missing permissions or dependencies are unavailable evidence, not a passing test.
+
+In a fresh worktree, reproduce CI's order before judging failures: install the root
+and `gui/` dependencies from their lockfiles, run `npm run build`, then `npm test`.
+Suites that need GUI dependencies or `dist/` fail without it. The harness test that expects
+`AuthRequiredError` fails on a machine signed in to Claude; treat that as an
+environment difference, confirmed by CI, not as a regression.
+
+Release gate: adding, renaming or making conditional a job in `ci.yml` or
+`security.yml` requires updating `.github/release-required-checks.json` and the
+branch protection on `main` in the same PR (see `RELEASING.md`, Publish gate).
