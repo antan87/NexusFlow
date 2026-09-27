@@ -53,9 +53,11 @@ export function resolveLaunch(target: string, sessionId?: string, env = terminal
   }
   if (!isCliHarnessId(target)) throw new Error('This harness does not have an embedded terminal target.');
   const harness = CLI_HARNESSES[target];
-  const file = target === 'cursor'
-    ? findExecutable('agent', env, platform) ?? findExecutable(harness.binary, env, platform)
-    : findExecutable(harness.binary, env, platform);
+  let file: string | null | undefined;
+  for (const binary of ('terminalBinaries' in harness ? harness.terminalBinaries : [harness.binary])) {
+    file = findExecutable(binary, env, platform);
+    if (file) break;
+  }
   if (!file) throw new Error(`${harness.name} is not installed or is not on PATH. Install it, then refresh the terminal list.`);
   let args: string[] = [];
   if (sessionId) {

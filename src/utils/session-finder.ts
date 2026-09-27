@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { AISession, ChatMessage, NormalizedUsage, NormalizedRemainingQuota, SessionAssistant } from '../types.js';
 import type { SessionSource } from './cli-harnesses.js';
-import { findPiSessions, getPiTranscript, hasPiSessions } from './pi-sessions.js';
+import { MODULAR_SESSION_READERS, modularSessionReader } from './session-readers.js';
 export { SESSION_SOURCES } from './cli-harnesses.js';
 export type { SessionSource } from './cli-harnesses.js';
 
@@ -818,12 +818,13 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   }
   }
 
-  // ─── 5. Pi Sessions ───────────────────────────────────────────────────────
-  if (!source || source === 'pi') {
-    sessions.push(...await findPiSessions([workspacePath, ...repoPaths], isPathMatch, resolveTargetCwd));
+  // ─── Modular history readers ────────────────────────────────────────────
+  const scanContext = { roots: [workspacePath, ...repoPaths], matchesCwd: isPathMatch, targetCwd: resolveTargetCwd };
+  for (const [id, reader] of Object.entries(MODULAR_SESSION_READERS)) {
+    if (!source || source === id) sessions.push(...await reader.list(scanContext));
   }
 
-  // ─── 6. Scan Workspace .sessions Directory ───────────────────────────────
+  // ─── Scan Workspace .sessions Directory ──────────────────────────────────
   if (!source || source === 'workspace') {
   try {
     const wsSessionsDir = path.join(workspacePath, '.sessions');
@@ -1076,7 +1077,9 @@ export async function findActiveAssistants(
     active.add('copilot');
   }
 
-  if (await hasPiSessions([workspacePath, ...repoPaths], isPathMatch)) active.add('pi');
+  for (const [id, reader] of Object.entries(MODULAR_SESSION_READERS)) {
+    if (await reader.hasAny({ roots: [workspacePath, ...repoPaths], matchesCwd: isPathMatch })) active.add(id as SessionAssistant);
+  }
 
   return Array.from(active);
 }
@@ -1092,7 +1095,10 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
   assertSafeSessionId(assistant, sessionId);
   const messages: ChatMessage[] = [];
 
-  if (assistant === 'antigravity') {
+  const modularReader = modularSessionReader(assistant);
+  if (modularReader) {
+    messages.push(...await modularReader.transcript(sessionId));
+  } else if (assistant === 'antigravity') {
     const agDir = getAntigravityDir();
     const transcriptPath = path.join(agDir, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
     const content = await fs.readFile(transcriptPath, 'utf-8');
@@ -1241,8 +1247,6 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
         });
       }
     }
-  } else if (assistant === 'pi') {
-    messages.push(...await getPiTranscript(sessionId));
   } else if (assistant === 'copilot') {
     const copilotDb = await openCopilotDb();
     if (!copilotDb) {
