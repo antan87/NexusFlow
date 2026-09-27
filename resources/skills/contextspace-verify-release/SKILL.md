@@ -40,6 +40,13 @@ head. Green checks on an earlier commit do not establish readiness for a newer o
 Pending checks, unresolved blocking findings, and missing required approvals must be
 reported as outstanding. No review submitted is different from an approved review.
 
+When a request chains push, merge and release, name every PR to merge and every
+release dispatch, and confirm each one. A dependent PR, such as a version bump, needs
+its own authorization. Harness safety checks may block a merge the user did not name;
+stop and ask rather than trying another route. For a gated release, dispatch only after
+required checks succeed on the exact merge commit, because merging anything else first
+moves the release source.
+
 An assessment or push request does not itself authorize merging or publishing.
 When those actions are requested, perform the applicable checks first and verify
 the resulting remote state. For deployments or migrations, include the relevant
