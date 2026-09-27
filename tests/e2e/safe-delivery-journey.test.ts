@@ -95,11 +95,12 @@ describe('safe delivery journey through the real server', { timeout: 180_000 }, 
       createdAt: new Date().toISOString(),
     });
     hostsBefore = { api: await identity(api.host), web: await identity(web.host) };
-  });
+    // Two remotes, seeds and clones take well over the 10 s default on Windows runners.
+  }, 120_000);
 
   afterAll(async () => {
-    await fs.rm(root, { recursive: true, force: true, maxRetries: 5 });
-  });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }, 60_000);
 
   it('starts with read-only references that commit refuses to change', async () => {
     const repos = await call('GET', `${ws}/repositories`);

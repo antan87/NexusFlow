@@ -30,8 +30,10 @@ describe('End-to-End Skills & Tooling Workflow Integration', () => {
     } else {
       delete process.env.NEXUSFLOW_HOME;
     }
-    await fse.remove(tempWorkspace);
-    await fse.remove(tempHome);
+    // A background `git gc --auto` from the workspace auto-commit can still be
+    // writing packs; rm's retries ride out that ENOTEMPTY/EBUSY window.
+    await fs.rm(tempWorkspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(tempHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
 
