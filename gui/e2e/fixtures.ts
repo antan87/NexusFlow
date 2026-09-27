@@ -88,6 +88,7 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/adapters', json(adaptersData));
     await page.route('**/api/workspaces', json(workspacesData));
     await page.route('**/api/workspaces/status', json(workspacesStatusData));
+    await page.route('**/api/session-sources', json({ sources: ['antigravity', 'claude', 'codex', 'copilot', 'pi', 'workspace'] }));
     await page.route('**/api/workspaces/status?*', async (route) => {
       const url = new URL(route.request().url());
       const offset = Number(url.searchParams.get('offset') ?? 0);

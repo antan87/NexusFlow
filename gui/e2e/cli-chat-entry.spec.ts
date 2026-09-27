@@ -23,7 +23,7 @@ test('workspace actions open the selected CLI chat without starting a session', 
 
   await page.goto('/#/overview');
   await page.locator('section[aria-labelledby="workspaces-heading"]')
-    .getByRole('button', { name: 'Open CLI chat for alpha' }).click();
+    .getByRole('button', { name: 'View all CLI sessions for alpha' }).click();
 
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
@@ -33,7 +33,7 @@ test('workspace actions open the selected CLI chat without starting a session', 
 
   await chat.getByRole('button', { name: 'Close floating chat' }).click();
 
-  await page.getByRole('button', { name: 'Open CLI chat for beta' }).first().click();
+  await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for beta' }).click();
   await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toHaveAttribute('aria-selected', 'true');
   await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
   await expect(launches).toEqual([]);

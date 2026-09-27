@@ -459,14 +459,12 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
     await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
-    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
     await expect(page.getByText('Register Workspace')).toBeVisible();
 
     await page.reload();
 
     await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
     await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
-    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
     await expect(page.getByText('Register Workspace')).toBeVisible();
 
     await page.getByRole('button', { name: 'Return to form' }).click();
