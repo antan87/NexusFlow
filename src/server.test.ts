@@ -872,6 +872,9 @@ describe('Server API Endpoints Unit Tests', () => {
     });
 
     it('validates a source and scans only that source for progressive history requests', async () => {
+      const sourceList = await app.request('/api/session-sources');
+      expect(sourceList.status).toBe(200);
+      expect((await sourceList.json() as { sources: string[] }).sources).toContain('pi');
       const invalid = await app.request('/api/workspace/safe-workspace/sessions?source=unknown');
       expect(invalid.status).toBe(400);
       const combined = await app.request('/api/workspace/safe-workspace/sessions?source=codex&desktopHandoffOnly=true');
@@ -886,6 +889,9 @@ describe('Server API Endpoints Unit Tests', () => {
         const response = await app.request('/api/workspace/safe-workspace/sessions?source=codex');
         expect(response.status).toBe(200);
         expect(find).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], 'codex');
+        const piResponse = await app.request('/api/workspace/safe-workspace/sessions?source=pi');
+        expect(piResponse.status).toBe(200);
+        expect(find).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], 'pi');
       } finally {
         find.mockRestore();
       }
@@ -913,6 +919,17 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('POST /api/workspace/:id/resume', () => {
+    it('uses the Pi resume command from the CLI catalog', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'test-ws', repos: [], assistants: [] } as any);
+      const response = await app.request('/api/workspace/test-ws/resume', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assistant: 'pi', sessionId: '01a0df53-f0a9-7290-bdd1-5c094ab07027' }),
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json() as { resumeCommand: string }).resumeCommand).toBe('pi --session 01a0df53-f0a9-7290-bdd1-5c094ab07027');
+    });
+
     it('rejects cross-origin requests to resume', async () => {
       const response = await app.request('/api/workspace/test-ws/resume', {
         method: 'POST',

@@ -11,6 +11,7 @@ import { loadWorkspaceManifest } from '../core/workspace.js';
 import { canOpenCodexSessionInWorkspace, canTransferClaudeSessionInWorkspace, findSessions } from '../utils/session-finder.js';
 import { TerminalManager, nativePtyAvailable, type TerminalClient } from './manager.js';
 import { listTerminalTargets, resolveLaunch, withWorkspaceCli } from './targets.js';
+import { isCliHarnessId } from '../utils/cli-harnesses.js';
 
 const COOKIE = 'contextspace_terminal_owner';
 const HEADER = 'x-contextspace-terminal';
@@ -18,7 +19,7 @@ const TOKEN_TTL = 5 * 60_000;
 const OWNER_TTL = 24 * 60 * 60_000;
 const uuid = z.string().uuid();
 const workspaceId = z.string().min(1).max(200);
-const createSchema = z.object({ launchId: uuid, target: z.enum(['shell', 'antigravity', 'codex', 'claude', 'copilot', 'cursor', 'pi']), cwd: z.string().max(4096).optional(), sessionId: uuid.optional() }).strict();
+const createSchema = z.object({ launchId: uuid, target: z.string().refine(id => id === 'shell' || isCliHarnessId(id)), cwd: z.string().max(4096).optional(), sessionId: uuid.optional() }).strict();
 
 export function trustedTerminalOrigin(origin: string | undefined, requestUrl: string, developmentOrigin = process.env.CONTEXTSPACE_DASHBOARD_ORIGIN): boolean {
   if (!origin) return false;

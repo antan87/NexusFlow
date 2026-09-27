@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 const feature = { id: 'feature-x', branchName: 'feature-x', description: 'Harness resume', repos: [], assistants: ['antigravity', 'codex'], workspacePath: 'C:/ws/feature-x', createdAt: '2026-09-20T00:00:00Z' };
-const harnesses = ['codex', 'claude', 'antigravity', 'copilot'];
+const harnesses = ['codex', 'claude', 'antigravity', 'copilot', 'pi'];
 const sessions = harnesses.map((assistant, i) => ({
   id: `0199a213-81c0-7800-8aa1-bbab2a035a5${i}`, assistant, title: `${assistant} saved conversation`,
   threadKind: i < 2 ? 'main' : 'unknown', workspacePath: feature.workspacePath,
@@ -17,6 +17,7 @@ test.beforeEach(async ({ page }) => {
     { name: 'codex', displayName: 'Codex', detected: true }, { name: 'antigravity', displayName: 'Antigravity', detected: true },
   ] }));
   await page.route('**/api/adapters/status', route => route.fulfill({ json: [] }));
+  await page.route('**/api/session-sources', route => route.fulfill({ json: { sources: [...harnesses, 'workspace'] } }));
   await page.route('**/api/workspace/feature-x/sessions*', route => route.fulfill({ json: { sessions: [...sessions, child] } }));
   await page.route('**/api/terminals/bootstrap', route => route.fulfill({ json: { token: 'test-token', expiresAt: Date.now() + 300_000 } }));
   await page.route('**/api/terminals/feature-x/status', route => route.fulfill({ json: {
@@ -59,7 +60,7 @@ test('saved conversations appear as their sources finish', async ({ page }) => {
     const history = page.getByRole('region', { name: 'Continue a conversation' });
     await expect(history.getByText(sessions[1].title)).toBeVisible();
     await expect(history.getByText(sessions[0].title)).toHaveCount(0);
-    await expect(history.getByRole('status')).toContainText('4 of 5 sources checked');
+    await expect(history.getByRole('status')).toContainText('5 of 6 sources checked');
     releaseCodex();
     await expect(history.getByText(sessions[0].title)).toBeVisible();
     await expect(history.getByRole('status')).toHaveCount(0);
@@ -89,7 +90,7 @@ test('overview loads previous sessions progressively and opens the selected CLI 
     await expect(preview.getByRole('status')).toBeVisible();
     releaseClaude();
     await expect(preview.getByRole('button', { name: 'Open claude saved conversation with Claude Code in CLI chat' })).toBeVisible();
-    await expect(preview.getByRole('status')).toContainText('4/5');
+    await expect(preview.getByRole('status')).toContainText('5/6');
     releaseCodex();
     const codex = preview.getByRole('button', { name: 'Open codex saved conversation with Codex in CLI chat' });
     await expect(codex).toBeVisible();
@@ -103,6 +104,25 @@ test('overview loads previous sessions progressively and opens the selected CLI 
     releaseClaude();
     releaseCodex();
   }
+});
+
+test('overview shows Pi history with its harness icon and resumes the chosen session', async ({ page }) => {
+  await page.route('**/api/workspace/feature-x/sessions?source=*', route => {
+    const source = new URL(route.request().url()).searchParams.get('source');
+    const result = source === 'pi' ? [{ ...sessions[4], updatedAt: '2026-09-22T00:00:00Z' }]
+      : source === 'codex' ? [{ ...sessions[0], updatedAt: '2026-09-24T00:00:00Z' },
+        { ...sessions[0], id: '0199a213-81c0-7800-8aa1-bbab2a035a61', updatedAt: '2026-09-23T00:00:00Z' }] : [];
+    return route.fulfill({ json: { sessions: result } });
+  });
+  await page.goto('/#/overview');
+  const preview = page.getByRole('region', { name: 'Recent CLI sessions for feature-x' });
+  const pi = preview.getByRole('button', { name: 'Open pi saved conversation with Pi in CLI chat' });
+  await expect(pi).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Open codex saved conversation with Codex in CLI chat' })).toHaveCount(1);
+  await expect(pi.locator('svg')).toHaveCount(2);
+  const request = page.waitForRequest('**/api/terminals/feature-x/create');
+  await pi.click();
+  expect((await request).postDataJSON()).toMatchObject({ target: 'pi', sessionId: sessions[4].id });
 });
 
 test('selecting an already running CLI session reuses its terminal', async ({ page }) => {
@@ -173,10 +193,10 @@ test('resumes every indexed harness in the chat window using its recorded identi
   await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
   await chat.getByRole('button', { name: 'Continue a conversation', exact: true }).click();
   const history = chat.getByRole('region', { name: 'Continue a conversation' });
-  await expect(history.getByTestId('resume-session-row')).toHaveCount(4);
+  await expect(history.getByTestId('resume-session-row')).toHaveCount(5);
   await expect(history.getByText(child.title)).toHaveCount(0);
   await expect(history.getByText('Main thread', { exact: true })).toHaveCount(2);
-  await expect(history.getByText('Conversation', { exact: true })).toHaveCount(2);
+  await expect(history.getByText('Conversation', { exact: true })).toHaveCount(3);
   const firstRow = history.getByTestId('resume-session-row').first();
   await expect(firstRow.getByText(/^Last activity/).locator('time')).toHaveAttribute('datetime', '2026-09-21T00:00:00.000Z');
   await expect(firstRow.getByText(/^Started/).locator('time')).toHaveAttribute('datetime', '2026-09-20T00:00:00.000Z');

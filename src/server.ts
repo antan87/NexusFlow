@@ -76,7 +76,7 @@ import {
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
 } from './utils/workspace-launch.js';
-import { isBinaryOnPath, launchWorkspaceTerminal, SUPPORTED_ASSISTANTS } from './utils/terminal-launch.js';
+import { buildHarnessCliCommand, buildHarnessContinueCommand, isBinaryOnPath, launchWorkspaceTerminal, SUPPORTED_ASSISTANTS } from './utils/terminal-launch.js';
 import { openInEditor } from './utils/open-editor.js';
 import {
   canOpenCodexSessionInWorkspace,
@@ -2869,28 +2869,9 @@ app.post('/api/workspace/:id/resume', async (c) => {
     }
 
     if (selectedSessionId) {
-      if (selectedAssistant === 'antigravity') {
-        resumeCommand = `agy --conversation ${selectedSessionId}`;
-      } else if (selectedAssistant === 'claude') {
-        resumeCommand = `claude --resume ${selectedSessionId}`;
-      } else if (selectedAssistant === 'codex') {
-        resumeCommand = `codex resume ${selectedSessionId}`;
-      } else if (selectedAssistant === 'copilot') {
-        resumeCommand = `copilot --resume ${selectedSessionId}`;
-      }
+      if (SUPPORTED_ASSISTANTS.has(selectedAssistant)) resumeCommand = buildHarnessCliCommand(selectedAssistant, selectedSessionId);
     } else {
-      // Fallback to start command (since there's no existing session for this workspace)
-      if (selectedAssistant === 'antigravity') {
-        resumeCommand = 'agy --continue';
-      } else if (selectedAssistant === 'claude') {
-        resumeCommand = 'claude --resume';
-      } else if (selectedAssistant === 'codex') {
-        resumeCommand = 'codex resume';
-      } else if (selectedAssistant === 'copilot') {
-        resumeCommand = 'copilot --resume';
-      } else {
-        resumeCommand = 'agy --continue';
-      }
+      resumeCommand = buildHarnessContinueCommand(SUPPORTED_ASSISTANTS.has(selectedAssistant) ? selectedAssistant : 'antigravity');
     }
 
     // Open in editor if command is provided
@@ -2912,6 +2893,9 @@ app.post('/api/workspace/:id/resume', async (c) => {
     return errorResponse(c, error);
   }
 });
+
+// The GUI asks the backend which history readers exist, then loads each one independently.
+app.get('/api/session-sources', c => c.json({ sources: SESSION_SOURCES }));
 
 // 15. List past AI sessions for a workspace
 app.get('/api/workspace/:id/sessions', async (c) => {

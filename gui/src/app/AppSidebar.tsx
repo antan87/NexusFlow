@@ -21,9 +21,7 @@ import {
   ArrowLeft,
   type LucideIcon,
 } from 'lucide-react';
-import { BsOpenai } from 'react-icons/bs';
-import { SiClaude, SiGithubcopilot, SiCursor } from 'react-icons/si';
-import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -409,18 +407,8 @@ function SidebarContents({
                           {st?.activeAssistants && st.activeAssistants.length > 0 && (
                             <div className="flex items-center gap-1">
                               {st.activeAssistants.map((ast) => (
-                                <span key={ast} className="inline-flex size-3.5 opacity-75">
-                                  {ast === 'antigravity' ? (
-                                    <AntigravityIcon className="size-3" />
-                                  ) : ast === 'claude' ? (
-                                    <SiClaude className="size-2.5 text-[#D97757]" />
-                                  ) : ast === 'codex' ? (
-                                    <BsOpenai className="size-2.5 text-foreground" />
-                                  ) : ast === 'cursor' ? (
-                                    <SiCursor className="size-2.5 text-foreground" />
-                                  ) : (
-                                    <SiGithubcopilot className="size-2.5 text-blue-400" />
-                                  )}
+                                <span key={ast} title={harnessName(ast)} className="inline-flex size-3.5 opacity-75">
+                                  <HarnessIcon harness={ast} className="size-3" />
                                 </span>
                               ))}
                             </div>

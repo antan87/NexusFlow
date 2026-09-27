@@ -8,6 +8,7 @@ import * as path from 'node:path';
 
 import { isValidSessionId, isValidSessionUuid } from '../agent/session.js';
 import { TERMINAL_TITLE_PREFIX, TERMINAL_DEFAULT_TITLE } from '../core/constants.js';
+import { CLI_HARNESSES, isCliHarnessId } from './cli-harnesses.js';
 
 export interface TerminalLaunchOptions {
   command?: string;
@@ -16,7 +17,7 @@ export interface TerminalLaunchOptions {
   title?: string;
 }
 
-export const SUPPORTED_ASSISTANTS = new Set(['antigravity', 'claude', 'codex', 'copilot', 'cursor', 'pi']);
+export const SUPPORTED_ASSISTANTS = new Set(Object.keys(CLI_HARNESSES));
 
 /**
  * Escapes a string for PowerShell single-quoted string literal (' -> '')
@@ -50,7 +51,7 @@ export function isBinaryOnPath(bin: string): boolean {
  */
 export function buildHarnessCliCommand(assistant: string, sessionId?: string): string {
   const normalized = assistant.trim().toLowerCase();
-  if (!SUPPORTED_ASSISTANTS.has(normalized)) {
+  if (!isCliHarnessId(normalized)) {
     throw new Error(`Unsupported assistant for terminal launch: "${assistant}".`);
   }
 
@@ -58,38 +59,16 @@ export function buildHarnessCliCommand(assistant: string, sessionId?: string): s
     if (!isValidSessionId(sessionId)) {
       throw new Error('Invalid session format.');
     }
-    switch (normalized) {
-      case 'antigravity':
-        return `agy --conversation ${sessionId}`;
-      case 'claude':
-        return `claude --resume ${sessionId}`;
-      case 'codex':
-        return `codex resume ${sessionId}`;
-      case 'copilot':
-        return `copilot --resume ${sessionId}`;
-      case 'pi':
-        throw new Error('Resume Pi sessions from its own session picker.');
-      case 'cursor':
-        return `cursor-agent --resume ${sessionId}`;
-    }
+    return [CLI_HARNESSES[normalized].binary, ...CLI_HARNESSES[normalized].resumeArgs(sessionId)].join(' ');
   }
 
-  switch (normalized) {
-    case 'antigravity':
-      return 'agy';
-    case 'claude':
-      return 'claude';
-    case 'codex':
-      return 'codex';
-    case 'copilot':
-      return 'copilot';
-    case 'cursor':
-      return 'cursor-agent';
-    case 'pi':
-      return 'pi';
-    default:
-      return 'agy';
-  }
+  return CLI_HARNESSES[normalized].binary;
+}
+
+export function buildHarnessContinueCommand(assistant: string): string {
+  const normalized = assistant.trim().toLowerCase();
+  if (!isCliHarnessId(normalized)) throw new Error(`Unsupported assistant for terminal launch: "${assistant}".`);
+  return [CLI_HARNESSES[normalized].binary, ...CLI_HARNESSES[normalized].continueArgs].join(' ');
 }
 
 /**

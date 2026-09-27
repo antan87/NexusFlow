@@ -19,6 +19,8 @@ export type {
 
 /** Supported AI assistant identifiers. */
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+/** CLI histories may come from tools that do not generate workspace resources. */
+export type SessionAssistant = AIAssistant | 'pi';
 
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */
 export interface NexusFlowConfig {
@@ -144,7 +146,7 @@ export interface RepoSelection extends RepoInfo {
 /** Metadata about a past AI session. */
 export interface AISession {
   id: string;
-  assistant: AIAssistant;
+  assistant: SessionAssistant;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -592,7 +594,7 @@ export interface WorkspaceStatus {
   /** True when any repo pulled in new commits and awaits re-validation. */
   pendingValidation: boolean;
   /** AI assistants that have active/recorded sessions in this workspace. */
-  activeAssistants?: AIAssistant[];
+  activeAssistants?: SessionAssistant[];
 }
 
 /** Persisted sync/validation state for a single repo in a workspace. */
