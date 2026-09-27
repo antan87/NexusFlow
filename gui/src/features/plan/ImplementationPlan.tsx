@@ -22,6 +22,8 @@ import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateDeliveryState } from '../../lib/api/queries.js';
 import type { WorkspaceLifecycle, WorkspaceVerificationReport } from '../../types.js';
 
 interface ImplementationPlanProps {
@@ -50,6 +52,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const [verificationReport, setVerificationReport] = useState<WorkspaceVerificationReport | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isFleetExpanded, setIsFleetExpanded] = useState(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (defaultViewMode) {
@@ -109,6 +112,9 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       setVerifyMessage({ status: 'fail', text: `Verification failed: ${err.message}` });
     } finally {
       setVerifying(false);
+      // The header gate, finish readiness and repository views read shared
+      // queries; refresh them together with this panel.
+      void invalidateDeliveryState(queryClient, workspaceId);
     }
   };
 
@@ -131,6 +137,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       await loadLifecycle();
     } finally {
       setActionLoading(null);
+      void invalidateDeliveryState(queryClient, workspaceId);
     }
   };
 

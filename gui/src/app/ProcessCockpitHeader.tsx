@@ -200,7 +200,7 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
               <span>
                 Gate:{' '}
                 {gateStatus.overallStatus === 'pass'
-                  ? `PASS (${gateStatus.durationMs ?? 120}ms)`
+                  ? `PASS${gateStatus.durationMs !== undefined ? ` (${(gateStatus.durationMs / 1000).toFixed(1)}s)` : ''}`
                   : gateStatus.overallStatus === 'fail'
                     ? 'FAILED ✗'
                     : gateStatus.overallStatus === 'running'
@@ -283,6 +283,10 @@ export const ProcessCockpitHeader: React.FC<ProcessCockpitHeaderProps> = ({
                       <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-400 font-bold border border-sky-500/30 flex items-center gap-0.5">
                         <Zap size={9} className="text-sky-400" />
                         Active ⚡
+                      </span>
+                    ) : iter.status === 'in_progress' ? (
+                      <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-sky-500/10 text-sky-500 font-bold border border-sky-500/25">
+                        In progress
                       </span>
                     ) : iter.status === 'done' ? (
                       <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">

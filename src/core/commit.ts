@@ -8,9 +8,11 @@
 
 import {
   getWorkspaceRepos,
+  getRemoteUrl,
   getRepoBranch,
   getRepoStatus,
   commitAndPush,
+  pushRepo,
 } from '../utils/multi-git.js';
 import { loadFeatureConfig } from './workspace.js';
 import { getOrganization } from './domain-packs.js';
@@ -173,4 +175,46 @@ export async function commitWorkspace(
     failedCount: reports.filter((r) => !r.success).length,
     conventionWarning,
   };
+}
+
+/** Outcome of pushing one repo. */
+export interface RepoPushReport {
+  name: string;
+  pushed: boolean;
+  branch: string;
+  error?: string;
+}
+
+/**
+ * Pushes already-committed work for the named editable repos — the retry for
+ * a commit whose push failed, so nothing is committed twice.
+ *
+ * @param workspacePath - Absolute path to the workspace directory.
+ * @param repoNames     - Repos to push (by directory name).
+ * @throws {ReferenceRepoError} When a named repo is a read-only reference.
+ */
+export async function pushWorkspace(workspacePath: string, repoNames: string[]): Promise<RepoPushReport[]> {
+  const repos = await getWorkspaceRepos(workspacePath);
+  const unknown = repoNames.filter((name) => !repos.some((r) => r.name === name));
+  if (unknown.length > 0) throw new Error(`Not in this workspace: ${unknown.join(', ')}`);
+  const feature = await loadFeatureConfig(workspacePath).catch(() => null);
+  const references = new Set(feature ? referenceRepoNames(feature, workspacePath) : []);
+  const blocked = repoNames.filter((name) => references.has(name));
+  if (blocked.length > 0) throw new ReferenceRepoError(blocked);
+
+  const reports: RepoPushReport[] = [];
+  for (const repo of repos.filter((r) => repoNames.includes(r.name))) {
+    const current = await getRepoBranch(repo.path);
+    if (current !== repo.branchName) {
+      reports.push({ name: repo.name, pushed: false, branch: repo.branchName, error: `on ${current ? `branch "${current}"` : 'a detached HEAD'}, not "${repo.branchName}"` });
+      continue;
+    }
+    if (!(await getRemoteUrl(repo.path))) {
+      reports.push({ name: repo.name, pushed: false, branch: repo.branchName, error: 'no remote configured' });
+      continue;
+    }
+    const result = await pushRepo(repo.path, repo.branchName);
+    reports.push({ name: repo.name, pushed: result.success, branch: repo.branchName, error: result.success ? undefined : result.message });
+  }
+  return reports;
 }

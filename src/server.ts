@@ -91,7 +91,7 @@ import { isValidSessionId, isValidSessionUuid, type AgentSession } from './agent
 import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './agent/TurnSessionManager.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
-import { commitWorkspace } from './core/commit.js';
+import { commitWorkspace, pushWorkspace } from './core/commit.js';
 import { finishWorkspace } from './core/finish.js';
 import { IsolationConflictError, planRepoIsolation } from './core/isolate.js';
 import { ReferenceRepoError, describeEditBoundaries, referenceRepoMessage } from './core/edit-policy.js';
@@ -2911,6 +2911,20 @@ app.post('/api/workspace/:id/commit', async (c) => {
     }));
 
     return c.json({ results, skipped: report.skipped, conventionWarning: report.conventionWarning });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13e-2. Push already-committed work (the retry after a failed push).
+app.post('/api/workspace/:id/push', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null) as { repos?: unknown } | null;
+    const repos = Array.isArray(body?.repos) ? body.repos.filter((r): r is string => typeof r === 'string' && r.length > 0) : [];
+    if (repos.length === 0) return c.json({ error: 'Name at least one repository to push.' }, 400);
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    return c.json({ results: await pushWorkspace(workspacePath, repos) });
   } catch (error) {
     return errorResponse(c, error);
   }

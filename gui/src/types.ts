@@ -633,3 +633,120 @@ export interface WorkGuidance {
   };
   documents: WorkDocument[];
 }
+
+// ─── Repository safety & delivery ──────────────────────────────────────────
+
+/** How a repository is attached: a read-only reference or an editable worktree. */
+export type RepoAccess = 'reference' | 'isolated' | 'worktree';
+
+/** Live state of one workspace repository (GET /api/workspace/:id/repositories). */
+export interface WorkspaceRepository {
+  name: string;
+  access: RepoAccess;
+  editable: boolean;
+  /** Where the workspace reads the repo and, when editable, edits it. */
+  path: string;
+  /** The user's own checkout. */
+  sourcePath: string;
+  /** Current branch, or null when detached. */
+  branch: string | null;
+  /** Branch edits land on; null for references. */
+  expectedBranch: string | null;
+  onExpectedBranch: boolean;
+  baseBranch: string;
+  headSha: string | null;
+  dirty: boolean;
+  changedFiles: Array<{ code: string; path: string }>;
+  ahead: number | null;
+  behind: number | null;
+  remoteUrl: string | null;
+}
+
+export type EvidenceState =
+  | 'passed' | 'passed-dirty' | 'no-tests' | 'missing' | 'failed' | 'timed-out' | 'stale' | 'unreadable';
+
+export interface RepoEvidence {
+  name: string;
+  state: EvidenceState;
+  ready: boolean;
+  detail: string;
+  verifiedAt?: string;
+  command?: string;
+}
+
+/** The shared finish policy decision (GET /api/workspace/:id/progression). */
+export interface ProgressionDecision {
+  ready: boolean;
+  repos: RepoEvidence[];
+  blockers: string[];
+}
+
+export interface CommitRepoResult {
+  repoName: string;
+  success: boolean;
+  committed: boolean;
+  pushed: boolean;
+  pushError?: string;
+  branch: string;
+  commitHash: string;
+  filesChanged: number;
+  message: string;
+}
+
+export interface CommitResponse {
+  results: CommitRepoResult[];
+  skipped: Array<{ name: string; reason: string }>;
+  conventionWarning?: string;
+}
+
+export interface IsolationPlan {
+  repoName: string;
+  sourcePath: string;
+  worktreePath: string;
+  branchName: string;
+  baseBranch: string;
+  alreadyIsolated: boolean;
+  conflicts: string[];
+}
+
+export interface FinishRepoReport {
+  name: string;
+  committed: boolean;
+  commitHash?: string;
+  pushed: boolean;
+  branch: string;
+  remoteUrl: string | null;
+  prUrl?: string;
+  compareUrl?: string;
+  skipped?: string;
+  error?: string;
+  wouldCommit?: boolean;
+  wouldPush?: boolean;
+}
+
+export interface VerificationOverrideRecord {
+  at: string;
+  operation: 'finish';
+  reason: string;
+  blockers: string[];
+}
+
+export interface FinishReport {
+  policy: ProgressionDecision;
+  blocked: boolean;
+  dryRun: boolean;
+  override?: VerificationOverrideRecord;
+  resumedFrom?: 'running' | 'partial';
+  repos: FinishRepoReport[];
+  safeToCleanup: boolean;
+}
+
+/** Durable record of the latest finish run (GET /api/workspace/:id/finish/last). */
+export interface FinishRecord {
+  startedAt: string;
+  completedAt?: string;
+  status: 'running' | 'completed' | 'partial' | 'blocked';
+  repos: Array<Pick<FinishRepoReport, 'name' | 'committed' | 'commitHash' | 'pushed' | 'prUrl' | 'compareUrl' | 'skipped' | 'error'>>;
+  override?: VerificationOverrideRecord;
+  safeToCleanup: boolean;
+}

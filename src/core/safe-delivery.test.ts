@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execa } from 'execa';
 
-import { commitWorkspace } from './commit.js';
+import { commitWorkspace, pushWorkspace } from './commit.js';
 import { ReferenceRepoError, describeEditBoundaries } from './edit-policy.js';
 import { IsolationConflictError, isolateWorkspaceRepo, planRepoIsolation } from './isolate.js';
 import { evaluateProgression } from './progression-policy.js';
@@ -210,6 +210,28 @@ describe('repository safety contract (real git)', { timeout: 60_000 }, () => {
       expect(result.pushError).toBeTruthy();
       expect(await git(host, 'status', '--porcelain')).toBe('');
     });
+  });
+
+  it('push retry sends the existing commit once the remote is back, and refuses references', async () => {
+    const { host, remote } = await hostWithRemote(root, 'api');
+    const workspacePath = await inPlaceWorkspace(root, [host]);
+    const { worktreePath: repo } = await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/safe' });
+    await fs.writeFile(path.join(repo, 'a.txt'), 'a\n');
+    await git(repo, 'remote', 'set-url', 'origin', path.join(root, 'offline.git'));
+    const [failed] = (await commitWorkspace(workspacePath, 'feat: a')).repos;
+    expect(failed).toMatchObject({ committed: true, pushed: false });
+
+    await git(repo, 'remote', 'set-url', 'origin', remote);
+    expect(await pushWorkspace(workspacePath, ['api'])).toEqual([{ name: 'api', pushed: true, branch: 'feat/safe', error: undefined }]);
+    expect(await git(remote, 'rev-parse', 'feat/safe')).toBe(await git(repo, 'rev-parse', 'HEAD'));
+    expect(await git(remote, 'rev-list', '--count', 'main..feat/safe')).toBe('1');
+
+    const other = await hostWithRemote(root, 'other');
+    const refWorkspace = await inPlaceWorkspace(path.join(root, 'second'), [other.host]).catch(async () => {
+      await fs.mkdir(path.join(root, 'second'), { recursive: true });
+      return inPlaceWorkspace(path.join(root, 'second'), [other.host]);
+    });
+    await expect(pushWorkspace(refWorkspace, ['other'])).rejects.toBeInstanceOf(ReferenceRepoError);
   });
 
   describe('finish policy', () => {
