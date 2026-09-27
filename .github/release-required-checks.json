@@ -1,0 +1,21 @@
+{
+  "description": "Checks that must succeed on the exact release SHA before any channel publishes. Keep identical to the required status checks on main; npm test fails when this list drifts from the listed workflows.",
+  "app": "github-actions",
+  "workflows": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/security.yml"
+  ],
+  "checks": [
+    "build-and-test (ubuntu-latest, 22.13.0)",
+    "build-and-test (ubuntu-latest, 24)",
+    "build-and-test (windows-latest, 22.13.0)",
+    "build-and-test (windows-latest, 24)",
+    "build-and-test (macos-latest, 22.13.0)",
+    "build-and-test (macos-latest, 24)",
+    "desktop-macos-terminal",
+    "desktop-package (windows-latest, windows, dist/win-unpacked/ContextSpace.exe)",
+    "desktop-package (ubuntu-latest, linux, dist/linux-unpacked/contextspace-desktop)",
+    "CodeQL Security Scan (javascript-typescript)",
+    "Dependency Security Audit"
+  ]
+}
