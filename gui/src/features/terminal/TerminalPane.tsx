@@ -239,7 +239,10 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       renderer.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [active, terminal]);
+    // Keyed on the session id: a status refresh replaces the session object and
+    // must not pull focus back from another panel into the terminal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, terminal?.id]);
   useEffect(() => { if (renderer.current) renderer.current.options.screenReaderMode = screenReader; }, [screenReader]);
 
   useEffect(() => {

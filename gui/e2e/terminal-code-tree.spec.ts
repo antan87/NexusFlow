@@ -305,6 +305,10 @@ test('opens panels by keyboard, steps files with Alt+Arrow, and keeps hunk keys 
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
+  // The pane focuses its terminal one frame after its session loads. Wait for
+  // that, or it can land after the Code button is focused below and swallow the
+  // Escape (inside the terminal, Escape belongs to the CLI, not the panel).
+  await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
 
   // The panel toggles are reachable without the mouse.
   await chat.getByRole('button', { name: 'Code', exact: true }).focus();
