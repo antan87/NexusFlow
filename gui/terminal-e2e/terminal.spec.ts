@@ -17,7 +17,8 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(pane.getByRole('status')).toHaveText('Running');
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const openPaneOptions = () => chat.getByRole('button', { name: 'Pane options' }).click();
-  const toggleInspector = async (name) => { await openPaneOptions(); await page.getByRole('button', { name, exact: true }).click(); };
+  // Code and Docs are inline toolbar buttons, so toggle them directly.
+  const toggleInspector = async (name: 'Code' | 'Docs') => { await chat.getByRole('button', { name, exact: true }).click(); };
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/terminal-compact.png' });
   // The raw session <select> and the always-on tools row were replaced by one
@@ -30,7 +31,6 @@ test('one real shell survives window changes and reload, then stops explicitly',
   const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
   await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
-  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   // The default window is 760px, above the 520px compact threshold, so the
   // inspector splits and the terminal stays visible beside it.
   await toggleInspector('Code');
@@ -72,16 +72,20 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await toggleInspector('Code');
   await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
   await expect(pane).toBeVisible();
-  await page.getByRole('button', { name: 'Add Workspace' }).click();
+  await page.getByRole('button', { name: 'Add workspace' }).click();
   await page.getByRole('menuitem').filter({ hasText: 'terminal-other' }).click();
-  await expect(pane.getByRole('button', { name: 'Continue a conversation', exact: true })).toBeVisible();
+  // "Continue a conversation" moved into the pane overflow with the rest of the
+  // secondary actions.
+  await openPaneOptions();
+  await expect(page.getByRole('menuitem', { name: /Continue a conversation/ })).toBeVisible();
   await page.getByRole('tab', { name: 'terminal-test', exact: false }).click();
-  await toggleInspector('Code');
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
+  await expect(pane).toBeVisible();
   await page.reload();
   await expect(pane.getByRole('status')).toHaveText('Running');
   await expect(pane.getByRole('region', { name: 'Continue a conversation' })).toHaveCount(0);
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
+  await openPaneOptions();
   await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
   await input.focus();
   await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : 'echo CS_ALIVE_$CS_KEEP');
