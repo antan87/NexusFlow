@@ -109,12 +109,17 @@ const EMPTY_ASSETS: HeadAssets = { stylesheets: [], scripts: [], styles: [], htm
 export const CARRIED_ATTRIBUTES = ['class', 'lang', 'dir', 'data-theme'] as const;
 
 /**
- * CSS is emitted inside a <style> element the viewer authors, so the text has to be unable to close
- * that element and become markup. CSS cannot execute script in a modern engine, and the CSP keeps
- * `@import` to http(s), so neutralising the tag terminators is sufficient.
+ * Inline CSS is emitted inside a <style> element that this module authors, so a terminator in the
+ * source would close it early and turn the rest of the document into markup.
+ *
+ * Style content is RAWTEXT, so `</style` is the only sequence that can break out, and matching a
+ * tag with a regex is exactly what CodeQL's `js/bad-tag-filter` warns against. Rather than escape
+ * it, a block that contains one is simply not hoisted: the honest failure is "this document's CSS
+ * is not shown" instead of a subtly half-escaped stylesheet. The check lives here, at the point of
+ * emission, so the guarantee holds no matter what a caller passes in.
  */
-function safeStyleText(css: string): string {
-  return css.replace(/<\/(style)/gi, '<\\/$1').replace(/<!--/g, '\\3c!--').replace(/-->/g, '--\\3e');
+function isHoistableStyle(css: string): boolean {
+  return !css.toLowerCase().includes('</style');
 }
 
 function escapeAttribute(value: string): string {
@@ -145,7 +150,7 @@ function renderAttributes(pairs: string[]): string {
  */
 export function buildPreviewDocument({ body, trusted, assets }: PreviewDocumentOptions): string {
   const merged = { ...EMPTY_ASSETS, ...assets };
-  const styles = merged.styles.map(css => `<style>${safeStyleText(css)}</style>`).join('');
+  const styles = merged.styles.filter(isHoistableStyle).map(css => `<style>${css}</style>`).join('');
   const stylesheets = merged.stylesheets.map(href => `<link rel="stylesheet" href="${escapeAttribute(href)}">`).join('');
   const scripts = (trusted ? merged.scripts : []).map(src => `<script src="${escapeAttribute(src)}"></script>`).join('');
   return `<!doctype html><html${renderAttributes(merged.htmlAttributes)}><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${previewCsp(trusted)}">${styles}${stylesheets}${scripts}</head><body${renderAttributes(merged.bodyAttributes)}>${body}</body></html>`;

@@ -188,10 +188,21 @@ describe('preview document assembly', () => {
     expect(document.indexOf('<style>')).toBeLessThan(document.indexOf('<body>'));
   });
 
-  it('neutralises a style terminator so inline CSS cannot become markup', () => {
-    const document = buildPreviewDocument({ body: '', trusted: false, assets: { styles: ['a{}</style><img src=x onerror=alert(1)>'] } as never });
-    expect(document).not.toContain('</style><img');
-    expect(document).toContain('<\\/style>');
+  it('drops an inline style that could break out of the style element', () => {
+    // No regex tag matching (CodeQL js/bad-tag-filter): a hostile block is not hoisted at all.
+    for (const css of ['a{}</style><img src=x onerror=alert(1)>', 'a{}</STYLE ><svg onload=1>', 'a{}</style']) {
+      const document = buildPreviewDocument({ body: '', trusted: false, assets: { styles: [css] } as never });
+      expect(document).not.toContain('onerror');
+      expect(document).not.toContain('onload');
+      expect(document).not.toContain('</style><');
+      expect(document).not.toContain('<style>');
+    }
+  });
+
+  it('keeps ordinary CSS untouched, including comment-like text', () => {
+    const css = 'a{color:red} /* <!-- not a terminator --> */ b::after{content:"-->"}';
+    const document = buildPreviewDocument({ body: '', trusted: false, assets: { styles: [css] } as never });
+    expect(document).toContain(`<style>${css}</style>`);
   });
 
   it('carries presentational html and body attributes the CSS is keyed on', () => {
