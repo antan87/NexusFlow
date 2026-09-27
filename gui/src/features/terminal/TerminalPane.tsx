@@ -16,6 +16,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
+import { SHIFT_ENTER_SEQUENCE, terminalKeyAction } from './terminalKeys.js';
 import type { AISession } from '../../types.js';
 
 /**
@@ -155,22 +156,28 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       }
     };
     terminalHost.addEventListener('paste', onPaste, true);
-    // A selected terminal range behaves like selected browser text. Without a
-    // selection Ctrl+C remains the terminal's interrupt key.
     term.attachCustomKeyEventHandler(event => {
-      if (event.type !== 'keydown') return true;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && (event.shiftKey || term.hasSelection())) {
-        event.preventDefault();
-        void safeCopyToClipboard(term.getSelection()).then(copied => {
-          if (!copied) setError('Select terminal output before copying, or check clipboard permissions.');
-          else setError('');
-        });
-        return false;
+      switch (terminalKeyAction(event, term.hasSelection())) {
+        case 'copy':
+          event.preventDefault();
+          void safeCopyToClipboard(term.getSelection()).then(copied => {
+            if (!copied) setError('Select terminal output before copying, or check clipboard permissions.');
+            else setError('');
+          });
+          return false;
+        // Let the browser dispatch its native paste event into xterm's textarea.
+        // xterm handles that event, including bracketed paste for CLI harnesses.
+        case 'paste':
+          return false;
+        case 'newline':
+          event.preventDefault();
+          term.input(SHIFT_ENTER_SEQUENCE);
+          return false;
+        case 'suppress':
+          return false;
+        default:
+          return true;
       }
-      // Let the browser dispatch its native paste event into xterm's textarea.
-      // xterm handles that event, including bracketed paste for CLI harnesses.
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return false;
-      return true;
     });
     const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
       const buffer = term.buffer.active;
