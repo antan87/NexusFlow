@@ -219,60 +219,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     ],
   });
 
-  test('should run the onboarding flow when config does not exist', async ({ page }) => {
-    await page.route('**/api/config', async (route, request) => {
-      if (request.method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            exists: false,
-            config: {
-              version: '0.2.7',
-              devDir: '',
-              workspacesDir: '',
-              defaultAssistant: null,
-              scanDepth: 2,
-            },
-          }),
-        });
-      } else if (request.method() === 'POST') {
-        const body = request.postDataJSON();
-        expect(body.devDir).toBe('C:\\mock-dev');
-        expect(body.workspacesDir).toBe('C:\\mock-dev\\workspaces');
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ success: true, config: body }),
-        });
-      }
-    });
-
-    await page.route('**/api/repos', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/ai-detect', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/workflows/templates', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
-    });
-
-    await page.goto('/');
-
-    await expect(page.locator('h1')).toContainText('Welcome to ContextSpace');
-    await expect(page.locator('h2')).toContainText('Initialize Config');
-
-    await page.getByPlaceholder('e.g. C:\\Users\\username\\dev', { exact: true }).fill('C:\\mock-dev');
-    await page
-      .getByPlaceholder('e.g. C:\\Users\\username\\dev\\workspaces', { exact: true })
-      .fill('C:\\mock-dev\\workspaces');
-
-    await page.locator('button:has-text("Save & Get Started")').click();
-  });
-
   test('should create a workspace in worktree mode from the new workspace flow', async ({ page }) => {
     await mockCompletedCreationStream(page);
     const chatFrames: Array<Record<string, unknown>> = [];

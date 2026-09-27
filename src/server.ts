@@ -18,6 +18,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
+import { z } from 'zod';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +26,8 @@ import { execa } from 'execa';
 import * as os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 
-import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { loadConfig, saveConfig, getConfigDir, getDefaultConfig } from './core/config.js';
+import { checkConfigPaths, expandHome } from './core/config-paths.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
 import {
   PRIMARY_LOGS_DIR,
@@ -753,10 +755,28 @@ app.get('/api/config', async (c) => {
     } catch {}
 
     const config = await loadConfig();
-    return c.json({ config, exists });
+    const defaults = getDefaultConfig();
+    // Setup shows examples and suggestions for the machine the server runs on,
+    // not the browser's platform.
+    return c.json({
+      config,
+      exists,
+      platform: process.platform,
+      suggested: { devDir: defaults.devDir, workspacesDir: defaults.workspacesDir },
+    });
   } catch (error) {
     return errorResponse(c, error);
   }
+});
+
+const configPathsInput = z.object({ devDir: z.string().max(4096).optional(), workspacesDir: z.string().max(4096).optional() });
+const countRepos = async (devDir: string) => (await scanForRepos(devDir, (await loadConfig({ quiet: true })).scanDepth)).length;
+
+// Check setup folders before saving so the GUI can explain a bad path inline.
+app.post('/api/config/validate', async (c) => {
+  const parsed = configPathsInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'Invalid folder payload' }, 400);
+  return c.json(await checkConfigPaths(parsed.data, { countRepos }));
 });
 
 // Get all registered storage adapters
@@ -775,12 +795,37 @@ app.get('/api/adapters', async (c) => {
 app.post('/api/config', async (c) => {
   try {
     const body = await c.req.json().catch(() => null);
-    const parsed = configPatchSchema.safeParse(body);
+    // `createWorkspacesDir` is a one-off instruction, never a stored setting.
+    const { createWorkspacesDir, ...patch } = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    for (const key of ['devDir', 'workspacesDir'] as const) {
+      if (typeof patch[key] === 'string') patch[key] = expandHome(patch[key]);
+    }
+    const parsed = configPatchSchema.safeParse(body === null ? null : patch);
     if (!parsed.success) {
       return c.json({ error: 'Invalid config payload', issues: parsed.error.flatten() }, 400);
     }
     const current = await loadConfig();
     const next = { ...current, ...parsed.data };
+    // Check a folder only when it changes: saving another setting must not fail
+    // because a previously saved folder has since gone away.
+    const changed = {
+      ...(parsed.data.devDir !== undefined && parsed.data.devDir !== current.devDir ? { devDir: next.devDir } : {}),
+      ...(parsed.data.workspacesDir !== undefined && parsed.data.workspacesDir !== current.workspacesDir ? { workspacesDir: next.workspacesDir } : {}),
+    };
+    if (Object.keys(changed).length) {
+      const pair = { devDir: next.devDir, workspacesDir: 'workspacesDir' in changed ? next.workspacesDir : undefined };
+      let report = await checkConfigPaths(pair);
+      if (createWorkspacesDir === true && report.workspacesDir?.status === 'missing' && report.workspacesDir.canCreate) {
+        await fs.mkdir(report.workspacesDir.path, { recursive: true });
+        report = await checkConfigPaths(pair);
+      }
+      const failed = (['devDir', 'workspacesDir'] as const).filter((key) => key in changed && report[key] && report[key]!.status !== 'ok');
+      if (failed.length) {
+        return c.json({ error: 'Check the highlighted folders.', fields: report }, 422);
+      }
+      if (report.devDir) next.devDir = report.devDir.path;
+      if (report.workspacesDir) next.workspacesDir = report.workspacesDir.path;
+    }
     await saveConfig(next);
     return c.json({ success: true, config: next });
   } catch (error) {

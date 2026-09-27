@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
 
 import { Alert } from '../components/ui/alert.js';
@@ -11,6 +12,8 @@ import { Separator } from '../components/ui/separator.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
 import type { DetectedEditor, ContextSpaceConfig, StorageAdapterMeta } from '../types.js';
+import { FolderField } from '../features/setup/FolderField.js';
+import { checkFolders, repoSummary, type ConfigPathsReport, type FolderKey } from '../features/setup/setupApi.js';
 
 interface ToolStatus {
   id: string;
@@ -26,6 +29,7 @@ interface SettingsPageProps {
   config: ContextSpaceConfig | null;
   setConfig: (config: ContextSpaceConfig) => void;
   saveStatus: 'success' | 'error' | null;
+  saveError?: { message: string; fields: ConfigPathsReport | null } | null;
   editors: DetectedEditor[];
   adapters: StorageAdapterMeta[];
   saveAppConfig: (config: ContextSpaceConfig) => void;
@@ -42,6 +46,7 @@ export function SettingsPage({
   config,
   setConfig,
   saveStatus,
+  saveError,
   editors,
   adapters,
   saveAppConfig,
@@ -53,7 +58,31 @@ export function SettingsPage({
   fetchToolsStatus,
   handleUpdateTool,
 }: SettingsPageProps) {
+  const [folderReport, setFolderReport] = useState<ConfigPathsReport | null>(null);
+  const [checking, setChecking] = useState<Partial<Record<FolderKey, boolean>>>({});
+  const checkRequest = useRef(0);
+  // A refused save reports which folder failed; show it on that field.
+  useEffect(() => { if (saveError?.fields) setFolderReport(saveError.fields); }, [saveError]);
+
   if (!config) return null;
+
+  const checkFolder = async (field: FolderKey, value: string) => {
+    if (!value.trim()) return;
+    const request = ++checkRequest.current;
+    setChecking({ [field]: true });
+    try {
+      const report = await checkFolders({ devDir: field === 'devDir' ? value : config.devDir, workspacesDir: field === 'workspacesDir' ? value : config.workspacesDir });
+      if (request === checkRequest.current) setFolderReport(report);
+    } catch {
+      // Saving checks again; a failed check says nothing about the folder.
+    } finally {
+      if (request === checkRequest.current) setChecking({});
+    }
+  };
+  const editFolder = (field: FolderKey, value: string) => {
+    setConfig({ ...config, [field]: value });
+    setFolderReport((report) => report && { ...report, [field]: undefined });
+  };
 
   const selectedEditor = editors.find((ed) => ed.command === config.defaultEditor);
   const selectedAdapter = adapters.find((a) => a.name === (config.storageProvider || 'local'));
@@ -75,33 +104,35 @@ export function SettingsPage({
       )}
       {saveStatus === 'error' && (
         <Alert variant="error" className="mb-6">
-          <AlertTriangle size={18} /> Error: Could not save configuration details to disk.
+          <AlertTriangle size={18} /> Settings were not saved. {saveError?.message ?? 'Could not save configuration details to disk.'}
         </Alert>
       )}
 
       <Card className="mb-6 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-6 shadow-xs">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="settings-devDir" className="text-sm">Development Directory</Label>
-            <Input
-              type="text"
-              id="settings-devDir"
-              value={config.devDir}
-              onChange={(e) => setConfig({ ...config, devDir: e.target.value })}
-            />
-            <span className="text-xs text-muted-foreground">Directory where your git projects are scanned.</span>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="settings-workspacesDir" className="text-sm">Workspaces Directory</Label>
-            <Input
-              type="text"
-              id="settings-workspacesDir"
-              value={config.workspacesDir}
-              onChange={(e) => setConfig({ ...config, workspacesDir: e.target.value })}
-            />
-            <span className="text-xs text-muted-foreground">Directory where unified worktree environments are spun up.</span>
-          </div>
+          <FolderField
+            id="settings-devDir"
+            label="Code folder"
+            description="The folder that holds your Git repositories."
+            placeholder=""
+            value={config.devDir}
+            onChange={(value) => editFolder('devDir', value)}
+            onCommit={(value) => void checkFolder('devDir', value)}
+            check={folderReport?.devDir}
+            checking={checking.devDir}
+            okText={repoSummary(folderReport?.devDir?.repoCount)}
+          />
+          <FolderField
+            id="settings-workspacesDir"
+            label="Workspaces folder"
+            description="Where a folder is created for each task."
+            placeholder=""
+            value={config.workspacesDir}
+            onChange={(value) => editFolder('workspacesDir', value)}
+            onCommit={(value) => void checkFolder('workspacesDir', value)}
+            check={folderReport?.workspacesDir}
+            checking={checking.workspacesDir}
+          />
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="settings-scanDepth" className="text-sm">Repo Search Depth</Label>

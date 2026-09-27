@@ -8,7 +8,8 @@ import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'r
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
-import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
+import { SetupPage } from './features/setup/SetupPage.js';
+import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
 import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
@@ -101,12 +102,14 @@ function AppInner() {
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [saveError, setSaveError] = useState<{ message: string; fields: ConfigPathsReport | null } | null>(null);
   const [adapters, setAdapters] = useState<StorageAdapterMeta[]>([]);
 
   // Update Check State
   const [updateStatus, setUpdateStatus] = useState<UiUpdateStatus | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
+  const [serverPlatform, setServerPlatform] = useState<string | undefined>(undefined);
   const [updateDeferred, setUpdateDeferred] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
 
@@ -367,11 +370,12 @@ function AppInner() {
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
+      setServerPlatform(typeof data.platform === 'string' ? data.platform : undefined);
 
       if (!(data.exists && data.config.devDir)) {
         setDefaultPaths({
-          devDir: data.config.devDir || '',
-          workspacesDir: data.config.workspacesDir || '',
+          devDir: data.suggested?.devDir || data.config.devDir || '',
+          workspacesDir: data.suggested?.workspacesDir || data.config.workspacesDir || '',
         });
         setConfig({
           version: '1.0.0',
@@ -389,25 +393,20 @@ function AppInner() {
   };
 
   const saveAppConfig = async (newConfig: ContextSpaceConfig) => {
+    setSaveError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig),
-      });
-      if (res.ok) {
-        setSaveStatus('success');
-        setConfig(newConfig);
-        setConfigExists(true);
-        queryClient.invalidateQueries({ queryKey: ['repos'] });
-        fetchWorkspaces();
-      } else {
-        setSaveStatus('error');
-      }
-    } catch {
+      const result = await postConfig(newConfig);
+      setSaveStatus('success');
+      setConfig({ ...newConfig, ...result.config });
+      setConfigExists(true);
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      fetchWorkspaces();
+      setTimeout(() => setSaveStatus((status) => status === 'success' ? null : status), 3000);
+    } catch (error) {
+      // Keep the error until the next save: the user needs it to fix the entry.
       setSaveStatus('error');
+      setSaveError({ message: error instanceof Error ? error.message : 'Could not save settings.', fields: folderErrors(error) });
     }
-    setTimeout(() => setSaveStatus(null), 3000);
   };
 
   // Kept as the single "refresh workspaces" entry point for the handlers and
@@ -949,12 +948,16 @@ Core Instructions:
 
   if (!configExists && config) {
     return (
-      <OnboardingScreen
-        config={config}
-        setConfig={setConfig}
-        defaultPaths={defaultPaths}
+      <SetupPage
+        initialConfig={config}
+        suggested={defaultPaths}
+        platform={serverPlatform}
         adapters={adapters}
-        saveAppConfig={saveAppConfig}
+        onComplete={(saved) => {
+          setConfig(saved);
+          setConfigExists(true);
+          void fetchWorkspaces();
+        }}
       />
     );
   }
@@ -1052,7 +1055,7 @@ Core Instructions:
 
   const settingsPage = config ? (
     <SettingsPage
-      config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
+      config={config} setConfig={setConfig} saveStatus={saveStatus} saveError={saveError} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
       fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}

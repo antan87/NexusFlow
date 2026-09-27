@@ -1,5 +1,5 @@
 import { stopOwnedUnixTree } from './lib/process-tree.js';
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn, spawnSync } from 'child_process';
 import { existsSync, statSync, createWriteStream, readdirSync } from 'fs';
 import os from 'os';
@@ -108,6 +108,21 @@ function setUpdaterError(error) {
   const message = error instanceof Error ? error.message : String(error);
   publishUpdateEvent('error', { error: message, progress: 0 });
   return updateProjection();
+}
+
+/**
+ * Native folder chooser for first-run setup. The renderer can only suggest a
+ * starting folder; the chosen path comes from the OS dialog.
+ */
+function registerDialogIpc() {
+  ipcMain.handle('dialog:pick-directory', async (event, defaultPath) => {
+    assertTrustedIpcEvent(event);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: typeof defaultPath === 'string' && path.isAbsolute(defaultPath) ? defaultPath : undefined,
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
 }
 
 function registerUpdateIpc() {
@@ -426,6 +441,7 @@ function stopBackend() {
 }
 
 app.whenReady().then(() => {
+  registerDialogIpc();
   configureAutoUpdater();
   createWindow();
 });

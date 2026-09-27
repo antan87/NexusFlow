@@ -7,6 +7,7 @@ import { execa } from 'execa';
 import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
+import * as configPaths from './core/config-paths.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
@@ -28,6 +29,10 @@ vi.mock('node:fs/promises');
 vi.mock('execa');
 vi.mock('./core/workspace.js');
 vi.mock('./core/config.js');
+vi.mock('./core/config-paths.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./core/config-paths.js')>()),
+  checkConfigPaths: vi.fn(),
+}));
 vi.mock('./core/domain-packs.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./core/domain-packs.js')>();
   return {
@@ -1034,6 +1039,7 @@ describe('Server API Endpoints Unit Tests', () => {
         devDir: '/mock/dev',
         scanDepth: 2
       } as any);
+      vi.spyOn(config, 'getDefaultConfig').mockReturnValue({ devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } as any);
       vi.spyOn(fs, 'access').mockResolvedValue();
 
       const response = await app.request('/api/config');
@@ -1041,6 +1047,59 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.config.devDir).toBe('/mock/dev');
       expect(data.exists).toBe(true);
+    });
+
+    it('reports the server platform and suggested folders for setup', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ devDir: '', scanDepth: 2 } as any);
+      vi.spyOn(config, 'getDefaultConfig').mockReturnValue({ devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } as any);
+      vi.spyOn(fs, 'access').mockRejectedValueOnce(new Error('ENOENT'));
+      const data = await (await app.request('/api/config')).json();
+      expect(data).toMatchObject({ exists: false, platform: process.platform, suggested: { devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } });
+    });
+  });
+
+  describe('POST /api/config folders', () => {
+    const ok = (p: string) => ({ path: p, status: 'ok' as const, message: '' });
+    const post = (body: unknown) => app.request('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    beforeEach(() => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ devDir: '/old/dev', workspacesDir: '/old/ws', scanDepth: 2 } as any);
+      vi.spyOn(config, 'saveConfig').mockResolvedValue();
+    });
+
+    it('refuses unusable folders with field messages and saves nothing', async () => {
+      vi.mocked(configPaths.checkConfigPaths).mockResolvedValue({
+        ok: false,
+        devDir: { path: '/new/dev', status: 'missing', message: "This folder doesn't exist.", canCreate: true },
+        workspacesDir: ok('/new/ws'),
+      });
+      const response = await post({ devDir: '/new/dev', workspacesDir: '/new/ws' });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ fields: { devDir: { status: 'missing', message: "This folder doesn't exist." } } });
+      expect(config.saveConfig).not.toHaveBeenCalled();
+    });
+
+    it('creates a missing workspaces folder only when asked, and never stores the request flag', async () => {
+      vi.mocked(configPaths.checkConfigPaths)
+        .mockResolvedValueOnce({ ok: false, devDir: ok('/new/dev'), workspacesDir: { path: '/new/ws', status: 'missing', message: '', canCreate: true } })
+        .mockResolvedValueOnce({ ok: true, devDir: ok('/new/dev'), workspacesDir: ok('/new/ws') });
+      const response = await post({ devDir: '/new/dev', workspacesDir: '/new/ws', createWorkspacesDir: true });
+      expect(response.status).toBe(200);
+      expect(fs.mkdir).toHaveBeenCalledWith('/new/ws', { recursive: true });
+      const saved = vi.mocked(config.saveConfig).mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(saved).toMatchObject({ devDir: '/new/dev', workspacesDir: '/new/ws' });
+      expect(saved).not.toHaveProperty('createWorkspacesDir');
+    });
+
+    it('does not re-check folders that did not change', async () => {
+      const response = await post({ devDir: '/old/dev', workspacesDir: '/old/ws', scanDepth: 3 });
+      expect(response.status).toBe(200);
+      expect(configPaths.checkConfigPaths).not.toHaveBeenCalled();
+      expect(config.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ scanDepth: 3 }));
     });
   });
 

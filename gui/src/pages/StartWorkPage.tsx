@@ -175,7 +175,8 @@ export function StartWorkPage() {
   const [workspaceName, setWorkspaceName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [adHocPaths, setAdHocPaths] = useState<string[]>([]);
+  // Setup hands over the repositories picked for the first task as ?repo=…
+  const [adHocPaths, setAdHocPaths] = useState<string[]>(() => searchParams.getAll('repo'));
   const [setupOpen, setSetupOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
