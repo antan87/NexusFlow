@@ -11,8 +11,8 @@ import { confirm, checkbox, select } from '@inquirer/prompts';
 import { loadFeatureConfig, deleteWorkspace } from '../core/workspace.js';
 import { stopServices } from '../orchestration/runner.js';
 import { getWorkspaceStatusReport } from '../core/status.js';
-import { finishWorkspace, type RepoFinishReport } from '../core/finish.js';
-import { getLastVerificationReport } from '../core/workspace-state.js';
+import { finishWorkspace, type FinishReport, type RepoFinishReport } from '../core/finish.js';
+import { evaluateProgression } from '../core/progression-policy.js';
 import { getWorkspaceRepos } from '../utils/multi-git.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { readWorkspaceKnowledge, parseKnowledgeEntries, promoteKnowledge, type KnowledgeEntryType } from '../core/knowledge.js';
@@ -23,8 +23,11 @@ interface FinishCommandOptions {
   pr?: boolean; // --no-pr → false
   knowledge?: boolean; // --no-knowledge → false
   cleanup?: boolean;
+  /** Accepts non-destructive defaults. Never bypasses verification. */
   yes?: boolean;
   dryRun?: boolean;
+  /** Finish without fresh passing verification; the reason is recorded. */
+  overrideVerification?: string;
 }
 
 const PROMOTABLE_TYPES: KnowledgeEntryType[] = ['decision', 'gotcha', 'assumption'];
@@ -67,38 +70,45 @@ export async function finishCommand(
     const dirtyCol = r.dirty ? chalk.yellow(dirtyText) : chalk.green(dirtyText);
     const aheadText = r.ahead === null ? 'never pushed' : String(r.ahead);
     const aheadCol = r.ahead === null || (r.ahead ?? 0) > 0 ? chalk.yellow(aheadText) : chalk.green(aheadText);
-    console.log('  ' + r.name.padEnd(nameW) + branchCol + dirtyCol + aheadCol);
+    const access = r.editable ? '' : chalk.dim('  read-only reference, not finished');
+    console.log('  ' + r.name.padEnd(nameW) + branchCol + dirtyCol + aheadCol + access);
   }
   console.log();
 
-  const verification = await getLastVerificationReport(workspacePath);
-  if (verification && verification.overallStatus === 'fail') {
-    console.log(chalk.yellow(`⚠ Warning: The latest mechanical verification run (${verification.overallStatus.toUpperCase()}) recorded test failures.`));
-    if (!options.yes && !options.dryRun) {
-      const proceed = await confirm({
-        message: 'Tests failed during verification. Do you want to finish and push anyway?',
-        default: false,
-      });
-      if (!proceed) {
-        console.log(chalk.red('Aborted finish. Run `ctxspace verify` and fix test failures before finishing.\n'));
-        return;
-      }
-    }
+  // ── Verification policy (shared with the GUI and MCP) ─────────────────
+  const policy = await evaluateProgression(workspacePath);
+  for (const repo of policy.repos) {
+    const mark = repo.ready ? chalk.green('✔') : chalk.red('✖');
+    console.log(`  ${mark} ${repo.detail}`);
+  }
+  console.log();
+  const override = options.overrideVerification !== undefined
+    ? { reason: options.overrideVerification }
+    : undefined;
+  if (!policy.ready && !override) {
+    console.log(chalk.red('✖ Finish refused: verification evidence is missing, failed or stale.'));
+    console.log(chalk.dim(`  Run \`ctxspace verify\`, or finish anyway with --override-verification "<reason>" (the reason is recorded).\n`));
+    process.exitCode = 1;
+    return;
+  }
+  if (!policy.ready && override) {
+    console.log(chalk.yellow(`⚠ Finishing without fresh passing verification. Recorded reason: ${override.reason}\n`));
   }
 
   if (options.dryRun) {
-    const dirty = preflight.repos.filter((r) => r.dirty && r.onExpectedBranch);
-    const toPush = preflight.repos.filter((r) => r.onExpectedBranch && r.remoteUrl && (r.ahead === null || (r.ahead ?? 0) > 0));
-    console.log(chalk.yellow('Dry run — no changes will be made.'));
-    console.log(`  Would commit: ${dirty.map((r) => r.name).join(', ') || 'nothing'}`);
-    console.log(`  Would push:   ${toPush.map((r) => r.name).join(', ') || 'nothing'}`);
-    console.log(`  Would offer PR links and knowledge promotion.\n`);
+    const preview = await finishWorkspace(workspacePath, {
+      message: options.message ?? 'dry run',
+      createPrs: false,
+      override,
+      dryRun: true,
+    });
+    printDryRun(preview);
     return;
   }
 
   // ── Commit message ─────────────────────────────────────────────────────
   let message = options.message;
-  const hasDirty = preflight.repos.some((r) => r.dirty && r.onExpectedBranch);
+  const hasDirty = preflight.repos.some((r) => r.dirty && r.onExpectedBranch && r.editable);
   if (hasDirty && !message) {
     const { promptMultiLineInput } = await import('../utils/prompts.js');
     message = await promptMultiLineInput('commit message for the remaining changes');
@@ -109,10 +119,27 @@ export async function finishCommand(
   }
 
   // ── Run the finish engine ────────────────────────────────────────────────
-  const report = await finishWorkspace(workspacePath, {
-    message,
-    createPrs: options.pr !== false,
-  });
+  let report: FinishReport;
+  try {
+    report = await finishWorkspace(workspacePath, {
+      message,
+      createPrs: options.pr !== false,
+      override,
+    });
+  } catch (error) {
+    console.error(chalk.red(`✖ ${error instanceof Error ? error.message : String(error)}\n`));
+    process.exitCode = 1;
+    return;
+  }
+  if (report.blocked) {
+    // The evidence changed between the check above and the run.
+    console.log(chalk.red('✖ Finish refused: verification evidence changed. Verify again.\n'));
+    process.exitCode = 1;
+    return;
+  }
+  if (report.resumedFrom) {
+    console.log(chalk.dim(`Resuming a previous finish that ended ${report.resumedFrom === 'running' ? 'before it completed' : 'with failures'}; completed commits are not repeated.\n`));
+  }
 
   console.log(chalk.bold('Results:'));
   for (const r of report.repos) {
@@ -175,6 +202,24 @@ export async function finishCommand(
   }
 
   console.log(chalk.green('✅ Finish complete.\n'));
+}
+
+/** Prints the remote effects a finish would have, without changing anything. */
+function printDryRun(preview: FinishReport): void {
+  console.log(chalk.yellow('Dry run — no changes will be made.'));
+  for (const r of preview.repos) {
+    if (r.skipped) {
+      console.log(`  ${chalk.bold(r.name)}: skipped (${r.skipped})`);
+      continue;
+    }
+    const effects: string[] = [];
+    if (r.wouldCommit) effects.push(`commit on ${r.branch}`);
+    if (r.wouldPush) effects.push(`push ${r.branch} → ${r.remoteUrl ?? 'no remote'}`);
+    if (r.compareUrl) effects.push(`PR link ${r.compareUrl}`);
+    if (r.error) effects.push(chalk.red(r.error));
+    console.log(`  ${chalk.bold(r.name)}: ${effects.join('; ') || 'nothing to do'}`);
+  }
+  console.log();
 }
 
 /** One-line description of a repo's finish outcome. */

@@ -616,6 +616,13 @@ export interface RepoVerificationReport {
   headSha: string;
   clean: boolean;
   dirtyFiles?: string[];
+  /**
+   * Hash of the tested content (HEAD diff plus untracked files). A later
+   * snapshot with a different fingerprint means the evidence is stale.
+   */
+  fingerprint?: string;
+  /** Git tree hash of the tested working tree; equal after committing it unchanged. */
+  contentTree?: string;
   durationMs: number;
   stdout?: string;
   stderr?: string;
@@ -715,8 +722,44 @@ export interface WorkspaceState {
   lastVerification?: WorkspaceVerificationReport;
   /** Active structured lifecycle state machine. */
   lifecycle?: WorkspaceLifecycle;
+  /** Recent explicit verification overrides, newest last (bounded). */
+  verificationOverrides?: VerificationOverrideRecord[];
+  /** Durable record of the latest finish run, so it can be resumed after a restart. */
+  lastFinish?: FinishRecord;
   /** Timestamp when the state was last updated. */
   updatedAt: string;
+}
+
+/** An explicit, reasoned decision to finish without fresh passing verification. */
+export interface VerificationOverrideRecord {
+  at: string;
+  operation: 'finish';
+  reason: string;
+  /** What the policy would have blocked on, as shown to the caller. */
+  blockers: string[];
+}
+
+/** Per-repo outcome of a finish run, as persisted. */
+export interface FinishRepoRecord {
+  name: string;
+  committed: boolean;
+  commitHash?: string;
+  pushed: boolean;
+  prUrl?: string;
+  compareUrl?: string;
+  skipped?: string;
+  error?: string;
+}
+
+/** Durable record of a finish run. Git effects are not atomic across repos. */
+export interface FinishRecord {
+  startedAt: string;
+  completedAt?: string;
+  /** `running` means the process stopped mid-run; re-running resumes safely. */
+  status: 'running' | 'completed' | 'partial' | 'blocked';
+  repos: FinishRepoRecord[];
+  override?: VerificationOverrideRecord;
+  safeToCleanup: boolean;
 }
 
 // ─── Phase 3: Dependency Graph Types ──────────────────────────────────────

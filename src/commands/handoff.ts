@@ -12,6 +12,7 @@ import { analyzeAllReposCached } from '../analyzers/index.js';
 import { buildDependencyGraph } from '../generators/plan-generator.js';
 import { BRAND_NAME, PRIMARY_KNOWLEDGE_FILE, PRIMARY_MANIFEST_FILE, resolveWorkspaceFilePath } from '../core/constants.js';
 import { getConventionalTestCommands } from '../utils/test-command.js';
+import { resolveFeatureRepoPath } from '../utils/feature.js';
 
 /**
  * Runs the handoff command.
@@ -31,7 +32,8 @@ export async function handoffCommand(workspaceArg?: string): Promise<void> {
     return;
   }
 
-  const allRepos = await resolveRepoInfos(feature.repos);
+  // Isolated repos are read from their worktree, not the reference checkout.
+  const allRepos = await resolveRepoInfos(feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r)));
 
   console.log(chalk.cyan('Retrieving repository statuses and running analysis...'));
   const { analysis } = await analyzeAllReposCached(allRepos, workspacePath);

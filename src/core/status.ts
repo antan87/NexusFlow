@@ -14,6 +14,8 @@ import {
   type RepoStatusFile,
 } from '../utils/multi-git.js';
 import { execa } from 'execa';
+import { loadFeatureConfig } from './workspace.js';
+import { describeEditBoundaries, type RepoAccess } from './edit-policy.js';
 
 /** A file collision or concurrent modification detected on disk. */
 export interface FileCollision {
@@ -45,6 +47,12 @@ export interface RepoStatusReport {
   behind: number | null;
   remoteUrl: string | null;
   defaultBranch: string;
+  /** How the repo is attached: a read-only reference, or an editable worktree. */
+  access: RepoAccess;
+  /** Whether workspace operations may change this repo. */
+  editable: boolean;
+  /** The user's own checkout the repo came from. */
+  sourcePath: string;
   /** Concurrent modifications or collisions detected for modified files. */
   collisions?: FileCollision[];
   collisionWarning?: string;
@@ -77,6 +85,10 @@ export async function getWorkspaceStatusReport(
   workspacePath: string,
 ): Promise<WorkspaceStatusReport> {
   const repos = await getWorkspaceRepos(workspacePath);
+  const feature = await loadFeatureConfig(workspacePath);
+  const boundaries = new Map(
+    (feature ? describeEditBoundaries(feature, workspacePath) : []).map((b) => [b.name, b]),
+  );
 
   const reports: RepoStatusReport[] = await Promise.all(
     repos.map(async (repo): Promise<RepoStatusReport> => {
@@ -186,6 +198,9 @@ export async function getWorkspaceStatusReport(
         behind: aheadBehind.behind,
         remoteUrl,
         defaultBranch: repo.defaultBranch,
+        access: boundaries.get(repo.name)?.access ?? 'worktree',
+        editable: boundaries.get(repo.name)?.editable ?? true,
+        sourcePath: boundaries.get(repo.name)?.sourcePath ?? repo.path,
         collisions: collisions.length > 0 ? collisions : undefined,
         collisionWarning,
       };

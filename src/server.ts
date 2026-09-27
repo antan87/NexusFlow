@@ -92,6 +92,11 @@ import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
 import { commitWorkspace } from './core/commit.js';
+import { finishWorkspace } from './core/finish.js';
+import { IsolationConflictError, planRepoIsolation } from './core/isolate.js';
+import { ReferenceRepoError, describeEditBoundaries, referenceRepoMessage } from './core/edit-policy.js';
+import { evaluateProgression } from './core/progression-policy.js';
+import { getWorkspaceStatusReport } from './core/status.js';
 import { refreshWorkspace } from './core/refresh.js';
 import { checkGenerationLock } from './core/generation-lock.js';
 import { writeWorkspaceFile } from './core/storage.js';
@@ -491,6 +496,12 @@ function errorResponse(c: any, error: unknown) {
   }
   if (error instanceof WorkroomValidationError) {
     return c.json({ error: error.message }, 400);
+  }
+  if (error instanceof ReferenceRepoError) {
+    return c.json({ error: error.message, code: error.code, repos: error.repos }, 409);
+  }
+  if (error instanceof IsolationConflictError) {
+    return c.json({ error: error.message, code: error.code, plan: error.plan }, 409);
   }
   const msg = error instanceof Error ? error.message : String(error);
   return c.json({ error: msg }, 500);
@@ -1288,7 +1299,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     // dir). One stable step id for both modes — only the wording differs.
     updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
     await createWorkspace(feature, body.repos, undefined, {
-      autoUpdateBase: body.autoUpdateBase !== false,
+      autoUpdateBase: body.autoUpdateBase === true,
     });
 
     if (Array.isArray(body.enabledSkills) || Array.isArray(body.enabledAgents) || Array.isArray(body.enabledCategories)) {
@@ -1558,6 +1569,7 @@ app.post('/api/workspace/:id/isolate', async (c) => {
       repo?: unknown;
       branchName?: unknown;
       baseBranch?: unknown;
+      dryRun?: unknown;
     };
     const repo = typeof body.repo === 'string' ? body.repo.trim() : '';
     if (!repo) {
@@ -1568,6 +1580,10 @@ app.post('/api/workspace/:id/isolate', async (c) => {
 
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    // A preview shows path, branch, base and conflicts before anything is created.
+    if (body.dryRun === true) {
+      return c.json(await planRepoIsolation(workspacePath, repo, { branchName, baseBranch }));
+    }
     const result = await isolateWorkspaceRepo(workspacePath, repo, {
       branchName,
       baseBranch,
@@ -2298,6 +2314,10 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
       }
+      const boundary = describeEditBoundaries(feature, workspacePath).find((b) => b.name === path.basename(matches[0]!));
+      if (boundary && !boundary.editable) {
+        return c.json({ error: referenceRepoMessage(boundary.name), code: 'REFERENCE_REPO' }, 409);
+      }
       worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
@@ -2855,20 +2875,123 @@ app.post('/api/workspace/:id/sync', async (c) => {
 app.post('/api/workspace/:id/commit', async (c) => {
   try {
     const id = c.req.param('id');
-    const { message } = await c.req.json() as { message: string };
+    const body = await c.req.json().catch(() => null) as { message?: unknown; noPush?: unknown; files?: unknown } | null;
+    const message = typeof body?.message === 'string' ? body.message.trim() : '';
+    if (!message) return c.json({ error: 'A commit message is required.' }, 400);
+    let files: Record<string, string[]> | undefined;
+    if (body?.files !== undefined) {
+      if (!body.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
+        return c.json({ error: '"files" must map repository names to file lists.' }, 400);
+      }
+      files = {};
+      for (const [repo, list] of Object.entries(body.files as Record<string, unknown>)) {
+        if (!Array.isArray(list) || list.some((file) => typeof file !== 'string' || !file)) {
+          return c.json({ error: `"files.${repo}" must be a list of file paths.` }, 400);
+        }
+        files[repo] = list as string[];
+      }
+      if (Object.values(files).every((list) => list.length === 0)) {
+        return c.json({ error: 'Select at least one file to commit.' }, 400);
+      }
+    }
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
-    const report = await commitWorkspace(workspacePath, message);
+    const report = await commitWorkspace(workspacePath, message, { noPush: body?.noPush === true, files });
     const results = report.repos.map((repo) => ({
       repoName: repo.name,
       success: repo.success,
+      committed: repo.committed,
+      pushed: repo.pushed,
+      pushError: repo.pushError,
+      branch: repo.branch,
       commitHash: repo.commitHash,
       filesChanged: repo.filesChanged,
       message: repo.message,
     }));
 
-    return c.json({ results });
+    return c.json({ results, skipped: report.skipped, conventionWarning: report.conventionWarning });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13f. Live per-repository state: edit boundary, branch, HEAD and changes.
+app.get('/api/workspace/:id/repositories', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) return c.json({ error: 'Workspace not found.' }, 404);
+    const boundaries = new Map(describeEditBoundaries(feature, workspacePath).map((b) => [b.name, b]));
+    const status = await getWorkspaceStatusReport(workspacePath);
+    return c.json({
+      repositories: status.repos.map((repo) => ({
+        name: repo.name,
+        access: repo.access,
+        editable: repo.editable,
+        path: repo.path,
+        sourcePath: repo.sourcePath,
+        branch: repo.branch,
+        expectedBranch: repo.editable ? repo.expectedBranch : null,
+        onExpectedBranch: repo.onExpectedBranch,
+        baseBranch: boundaries.get(repo.name)?.baseBranch ?? repo.defaultBranch,
+        headSha: repo.headSha ?? null,
+        dirty: repo.dirty,
+        changedFiles: repo.changedFiles,
+        ahead: repo.ahead,
+        behind: repo.behind,
+        remoteUrl: repo.remoteUrl,
+      })),
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13g. The shared finish policy decision for the current content.
+app.get('/api/workspace/:id/progression', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    return c.json(await evaluateProgression(workspacePath));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13h. Finish: policy check, commit, push and PR links; dry run previews effects.
+app.post('/api/workspace/:id/finish', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null) as {
+      message?: unknown; skipPush?: unknown; createPrs?: unknown; overrideReason?: unknown; dryRun?: unknown;
+    } | null;
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const overrideReason = typeof body?.overrideReason === 'string' ? body.overrideReason : undefined;
+    const report = await finishWorkspace(workspacePath, {
+      message: typeof body?.message === 'string' ? body.message : undefined,
+      skipPush: body?.skipPush === true,
+      createPrs: body?.createPrs === true,
+      override: overrideReason !== undefined ? { reason: overrideReason } : undefined,
+      dryRun: body?.dryRun === true,
+    });
+    return c.json(report, report.blocked ? 409 : 200);
+  } catch (error) {
+    if (error instanceof Error && /override needs a reason/.test(error.message)) {
+      return c.json({ error: error.message }, 400);
+    }
+    return errorResponse(c, error);
+  }
+});
+
+// 13i. The durable record of the latest finish run, for resuming after a restart.
+app.get('/api/workspace/:id/finish/last', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const state = await loadWorkspaceState(workspacePath);
+    return c.json({ lastFinish: state.lastFinish ?? null });
   } catch (error) {
     return errorResponse(c, error);
   }

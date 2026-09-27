@@ -29,6 +29,7 @@ import { commitWorkspace } from '../core/commit.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { runDoctor } from '../core/doctor.js';
 import { finishWorkspace } from '../core/finish.js';
+import { planRepoIsolation } from '../core/isolate.js';
 import { getWorkContext, readWorkDocument } from '../core/work-guidance.js';
 import { verifyWorkspace } from '../core/verify.js';
 import { getAllSkills, saveSkill } from '../utils/skills-catalog.js';
@@ -100,6 +101,23 @@ const workspaceIdProp = {
     description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
   },
 } as const;
+
+/**
+ * Validates a `{ repo: [files] }` selection from tool input.
+ * @throws When the shape is wrong.
+ */
+function parseFileSelection(value: unknown): Record<string, string[]> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('`files` must map repo names to file path arrays.');
+  const selection: Record<string, string[]> = {};
+  for (const [repo, files] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(files) || files.some((file) => typeof file !== 'string' || !file.trim())) {
+      throw new Error(`\`files.${repo}\` must be an array of file paths.`);
+    }
+    selection[repo] = files as string[];
+  }
+  return selection;
+}
 
 async function requireWorkspace(ctx: ToolContext): Promise<void> {
   const feature = await loadFeatureConfig(ctx.workspacePath);
@@ -230,7 +248,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'commit_workspace',
     description:
-      'Stage, commit, and (unless noPush) push all repos that have changes, using one commit message. Returns a per-repo report. This writes to git history and pushes to the remote.',
+      'Stage, commit, and (unless noPush) push the editable repos that have changes, using one commit message. Read-only reference repos are never committed (they appear in `skipped`); prepare one with isolate_repo first. Pass `files` to commit only reviewed files per repo — other changes, including already-staged ones, stay as they are. Returns a per-repo report with commit and push outcomes separately. This writes to git history and pushes to the remote.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -238,6 +256,11 @@ export const tools: NexusFlowTool[] = [
         message: { type: 'string', description: 'Commit message applied to every changed repo.' },
         noPush: { type: 'boolean', description: 'Commit but do not push. Default false.' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Optional list of repo names to restrict the commit to.' },
+        files: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'string' } },
+          description: 'Optional reviewed selection: repo name → changed file paths to commit. Only these repos and files are committed.',
+        },
         ...workspaceIdProp,
       },
       required: ['message'],
@@ -248,7 +271,8 @@ export const tools: NexusFlowTool[] = [
         const message = String(args.message ?? '').trim();
         if (!message) return errorResult('A commit message is required.');
         const repos = Array.isArray(args.repos) ? (args.repos as string[]) : undefined;
-        return json(await commitWorkspace(ctx.workspacePath, message, { noPush: Boolean(args.noPush), repos }));
+        const files = parseFileSelection(args.files);
+        return json(await commitWorkspace(ctx.workspacePath, message, { noPush: Boolean(args.noPush), repos, files }));
       } catch (error: any) {
         return errorResult(`Error committing workspace: ${error.message}`);
       }
@@ -431,31 +455,43 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'finish_workspace',
     description:
-      `Finish the feature: commit any remaining changes (with the given message), push every repo, and return per-repo PR/compare links. Does NOT delete anything — to remove the workspace, the user runs \`${CLI_NAME} finish --cleanup\` from outside it.`,
+      `Finish the feature: check verification evidence, commit any remaining changes (with the given message), push every editable repo, and return per-repo PR/compare links. Refuses (blocked: true, nothing changed) when verification is missing, failed, timed out or stale for the current content, unless overrideReason explains why finishing anyway is acceptable; the override is recorded. Read-only reference repos are never touched. Re-running after a partial failure resumes without repeating commits. Use dryRun to preview remote effects. Does NOT delete anything — to remove the workspace, the user runs \`${CLI_NAME} finish --cleanup\` from outside it.`,
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         message: { type: 'string', description: 'Commit message for any remaining changes.' },
         skipPush: { type: 'boolean', description: 'Commit but do not push. Default false.' },
+        overrideReason: {
+          type: 'string',
+          description: 'Finish although verification is missing, failed or stale. Only with the user\'s explicit agreement; the reason is recorded and returned.',
+        },
+        dryRun: { type: 'boolean', description: 'Preview commits, pushes and PR targets without changing anything.' },
         ...workspaceIdProp,
       },
     },
     handler: async (args, ctx) => {
       try {
         await requireWorkspace(ctx);
+        const overrideReason = typeof args.overrideReason === 'string' ? args.overrideReason : undefined;
         const report = await finishWorkspace(ctx.workspacePath, {
           message: args.message ? String(args.message) : undefined,
           skipPush: Boolean(args.skipPush),
-          createPrs: true,
+          createPrs: !args.dryRun,
+          override: overrideReason !== undefined ? { reason: overrideReason } : undefined,
+          dryRun: Boolean(args.dryRun),
         });
         // MCP never deletes worktrees (an agent's CWD is usually inside the
         // workspace). Point the user at the CLI for cleanup instead.
         return json({
           ...report,
-          note: report.safeToCleanup
-            ? `Workspace is fully pushed. To remove it, run \`${CLI_NAME} finish --cleanup\` from outside the workspace.`
-            : 'Some repos are still dirty or unpushed — see the per-repo report.',
+          note: report.blocked
+            ? `Finish refused, nothing changed: ${report.policy.blockers.join(' ')} Run verify_workspace, or ask the user whether to finish anyway with overrideReason.`
+            : report.dryRun
+              ? 'Dry run: nothing was changed.'
+              : report.safeToCleanup
+                ? `Workspace is fully pushed. To remove it, run \`${CLI_NAME} finish --cleanup\` from outside the workspace.`
+                : 'Some repos are still dirty or unpushed — see the per-repo report. Re-run to resume.',
         });
       } catch (error: any) {
         return errorResult(`Error finishing workspace: ${error.message}`);
@@ -504,7 +540,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'isolate_repo',
     description:
-      'Dynamically isolate a repository in an in-place workspace into a dedicated worktree before writing code. This creates a dedicated feature branch and worktree directory so the repository default/main branch remains clean and untouched.',
+      'Prepare a read-only reference repository for editing: creates a dedicated worktree and feature branch inside the workspace. Required before changing files in any reference repo. The user\'s own checkout (its branch, files and base branch) is not changed. Fails without changing anything on a path or branch collision. Pass dryRun to see the path, branch, base and conflicts first.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -524,6 +560,7 @@ export const tools: NexusFlowTool[] = [
           minLength: 1,
           description: 'Optional base branch to branch off. Defaults to repository default branch.',
         },
+        dryRun: { type: 'boolean', description: 'Return the plan (path, branch, base, conflicts) without creating anything.' },
         ...workspaceIdProp,
       },
       required: ['repo'],
@@ -533,6 +570,12 @@ export const tools: NexusFlowTool[] = [
         await requireWorkspace(ctx);
         const repoName = String(args.repo || '').trim();
         if (!repoName) return errorResult('Repository name is required.');
+        if (args.dryRun) {
+          return json(await planRepoIsolation(ctx.workspacePath, repoName, {
+            branchName: args.branchName ? String(args.branchName) : undefined,
+            baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
+          }));
+        }
         const result = await isolateWorkspaceRepo(ctx.workspacePath, repoName, {
           branchName: args.branchName ? String(args.branchName) : undefined,
           baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
