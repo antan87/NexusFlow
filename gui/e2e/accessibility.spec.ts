@@ -108,6 +108,13 @@ test.describe('constrained windows', () => {
     await expect(page.getByRole('button', { name: 'All workspaces' })).toBeVisible();
   });
 
+  test('keep the full sidebar in a 1024-wide window', async ({ page }) => {
+    // Windows CI clamps the desktop window to a 1024×768 screen; the rail is only for narrower windows.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto('/#/overview');
+    await expect(page.getByText('ContextSpace', { exact: true }).first()).toBeVisible();
+  });
+
   test('keep primary actions reachable at 200% zoom (720 CSS pixels)', async ({ page }) => {
     // 200% zoom of a 1440-wide window leaves 720 CSS pixels.
     await page.setViewportSize({ width: 720, height: 525 });

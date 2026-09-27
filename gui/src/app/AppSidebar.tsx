@@ -95,7 +95,7 @@ function SidebarContents({
   const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved, customTitles, updateTitle } = useWorktreeNavigationState();
   // In a narrow window (split screen, 200% zoom) the rail is the default so the
   // task keeps the room; expanding it there is temporary and leaves the saved choice alone.
-  const narrow = useMediaQuery('(min-width: 768px) and (max-width: 1099px)');
+  const narrow = useMediaQuery('(min-width: 768px) and (max-width: 999px)');
   const [narrowExpanded, setNarrowExpanded] = useState(false);
   const isCollapsed = narrow ? !narrowExpanded : savedCollapsed;
   const toggleCollapsed = useCallback(() => {
