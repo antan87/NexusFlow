@@ -24,9 +24,30 @@ Here is how to get started with your first feature workspace.
 flowchart TD
     A["1. Run Web GUI or CLI"] --> B["2. Fill Feature Details & Pick Repos"]
     B --> C["3. Workspace Created\n(Context generated + optional worktrees)"]
-    C --> D["4. AI Agent Initializes\n(Fills contextspace-overview.md + questions)"]
+    C --> D["4. AI Agent Initializes\n(Reads AGENTS.md, assignment & plan)"]
     D --> E["5. Confirm Assumptions & Spin up services"]
 ```
+
+### 0. Install
+
+The recommended path for most users is the **desktop app** (Windows NSIS installer or
+Linux AppImage from [GitHub Releases](https://github.com/antan87/NexusFlow/releases));
+see the [README installation section](./README.md#-installation). It needs no Node.js.
+
+This guide follows the **CLI** path, which needs Node.js 22.13 or later and Git 2.20 or later:
+
+```bash
+npm install -g @mrpatronz/nexusflow   # provides ctxspace (aliases: contextspace, cs, nexusflow)
+ctxspace --version
+```
+
+#### Which surface does what
+
+| Surface | Use it for |
+| :--- | :--- |
+| **Desktop app** | The full dashboard in a native window, with the backend embedded and optional native updates. |
+| **CLI (`ctxspace`)** | Creating and finishing workspaces, services, verification, knowledge and scripting. `ctxspace ui` serves the same dashboard to a browser. |
+| **VS Code extension** | A sidebar dashboard, plus shortcuts to create, sync, commit and diagnose workspaces, and to open the web dashboard or TUI. |
 
 ### 1. Initialize ContextSpace
 First, initialize the default configuration on your machine:
@@ -44,7 +65,9 @@ ContextSpace comes with a rich, interactive Web Dashboard. Launch it by running:
 ```bash
 ctxspace ui
 ```
-This starts the local backend server on port `3000` and automatically opens the browser.
+This starts the local backend server on port `3000` (the next free port if it is taken; add
+`--strict-port` to fail instead). It does not open a browser unless you pass `--open`;
+otherwise browse to the printed URL. Use `-d/--daemon` to keep it running in the background.
 
 ---
 
@@ -52,7 +75,7 @@ This starts the local backend server on port `3000` and automatically opens the 
 Via the `ctxspace create` CLI command (or `ctxspace quick` for rapid bug fixes):
 1. **Repo Source**: Choose a registered project or continue with ad-hoc repo scanning.
 2. **Work Mode**: Pick **Isolated worktrees** or **In-place**.
-3. **Lifecycle Flow Preset**: Choose **Quick Bug Fix** (`quick`), **Standard Feature** (`feature`), or **Multi-Milestone Epic** (`epic`).
+3. **Lifecycle Flow Preset**: Pass `--flow quick-fix`, `--flow feature` or `--flow epic` (or use `ctxspace quick`, which implies the quick-fix flow).
 4. **Branch or Workspace Name**: Enter a feature branch for worktree mode (e.g. `feature/user-profiles`) or a workspace name for in-place mode.
 5. **Description**: Describe what you are building. The AI assistant will read this to compile the plan.
 6. **Skills & Enterprise Tags**: Equip portable skills and enterprise categories/traits directly in the wizard.
@@ -155,8 +178,8 @@ Here is a summary of the command-line interface:
 
 | Command | Usage | Description |
 | :--- | :--- | :--- |
-| **`ctxspace ui`** | `ctxspace ui [-p <port>]` | Starts the backend Hono API server and opens the GUI Dashboard. |
-| **`ctxspace create`** | `ctxspace create` | Launches the interactive wizard to build a worktree or in-place workspace. |
+| **`ctxspace ui`** | `ctxspace ui [-p <port>] [--open] [-d]` | Starts the dashboard server (the backend the desktop app embeds); `--open` also opens a browser, `-d` runs it in the background. |
+| **`ctxspace create`** | `ctxspace create [--flow <quick-fix\|feature\|epic>] [-m <worktree\|in-place>]` | Launches the interactive wizard to build a worktree or in-place workspace. |
 | **`ctxspace quick`** | `ctxspace quick` | Fast-tracks instant workspace creation for quick bug fixes. |
 | **`ctxspace list`** | `ctxspace list` / `ctxspace ls` | Lists all active feature workspaces, tagging in-place ones with `[in-place]`. |
 | **`ctxspace open`** | `ctxspace open` | Prompts you to pick an active workspace and opens it in your editor. |

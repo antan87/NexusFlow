@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import { appendFile, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { appendFile, cp, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { checkDevelopmentSkills, readDevelopmentSkills, repositoryRoot } from './check-development-skills.mjs';
@@ -49,3 +49,29 @@ it('fails when SKILL.md is missing from a maintained skill directory', async () 
   await expect(readDevelopmentSkills(root)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
+
+describe('onboarding documents', () => {
+  beforeEach(async () => {
+    // The CLI help check runs the built CLI; CI builds before tests.
+    await symlink(path.join(repositoryRoot, 'dist'), path.join(root, 'dist'), 'junction');
+    for (const manifest of ['package.json', 'gui/package.json', 'desktop/package.json', 'extension/package.json']) {
+      await cp(path.join(repositoryRoot, manifest), path.join(root, manifest));
+    }
+  });
+
+  it('checks commands advertised in GETTING_STARTED.md against the shipped CLI', async () => {
+    await writeFile(path.join(root, 'GETTING_STARTED.md'), 'Run `ctxspace ui --auto-open-browser`.\n');
+    await expect(checkDevelopmentSkills(root)).rejects.toThrow('Unknown documented flag --auto-open-browser');
+  });
+
+  it('accepts usage notation, real flags and npm built-ins but still rejects unknown scripts', async () => {
+    await writeFile(path.join(root, 'README.md'), [
+      'Install with `npm install -g @mrpatronz/nexusflow` and run `npm test`.',
+      'Remove with `ctxspace project remove [id] [-y, --yes]`; serve with `ctxspace ui --open`.',
+    ].join('\n'));
+    await expect(checkDevelopmentSkills(root)).resolves.toMatchObject({ documents: expect.any(Number) });
+
+    await appendFile(path.join(root, 'README.md'), '\nThen `npm run not-a-script`.\n');
+    await expect(checkDevelopmentSkills(root)).rejects.toThrow('Unknown package script: npm run not-a-script');
+  });
+});

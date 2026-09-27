@@ -8,6 +8,13 @@ import { load } from 'js-yaml';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const skillIds = ['nexusflow-dev', 'nexusflow-lifecycle', 'contextspace-verify-release'];
+export const onboardingDocuments = ['README.md', 'GETTING_STARTED.md'];
+// npm's own commands, not package scripts (`npm test`/`npm start` still resolve to scripts).
+const npmBuiltins = new Set(['install', 'i', 'ci', 'link', 'uninstall', 'update', 'pack', 'publish', 'view', 'info', 'version', 'exec', 'audit', 'outdated', 'ls']);
+
+async function exists(file) {
+  try { return (await lstat(file)).isFile(); } catch { return false; }
+}
 
 /** Read the entire maintained bundle before installation writes anything. */
 export async function readDevelopmentSkills(root = repositoryRoot) {
@@ -62,6 +69,11 @@ export async function checkDevelopmentSkills(root = repositoryRoot) {
     if (entry.endsWith('.md')) documents.push({ file: path.join(root, 'resources/workflows', entry),
       content: await readFile(path.join(root, 'resources/workflows', entry), 'utf8') });
   }
+  // User onboarding promises the same commands, so they are held to the same check.
+  for (const entry of onboardingDocuments) {
+    const file = path.join(root, entry);
+    if (await exists(file)) documents.push({ file, content: await readFile(file, 'utf8') });
+  }
   const checkedCommands = new Set();
   const helpByPath = new Map();
   for (const { file, content } of documents) {
@@ -97,7 +109,9 @@ export async function checkDevelopmentSkills(root = repositoryRoot) {
             helpByPath.set(key, help);
           } finally { await rm(configDir, { recursive: true, force: true }); }
         }
-        for (const flag of words.filter((word) => word.startsWith('--') && word !== '--help')) {
+        // Usage notation such as `[-y, --yes]` or `--flag=<v>` wraps the flag itself.
+        const flags = words.filter((word) => word.startsWith('--')).map((word) => word.replace(/[=[\]),|<].*$/, ''));
+        for (const flag of flags.filter((word) => word !== '--help')) {
           if (!new RegExp(`${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[ ,=\\n]|$)`).test(help)) throw new Error(`Unknown documented flag ${flag}: ${command}`);
         }
         checkedCommands.add(command);
@@ -107,6 +121,7 @@ export async function checkDevelopmentSkills(root = repositoryRoot) {
         const directory = prefix >= 0 ? words[prefix + 1] : '.';
         const manifest = JSON.parse(await readFile(path.join(root, directory, 'package.json'), 'utf8'));
         const script = words[1] === 'run' ? words[2] : words[1];
+        if (words[1] !== 'run' && npmBuiltins.has(script)) { checkedCommands.add(command); continue; }
         if (!manifest.scripts?.[script]) throw new Error(`Unknown package script: ${command}`);
         checkedCommands.add(command);
       }
