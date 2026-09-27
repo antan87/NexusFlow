@@ -21,8 +21,26 @@ it('discovers unregistered root documents and reads their current contents', asy
   expect(await readRootDocument(root, 'brief.docx')).toMatchObject({ kind: 'download' });
 });
 
+it('opens linked files in visible subfolders but never hidden, linked or escaping paths', async () => {
+  await fs.mkdir(path.join(root, 'assessment', 'screenshots'), { recursive: true });
+  await fs.writeFile(path.join(root, 'assessment', 'screenshots', '01.png'), 'png');
+  expect(await readRootDocument(root, 'assessment/screenshots/01.png')).toMatchObject({ kind: 'image', name: 'assessment/screenshots/01.png' });
+  // Nested files are reachable by link only; the root listing stays flat.
+  expect((await listRootDocuments(root)).documents).toEqual([]);
+
+  await fs.mkdir(path.join(root, '.git'));
+  await fs.writeFile(path.join(root, '.git', 'notes.md'), 'hidden');
+  await fs.mkdir(path.join(root, 'outside'));
+  await fs.writeFile(path.join(root, 'outside', 'secret.md'), 'secret');
+  await fs.symlink(path.join(root, 'outside'), path.join(root, 'linked-dir'));
+  for (const name of ['.git/notes.md', 'assessment/../.git/notes.md', 'assessment//screenshots/01.png', 'linked-dir/secret.md', 'C:/escape.md', 'doc.md:stream']) {
+    await expect(readRootDocument(root, name)).rejects.toThrow();
+  }
+  await expect(readRootDocument(root, 'assessment/evidence.json')).rejects.toThrow("can't be opened here");
+});
+
 it('rejects traversal, linked files, unsupported files and nonregular paths', async () => {
-  for (const name of ['../escape.md', '..\\escape.md', '/tmp/escape.md', '.private.md', 'nested/doc.md', 'keys.env', 'bad\nname.md']) {
+  for (const name of ['../escape.md', '..\\escape.md', '/tmp/escape.md', '.private.md', 'nested/../../escape.md', 'keys.env', 'bad\nname.md']) {
     await expect(readRootDocument(root, name)).rejects.toThrow();
   }
   await fs.writeFile(path.join(root, 'real.md'), 'original');

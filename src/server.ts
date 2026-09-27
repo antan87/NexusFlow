@@ -38,6 +38,7 @@ import {
   LEGACY_ENGINE_NPM_PACKAGE,
   resolveWorkspaceChatLedger,
   readWorkspaceChatMessages,
+  BRAND_NAME,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
@@ -4432,6 +4433,17 @@ app.get('/', async (c) => {
 // the server's cwd — a cwd on another drive made the old cwd-relative path
 // resolve wrong and serve a blank GUI, e.g. under `ui --daemon`.
 app.use('/*', serveStatic({ root: guiPath }));
+
+// A link that leaves the app (for example a local file path clicked in a
+// rendered document) must not strand the user on a bare 404 with no way back:
+// page loads that match no route or asset get a page that returns to the app.
+// API and asset requests keep the plain 404.
+app.get('*', (c) => {
+  if (c.req.path.startsWith('/api/') || !(c.req.header('accept') ?? '').includes('text/html')) return c.notFound();
+  return c.html(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found · ${BRAND_NAME}</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#1f2937;background:#fff}@media (prefers-color-scheme:dark){body{color:#e5e7eb;background:#111827}a{color:#93c5fd}}</style></head>
+<body><h1>This page isn't part of ${BRAND_NAME}</h1><p>The link you followed points to a file or page the app can't show here.</p><p><a href="/">Back to ${BRAND_NAME}</a></p></body></html>`, 404);
+});
 
 export function startServer(
   port = 3000,
