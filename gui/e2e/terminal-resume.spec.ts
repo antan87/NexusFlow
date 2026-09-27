@@ -145,6 +145,10 @@ test('selecting an already running CLI session reuses its terminal', async ({ pa
     await expect(session).toBeVisible();
     await session.click();
     const chat = page.getByRole('region', { name: 'CLI Chat' });
+    // The pane toolbar replaced the "Resume session" toggle, so assert the reused
+    // terminal itself. This fixture mocks the HTTP routes only, so the pane can
+    // settle on either test id: a terminal is attached to the pane either way.
+    const attached = chat.locator('[data-testid="terminal-state"], [data-testid="terminal-disconnected"]');
     await expect.poll(() => launches).toBe(1);
     await chat.getByRole('button', { name: 'Close floating chat' }).click();
     await session.click();
@@ -152,11 +156,11 @@ test('selecting an already running CLI session reuses its terminal', async ({ pa
     await page.waitForTimeout(150);
     expect(launches).toBe(1);
     releaseCreate();
-    await expect(chat.getByRole('button', { name: 'Resume session' })).toBeVisible();
+    await expect(attached).toBeVisible();
     await chat.getByRole('button', { name: 'Close floating chat' }).click();
     await session.click();
     await expect(chat).toBeVisible();
-    await expect(chat.getByRole('button', { name: 'Resume session' })).toBeVisible();
+    await expect(attached).toBeVisible();
     expect(launches).toBe(1);
     await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
   } finally {

@@ -28,7 +28,7 @@ test('workspace actions open the selected CLI chat without starting a session', 
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
-  await expect(chat.getByText('CLI', { exact: true }).first()).toBeVisible();
+  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
   await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
 
   await chat.getByRole('button', { name: 'Close floating chat' }).click();
@@ -61,7 +61,7 @@ test('creation from chat returns to the new workspace in CLI mode', async ({ pag
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toHaveAttribute('aria-selected', 'true');
-  await expect(chat.getByText('CLI', { exact: true }).first()).toBeVisible();
+  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
   await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
   await expect(chat.getByRole('button', { name: 'Start session' })).toBeDisabled();
 });

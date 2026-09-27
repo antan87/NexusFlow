@@ -10,6 +10,15 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/terminals/feature-x/status', route => route.fulfill({ json: { available: true, sessions: [terminal], targets: [{ id: 'shell', name: 'Shell', available: true, reason: null }] } }));
 });
 
+/**
+ * The Code and Docs toggles moved into the pane overflow menu when the
+ * per-pane sub-header was removed, so reach them through that menu.
+ */
+const toggleInspector = async (page: import('@playwright/test').Page, chat: import('@playwright/test').Locator, name: 'Code' | 'Docs') => {
+  await chat.getByRole('button', { name: 'Pane options' }).click();
+  await page.getByRole('button', { name, exact: true }).click();
+};
+
 test('shows expandable changed and repository file trees beside the CLI terminal', async ({ page }) => {
   const changed = { repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/nested/changed.ts', type: 'modified', additions: 1, deletions: 0 }] };
   await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [{ ...changed, files: [...changed.files, { file: 'src/nested/clean.ts', type: 'unchanged' }] }] } }));
@@ -18,7 +27,7 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector(page, chat, 'Code');
   const code = chat.getByRole('region', { name: 'Workspace code' });
   await expect(code.getByRole('navigation', { name: 'repo changes' })).toBeVisible();
   await expect(code.getByText('src', { exact: true })).toBeVisible();
@@ -28,7 +37,7 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await expect(code.getByRole('navigation', { name: 'repo files' }).getByRole('button', { name: /clean\.ts/ })).toBeVisible();
   await code.getByRole('button', { name: /clean\.ts/ }).click();
   await expect(code.getByText('repo/src/nested/clean.ts')).toBeVisible();
-  await chat.getByRole('button', { name: 'Back to CLI' }).click();
+  await toggleInspector(page, chat, 'Code');
   await expect(chat.getByTestId('terminal-pane')).toBeVisible();
 });
 
@@ -48,25 +57,30 @@ test('labels the maximized CLI and exposes a disconnected session with a reconne
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status', { name: /Terminal connection status:/ })).toHaveText('Running');
-  await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(0);
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
-  await expect(chat.getByText('ContextSpace', { exact: true })).toBeVisible();
+  // The window carries exactly one title now. The "ContextSpace / CLI chat"
+  // breadcrumb and the duplicate pane label were removed, so assert both the
+  // single label and the absence of the breadcrumb.
   await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await expect(chat.getByText('ContextSpace', { exact: true })).toHaveCount(0);
+  await toggleInspector(page, chat, 'Code');
   await expect(chat.getByText('ContextSpace code', { exact: true })).toBeVisible();
   await dropConnection?.();
-  await expect(pane.getByTestId('terminal-disconnected')).toContainText('Input is paused');
-  await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(1);
-  await expect(pane.getByRole('button', { name: 'End session' })).toHaveCount(1);
-  await pane.getByRole('button', { name: 'Reconnect CLI' }).click();
+  await expect(pane.getByTestId('terminal-state-help')).toContainText('Input is paused');
+  await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(1);
+  await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(1);
+  await pane.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await expect.poll(() => connections).toBe(2);
-  await expect(pane.getByRole('status', { name: /Terminal connection status:/ })).toHaveText('Running');
-  await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(0);
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await expect(pane.getByTestId('terminal-disconnected')).toHaveCount(0);
 });
 
 test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, baseURL }) => {
+  // Derive the origin so the grant follows the configured port instead of a
+  // hardcoded one that silently stops matching.
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseURL!).origin });
   const inputs: string[] = [];
   await page.routeWebSocket('**/ws/terminal', socket => {
@@ -83,7 +97,7 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, 
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const pane = page.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status', { name: /Terminal connection status:/ })).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
   const bounds = await screen.boundingBox();
   expect(bounds).not.toBeNull();
@@ -149,7 +163,7 @@ test('restores CLI input focus and opens terminal file references in the code tr
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status', { name: /Terminal connection status:/ })).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
 
@@ -193,7 +207,7 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status', { name: /Terminal connection status:/ })).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
   const clickRow = async (row: number) => {
     const cell = await screen.evaluate((element, index) => {
@@ -209,7 +223,7 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   await expect(code.getByText('repo/src/nested/clean.ts')).toBeVisible();
   const separator = chat.getByRole('separator', { name: 'Resize code panel' });
   for (let step = 0; step < 7; step++) await separator.press('ArrowLeft');
-  await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane.getByRole('region', { name: 'Continue a conversation' })).toHaveCount(0);
   await expect.poll(() => screen.evaluate(element => element.clientHeight)).toBeGreaterThan(100);
   await expect.poll(() => screen.evaluate(element => element.clientWidth)).toBeLessThan(400);
   const wrappedLinkRow = screen.locator('.xterm-rows > div').filter({ hasText: 'really-long' }).first();
@@ -228,7 +242,7 @@ test('renders file tree as a left sidebar alongside code panel and allows collap
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector(page, chat, 'Code');
   const code = chat.getByRole('region', { name: 'Workspace code' });
 
   // File tree is on the left side of the code panel (sidebar)
@@ -249,6 +263,128 @@ test('renders file tree as a left sidebar alongside code panel and allows collap
   await expect(aside).toHaveClass(/w-0/);
   await toggleBtn.click();
   await expect(aside).not.toHaveClass(/w-0/);
+});
+
+test('opens panels by keyboard, steps files with Alt+Arrow, and keeps hunk keys out of the app', async ({ page }) => {
+  const files = [
+    { file: 'src/alpha.ts', type: 'modified' },
+    { file: 'src/beta.ts', type: 'modified' },
+  ];
+  const changed = { repoName: 'repo', repoPath: 'C:/repo', files };
+  await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: 'x\n' } }));
+  await page.route('**/api/workspace/feature-x/documents', route => route.fulfill({ json: { documents: [{ name: 'AGENTS.md', kind: 'markdown', modifiedAt: '' }, { name: 'WORKSPACE.md', kind: 'markdown', modifiedAt: '' }] } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  const pane = chat.getByTestId('terminal-pane');
+
+  // The panel toggles are reachable without the mouse.
+  await chat.getByRole('button', { name: 'Code', exact: true }).focus();
+  await page.keyboard.press('Control+Shift+E');
+  // Exactly one panel: the chat keeps every tab mounted, so an ungated
+  // window listener would open one per pane.
+  await expect(page.locator('section[aria-label="Workspace code"]')).toHaveCount(1);
+  await page.keyboard.press('Control+Shift+D');
+  await expect(chat.getByRole('region', { name: 'Workspace documents' })).toBeVisible();
+  await expect(chat.getByRole('region', { name: 'Workspace code' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(chat.getByRole('region', { name: 'Workspace documents' })).toHaveCount(0);
+
+  // Regression: the binding must also work with the terminal focused, which is
+  // where a user actually is. Shift+C could not be used here because the PTY
+  // claims it for copy-selection and stops propagation.
+  await pane.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.press('Control+Shift+E');
+  // Exactly one panel: the chat keeps every tab mounted, so an ungated
+  // window listener would open one per pane.
+  await expect(page.locator('section[aria-label="Workspace code"]')).toHaveCount(1);
+  await page.keyboard.press('Control+Shift+D');
+  await expect(chat.getByRole('region', { name: 'Workspace documents' })).toBeVisible();
+  await pane.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(chat.getByRole('region', { name: 'Workspace code' })).toBeVisible();
+
+  // Alt+Arrow walks the changed files in the code panel.
+  await page.keyboard.press('Control+Shift+C');
+  const code = chat.getByRole('region', { name: 'Workspace code' });
+  await code.getByRole('button', { name: /alpha\.ts/ }).click();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(code.getByRole('button', { name: /beta\.ts/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect(code.getByRole('button', { name: /alpha\.ts/ })).toHaveAttribute('aria-pressed', 'true');
+
+  // Regression: the hunk shortcuts used to be bound to window, so pressing
+  // "a" anywhere in the app accepted a hunk while the chat sat open.
+  await page.keyboard.press('Escape');
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  const before = await chat.getByRole('button', { name: /Accept/ }).count();
+  await page.keyboard.press('a');
+  await page.keyboard.press('r');
+  expect(await chat.getByRole('button', { name: /Accept/ }).count()).toBe(before);
+  await expect(pane).toBeVisible();
+});
+
+test('resizes the file tree by dragging, persists it, and marks file types', async ({ page }) => {
+  const files = [
+    { file: 'src/deeply/nested/folder/with-a-very-long-module-name.ts', type: 'modified' },
+    { file: 'src/app.tsx', type: 'added' },
+    { file: 'docs/notes.md', type: 'unchanged' },
+    { file: 'config/app.config.json', type: 'unchanged' },
+    { file: 'scripts/release.sh', type: 'unchanged' },
+  ];
+  const changed = { repoName: 'repo', repoPath: 'C:/repo', files };
+  await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [changed] } }));
+  await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: 'x\n' } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  await chat.getByRole('button', { name: 'Code', exact: true }).click();
+  const code = chat.getByRole('region', { name: 'Workspace code' });
+  const aside = code.locator('aside');
+  const tree = code.getByRole('navigation', { name: 'repo changes' });
+  await expect(tree).toBeVisible();
+
+  // Extension glyphs carry the file type, and the type is still announced.
+  await expect(tree.getByRole('button', { name: /app\.tsx/ })).toContainText('TypeScript React');
+  await expect(tree.getByRole('button', { name: /app\.config\.json/ })).toContainText('JSON');
+  await expect(tree.getByRole('button', { name: /release\.sh/ })).toContainText('Shell script');
+  await expect(tree.getByRole('button', { name: /notes\.md/ })).toContainText('Markdown');
+
+  // Dragging the separator widens the tree and persists the width. The width
+  // animates, so poll rather than sampling the box the instant the drag ends.
+  const handle = code.getByRole('separator', { name: 'Resize file tree' });
+  await expect(handle).toBeVisible();
+
+  // Regression: the handle once used a negative margin and sat on top of the
+  // tree's vertical scrollbar, so the scrollbar thumb could not be grabbed.
+  const scroller = aside.locator('div').first();
+  const treeBox = (await scroller.boundingBox())!;
+  const handleBox = (await handle.boundingBox())!;
+  expect(handleBox.x).toBeGreaterThanOrEqual(treeBox.x + treeBox.width - 0.5);
+  const before = (await aside.boundingBox())!.width;
+  const grip = (await handle.boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 90, grip.y + grip.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await aside.boundingBox())!.width).toBeGreaterThan(before + 40);
+  // Assert on the committed width, not a box read that can race the 150ms
+  // width transition.
+  await expect(handle).toHaveAttribute('aria-valuenow', /^\d+$/);
+  const dragged = Number(await handle.getAttribute('aria-valuenow'));
+  expect(dragged).toBeGreaterThan(200);
+  expect(await page.evaluate(() => localStorage.getItem('contextspace.code-panel.tree-width'))).toBe(String(dragged));
+
+  // Keyboard resizing stays available, and double-click restores the default.
+  await handle.focus();
+  await handle.press('ArrowRight');
+  await expect(handle).toHaveAttribute('aria-valuenow', String(dragged + 16));
+  await handle.dblclick();
+  await expect(handle).toHaveAttribute('aria-valuenow', '208');
+  await expect.poll(async () => (await aside.boundingBox())!.width).toBeCloseTo(208, 0);
 });
 
 test('navigates through change sections using section tabs and Next Section button', async ({ page }) => {
@@ -272,7 +408,7 @@ test('navigates through change sections using section tabs and Next Section butt
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector(page, chat, 'Code');
   const code = chat.getByRole('region', { name: 'Workspace code' });
 
   await code.getByRole('button', { name: /multi\.ts/ }).click();
@@ -305,16 +441,16 @@ test('allows expanding code view to focused width and restoring split', async ({
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector(page, chat, 'Code');
 
-  const expandBtn = chat.getByRole('button', { name: /Expand code/i });
+  const expandBtn = chat.getByRole('button', { name: 'Give the inspector the full width' });
   await expect(expandBtn).toBeVisible();
   await expandBtn.click();
 
   const codeContainer = chat.getByRole('region', { name: 'Workspace code' }).locator('xpath=..');
-  await expect(codeContainer).toHaveAttribute('style', /width:\s*85%/);
+  await expect(codeContainer).toHaveAttribute('style', /width:\s*80%/);
 
-  const splitBtn = chat.getByRole('button', { name: /Split view/i });
+  const splitBtn = chat.getByRole('button', { name: 'Show terminal and inspector side by side' });
   await expect(splitBtn).toBeVisible();
   await splitBtn.click();
   await expect(codeContainer).toHaveAttribute('style', /width:\s*50%/);
@@ -325,7 +461,7 @@ test('supports keyboard resizing of code panel using arrow keys on separator', a
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
-  await chat.getByRole('button', { name: 'Show code' }).click();
+  await toggleInspector(page, chat, 'Code');
 
   const separator = chat.getByRole('separator', { name: 'Resize code panel' });
   await expect(separator).toBeVisible();
