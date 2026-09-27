@@ -278,21 +278,11 @@ function SidebarContents({
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60 px-2 py-1 rounded transition-colors cursor-pointer"
             >
               <ArrowLeft size={12} />
-              <span>All Workspaces</span>
+              <span>All workspaces</span>
             </button>
 
-            {/* Active Workspace Identity Card */}
-            <div className="p-2.5 rounded-lg border border-border/60 bg-muted/20 flex flex-col gap-1">
-              <div className="text-xs font-semibold text-foreground truncate" title={activeWorkspace.name || activeWorkspace.description || activeWorkspace.branchName}>
-                {activeWorkspace.name || cockpit.workspaceTitle || activeWorkspace.description || activeWorkspace.branchName}
-              </div>
-              <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground truncate">
-                <span className="truncate">{activeWorkspace.branchName}</span>
-                <span>•</span>
-                <span>{activeWorkspace.repos.length} repos</span>
-              </div>
-            </div>
-
+            {/* The workspace header names the workspace; here only the repository picker. */}
+            <div className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Repositories</div>
             {/* Worktree Hierarchy Picker */}
             <WorktreePicker
               repoGroups={repoGroups}

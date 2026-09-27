@@ -86,8 +86,8 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.goto('/#/workspaces/feature-x');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
-    // Navigate to sessions tab
-    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    // Sessions are the first section of Run
+    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
@@ -133,7 +133,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     });
 
     await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();

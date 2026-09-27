@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PlanningNotesPanel } from './PlanningNotesPanel.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
@@ -37,6 +38,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<{ title: string; content?: string; location: string } | null>(null);
   const base = `/api/workspace/${encodeURIComponent(workspaceId)}`;
+  const queryClient = useQueryClient();
   const load = useCallback(async () => {
     setError('');
     try {
@@ -48,7 +50,12 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
 
   const perform = async (operation: () => Promise<void>) => {
     setBusy(true); setError(''); setMessage('');
-    try { await operation(); }
+    try {
+      await operation();
+      // The workspace header shows the stage and next milestone; keep it current.
+      void queryClient.invalidateQueries({ queryKey: ['workspace-work', workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ['workspace-lifecycle', workspaceId] });
+    }
     catch (error) { setError(error instanceof Error ? error.message : 'The operation failed.'); }
     finally { setBusy(false); }
   };

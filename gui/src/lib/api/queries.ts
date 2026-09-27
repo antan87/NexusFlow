@@ -37,6 +37,7 @@ import type {
   WorkspaceRepository,
   ProgressionDecision,
   FinishRecord,
+  WorkGuidance,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -665,6 +666,16 @@ export function useWorkspaceLifecycle(wsId: string | null) {
       );
       return data;
     },
+    enabled: Boolean(wsId),
+    staleTime: 10_000,
+  });
+}
+
+/** The workspace's current AI assignment (stage, objective) and documents. */
+export function useWorkGuidance(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-work', wsId],
+    queryFn: async () => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId!)}/work`)).guidance,
     enabled: Boolean(wsId),
     staleTime: 10_000,
   });

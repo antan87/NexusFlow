@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import fse from 'fs-extra';
 
 import type { CodexAgentItem, SkillItem } from '../types.js';
-import { reconcileWorkspaceResources, ResourceConflictError } from './materializer.js';
+import { previewResourceFiles, reconcileWorkspaceResources, ResourceConflictError } from './materializer.js';
 import { PRIMARY_CONFIG_DIR_NAME } from '../core/constants.js';
 
 const skill: SkillItem = {
@@ -59,6 +59,18 @@ describe('workspace resource materializer', () => {
     expect(second.installed).toEqual([]);
     expect(second.updated).toEqual([]);
     expect(second.unchanged).toHaveLength(3);
+  });
+
+  it('previews exactly the files an install writes, without writing', async () => {
+    const assistants = ['codex', 'claude'] as const;
+    const preview = await previewResourceFiles([...assistants], [skill], [agent]);
+    expect(await fs.readdir(workspace)).toEqual([]);
+    const result = await reconcileWorkspaceResources(workspace, [...assistants], [skill], [agent]);
+    // `installed` lists resource ids as well as files; compare the files.
+    expect(preview.map((file) => file.path).sort()).toEqual(result.installed.filter((entry) => entry.includes('/')).sort());
+    expect(preview).toContainEqual({ kind: 'codex-agent', resourceId: 'code_reviewer', path: '.codex/agents/code_reviewer.toml' });
+    // Only the assistants in use get a copy.
+    expect((await previewResourceFiles(['claude'], [skill], [])).map((file) => file.path)).toEqual(['.claude/skills/portable-skill/SKILL.md']);
   });
 
   it('removes only unchanged owned packages and permits reassignment', async () => {

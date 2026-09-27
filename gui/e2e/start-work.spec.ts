@@ -319,6 +319,11 @@ test.describe('NexusFlow E2E GUI Tests', () => {
   test('starts from repos, task, name, and skills without a size preset', async ({ page }) => {
     await mockRunningCreationStream(page);
     await page.route('**/api/skills', (route) => route.fulfill({ json: { skills: [{ id: 'work-lifecycle', name: 'Work lifecycle', title: 'Work lifecycle', description: 'Workspace guidance' }] } }));
+    let previewRequest: any;
+    await page.route('**/api/resources/preview', (route) => {
+      previewRequest = route.request().postDataJSON();
+      return route.fulfill({ json: { resources: [{ kind: 'skill', id: 'work-lifecycle', title: 'Work lifecycle', description: 'Workspace guidance', files: ['.agents/skills/work-lifecycle/SKILL.md'] }] } });
+    });
     let payload: any;
     await page.route('**/api/workspace', async (route) => {
       payload = route.request().postDataJSON();
@@ -336,7 +341,13 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Simple start');
     await page.getByLabel('What do you want to do?').fill('Simplify creation');
+    await expect(page.getByText('No skills or agents selected', { exact: false })).toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Work lifecycle' }).check();
+    // Before anything is installed, the user sees each file and where it goes.
+    const preview = page.getByRole('region', { name: 'What this adds to the workspace' });
+    await expect(preview).toContainText('Work lifecycle');
+    await expect(preview).toContainText('.agents/skills/work-lifecycle/SKILL.md');
+    expect(previewRequest).toMatchObject({ skills: ['work-lifecycle'], agents: [] });
     await page.getByRole('button', { name: 'Create workspace' }).click();
     await expect.poll(() => payload?.name).toBe('Simple start');
     expect(payload.mode).toBe('in-place');
