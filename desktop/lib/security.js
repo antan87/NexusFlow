@@ -25,3 +25,33 @@ export function isTrustedIpcEvent(event, mainWindow, assignedPort) {
   if (!event.senderFrame || event.senderFrame !== webContents.mainFrame) return false;
   return isExactLocalOrigin(event.senderFrame.url, assignedPort);
 }
+
+/**
+ * The renderer is a single-page app served from `/`; in-app routes live in the
+ * hash. Any other path on the local origin is not part of the app, and loading
+ * it strands the window (the desktop app has no back button).
+ */
+export function isAppShellNavigation(candidate, port) {
+  if (!isExactLocalOrigin(candidate, port)) return false;
+  const { pathname } = new URL(String(candidate));
+  return pathname === '/' || pathname === '/index.html';
+}
+
+/**
+ * Web and mail links a user clicks in rendered content open in the system
+ * handler, never inside the app window. Local-network and credentialed URLs
+ * are refused so a link cannot reach the dashboard server or smuggle secrets.
+ */
+export function externalLinkTarget(candidate) {
+  try {
+    const url = new URL(String(candidate));
+    if (url.protocol === 'mailto:') return url.href;
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.username || url.password) return null;
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0' || host === '::1' || /^127\./.test(host)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}

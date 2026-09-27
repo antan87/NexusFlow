@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import updaterPackage from 'electron-updater';
-import { isExactLocalOrigin, isTrustedIpcEvent } from './lib/security.js';
+import { externalLinkTarget, isAppShellNavigation, isTrustedIpcEvent } from './lib/security.js';
 import { configureDesktopUserData } from './lib/upgrade.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,19 +102,6 @@ function updateInfoProjection(info) {
     releaseDate: typeof info.releaseDate === 'string' ? info.releaseDate : null,
     releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : null,
   };
-}
-
-function isAllowedReleaseLink(candidate) {
-  try {
-    const url = new URL(candidate);
-    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) {
-      return false;
-    }
-    if (url.pathname === '/antan87/NexusFlow/releases/latest' || url.pathname === '/antan87/ContextSpace/releases/latest') return true;
-    return /^\/antan87\/(NexusFlow|ContextSpace)\/releases\/tag\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(url.pathname);
-  } catch {
-    return false;
-  }
 }
 
 function setUpdaterError(error) {
@@ -261,18 +248,20 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    // User-initiated navigation may stay on the exact dashboard origin only.
-    // A localhost port prefix, userinfo URL, or data: page is not trusted.
-    if (!isExactLocalOrigin(url, assignedPort)) {
-      event.preventDefault();
-    }
+    // The window only ever shows the app itself. Anything else — another path
+    // on the dashboard origin (a local file link), a foreign origin, a data:
+    // page — would replace the app with no way back, so it is refused and web
+    // links are handed to the system browser instead.
+    if (isAppShellNavigation(url, assignedPort)) return;
+    event.preventDefault();
+    const external = externalLinkTarget(url);
+    if (external) void shell.openExternal(external);
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // The browser dashboard can link to the release page. In the desktop app,
-    // open only that fixed HTTPS destination outside the renderer.
-    if (isAllowedReleaseLink(url)) {
-      void shell.openExternal(url);
-    }
+    // New windows are never opened in-app. Release pages and web/mail links
+    // the user clicked open in the system handler.
+    const external = externalLinkTarget(url);
+    if (external) void shell.openExternal(external);
     return { action: 'deny' };
   });
 

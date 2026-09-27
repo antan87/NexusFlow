@@ -3336,3 +3336,24 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 });
+
+describe('pages outside the app', () => {
+  it('lead back to the app instead of a bare 404 when a document link leaves it', async () => {
+    const page = await app.request('/home/me/workspaces/audit/assessment/screenshots/01.jpeg', { headers: { accept: 'text/html,application/xhtml+xml' } });
+    expect(page.status).toBe(404);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const html = await page.text();
+    expect(html).toContain('href="/"');
+    // The requested path is never reflected into the page.
+    expect(html).not.toContain('01.jpeg');
+  });
+
+  it('keeps plain 404s for API and asset requests', async () => {
+    const api = await app.request('/api/not-a-route', { headers: { accept: 'text/html' } });
+    expect(api.status).toBe(404);
+    expect(await api.text()).not.toContain('href="/"');
+    const asset = await app.request('/assets/missing.js', { headers: { accept: '*/*' } });
+    expect(asset.status).toBe(404);
+    expect(asset.headers.get('content-type') ?? '').not.toContain('text/html');
+  });
+});

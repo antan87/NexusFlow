@@ -19,11 +19,19 @@ function format(name: string) {
   return null;
 }
 
+/**
+ * `name` is a workspace-relative path with `/` separators. Nested files are
+ * allowed so document links (e.g. screenshots) can open in the viewer, but no
+ * segment may be hidden (`.git`, `..`), empty, or carry Windows drive/stream
+ * syntax. Links on disk are rejected by the callers' safety checks.
+ */
 function documentPath(root: string, name: string) {
-  if (!name || name.startsWith('.') || /[/\\\x00-\x1f\x7f]/.test(name) || path.isAbsolute(name) || !format(name)) {
-    throw new Error('Choose a supported document in the workspace root.');
+  const segments = name.split('/');
+  if (!name || path.isAbsolute(name) || /[\\:\x00-\x1f\x7f]/.test(name) || segments.some((segment) => !segment || segment.startsWith('.'))) {
+    throw new Error('Choose a document inside this workspace.');
   }
-  return path.join(root, name);
+  if (!format(name)) throw new Error(`${path.extname(name) || 'This'} files can't be opened here. Open it from the workspace folder instead.`);
+  return path.join(root, ...segments);
 }
 
 /** Agent-created files are local files, not copies registered with a storage adapter. */
