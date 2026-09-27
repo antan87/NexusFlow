@@ -151,7 +151,7 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
     const location = inPlace
       ? (isIsolated
           ? `\`${isolated!.worktreePath}\` *(on ${branch ?? 'feature branch'} [isolated worktree])*`
-          : `\`${repo.path}\`${branch ? ` (on ${branch})` : ''}`)
+          : `\`${repo.path}\`${branch ? ` (on ${branch})` : ''} *(read-only reference)*`)
       : `\`${repo.name}\``;
 
     const ties: string[] = [];
@@ -179,8 +179,8 @@ export async function buildContextContent(ctx: WorkspaceContext): Promise<string
   const hasIsolated = inPlace && Boolean(feature.isolatedRepos && Object.keys(feature.isolatedRepos).length > 0);
   const structureRule = inPlace
     ? (hasIsolated
-        ? '**RULE**: Repos marked `[isolated worktree]` MUST be edited inside their dedicated worktree path. Unisolated repos are in READ-ONLY reference mode: before modifying files in any unisolated repository, you MUST invoke the `isolate_repo` MCP tool (or run `ctxspace isolate <repo>`).'
-        : '**RULE**: These repositories are in READ-ONLY reference mode on host branches. Before making ANY file modifications, you MUST invoke the `isolate_repo` MCP tool (or run `ctxspace isolate <repo>`) to create a dedicated feature worktree.')
+        ? '**RULE**: Repos marked `[isolated worktree]` MUST be edited inside their dedicated worktree path. Unisolated repos are in READ-ONLY reference mode: before modifying files in any unisolated repository, you MUST prepare it for editing with the `isolate_repo` MCP tool (or `ctxspace isolate <repo>`, or "Prepare for editing" in the app). Commit, finish and revert refuse to change a reference repo.'
+        : '**RULE**: These repositories are in READ-ONLY reference mode on host branches. Before making ANY file modifications, you MUST prepare the repo for editing with the `isolate_repo` MCP tool (or `ctxspace isolate <repo>`, or "Prepare for editing" in the app) to create a dedicated feature worktree. Commit, finish and revert refuse to change a reference repo.')
     : `Each repo above is a separate git worktree on \`${feature.branchName}\`. **Do not edit the original repositories elsewhere on disk** — that is a different checkout and changes there are not part of this feature.`;
 
   // Repos that already ship their own assistant instructions; those override

@@ -450,13 +450,14 @@ program
 
 program
   .command('isolate')
-  .description('Dynamically isolate a repository in an in-place workspace into a dedicated worktree on demand')
+  .description('Prepare a read-only reference repository for editing in its own worktree and branch')
   .argument('[repo]', 'Name or path of the repository to isolate')
   .argument('[branch]', 'Target feature branch name')
   .option('-b, --branch <branch>', 'Target feature branch name')
   .option('--base <base>', 'Base branch to branch off')
   .option('-w, --workspace <workspace>', 'Workspace name or path')
-  .action(runAction(async (repo?: string, branchArg?: string, options?: { branch?: string; base?: string; workspace?: string }) => {
+  .option('--dry-run', 'Show the path, branch and base without creating anything')
+  .action(runAction(async (repo?: string, branchArg?: string, options?: { branch?: string; base?: string; workspace?: string; dryRun?: boolean }) => {
     await isolateCommand(repo, branchArg, options);
   }));
 
@@ -508,7 +509,8 @@ program
   .option('--cleanup', 'Remove the workspace after everything is confirmed pushed (still asks for confirmation)')
   .option('-y, --yes', 'Accept defaults for non-destructive prompts')
   .option('--dry-run', 'Show what finish would do without changing anything')
-  .action(runAction(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean }) => {
+  .option('--override-verification <reason>', 'Finish although verification is missing, failed or stale; the reason is recorded')
+  .action(runAction(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean; overrideVerification?: string }) => {
     await finishCommand(workspace, options);
   }));
 

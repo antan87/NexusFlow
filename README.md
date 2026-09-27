@@ -157,9 +157,9 @@ Removing a project only edits the registry — it never deletes repositories or 
 | Mode | What it does |
 |:---|:---|
 | **Isolated worktrees** | The classic flow: ContextSpace creates a feature branch and git worktree per repo inside the workspace directory. |
-| **In-place** | ContextSpace works directly in the source repositories. No branches or worktrees are created; you provide a workspace name, and the workspace directory only holds `contextspace.json` plus generated AI context files. |
+| **In-place (reference checkouts)** | Your source repositories are attached as read-only references: ContextSpace reads them where they are and never changes them. No branches or worktrees are created up front; you provide a workspace name, and the workspace directory only holds `contextspace.json` plus generated AI context files. |
 
-In in-place workspaces, `ctxspace sync` never mutates source-repo branches because you manage them yourself; it only reconciles stale generated views. `ctxspace finish` commits and pushes each repo's current branch, and only offers PR/compare links when that branch differs from the default branch. Deleting an in-place workspace never touches the source repositories, `ctxspace list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
+To change a reference repository, **prepare it for editing** (`ctxspace isolate <repo>`, the MCP `isolate_repo` tool, or the + action in the app). That creates an editable worktree on its own branch inside the workspace, and leaves your checkout — its branch, files and local base branch — exactly as it was. A path or branch collision is reported before anything is created (`--dry-run` shows the plan). Commit, finish, push and revert refuse to change a reference repository on every surface. `ctxspace sync` never mutates source-repo branches; creating a workspace fast-forwards your checkouts only when you explicitly ask. Deleting an in-place workspace never touches the source repositories, `ctxspace list` tags it with `[in-place]`, and agent sessions for single-repo in-place workspaces run in the repo root.
 
 For API callers, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
@@ -223,8 +223,8 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
 | `ctxspace commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `ctxspace sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
-| `ctxspace finish` | Close out a feature: commit & push all repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`) |
-| `ctxspace isolate` | On-demand worktree isolation for repositories in in-place workspaces (`[repo] [branch]`) |
+| `ctxspace finish` | Close out a feature: check verification evidence, commit & push editable repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`, `--override-verification <reason>`) |
+| `ctxspace isolate` | Prepare a read-only reference repository for editing in its own worktree and branch (`[repo] [branch]`, `--base`, `--dry-run`) |
 | `ctxspace strategy` | Manage teamwork strategy workflows (`list`, `create`, `edit`, `delete`, `show`) |
 | `ctxspace migrate` | Migrate legacy `.nexusflow` workspaces to `.contextspace` |
 | `ctxspace tag` | Manage enterprise categories, vertical subsystems, and cross-cutting traits (`list`, `add`, `remove`, `show`) (alias: `category`) |
@@ -267,8 +267,10 @@ ContextSpace is built around a single loop:
    ```
    Entries land under searchable dated slug headings in `contextspace-knowledge.md`. Identical retries are idempotent. If the storage write succeeds but Git auto-commit fails, ContextSpace reports "recorded but not committed" instead of inviting a duplicate retry. Git auto-commit applies to local workspace storage; custom adapters retain their own durability contract. The 300-character body cap remains enforced; implementation progress is never authored and is derived live instead.
 3. **`ctxspace finish`** — close it out:
-   - Shows a preflight status table (branch, dirty files, unpushed commits) per repo.
-   - Commits any remaining changes and pushes every branch; worktree-mode repos on the wrong branch or in a detached HEAD are skipped, while in-place workspaces use each repo's current branch.
+   - Shows a preflight status table (branch, dirty files, unpushed commits) per repo, and the verification evidence for each editable repo.
+   - Refuses to finish while verification is missing, failed, timed out or stale for the current content — the same decision in the CLI, the app and MCP. Verify again, or pass `--override-verification "<reason>"`; the reason is recorded and returned. `--yes` never bypasses it.
+   - Commits any remaining changes and pushes every editable branch; repos on the wrong branch or in a detached HEAD are skipped, and read-only reference repos are never touched.
+   - Records each repo's outcome as it goes. Git effects are not atomic across repos: if a push fails, running `finish` again resumes — committed repos are pushed, not committed again.
    - Opens a PR per repo with the GitHub CLI when it's installed and authenticated; otherwise prints a ready-to-click **compare URL** for GitHub, GitLab, Azure DevOps, or Bitbucket.
    - Offers to **promote** reusable learnings into each repo's persistent base knowledge (so they survive into the next feature).
    - With `--cleanup`, removes the workspace once everything is confirmed pushed (never while you're `cd`'d inside it, and never touching source repositories for in-place workspaces).

@@ -5,7 +5,7 @@ import { floatingChatStore } from '../../features/chat/floatingChatStore.js';
  * hand-rolled refetch effects.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './client.js';
 import type {
@@ -34,6 +34,9 @@ import type {
   FastForwardResult,
   WorkspaceLifecycle,
   WorkspaceVerificationReport,
+  WorkspaceRepository,
+  ProgressionDecision,
+  FinishRecord,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -665,4 +668,52 @@ export function useWorkspaceLifecycle(wsId: string | null) {
     enabled: Boolean(wsId),
     staleTime: 10_000,
   });
+}
+
+// ─── Repository safety & delivery ─────────────────────────────────────────
+
+/** Live per-repo state: edit boundary, branch, HEAD and changed files. */
+export function useWorkspaceRepositories(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-repositories', wsId],
+    queryFn: async () => (await apiFetch<{ repositories: WorkspaceRepository[] }>(
+      `/api/workspace/${encodeURIComponent(wsId!)}/repositories`,
+    )).repositories,
+    enabled: Boolean(wsId),
+  });
+}
+
+/** The shared finish policy decision for the current content. */
+export function useProgression(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-progression', wsId],
+    queryFn: () => apiFetch<ProgressionDecision>(`/api/workspace/${encodeURIComponent(wsId!)}/progression`),
+    enabled: Boolean(wsId),
+  });
+}
+
+/** The durable record of the latest finish run, to resume after a restart. */
+export function useLastFinish(wsId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-finish-last', wsId],
+    queryFn: async () => (await apiFetch<{ lastFinish: FinishRecord | null }>(
+      `/api/workspace/${encodeURIComponent(wsId!)}/finish/last`,
+    )).lastFinish,
+    enabled: Boolean(wsId),
+  });
+}
+
+/**
+ * Invalidates every view derived from a workspace's repositories, verification
+ * or delivery, so one mutation updates all visible surfaces together.
+ */
+export function invalidateDeliveryState(queryClient: QueryClient, wsId: string): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['workspace-repositories', wsId] }),
+    queryClient.invalidateQueries({ queryKey: ['workspace-progression', wsId] }),
+    queryClient.invalidateQueries({ queryKey: ['workspace-finish-last', wsId] }),
+    queryClient.invalidateQueries({ queryKey: ['workspace-lifecycle', wsId] }),
+    queryClient.invalidateQueries({ queryKey: ['workspaces-status'] }),
+    queryClient.invalidateQueries({ queryKey: ['workspaces'] }),
+  ]);
 }

@@ -29,7 +29,7 @@ export const WorktreeItem: React.FC<WorktreeItemProps> = ({
   onSelect,
   onEditTitle,
 }) => {
-  const shortSha = worktree.commitInfo?.shortSha || worktree.commitSha?.slice(0, 7) || 'unknown';
+  const shortSha = worktree.commitInfo?.shortSha || worktree.commitSha?.slice(0, 7) || '';
 
   return (
     <div
@@ -72,7 +72,7 @@ export const WorktreeItem: React.FC<WorktreeItemProps> = ({
 
         {/* Status Indicators */}
         <div className="flex items-center gap-1 shrink-0">
-          {worktree.status === 'active_review' || isActive ? (
+          {worktree.status === 'active_review' ? (
             <span
               className="inline-flex items-center gap-1 font-mono text-[9px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
               title="Active worktree in code review"
@@ -140,7 +140,7 @@ export const WorktreeItem: React.FC<WorktreeItemProps> = ({
         </span>
 
         {/* Short SHA */}
-        <span className="shrink-0 text-muted-foreground/50">@{shortSha}</span>
+        {shortSha && <span className="shrink-0 text-muted-foreground/50">@{shortSha}</span>}
 
         {/* Pin Lock */}
         {worktree.isPinned && (

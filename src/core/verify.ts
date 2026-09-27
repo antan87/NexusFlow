@@ -8,6 +8,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execa } from 'execa';
@@ -226,14 +227,50 @@ function buildArgsWithFilter(spec: VerifyCommandSpec, filter?: string): string[]
   }
 }
 
-interface RepositorySnapshot {
+export interface RepositorySnapshot {
   headSha: string;
   clean: boolean;
   dirtyFiles: string[];
   fingerprint: string;
+  /**
+   * Git tree hash of the working tree as it is (tracked edits plus untracked,
+   * non-ignored files). Unlike `fingerprint` it survives committing the same
+   * content, so evidence stays fresh when tested changes are committed as-is.
+   */
+  contentTree: string;
 }
 
-async function captureRepositorySnapshot(repoPath: string): Promise<RepositorySnapshot> {
+/**
+ * Hashes the working tree into a Git tree object using a throwaway index, so
+ * the user's real index (their staging) is never read or modified.
+ */
+export async function captureContentTree(repoPath: string): Promise<string> {
+  const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'contextspace-tree-'));
+  const env = { ...process.env, GIT_INDEX_FILE: path.join(scratch, 'index') };
+  try {
+    // Seed from a copy of the real index for its stat cache (so unchanged files
+    // are not re-hashed); `add -A` then makes it match the working tree exactly.
+    const { stdout: indexPath } = await execa('git', ['rev-parse', '--path-format=absolute', '--git-path', 'index'], { cwd: repoPath });
+    try {
+      await fs.copyFile(indexPath.trim(), env.GIT_INDEX_FILE);
+    } catch {
+      await execa('git', ['read-tree', 'HEAD'], { cwd: repoPath, env });
+    }
+    await execa('git', ['add', '-A', '--', '.'], { cwd: repoPath, env });
+    const { stdout } = await execa('git', ['write-tree'], { cwd: repoPath, env });
+    const tree = stdout.trim();
+    if (!tree) throw new Error('Cannot hash the working tree.');
+    return tree;
+  } finally {
+    await fs.rm(scratch, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Captures the identity of a repository's current content: HEAD, dirty files
+ * and a fingerprint over the diff and untracked files. Fails closed.
+ */
+export async function captureRepositorySnapshot(repoPath: string): Promise<RepositorySnapshot> {
   const { stdout } = await execa('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
   const headSha = stdout.trim();
   if (!headSha) throw new Error('Cannot determine the repository HEAD.');
@@ -245,7 +282,14 @@ async function captureRepositorySnapshot(repoPath: string): Promise<RepositorySn
   for (const file of status.files.filter((file) => file.code === '??')) {
     hash.update(file.path).update(await fs.readFile(path.join(repoPath, file.path)));
   }
-  return { headSha, clean: !status.hasChanges, dirtyFiles: status.files.map((file) => file.path), fingerprint: hash.digest('hex') };
+  const contentTree = await captureContentTree(repoPath);
+  return {
+    headSha,
+    clean: !status.hasChanges,
+    dirtyFiles: status.files.map((file) => file.path),
+    fingerprint: hash.digest('hex'),
+    contentTree,
+  };
 }
 
 /**
@@ -282,6 +326,8 @@ export async function verifyRepo(
       headSha,
       clean,
       dirtyFiles: dirtyFiles.length > 0 ? dirtyFiles : undefined,
+      fingerprint: before?.fingerprint,
+      contentTree: before?.contentTree,
       durationMs: 0,
       verifiedAt,
     };
@@ -349,6 +395,9 @@ export async function verifyRepo(
       headSha,
       clean,
       dirtyFiles: dirtyFiles.length > 0 ? dirtyFiles : undefined,
+      // Only content that stayed identical through the run is proven tested.
+      fingerprint: proofError ? undefined : before?.fingerprint,
+      contentTree: proofError ? undefined : before?.contentTree,
       durationMs,
       error: proofError,
       stdout: stdout || undefined,

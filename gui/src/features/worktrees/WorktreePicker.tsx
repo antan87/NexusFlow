@@ -20,7 +20,8 @@ export interface WorktreePickerProps {
   repoGroups: RepoWorktreeGroup[];
   activeWorktreeId: string | null;
   onSelectWorktree: (wt: WorktreeDescriptor) => void;
-  onNewWorktree?: (repoName: string) => void;
+  /** Offered for read-only reference repos: create an editable worktree. */
+  onPrepareForEditing?: (repoName: string) => void;
   onUpdateWorktreeTitle?: (worktreeId: string, title: string, intent?: string) => void;
   customTitles?: Record<string, { title: string; intent?: string }>;
 }
@@ -29,7 +30,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
   repoGroups,
   activeWorktreeId,
   onSelectWorktree,
-  onNewWorktree,
+  onPrepareForEditing,
   onUpdateWorktreeTitle,
   customTitles = {},
 }) => {
@@ -143,7 +144,10 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
                   <span className="font-semibold text-foreground truncate">{group.repoName}</span>
 
                   {group.isHostRepo && (
-                    <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground/80 border border-border/40 uppercase">
+                    <span
+                      className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground/80 border border-border/40 uppercase"
+                      title="Read-only reference: prepare it for editing to change it here"
+                    >
                       ro
                     </span>
                   )}
@@ -154,14 +158,15 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
                     {group.worktrees.length} wt
                   </span>
 
-                  {onNewWorktree && (
+                  {onPrepareForEditing && group.isHostRepo && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNewWorktree(group.repoName);
+                        onPrepareForEditing(group.repoName);
                       }}
-                      title={`Isolate new worktree in ${group.repoName}`}
+                      title={`Prepare ${group.repoName} for editing`}
+                      aria-label={`Prepare ${group.repoName} for editing`}
                       className="p-0.5 hover:text-foreground text-muted-foreground hover:bg-accent rounded transition-colors"
                     >
                       <Plus size={12} />

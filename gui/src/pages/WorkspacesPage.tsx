@@ -88,6 +88,7 @@ import {
   useSaveDomainPack,
   useDeleteDomainPack,
   useWorkspaceLifecycle,
+  useWorkspaceRepositories,
 } from '../lib/api/queries.js';
 import { safeCopyToClipboard } from '../lib/clipboard.js';
 import { syncMeta, repoName } from '../lib/status.js';
@@ -174,6 +175,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const [migrating, setMigrating] = useState(false);
   const cockpit = useCockpitStore();
   const { data: lifecycleData } = useWorkspaceLifecycle(selected?.branchName ?? null);
+  const { data: liveRepositories } = useWorkspaceRepositories(selected?.branchName ?? null);
 
   useEffect(() => {
     if (!selected) return;
@@ -183,7 +185,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       lifecycleData?.lifecycle ?? null,
       st,
       planProps?.planContent,
-      lifecycleData?.report ?? null
+      lifecycleData?.report ?? null,
+      liveRepositories,
     );
     cockpitStore.setWorkspaceData({
       workspaceId: selected.branchName,
@@ -193,7 +196,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       worktrees: cockpitData.worktrees,
       gateStatus: cockpitData.gateStatus,
     });
-  }, [selected, workspaceStatuses, lifecycleData, planProps?.planContent]);
+  }, [selected, workspaceStatuses, lifecycleData, liveRepositories, planProps?.planContent]);
 
   useEffect(() => {
     if (!selected?.branchName) {

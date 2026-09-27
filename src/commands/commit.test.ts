@@ -36,6 +36,7 @@ describe('commitCommand --no-push handling (A1.1)', () => {
       summary: '1 file changed',
     } as any);
     vi.spyOn(multiGit, 'getDiffSummary').mockResolvedValue({ additions: 1, deletions: 0 } as any);
+    vi.spyOn(multiGit, 'getRepoBranch').mockResolvedValue('feature-branch');
     vi.spyOn(multiGit, 'commitAndPush').mockResolvedValue({
       success: true,
       commitHash: 'abc1234',

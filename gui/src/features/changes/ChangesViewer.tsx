@@ -4,7 +4,6 @@ import {
   FolderGit2,
   RefreshCw,
   Check,
-  Save,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -14,10 +13,11 @@ import {
   ExternalLink,
   Navigation,
 } from 'lucide-react';
-import type { Feature } from '../../types.js';
+import type { CommitRepoResult, Feature } from '../../types.js';
+import { CommitReviewPanel } from './CommitReviewPanel.js';
+import { FinishPanel } from './FinishPanel.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { Button } from '../../components/ui/button.js';
-import { Input } from '../../components/ui/input.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
@@ -46,15 +46,13 @@ interface ChangesViewerProps {
   syncResults: any[] | null;
   commitMessage: string;
   showCommitModal: boolean;
-  commitLoading: boolean;
-  commitResults: any[] | null;
+  commitResults: CommitRepoResult[] | null;
   setSyncResults: (val: any[] | null) => void;
-  setCommitResults: (val: any[] | null) => void;
+  setCommitResults: (val: CommitRepoResult[] | null) => void;
   setCommitMessage: (val: string) => void;
   setShowCommitModal: (val: boolean) => void;
   fetchGitChanges: (wsId: string) => Promise<void>;
   handleSyncAll: (wsId: string) => Promise<void>;
-  handleCommitAll: (wsId: string) => Promise<void>;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -66,7 +64,6 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   syncResults,
   commitMessage,
   showCommitModal,
-  commitLoading,
   commitResults,
   setSyncResults,
   setCommitResults,
@@ -74,7 +71,6 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   setShowCommitModal,
   fetchGitChanges,
   handleSyncAll,
-  handleCommitAll,
   showToast,
 }) => {
   // Collapsed repositories state: default to TRUE (collapsed) so user isn't overwhelmed
@@ -91,6 +87,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [revealKey, setRevealKey] = useState(0);
   const [targetLineMap, setTargetLineMap] = useState<Record<string, number>>({});
   const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
+  const [finishOpen, setFinishOpen] = useState(false);
 
   const config = useConfig().data?.config;
   const cockpit = useCockpitStore();
@@ -420,9 +417,12 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           <Button
             size="sm"
             onClick={() => setShowCommitModal(true)}
-            disabled={totalFilesAcrossRepos === 0 || commitLoading}
+            disabled={totalFilesAcrossRepos === 0 || showCommitModal}
           >
-            Commit & Push All
+            Review & commit
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setFinishOpen(true)} disabled={finishOpen}>
+            Finish…
           </Button>
         </div>
       </header>
@@ -584,15 +584,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             </button>
           </div>
           <div className="space-y-2">
-            {commitResults.map((r: any) => (
+            {commitResults.map((r) => (
               <div
                 key={r.repoName}
                 className="flex items-center justify-between rounded-lg border border-border bg-card p-2 font-mono text-[10px]"
               >
                 <span className="font-semibold text-foreground">{r.repoName}</span>
                 <span className={r.success ? 'font-bold text-success-foreground' : 'font-bold text-destructive-foreground'}>
-                  {r.success
-                    ? `✓ Committed ${r.filesChanged} file(s) (${r.commitHash ? r.commitHash.slice(0, 7) : 'no hash'})`
+                  {r.committed
+                    ? `✓ Committed ${r.filesChanged} file(s) (${r.commitHash ? r.commitHash.slice(0, 7) : 'no hash'}) on ${r.branch}${r.pushed ? ', pushed' : ', not pushed'}`
                     : `✗ Error: ${r.message}`}
                 </span>
               </div>
@@ -601,44 +601,23 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         </div>
       )}
 
-      {/* Interactive Commit Panel */}
+      {finishOpen && (
+        <FinishPanel ws={ws} onClose={() => setFinishOpen(false)} onGitChanged={() => void fetchGitChanges(ws.branchName)} />
+      )}
+
+      {/* Reviewed commit: scope, destinations, verification and push decision */}
       {showCommitModal && (
-        <div className="relative mb-6 rounded-xl border border-border bg-card p-6 shadow-sm animate-rise">
-          <h5 className="mb-3 flex items-center gap-1.5 text-xs font-bold text-foreground">
-            <Save size={13} className="text-primary" /> Enter Commit Message
-          </h5>
-          <Input
-            type="text"
-            className="mb-4 font-mono text-xs"
-            placeholder="feat: implement multi-repo logic..."
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && commitMessage.trim()) handleCommitAll(ws.branchName);
-            }}
-          />
-          <div className="flex justify-end gap-2.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCommitModal(false);
-                setCommitMessage('');
-              }}
-              disabled={commitLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => handleCommitAll(ws.branchName)}
-              disabled={commitLoading || !commitMessage.trim()}
-            >
-              {commitLoading ? <Spinner className="size-3" /> : null}
-              {commitLoading ? 'Committing...' : 'Commit & Push All'}
-            </Button>
-          </div>
-        </div>
+        <CommitReviewPanel
+          ws={ws}
+          message={commitMessage}
+          setMessage={setCommitMessage}
+          onClose={() => setShowCommitModal(false)}
+          onCompleted={(results) => {
+            setCommitResults(results);
+            setShowCommitModal(false);
+          }}
+          onGitChanged={() => void fetchGitChanges(ws.branchName)}
+        />
       )}
 
       {gitChangesLoading ? (

@@ -9,7 +9,8 @@ import * as path from 'node:path';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, loadFeatureConfig } from '../core/workspace.js';
-import { getWorkspaceRepos, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
+import { getWorkspaceRepos, getRepoBranch, getRepoStatus, getDiffSummary, commitAndPush, type RepoStatusFile } from '../utils/multi-git.js';
+import { referenceRepoMessage, referenceRepoNames } from '../core/edit-policy.js';
 import { BRAND_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 import { getOrganization } from '../core/domain-packs.js';
 
@@ -87,13 +88,30 @@ export async function commitCommand(
     repos = repos.filter((r) => options.repo!.includes(r.name));
   }
 
+  // Read-only references are never committed; naming one is an error.
+  const references = new Set(referenceRepoNames(feature, workspacePath));
+  const namedReferences = (options?.repo ?? []).filter((name) => references.has(name));
+  if (namedReferences.length > 0) {
+    for (const name of namedReferences) console.error(chalk.red(`✖ ${referenceRepoMessage(name)}`));
+    process.exitCode = 1;
+    return;
+  }
+
   const changedRepos = [];
 
   for (const repo of repos) {
     const status = await getRepoStatus(repo.path);
-    if (status.hasChanges) {
-      changedRepos.push({ repo, status });
+    if (!status.hasChanges) continue;
+    if (references.has(repo.name)) {
+      console.log(chalk.dim(`Skipping ${repo.name}: ${referenceRepoMessage(repo.name)}`));
+      continue;
     }
+    const current = await getRepoBranch(repo.path);
+    if (repo.branchName !== 'HEAD' && current !== repo.branchName) {
+      console.log(chalk.yellow(`Skipping ${repo.name}: on ${current ? `branch "${current}"` : 'a detached HEAD'}, not "${repo.branchName}".`));
+      continue;
+    }
+    changedRepos.push({ repo, status });
   }
 
   if (changedRepos.length === 0) {

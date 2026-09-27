@@ -62,9 +62,9 @@ test('upcastWorkspaceToCockpit maps real lifecycle.steps into development iterat
   assert.equal(cockpitData.iterations[0].title, 'Iteration 1: Architecture Blueprint');
   assert.equal(cockpitData.iterations[0].status, 'done');
 
-  // In-progress step with changedFiles > 0 becomes review_ready
-  assert.equal(cockpitData.iterations[1].title, 'Iteration 2: Core Engine Refactor');
-  assert.equal(cockpitData.iterations[1].status, 'review_ready');
+  // A saved in-progress milestone is only "in progress": changed files do not
+  // prove review readiness, and no live process proves an agent is running.
+  assert.equal(cockpitData.iterations[1].status, 'in_progress');
   assert.equal(cockpitData.iterations[1].changesCount, 3);
 
   assert.equal(cockpitData.iterations[2].title, 'Iteration 3: Security Review');
