@@ -5,6 +5,16 @@ test('one real shell survives window changes and reload, then stops explicitly',
   let launches = 0;
   page.on('websocket', ws => { ws.on('framereceived', frame => { const data = JSON.parse(String(frame.payload)); if (data.type === 'error') console.log('Terminal error:', data.message); }); ws.on('socketerror', error => console.log('Terminal socket:', error)); });
   page.on('request', request => { if (request.url().endsWith('/terminal-test/create')) launches++; });
+  // Typing while the shell is handling a resize (SIGWINCH) drops keystrokes on
+  // macOS's bash 3.2: a panel toggle resized the PTY and the next command lost
+  // its arguments. Commands therefore wait until resizes and the prompt redraw
+  // have gone quiet. Tracks every socket, including the one after reload.
+  let lastTerminalActivity = Date.now();
+  page.on('websocket', ws => {
+    ws.on('framesent', frame => { try { if (JSON.parse(String(frame.payload)).type === 'resize') lastTerminalActivity = Date.now(); } catch { /* not a terminal frame */ } });
+    ws.on('framereceived', frame => { try { if (JSON.parse(String(frame.payload)).type === 'output') lastTerminalActivity = Date.now(); } catch { /* not a terminal frame */ } });
+  });
+  const settle = () => expect.poll(() => Date.now() - lastTerminalActivity, { timeout: 10_000, intervals: [100] }).toBeGreaterThanOrEqual(400);
   await page.addInitScript(() => {
     if (!localStorage.getItem('contextspace_floating_chat_state_v1')) localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({ isOpen: true, openTabs: ['terminal-test'], activeTab: 'terminal-test' }));
   });
@@ -30,8 +40,12 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.screenshot({ path: 'test-results/terminal-pane-options.png' });
   await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
   const input = pane.locator('.xterm-helper-textarea');
+  const run = async (command: string) => {
+    await settle();
+    await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
+  };
   const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
-  await input.focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
+  await run(command);
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
   // The default window is 760px, above the 520px compact threshold, so the
   // inspector splits and the terminal stays visible beside it.
@@ -41,14 +55,14 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.screenshot({ path: 'test-results/terminal-compact-inspector.png' });
   await toggleInspector('Code');
   await expect(pane).toBeVisible();
-  await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_CODE')" : 'echo CS_${CS_KEEP}_CODE'); await page.keyboard.press('Enter');
+  await run(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_CODE')" : 'echo CS_${CS_KEEP}_CODE');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_CODE');
   await toggleInspector('Docs');
   await expect(chat.getByRole('separator', { name: 'Resize documents panel' })).toHaveCount(1);
   await expect(pane).toBeVisible();
   await toggleInspector('Docs');
   await expect(pane).toBeVisible();
-  await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_DOCS')" : 'echo CS_${CS_KEEP}_DOCS'); await page.keyboard.press('Enter');
+  await run(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_DOCS')" : 'echo CS_${CS_KEEP}_DOCS');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_DOCS');
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
   const box = await page.getByRole('region', { name: 'CLI Chat', exact: true }).boundingBox();
@@ -59,7 +73,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await separator.focus();
   await page.keyboard.press('ArrowLeft');
   await expect(separator).toHaveAttribute('aria-valuenow', '55');
-  await input.focus(); await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_WIDE')" : 'echo CS_${CS_KEEP}_WIDE'); await page.keyboard.press('Enter');
+  await run(process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_WIDE')" : 'echo CS_${CS_KEEP}_WIDE');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_WIDE');
   await toggleInspector('Code');
   await expect.poll(() => pane.getByLabel('Interactive CLI terminal').evaluate(host => {
@@ -89,9 +103,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
   await openPaneOptions();
   await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
-  await input.focus();
-  await page.keyboard.type(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : 'echo CS_ALIVE_$CS_KEEP');
-  await page.keyboard.press('Enter');
+  await run(process.platform === 'win32' ? "Write-Output ('CS_ALIVE_' + $env:CS_KEEP)" : 'echo CS_ALIVE_$CS_KEEP');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_ALIVE_42');
   expect(launches).toBe(1);
   await page.getByRole('button', { name: 'Maximize floating chat', exact: true }).click();
