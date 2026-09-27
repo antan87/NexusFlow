@@ -46,8 +46,9 @@ git commit -m "chore: prepare release"   # version hook already staged the synce
 git push origin HEAD
 ```
 
-After the PR is merged, dispatch the release using the exact version in the merged
-`package.json`. You can trigger it either from GitHub Actions UI (**Actions** -> **Release** -> **Run workflow**, entering the version) or via `gh`:
+After the PR is merged, wait until every required check (see [Publish gate](#publish-gate))
+has succeeded on the merge commit, then dispatch the release using the exact version
+in the merged `package.json`. You can trigger it either from GitHub Actions UI (**Actions** -> **Release** -> **Run workflow**, entering the version) or via `gh`:
 
 ```bash
 VERSION=$(node -p "require('./package.json').version")
@@ -70,8 +71,10 @@ it does not rely on a tag push triggering workflow code from an unreviewed ref.
 
 The [`release.yml`](./.github/workflows/release.yml) workflow then:
 
-1. **`guard`** — verifies the dispatch came from protected `main`, checks the requested
-   version against `package.json`, runs the sync check, and creates the immutable tag.
+1. **`guard`** — rejects any ref other than `main`, verifies the source is on `main`,
+   checks the requested version against `package.json`, runs the sync check, requires
+   every check in `.github/release-required-checks.json` to have succeeded on this exact
+   SHA, and only then creates the immutable tag.
 2. **`npm` / `vscode` / `desktop`** run in parallel. npm and Marketplace skip versions
    that are already published; desktop rebuilds its installers and metadata on each
    run. Stable releases always package the VSIX. npm uses trusted OIDC publishing;
@@ -80,7 +83,74 @@ The [`release.yml`](./.github/workflows/release.yml) workflow then:
    are present.
 3. **`github-release`** — creates **one** GitHub Release for the tag with generated
    notes and attaches the stable-release VSIX, both desktop installers, their checksum sidecars, and the
-   electron-updater metadata (`latest.yml` and `latest-linux.yml`).
+   electron-updater metadata (`latest.yml` and `latest-linux.yml`). It then writes a
+   channel-status table to the run summary.
+
+Every job checks out the guard-approved SHA, and the jobs that hold publish
+credentials (`npm`, `vscode`, `github-release`) run in the `release` environment.
+
+## Publish gate
+
+Nothing publishes unless every required check succeeded on the exact source SHA.
+The guard fails closed: a required check that is missing, queued, in progress,
+skipped, neutral, cancelled, failed, reported by an app other than GitHub Actions,
+or recorded for a different SHA blocks the release. The same applies when GitHub's
+check-run API cannot be read completely. When a check was re-run, its latest run decides.
+
+The required checks are listed in
+[`.github/release-required-checks.json`](./.github/release-required-checks.json):
+every job in `ci.yml` and `security.yml`. `npm test` derives the expected names from
+those workflows and fails when the list drifts, so a new CI job must be added
+there (and to branch protection) in the same PR. Required jobs must not be
+conditional, because a skipped required check would block every release.
+
+If a required check fails, fix it on `main` and release the fixing commit; do not
+re-dispatch against a commit you believe is flaky until its check is re-run green.
+
+Check what the guard would decide, without publishing:
+
+```bash
+GH_TOKEN=$(gh auth token) node scripts/release-guard.mjs checks \
+  --sha "$(git rev-parse origin/main)" --repo antan87/NexusFlow
+```
+
+### Owner-applied repository settings
+
+The workflow cannot configure these itself. Apply and review them as the repository owner:
+
+1. **Required status checks on `main`**: the same names as the JSON list, from the
+   GitHub Actions app, so an unchecked commit cannot merge either:
+
+   ```bash
+   jq '{strict: false, checks: [.checks[] | {context: ., app_id: 15368}]}' \
+     .github/release-required-checks.json |
+     gh api -X PATCH repos/antan87/NexusFlow/branches/main/protection/required_status_checks --input -
+   ```
+
+   (`15368` is the GitHub Actions app ID; confirm it with
+   `gh api repos/antan87/NexusFlow/commits/<sha>/check-runs --jq '.check_runs[0].app.id'`.)
+2. **Include administrators** (`enforce_admins`) so direct pushes cannot skip those checks.
+3. **`release` environment**: deployment branches limited to `main`, and the owner as the
+   required reviewer. The branch policy is what stops a workflow edited on another
+   branch from reaching the credentials; the guard's ref check only fails early.
+4. **Credentials bound to the environment**: set the npm trusted publisher's environment
+   to `release`. If Marketplace publishing is enabled, give the Azure federated credential
+   the subject `repo:antan87/NexusFlow:environment:release`. Keep no long-lived publish
+   tokens as repository secrets; any workflow run can read those.
+
+### Emergency releases
+
+There is no check bypass. For an urgent fix, the owner may merge the fix without
+waiting for review, but the release still needs every required check green on
+that exact commit and the owner's approval in the `release` environment. Both
+are recorded in the run log.
+
+### Channel status
+
+A VS Code Marketplace failure does not stop npm, the desktop installers or the
+GitHub Release. The channel is reported as `failed` in the run summary, and the run
+ends red. After fixing the Marketplace credentials, re-run the whole workflow: the
+tag, npm and Marketplace steps are idempotent for an already-published version.
 
 ## Version baseline
 
@@ -102,7 +172,8 @@ Use these to rehearse the pipeline end-to-end before a real release.
 ## Required credentials
 
 - npm trusted publishing is configured through the package/repository OIDC trust;
-  the workflow requests `id-token: write` and does not use an `NPM_TOKEN` secret.
+  the workflow requests `id-token: write` from the `release` environment and does
+  not use an `NPM_TOKEN` secret.
 - `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` — Azure OIDC for `vsce publish`, used only
   when the repository variable `VSCODE_PUBLISHING_ENABLED=true`.
 
