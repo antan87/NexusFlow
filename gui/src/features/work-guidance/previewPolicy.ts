@@ -85,6 +85,15 @@ export interface HeadAssets {
   stylesheets: string[];
   /** Remote scripts, hoisted only when the document is trusted. */
   scripts: string[];
+  /** Inline CSS lifted out of the source <head>. */
+  styles: string[];
+  /**
+   * Attributes of the source <html>/<body>. Agent-written documents routinely key their whole
+   * design system off these, e.g. `:root[data-theme="dark"]` or Tailwind utility classes on
+   * <body>, so dropping them leaves correctly-hoisted CSS that still matches nothing.
+   */
+  htmlAttributes: string[];
+  bodyAttributes: string[];
 }
 
 export interface PreviewDocumentOptions {
@@ -94,8 +103,37 @@ export interface PreviewDocumentOptions {
   assets?: HeadAssets;
 }
 
+const EMPTY_ASSETS: HeadAssets = { stylesheets: [], scripts: [], styles: [], htmlAttributes: [], bodyAttributes: [] };
+
+/** Only presentational, non-executable attributes. `style` is excluded on purpose. */
+export const CARRIED_ATTRIBUTES = ['class', 'lang', 'dir', 'data-theme'] as const;
+
+/**
+ * CSS is emitted inside a <style> element the viewer authors, so the text has to be unable to close
+ * that element and become markup. CSS cannot execute script in a modern engine, and the CSP keeps
+ * `@import` to http(s), so neutralising the tag terminators is sufficient.
+ */
+function safeStyleText(css: string): string {
+  return css.replace(/<\/(style)/gi, '<\\/$1').replace(/<!--/g, '\\3c!--').replace(/-->/g, '--\\3e');
+}
+
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * The single place attributes reach the generated document, so the allowlist is enforced here
+ * rather than trusted from the caller.
+ */
+function renderAttributes(pairs: string[]): string {
+  return pairs.map(pair => {
+    const separator = pair.indexOf('=');
+    if (separator === -1) return '';
+    const name = pair.slice(0, separator);
+    const value = pair.slice(separator + 1);
+    const allowed = (CARRIED_ATTRIBUTES as readonly string[]).includes(name);
+    return allowed && /^[a-z][a-z0-9-]*$/.test(name) ? ` ${name}="${escapeAttribute(value)}"` : '';
+  }).join('');
 }
 
 /**
@@ -106,9 +144,11 @@ function escapeAttribute(value: string): string {
  * yields a full stylesheet.
  */
 export function buildPreviewDocument({ body, trusted, assets }: PreviewDocumentOptions): string {
-  const stylesheets = (assets?.stylesheets ?? []).map(href => `<link rel="stylesheet" href="${escapeAttribute(href)}">`).join('');
-  const scripts = (trusted ? assets?.scripts ?? [] : []).map(src => `<script src="${escapeAttribute(src)}"></script>`).join('');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${previewCsp(trusted)}">${stylesheets}${scripts}</head><body>${body}</body></html>`;
+  const merged = { ...EMPTY_ASSETS, ...assets };
+  const styles = merged.styles.map(css => `<style>${safeStyleText(css)}</style>`).join('');
+  const stylesheets = merged.stylesheets.map(href => `<link rel="stylesheet" href="${escapeAttribute(href)}">`).join('');
+  const scripts = (trusted ? merged.scripts : []).map(src => `<script src="${escapeAttribute(src)}"></script>`).join('');
+  return `<!doctype html><html${renderAttributes(merged.htmlAttributes)}><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${previewCsp(trusted)}">${styles}${stylesheets}${scripts}</head><body${renderAttributes(merged.bodyAttributes)}>${body}</body></html>`;
 }
 
 const EXTERNAL_SCRIPT = /<script\b[^>]*\bsrc\s*=/i;

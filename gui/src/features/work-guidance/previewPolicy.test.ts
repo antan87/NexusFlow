@@ -175,7 +175,40 @@ describe('preview document assembly', () => {
     expect(document).toContain('&quot;');
   });
 
-  it('tolerates a missing asset list', () => {
+  it('tolerates a missing or partial asset list', () => {
     expect(buildPreviewDocument({ body: '<p>hi</p>', trusted: true })).toContain('<body><p>hi</p></body>');
+    expect(buildPreviewDocument({ body: '', trusted: false, assets: { stylesheets: ['https://x/a.css'] } as never })).toContain('a.css');
+  });
+
+  it('hoists inline CSS into the head, which is where self-contained pages keep it', () => {
+    // The real failure: an agent page with 11KB of CSS in a head <style> rendered naked,
+    // because DOMPurify returns only the body.
+    const document = buildPreviewDocument({ body: '<p>hi</p>', trusted: false, assets: { styles: ['h1{color:red}'] } as never });
+    expect(document).toContain('<style>h1{color:red}</style>');
+    expect(document.indexOf('<style>')).toBeLessThan(document.indexOf('<body>'));
+  });
+
+  it('neutralises a style terminator so inline CSS cannot become markup', () => {
+    const document = buildPreviewDocument({ body: '', trusted: false, assets: { styles: ['a{}</style><img src=x onerror=alert(1)>'] } as never });
+    expect(document).not.toContain('</style><img');
+    expect(document).toContain('<\\/style>');
+  });
+
+  it('carries presentational html and body attributes the CSS is keyed on', () => {
+    // :root[data-theme="dark"] and Tailwind utilities on <body> match nothing without these.
+    const document = buildPreviewDocument({
+      body: '<p>hi</p>',
+      trusted: false,
+      assets: { htmlAttributes: ['class=dark', 'data-theme=dark', 'lang=en'], bodyAttributes: ['class=min-h-screen bg-dark-900'] } as never,
+    });
+    expect(document).toContain('<html class="dark" data-theme="dark" lang="en">');
+    expect(document).toContain('<body class="min-h-screen bg-dark-900">');
+  });
+
+  it('refuses a malformed or non-presentational attribute name', () => {
+    const document = buildPreviewDocument({ body: '', trusted: false, assets: { htmlAttributes: ['onload=alert(1)', 'data-x', 'style=color:red'] } as never });
+    expect(document).not.toContain('onload');
+    expect(document).not.toContain('style="color:red"');
+    expect(document).toContain('<html>');
   });
 });

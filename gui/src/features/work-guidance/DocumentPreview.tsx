@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import {
   buildPreviewDocument,
+  CARRIED_ATTRIBUTES,
   isStyleSheetHref,
   safeAssetUrl,
   sanitizeOptions,
@@ -13,15 +14,18 @@ export type DocumentKind = 'markdown' | 'text' | 'html' | 'pdf' | 'image' | 'dow
 export interface DocumentPreviewData { name: string; kind: DocumentKind; content?: string }
 
 /**
- * Reads the remote assets the viewer is willing to re-emit, because DOMPurify hands back only the
- * `<body>` and a real AI-generated page keeps its stylesheet and Play CDN in the `<head>`.
+ * Reads back everything a real AI-authored page needs that DOMPurify's body-only output throws
+ * away. Verified against the HTML that actually exists in these workspaces: most of it carries its
+ * entire design system in a single inline <style> inside <head>, and keys it off attributes on
+ * <html>/<body> such as `data-theme` and Tailwind utility classes. Losing any one of the three
+ * leaves an unstyled page.
  *
- * Only what the owner approved comes back: remote stylesheets always (Q1), remote scripts only for
- * a trusted document (Q5). Inline scripts are never hoisted, so trusting a document does not hand
- * it an inline code path.
+ * Only what the owner approved comes back: remote stylesheets and inline CSS always (Q1), remote
+ * scripts only for a trusted document (Q5). Inline scripts are never hoisted, so trusting a
+ * document does not hand it an inline code path.
  */
 function collectHeadAssets(html: string, trusted: boolean): HeadAssets {
-  const assets: HeadAssets = { stylesheets: [], scripts: [] };
+  const assets: HeadAssets = { stylesheets: [], scripts: [], styles: [], htmlAttributes: [], bodyAttributes: [] };
   let doc: Document;
   try {
     doc = new DOMParser().parseFromString(html, 'text/html');
@@ -33,10 +37,21 @@ function collectHeadAssets(html: string, trusted: boolean): HeadAssets {
     const href = safeAssetUrl(link.getAttribute('href'));
     if (href && !assets.stylesheets.includes(href)) assets.stylesheets.push(href);
   }
+  for (const style of Array.from(doc.head.querySelectorAll('style'))) {
+    const css = style.textContent ?? '';
+    if (css.trim()) assets.styles.push(css);
+  }
   if (trusted) {
     for (const script of Array.from(doc.querySelectorAll('script[src]'))) {
       const src = safeAssetUrl(script.getAttribute('src'));
       if (src && !assets.scripts.includes(src)) assets.scripts.push(src);
+    }
+  }
+  for (const [element, target] of [[doc.documentElement, assets.htmlAttributes], [doc.body, assets.bodyAttributes]] as const) {
+    if (!element) continue;
+    for (const name of CARRIED_ATTRIBUTES) {
+      const value = element.getAttribute(name);
+      if (value) target.push(`${name}=${value}`);
     }
   }
   return assets;
