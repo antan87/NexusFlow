@@ -37,7 +37,7 @@ export function ScaffoldRepoInline({ onCreated }: { onCreated: (repo: RepoInfo) 
         onClick={() => setOpen(true)}
         className="mt-1.5 inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
       >
-        <FolderPlus className="size-3.5" /> Scaffold a brand-new repository
+        <FolderPlus className="size-3.5" /> Create a repository
       </button>
     );
   }

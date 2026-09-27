@@ -11,8 +11,8 @@ test.use({ workspacesData: [feature], workspacesStatusData: {
   review: { id: 'review', branchName: 'review', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 },
 } });
 
-test('reviews the actual worktree, shares diff mode, and copies refinement feedback for CLI chat', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+test('reviews the actual worktree, shares diff mode, and copies refinement feedback for CLI chat', async ({ page, context, baseURL }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseURL!).origin });
   const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/workspace/review/lifecycle', route => route.fulfill(json({ lifecycle: { steps: [] }, report: null })));
   await page.route('**/api/workspace/review/changes', route => route.fulfill(json({ changes: [{ repoName: 'app', repoPath: feature.repos[0], files: [{ file: 'demo.ts', type: 'modified', additions: 1, deletions: 1 }] }] })));

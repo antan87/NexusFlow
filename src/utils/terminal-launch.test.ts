@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   buildHarnessCliCommand,
+  buildHarnessContinueCommand,
   launchWorkspaceTerminal,
   formatTerminalTitle,
   escapePsSingleQuote,
@@ -55,6 +56,11 @@ describe('terminal-launch utility', () => {
       expect(buildHarnessCliCommand('codex')).toBe('codex');
       expect(buildHarnessCliCommand('copilot')).toBe('copilot');
       expect(buildHarnessCliCommand('cursor')).toBe('cursor-agent');
+      expect(buildHarnessCliCommand('pi')).toBe('pi');
+    });
+
+    it('continues the most recent Pi session through its CLI', () => {
+      expect(buildHarnessContinueCommand('pi')).toBe('pi --continue');
     });
 
     it('builds resume commands when a valid UUID or safe session ID is provided', () => {
@@ -64,6 +70,7 @@ describe('terminal-launch utility', () => {
       expect(buildHarnessCliCommand('codex', uuid)).toBe(`codex resume ${uuid}`);
       expect(buildHarnessCliCommand('copilot', uuid)).toBe(`copilot --resume ${uuid}`);
       expect(buildHarnessCliCommand('cursor', uuid)).toBe(`cursor-agent --resume ${uuid}`);
+      expect(buildHarnessCliCommand('pi', uuid)).toBe(`pi --session ${uuid}`);
 
       // Safe alphanumeric Copilot / ACP session IDs
       const copilotId = 'ses_copilot-123456_abc';

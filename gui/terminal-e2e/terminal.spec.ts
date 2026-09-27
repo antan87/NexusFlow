@@ -14,7 +14,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await pane.getByRole('combobox', { name: 'CLI harness' }).click();
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const openPaneOptions = () => chat.getByRole('button', { name: 'Pane options' }).click();
   // Code and Docs are inline toolbar buttons, so toggle them directly.
@@ -84,7 +84,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
   await expect(pane).toBeVisible();
   await page.reload();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect(pane.getByRole('region', { name: 'Continue a conversation' })).toHaveCount(0);
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
   await openPaneOptions();
@@ -98,7 +98,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.screenshot({ path: 'test-results/terminal-maximized.png' });
   page.once('dialog', dialog => dialog.accept());
   await pane.getByRole('button', { name: 'End', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Ended');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Ended');
   await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 
@@ -112,11 +112,11 @@ test('a shell that quits on its own is labeled exited', async ({ page }) => {
   await pane.getByRole('combobox', { name: 'CLI harness' }).click();
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await pane.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('exit 3');
   await page.keyboard.press('Enter');
-  await expect(pane.getByRole('status')).toContainText('Exited');
+  await expect(pane.getByTestId('terminal-state')).toContainText('Exited');
   await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 

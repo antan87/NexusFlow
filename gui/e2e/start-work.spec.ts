@@ -273,7 +273,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.locator('button:has-text("Save & Get Started")').click();
   });
 
-  test('should create a workspace in worktree mode from the new Start work flow', async ({ page }) => {
+  test('should create a workspace in worktree mode from the new workspace flow', async ({ page }) => {
     await mockCompletedCreationStream(page);
     const chatFrames: Array<Record<string, unknown>> = [];
     const legacyRequests: string[] = [];
@@ -342,7 +342,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.route('**/api/workspace', async (route, request) => {
       workspaceBody = request.postDataJSON();
       expect(workspaceBody.mode).toBe('worktree');
-      expect(workspaceBody.flowType).toBe('feature');
+      expect(workspaceBody.flowType).toBeUndefined();
+      expect(workspaceBody.name).toBe('Demo work');
       expect(workspaceBody.branchName).toBe('feature/demo-work');
       expect(workspaceBody.projectId).toBe('demo');
       await route.fulfill({
@@ -353,11 +354,13 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
 
     await page.goto('/#/new?project=demo');
-    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
 
-    await page.getByRole('radio', { name: /Isolated worktrees/ }).click();
+    await page.getByLabel('Workspace name').fill('Demo work');
+    await page.getByRole('button', { name: 'Advanced setup' }).click();
+    await page.getByRole('radio', { name: /New worktrees/ }).click();
     await page.getByLabel('Feature branch').fill('feature/demo-work');
-    await page.getByLabel('What are you building?').fill('Implement the demo flow');
+    await page.getByLabel('What do you want to do?').fill('Implement the demo flow');
     await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect.poll(() => workspaceBody?.mode).toBe('worktree');
@@ -367,27 +370,76 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page).toHaveURL(/#\/workspaces\/demo-worktree/);
   });
 
-  for (const [label, flowType] of [['Small task', 'quick'], ['Epic', 'epic']] as const) {
-    test(`persists the selected ${label} flow when creating a workspace`, async ({ page }) => {
-      await mockRunningCreationStream(page);
-      let payload: any;
-      await page.route('**/api/workspace', async (route) => {
-        payload = route.request().postDataJSON();
-        await route.fulfill({ json: { success: true, jobId: 'selected-flow' } });
-      });
-      await page.goto('/#/new');
-      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
-      await expect(page.getByRole('radio', { name: 'Standard change', exact: true })).toBeChecked();
-      await page.getByRole('radio', { name: label, exact: true }).check();
-      await page.getByLabel('Work type', { exact: true }).selectOption('performance');
-      await page.getByLabel('Workspace name').fill('Selected flow');
-      await page.getByLabel('What are you building?').fill('Validate explicit flow choice');
-      await page.getByRole('button', { name: 'Start working' }).click();
-      await expect.poll(() => payload?.flowType).toBe(flowType);
-      expect(payload.mode).toBe('in-place');
-      expect(payload.workType).toBe('performance');
+  test('starts from repos, task, name, and skills without a size preset', async ({ page }) => {
+    await mockRunningCreationStream(page);
+    await page.route('**/api/skills', (route) => route.fulfill({ json: { skills: [{ id: 'work-lifecycle', name: 'Work lifecycle', title: 'Work lifecycle', description: 'Workspace guidance' }] } }));
+    let payload: any;
+    await page.route('**/api/workspace', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ json: { success: true, jobId: 'simple-start' } });
     });
-  }
+    await page.goto('/#/new');
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'Select Work lifecycle' })).toBeVisible();
+    await expect(page.getByText('Small task', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Standard change', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Epic', { exact: true })).toHaveCount(0);
+    await page.screenshot({ path: 'test-results/new-workspace.png', fullPage: true });
+    await page.getByRole('link', { name: /Advanced setup/ }).click();
+    await expect(page.getByRole('radio', { name: /New worktrees/ })).toBeVisible();
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await page.getByLabel('Workspace name').fill('Simple start');
+    await page.getByLabel('What do you want to do?').fill('Simplify creation');
+    await page.getByRole('checkbox', { name: 'Select Work lifecycle' }).check();
+    await page.getByRole('button', { name: 'Create workspace' }).click();
+    await expect.poll(() => payload?.name).toBe('Simple start');
+    expect(payload.mode).toBe('in-place');
+    expect(payload.flowType).toBeUndefined();
+    expect(payload.autoUpdateBase).toBe(false);
+    expect(payload.enabledSkills).toEqual(['work-lifecycle']);
+  });
+
+  test('creates worktrees from an existing branch with a suggested workspace branch', async ({ page }) => {
+    await mockRunningCreationStream(page);
+    await page.route('**/api/skills', (route) => route.fulfill({ json: { skills: [] } }));
+    let payload: any;
+    await page.route('**/api/workspace', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ json: { success: true, jobId: 'review-api' } });
+    });
+    await page.goto('/#/new');
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await page.getByLabel('Workspace name').fill('Review API');
+    await page.getByLabel('What do you want to do?').fill('Review an existing release branch');
+    await page.getByRole('button', { name: /Advanced setup/ }).click();
+    await page.getByRole('radio', { name: /New worktrees/ }).click();
+    await expect(page.getByRole('checkbox', { name: 'nexus-frontend' })).toBeChecked();
+    await expect(page.getByRole('radio', { name: /New worktrees/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('Loading skills...')).toHaveCount(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: 'test-results/new-workspace-advanced.png', fullPage: true });
+    await expect(page.getByLabel('Feature branch')).toHaveAttribute('placeholder', 'feature/review-api');
+    await page.getByText('Create worktrees from existing branches').click();
+    await page.getByPlaceholder('existing branch (must exist)').fill('release/2.0');
+    await page.getByRole('button', { name: 'Create workspace' }).click();
+    await expect.poll(() => payload?.branchName).toBe('feature/review-api');
+    expect(payload.name).toBe('Review API');
+    expect(payload.repos[0].existingBranch).toBe('release/2.0');
+  });
+
+  test('shows workspace names and clear sections in the left menu', async ({ page }) => {
+    await page.route('**/api/workspaces', (route) => route.fulfill({ json: [{
+      id: 'feature/review-api', branchName: 'feature/review-api', name: 'Review API',
+      description: 'Review an existing release branch', repos: ['C:\\mock-dev\\nexus-frontend'],
+      assistants: [], workspacePath: 'C:\\mock-dev\\workspaces\\feature\\review-api', createdAt: '2026-08-10T00:00:00.000Z',
+    }] }));
+    await page.goto('/#/overview');
+    await expect(page.getByRole('link', { name: /Review API/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'New workspace' })).toBeVisible();
+    await expect(page.getByText('Reusable setup', { exact: true })).toBeVisible();
+    await expect(page.getByText('Advanced tools', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Skills & agents' })).toBeVisible();
+  });
 
   test('keeps the setup screen visible after a creation-page reload', async ({ page }) => {
     await mockRunningCreationStream(page);
@@ -402,24 +454,22 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.goto('/#/new');
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Running workspace');
-    await page.getByLabel('What are you building?').fill('Keep setup progress visible');
-    await page.getByRole('button', { name: 'Start working' }).click();
+    await page.getByLabel('What do you want to do?').fill('Keep setup progress visible');
+    await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
     await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
-    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
     await expect(page.getByText('Register Workspace')).toBeVisible();
 
     await page.reload();
 
     await expect(page).toHaveURL(/#\/new\?job=running-workspace/);
     await expect(page.getByRole('heading', { name: 'Setting up your workspace…' })).toBeVisible();
-    await expect(page.getByText('Connecting to workspace setup…')).toBeVisible();
     await expect(page.getByText('Register Workspace')).toBeVisible();
 
     await page.getByRole('button', { name: 'Return to form' }).click();
     await expect(page).toHaveURL(/#\/new$/);
-    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
   });
 
   test('renders a replayed failed creation job with its server error', async ({ page }) => {
@@ -433,7 +483,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await page.getByRole('button', { name: 'Start over (clear form)' }).click();
     await expect(page).toHaveURL(/#\/new$/);
-    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
   });
 
   test('renders a replayed completed creation job opened directly', async ({ page }) => {
@@ -475,8 +525,8 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.goto('/#/new');
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Missing workspace');
-    await page.getByLabel('What are you building?').fill('Show a recovery state');
-    await page.getByRole('button', { name: 'Start working' }).click();
+    await page.getByLabel('What do you want to do?').fill('Show a recovery state');
+    await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect(page.getByRole('heading', { name: 'Unable to reconnect to workspace setup' })).toBeVisible();
     await expect(page.getByText('Unable to reconnect to the creation stream. The workspace may still have been created.')).toBeVisible();
@@ -484,7 +534,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await page.getByRole('button', { name: 'Back to form' }).click();
     await expect(page).toHaveURL(/#\/new$/);
-    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
   });
 
   test('should create an in-place workspace without showing branch fields', async ({ page }) => {
@@ -504,14 +554,15 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
 
     await page.goto('/#/new');
-    await expect(page.getByRole('heading', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
 
-    await page.getByRole('radio', { name: /In-place/ }).click();
+    await page.getByRole('button', { name: 'Advanced setup' }).click();
+    await expect(page.getByRole('radio', { name: /Current checkouts/ })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByLabel('Feature branch')).toBeHidden();
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Fix invoices');
-    await page.getByLabel('What are you building?').fill('Fix invoice rounding issues');
-    await page.getByRole('button', { name: 'Start working' }).click();
+    await page.getByLabel('What do you want to do?').fill('Fix invoice rounding issues');
+    await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect.poll(() => workspaceBody?.mode).toBe('in-place');
   });
@@ -550,7 +601,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
 
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
 
     await expect(page.locator('h1')).toContainText('Global Settings');
@@ -642,6 +692,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(repoCheckbox).toBeVisible();
     await repoCheckbox.click();
 
+    await page.getByRole('button', { name: 'Advanced setup' }).click();
     // Verify Base repository sync section appears
     await expect(page.locator('text=Base repository sync')).toBeVisible();
     await expect(page.locator('text=↓ 3 behind origin/main').first()).toBeVisible();
@@ -653,17 +704,19 @@ test.describe('NexusFlow E2E GUI Tests', () => {
 
     await expect.poll(() => pullCalled).toBe(true);
 
-    // Verify autoUpdateBase checkbox is present and checked
+    // Updating the selected checkout is opt-in, even when a remote is ahead.
     const autoUpdateCb = page.getByRole('checkbox', { name: /Fast-forward/i });
     await expect(autoUpdateCb).toBeVisible();
+    await expect(autoUpdateCb).not.toHaveAttribute('data-checked', '');
+    await autoUpdateCb.click();
     await expect(autoUpdateCb).toHaveAttribute('data-checked', '');
 
     // Fill workspace name and description
-    await page.locator('input[placeholder="e.g. Fix invoice rounding"]').fill('Freshness Workspace');
-    await page.locator('textarea[placeholder*="short description"]').fill('Test base freshness feature');
+    await page.getByLabel('Workspace name').fill('Freshness Workspace');
+    await page.getByLabel('What do you want to do?').fill('Test base freshness feature');
 
     // Submit workspace creation
-    const submitBtn = page.locator('button:has-text("Start working")');
+    const submitBtn = page.getByRole('button', { name: 'Create workspace', exact: true });
     await expect(submitBtn).toBeEnabled();
     await submitBtn.click();
 

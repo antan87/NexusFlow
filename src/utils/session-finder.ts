@@ -6,7 +6,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { AIAssistant, AISession, ChatMessage, NormalizedUsage, NormalizedRemainingQuota } from '../types.js';
+import type { AISession, ChatMessage, NormalizedUsage, NormalizedRemainingQuota, SessionAssistant } from '../types.js';
+import type { SessionSource } from './cli-harnesses.js';
+import { MODULAR_SESSION_READERS, modularSessionReader } from './session-readers.js';
+export { SESSION_SOURCES } from './cli-harnesses.js';
+export type { SessionSource } from './cli-harnesses.js';
 
 export function extractRecordUsage(record: any): { usage?: NormalizedUsage; quota?: NormalizedRemainingQuota } {
   if (!record || typeof record !== 'object') return {};
@@ -450,13 +454,14 @@ export async function canTransferClaudeSessionInWorkspace(
 
 /**
  * Scans the local filesystem for conversation histories belonging to Claude, Antigravity,
- * Codex, and Copilot that relate to the specified workspace.
+ * Codex, Copilot, and Pi that relate to the specified workspace.
  *
  * @param workspacePath - Root directory of the active workspace.
  * @param repoPaths - Directories of sub-repositories included in the workspace.
+ * @param source - Optional history source to scan independently for progressive loading.
  * @returns A promise that resolves to an array of {@link AISession} objects sorted by update time descending.
  */
-export async function findSessions(workspacePath: string, repoPaths: string[] = []): Promise<AISession[]> {
+export async function findSessions(workspacePath: string, repoPaths: string[] = [], source?: SessionSource): Promise<AISession[]> {
   const sessions: AISession[] = [];
   const wsFolderName = path.basename(workspacePath);
 
@@ -495,6 +500,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
   };
 
   // ─── 1. Scan Antigravity Sessions ──────────────────────────────────────
+  if (!source || source === 'antigravity') {
   const agDir = getAntigravityDir();
   const agHistoryPath = path.join(agDir, 'history.jsonl');
   
@@ -571,8 +577,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       });
     }
   } catch {}
+  }
 
   // ─── 2. Scan Claude Code Sessions ──────────────────────────────────────
+  if (!source || source === 'claude') {
   const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const claudeProjectsDir = path.join(claudeConfigDir, 'projects');
   
@@ -650,8 +658,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // ─── 3. OpenAI Codex Sessions (rollout-*.jsonl) ──────────────────────────
+  if (!source || source === 'codex') {
   // Codex writes a `session_meta` record (payload.cwd) followed by
   // `response_item` records (payload.type==='message', role, content[].text).
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -750,8 +760,10 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // ─── 4. GitHub Copilot Sessions (SQLite session store) ───────────────────
+  if (!source || source === 'copilot') {
   // Copilot keeps sessions in ~/.copilot/session-store.db: a `sessions` table
   // (id, cwd, summary, timestamps) and a `turns` table (user_message /
   // assistant_response per turn). Match on `cwd` like the other harnesses.
@@ -804,8 +816,16 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       try { copilotDb.close(); } catch {}
     }
   }
+  }
 
-  // ─── 5. Scan Workspace .sessions Directory ───────────────────────────────
+  // ─── Modular history readers ────────────────────────────────────────────
+  const scanContext = { roots: [workspacePath, ...repoPaths], matchesCwd: isPathMatch, targetCwd: resolveTargetCwd };
+  for (const [id, reader] of Object.entries(MODULAR_SESSION_READERS)) {
+    if (!source || source === id) sessions.push(...await reader.list(scanContext));
+  }
+
+  // ─── Scan Workspace .sessions Directory ──────────────────────────────────
+  if (!source || source === 'workspace') {
   try {
     const wsSessionsDir = path.join(workspacePath, '.sessions');
     const sessionFiles = await getFilesRecursively(wsSessionsDir, '.jsonl').catch(() => []);
@@ -816,7 +836,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
         if (lines.length === 0) continue;
 
         let sessionId = path.basename(filePath, '.jsonl');
-        let assistant: AIAssistant = 'claude';
+        let assistant: SessionAssistant = 'claude';
         let title = 'AI Session';
         let messageCount = 0;
         const times = sessionTimes();
@@ -835,6 +855,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
             else if (p.includes('codex')) assistant = 'codex';
             else if (p.includes('antigravity') || p.includes('gemini')) assistant = 'antigravity';
             else if (p.includes('copilot')) assistant = 'copilot';
+            else if (p === 'pi') assistant = 'pi';
           }
           if (record.userPrompt && title === 'AI Session') {
             title = String(record.userPrompt).trim();
@@ -864,6 +885,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
       } catch {}
     }
   } catch {}
+  }
 
   // Sort by updatedAt descending
   sessions.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
@@ -877,7 +899,7 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
  *
  * @param workspacePath - Root directory of the active workspace.
  * @param repoPaths - Directories of sub-repositories included in the workspace.
- * @returns A promise that resolves to an array of unique {@link AIAssistant} names.
+ * @returns A promise that resolves to an array of unique session assistant names.
  */
 // ─── High-Performance mtime-aware Session Caches ────────────────────────────
 let agHistoryCache: { mtime: number; workspaces: string[] } | null = null;
@@ -991,13 +1013,13 @@ async function getCodexCwds(codexHome: string): Promise<string[]> {
  *
  * @param workspacePath - Root directory of the active workspace.
  * @param repoPaths - Directories of sub-repositories included in the workspace.
- * @returns A promise that resolves to an array of unique {@link AIAssistant} names.
+ * @returns A promise that resolves to an array of unique session assistant names.
  */
 export async function findActiveAssistants(
   workspacePath: string,
   repoPaths: string[] = []
-): Promise<AIAssistant[]> {
-  const active = new Set<AIAssistant>();
+): Promise<SessionAssistant[]> {
+  const active = new Set<SessionAssistant>();
   const wsFolderName = path.basename(workspacePath);
 
   const cleanPath = (p: string) => {
@@ -1055,13 +1077,17 @@ export async function findActiveAssistants(
     active.add('copilot');
   }
 
+  for (const [id, reader] of Object.entries(MODULAR_SESSION_READERS)) {
+    if (await reader.hasAny({ roots: [workspacePath, ...repoPaths], matchesCwd: isPathMatch })) active.add(id as SessionAssistant);
+  }
+
   return Array.from(active);
 }
 
 /**
  * Reads and parses the full transcript for a specific assistant conversation session.
  *
- * @param assistant - The name of the AI assistant ('antigravity', 'claude', 'codex', 'copilot').
+ * @param assistant - The name of the AI assistant ('antigravity', 'claude', 'codex', 'copilot', 'pi').
  * @param sessionId - Unique ID of the conversation session.
  * @returns A promise that resolves to an array of {@link ChatMessage} objects.
  */
@@ -1069,7 +1095,10 @@ export async function getSessionTranscript(assistant: string, sessionId: string)
   assertSafeSessionId(assistant, sessionId);
   const messages: ChatMessage[] = [];
 
-  if (assistant === 'antigravity') {
+  const modularReader = modularSessionReader(assistant);
+  if (modularReader) {
+    messages.push(...await modularReader.transcript(sessionId));
+  } else if (assistant === 'antigravity') {
     const agDir = getAntigravityDir();
     const transcriptPath = path.join(agDir, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
     const content = await fs.readFile(transcriptPath, 'utf-8');

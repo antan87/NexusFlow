@@ -366,6 +366,27 @@ describe('JSON error boundaries and malformed lines resilience', () => {
     expect(transcript[1].content).toBe('Valid response');
   });
 
+  it('loads only the requested history source while preserving the combined listing', async () => {
+    const claudeId = '0199a213-81c0-7800-8aa1-bbab2a035a91';
+    const workspaceId = '0199a213-81c0-7800-8aa1-bbab2a035a92';
+    const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', getClaudeProjectFolderName(workspaceDir));
+    await fs.mkdir(claudeProjDir, { recursive: true });
+    await fs.writeFile(path.join(claudeProjDir, `${claudeId}.jsonl`), JSON.stringify({
+      type: 'user', sessionId: claudeId, cwd: workspaceDir, timestamp: '2026-08-19T08:00:00.000Z',
+      message: { content: 'Claude prompt' },
+    }));
+    const workspaceSessionsDir = path.join(workspaceDir, '.sessions');
+    await fs.mkdir(workspaceSessionsDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceSessionsDir, `${workspaceId}.jsonl`), JSON.stringify({
+      sessionId: workspaceId, provider: 'codex', userPrompt: 'Workspace prompt', timestamp: '2026-08-19T09:00:00.000Z',
+    }));
+
+    expect((await findSessions(workspaceDir, [], 'claude')).map(session => session.id)).toEqual([claudeId]);
+    expect((await findSessions(workspaceDir, [], 'workspace')).map(session => session.id)).toEqual([workspaceId]);
+    expect((await findSessions(workspaceDir, [], 'codex')).map(session => session.id)).toEqual([]);
+    expect((await findSessions(workspaceDir)).map(session => session.id)).toEqual([workspaceId, claudeId]);
+  });
+
   it('continues parsing Antigravity transcript despite malformed JSON lines', async () => {
     const convId = '0199a213-81c0-7800-8aa1-bbab2a035a98';
     const brainLogDir = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'brain', convId, '.system_generated', 'logs');

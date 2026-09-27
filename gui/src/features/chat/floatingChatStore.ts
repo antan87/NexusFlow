@@ -122,6 +122,11 @@ export const floatingChatStore = {
   },
 
   openTerminal: (branchName: string, target = 'shell', sessionId?: string, cwd?: string) => {
+    const pending = currentState.terminalLaunches[branchName];
+    if (sessionId && pending?.target === target && pending.sessionId === sessionId) {
+      floatingChatStore.openCli(branchName);
+      return;
+    }
     floatingChatStore.open(branchName);
     floatingChatStore.setHarness(branchName, target);
     updateState(prev => ({ ...prev, modes: { ...prev.modes, [branchName]: 'cli' }, terminalLaunches: { ...prev.terminalLaunches, [branchName]: { id: crypto.randomUUID(), target, sessionId, cwd } } }));

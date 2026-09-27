@@ -110,7 +110,9 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       const next = await terminalRequest<TerminalStatus>(workspace, 'status');
       setStatus(next);
       // Recover backend-owned sessions after reloading or reopening a workspace.
-      setTerminal(current => current ?? next.sessions.find(s => s.state === 'running') ?? null);
+      // Prefer the backend's view of the session we already track, so a session
+      // that exited while the pane was closed is not shown as still running.
+      setTerminal(current => next.sessions.find(s => s.id === current?.id) ?? current ?? next.sessions.find(s => s.state === 'running') ?? null);
       if (!next.available) setError(next.reason || 'Native terminal support is unavailable.');
     } catch (e) { setError((e as Error).message); }
   }, [workspace]);
@@ -266,6 +268,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           });
         } else if (message.type === 'exit') {
           ended = true; term.options.disableStdin = true; setPaneState({ kind: 'exited', code: message.exitCode ?? null });
+          setTerminal(current => current?.id === terminal.id ? { ...current, state: 'exited', exitCode: message.exitCode } : current);
           setStatus(current => current && ({ ...current, sessions: current.sessions.map(s => s.id === terminal.id ? { ...s, state: 'exited' } : s) }));
         } else if (message.type === 'error') { setError(message.message); term.options.disableStdin = true; }
       };
@@ -287,11 +290,24 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }, [workspace, refresh, setTarget]);
+  // A launch for a session that is already running must attach to it. Creating a
+  // second terminal would leave two shells on one session and lose the first.
+  const resume = useCallback((request: TerminalLaunch): Promise<void> => {
+    const existing = request.sessionId && [terminal, ...(status?.sessions ?? [])].find(item =>
+      item?.state === 'running' && item.target === request.target && item.sessionId === request.sessionId);
+    if (existing) {
+      setTerminal(existing);
+      setTarget(existing.target);
+      setShowHistory(false);
+      return Promise.resolve();
+    }
+    return start(request);
+  }, [terminal, status, start, setTarget]);
   useEffect(() => {
     if (!launch || launchSeen.current === launch.id) return;
     launchSeen.current = launch.id;
-    void start(launch).finally(() => consumeLaunch(launch.id));
-  }, [launch, start, consumeLaunch]);
+    void resume(launch).finally(() => consumeLaunch(launch.id));
+  }, [launch, resume, consumeLaunch]);
 
   const stop = async () => {
     if (!terminal || !window.confirm('End this terminal and its running commands?')) return;
@@ -442,7 +458,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       {!exited && terminal.state !== 'exited' && <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End</Button>}
     </div>}
     {error && (!terminal || !disconnected) && <div role="alert" className="border-b border-border px-3 py-2 text-xs text-warning break-words">{error}{retryLaunch && <Button size="xs" variant="ghost" disabled={busy} onClick={() => void start(retryLaunch)}>Retry launch</Button>}</div>}
-    {showHistory && <ResumeSessions workspace={workspace} active={active} busy={busy} status={status} fill={!terminal} onStartNew={() => setShowHistory(false)} onResume={session => void start({ id: crypto.randomUUID(), target: session.assistant, sessionId: session.id, cwd: session.workspacePath })} />}
+    {showHistory && <ResumeSessions workspace={workspace} active={active} busy={busy} status={status} fill={!terminal} onStartNew={() => setShowHistory(false)} onResume={session => void resume({ id: crypto.randomUUID(), target: session.assistant, sessionId: session.id, cwd: session.workspacePath })} />}
     {!terminal && !showHistory && <section aria-label="Start a new CLI session" className="flex-1 space-y-3 overflow-auto px-3 py-4">
       <div>
         <h3 className="text-sm font-semibold text-foreground">Start a new session</h3>

@@ -57,7 +57,7 @@ test('labels the maximized CLI and exposes a disconnected session with a reconne
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   // The window carries exactly one title now. The "ContextSpace / CLI chat"
@@ -73,13 +73,15 @@ test('labels the maximized CLI and exposes a disconnected session with a reconne
   await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(1);
   await pane.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await expect.poll(() => connections).toBe(2);
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await expect(pane.getByTestId('terminal-disconnected')).toHaveCount(0);
 });
 
-test('uses ordinary terminal copy and paste shortcuts', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, baseURL }) => {
+  // Derive the origin so the grant follows the configured port instead of a
+  // hardcoded one that silently stops matching.
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseURL!).origin });
   const inputs: string[] = [];
   await page.routeWebSocket('**/ws/terminal', socket => {
     socket.onMessage(message => {
@@ -95,7 +97,7 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context }
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const pane = page.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
   const bounds = await screen.boundingBox();
   expect(bounds).not.toBeNull();
@@ -161,7 +163,7 @@ test('restores CLI input focus and opens terminal file references in the code tr
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
 
@@ -205,7 +207,7 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   const pane = chat.getByTestId('terminal-pane');
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
   const clickRow = async (row: number) => {
     const cell = await screen.evaluate((element, index) => {

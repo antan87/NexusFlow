@@ -65,6 +65,7 @@ export interface WorkspaceLaunchTarget {
 }
 
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+export type SessionAssistant = AIAssistant | 'pi';
 
 export interface QuotaWindow {
   unit: 'tokens' | 'requests' | 'percent';
@@ -109,7 +110,7 @@ export type NormalizedUsage = {
 /** Metadata about a local AI session (mirrors src/types.ts). */
 export interface AISession {
   id: string;
-  assistant: AIAssistant;
+  assistant: SessionAssistant;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -205,6 +206,7 @@ export interface Feature {
   /** Id of the project this feature was created from, if any. */
   projectId?: string;
   branchName: string;
+  name?: string;
   description: string;
   repos: string[];
   assistants: string[];
@@ -290,7 +292,7 @@ export interface WorkspaceStatus {
   /** True when any repo pulled in new commits and awaits re-validation. */
   pendingValidation: boolean;
   /** AI assistants that have active/recorded sessions in this workspace. */
-  activeAssistants?: AIAssistant[];
+  activeAssistants?: SessionAssistant[];
 }
 
 export interface ServiceConfig {
