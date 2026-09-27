@@ -1,4 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
+
+// The pane also hosts the progressive saved-conversation live region, so the
+// terminal connection status has to be selected by its accessible name.
+const connectionStatus = (pane: Locator) => pane.getByRole('status', { name: /Terminal connection status/ });
 
 test('one real shell survives window changes and reload, then stops explicitly', async ({ page }) => {
   test.setTimeout(60_000);
@@ -14,7 +18,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await pane.getByRole('combobox', { name: 'CLI harness' }).click();
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(connectionStatus(pane)).toHaveText('Running');
   const session = await pane.getByLabel('Terminal sessions').inputValue();
   await expect(pane.getByRole('button', { name: 'Reconnect CLI' })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/terminal-compact.png' });
@@ -70,9 +74,9 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('tab', { name: 'terminal-test', exact: false }).click();
   await expect(chat.getByRole('button', { name: 'Back to CLI' })).toBeVisible();
   await chat.getByRole('button', { name: 'Back to CLI' }).click();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(connectionStatus(pane)).toHaveText('Running');
   await page.reload();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(connectionStatus(pane)).toHaveText('Running');
   await expect(pane.getByLabel('Terminal sessions')).toHaveValue(session);
   await expect(pane.getByRole('button', { name: 'Resume session' })).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => pane.locator('.xterm-screen').evaluate(screen => screen.getBoundingClientRect().height)).toBeGreaterThan(100);
@@ -87,7 +91,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.screenshot({ path: 'test-results/terminal-maximized.png' });
   page.once('dialog', dialog => dialog.accept());
   await pane.getByRole('button', { name: 'End session', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Ended');
+  await expect(connectionStatus(pane)).toHaveText('Ended');
   await expect(pane.getByRole('button', { name: 'End session' })).toHaveCount(0);
 });
 
@@ -101,11 +105,11 @@ test('a shell that quits on its own is labeled exited', async ({ page }) => {
   await pane.getByRole('combobox', { name: 'CLI harness' }).click();
   await page.getByRole('option', { name: 'Shell', exact: true }).click();
   await pane.getByRole('button', { name: 'Start session', exact: true }).click();
-  await expect(pane.getByRole('status')).toHaveText('Running');
+  await expect(connectionStatus(pane)).toHaveText('Running');
   await pane.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('exit 3');
   await page.keyboard.press('Enter');
-  await expect(pane.getByRole('status')).toContainText('Exited');
+  await expect(connectionStatus(pane)).toContainText('Exited');
   await expect(pane.getByRole('button', { name: 'End session' })).toHaveCount(0);
 });
 
