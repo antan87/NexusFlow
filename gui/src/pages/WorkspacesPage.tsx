@@ -10,10 +10,8 @@ import {
   Sparkles,
   ArrowUpCircle,
   Puzzle,
-  LayoutDashboard,
   GitCompare,
   MessagesSquare,
-  Brain,
   Workflow,
   Zap,
   Building2,
@@ -25,9 +23,6 @@ import {
   SlidersHorizontal,
   RotateCcw,
   X,
-  Calendar,
-  FileText,
-  type LucideIcon,
 } from 'lucide-react';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
@@ -35,7 +30,9 @@ import type { Feature, WorkspaceStatus, RepoInfo, DomainPack, ResolvedCategoryRu
 import { API_BASE } from '../lib/apiBase.js';
 import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
-import { ProcessCockpitHeader } from '../app/ProcessCockpitHeader.js';
+import { WorkspaceHeader } from '../features/workspace-shell/WorkspaceHeader.js';
+import { WorkspaceNav } from '../features/workspace-shell/WorkspaceNav.js';
+import { SECTION_LABELS, destinationOf, type WorkspaceDestination, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
 import { useCockpitStore, cockpitStore, upcastWorkspaceToCockpit } from '../features/cockpit/cockpitStore.js';
 
 const renderEditorIcon = (id: string, name: string) => {
@@ -53,10 +50,10 @@ const renderEditorIcon = (id: string, name: string) => {
     return <Sparkles size={14} className="text-purple-400 shrink-0" />;
   }
   if (lower.includes('powershell') || lower.includes('pwsh')) {
-    return <Terminal size={14} className="text-sky-400 shrink-0" />;
+    return <Terminal size={14} className="text-info-foreground shrink-0" />;
   }
   if (lower.includes('cmd') || lower.includes('command prompt')) {
-    return <Terminal size={14} className="text-amber-400 shrink-0" />;
+    return <Terminal size={14} className="text-warning-foreground shrink-0" />;
   }
   return <Code2 size={14} className="shrink-0" />;
 };
@@ -76,7 +73,6 @@ import { Input } from '../components/ui/input.js';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Spinner } from '../components/ui/spinner.js';
-import { Tabs, TabsList, TabsPanel, TabsTab } from '../components/ui/tabs.js';
 import { AddRepoPicker } from '../components/AddRepoPicker.js';
 import {
   useConfig,
@@ -89,9 +85,9 @@ import {
   useDeleteDomainPack,
   useWorkspaceLifecycle,
   useWorkspaceRepositories,
+  useWorkGuidance,
 } from '../lib/api/queries.js';
-import { safeCopyToClipboard } from '../lib/clipboard.js';
-import { syncMeta, repoName } from '../lib/status.js';
+import { repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
@@ -104,25 +100,17 @@ import { WorkspaceWorkPanel } from '../features/work-guidance/WorkspaceWorkPanel
 import { WorkspaceSkillsTab } from '../features/skills/WorkspaceSkillsTab.js';
 import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
-type SubTab = 'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills';
+type SubTab = WorkspaceSection;
 
-interface TabDef {
-  value: SubTab;
-  label: string;
-  ariaLabel?: string;
-  icon: LucideIcon;
+// Per workspace, the section last used in each destination and the sections
+// already opened. Module scope keeps both across route changes in a session.
+const lastVisitedByWorkspace = new Map<string, Partial<Record<WorkspaceDestination['id'], WorkspaceSection>>>();
+const visitedByWorkspace = new Map<string, Set<WorkspaceSection>>();
+function workspaceMemory<T>(store: Map<string, T>, id: string, create: () => T): T {
+  let value = store.get(id);
+  if (!value) { value = create(); store.set(id, value); }
+  return value;
 }
-
-const TABS: TabDef[] = [
-  { value: 'overview', label: 'Command Center', ariaLabel: 'Overview', icon: LayoutDashboard },
-  { value: 'plan', label: 'Plan', ariaLabel: 'Plan', icon: Calendar },
-  { value: 'documents', label: 'Documents', ariaLabel: 'Documents', icon: FileText },
-  { value: 'changes', label: 'Git Diff', ariaLabel: 'Changes', icon: GitCompare },
-  { value: 'services', label: 'Services', ariaLabel: 'Services', icon: Zap },
-  { value: 'sessions', label: 'AI Sessions', ariaLabel: 'AI Sessions', icon: MessagesSquare },
-  { value: 'knowledge', label: 'Knowledge', ariaLabel: 'Knowledge', icon: Brain },
-  { value: 'skills', label: 'Skills', ariaLabel: 'Skills', icon: Puzzle },
-];
 
 interface WorkspacesPageProps {
   workspaces: Feature[];
@@ -176,6 +164,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const cockpit = useCockpitStore();
   const { data: lifecycleData } = useWorkspaceLifecycle(selected?.branchName ?? null);
   const { data: liveRepositories } = useWorkspaceRepositories(selected?.branchName ?? null);
+  const { data: workGuidance } = useWorkGuidance(selected?.branchName ?? null);
+  const lastVisited = workspaceMemory(lastVisitedByWorkspace, selected?.branchName ?? '', (): Partial<Record<WorkspaceDestination['id'], WorkspaceSection>> => ({}));
+  lastVisited[destinationOf(subTab).id] = subTab;
+  const visitedSections = workspaceMemory(visitedByWorkspace, selected?.branchName ?? '', () => new Set<WorkspaceSection>());
+  visitedSections.add(subTab);
 
   useEffect(() => {
     if (!selected) return;
@@ -554,98 +547,22 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const renderInspector = () => {
     if (!selected) return null;
     const st = workspaceStatuses[selected.branchName];
-    const sync = selectedMode === 'in-place' ? null : (st ? syncMeta(st.syncStatus) : null);
     const totalChangedFiles = st?.changedFiles ?? 0;
-
-    const activeWorktree = (cockpit.activeWorktreeId && cockpit.worktrees[cockpit.activeWorktreeId])
-      ? cockpit.worktrees[cockpit.activeWorktreeId]
-      : Object.values(cockpit.worktrees)[0] || null;
 
     return (
       <div className="flex flex-col min-w-0 pb-12 w-full">
-        {/* L0 + L1 Process Cockpit Header */}
-        <ProcessCockpitHeader
-          workspaceTitle={selected.name || cockpit.workspaceTitle || selected.description || selected.branchName}
-          workspaceDescription={cockpit.workspaceIntent || selected.description}
-          activeWorktree={activeWorktree}
-          iterations={cockpit.iterations}
-          activeIterationId={cockpit.activeIterationId}
-          onSelectIteration={(iterId) => cockpit.selectIteration(iterId)}
-          activeStage={subTab === 'changes' ? 'diff' : subTab === 'plan' ? 'plan' : subTab === 'knowledge' ? 'knowledge' : 'overview'}
-          onSelectStage={(stage) => {
-            if (stage === 'diff') onSelectTab(selected.branchName, 'changes');
-            else if (stage === 'plan') onSelectTab(selected.branchName, 'plan');
-            else if (stage === 'knowledge') onSelectTab(selected.branchName, 'knowledge');
-            else onSelectTab(selected.branchName, 'overview');
-            cockpit.setActiveStage(stage);
-          }}
-          diffViewMode={cockpit.diffViewMode}
-          onToggleDiffMode={() => cockpit.toggleDiffMode()}
-          isZenMode={cockpit.isZenMode}
-          onToggleZenMode={() => cockpit.toggleZenMode()}
-          gateStatus={cockpit.gateStatus}
-          onNewIteration={() => onSelectTab(selected.branchName, 'plan')}
-          showToast={showToast}
-        />
-
-        {/* Compact Workspace Action Bar (collapsed in Zen Mode) */}
-        {!cockpit.isZenMode && (
-          <div className="border-b border-border bg-card/80 px-4 py-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
-            {/* Left: workspace name, branch, and telemetry */}
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <h1 className="font-bold text-foreground truncate" title={selected.name || selected.branchName}>
-                {selected.name || selected.branchName}
-              </h1>
-              {selected.name && <span className="font-mono text-[10px] text-muted-foreground" title={selected.branchName}>{selected.branchName}</span>}
-              <button
-                type="button"
-                onClick={async () => {
-                  const copied = await safeCopyToClipboard(selected.branchName);
-                  if (copied) showToast?.('Copied branch name to clipboard.', 'success');
-                }}
-                className="text-muted-foreground hover:text-primary transition-colors p-0.5 rounded hover:bg-secondary cursor-pointer"
-                title="Copy branch name"
-              >
-                <Copy size={11} />
-              </button>
-              <span className="inline-flex items-center rounded border border-border bg-secondary/60 px-1.5 py-0.2 font-mono text-[10px] font-medium text-muted-foreground uppercase">
-                {selectedMode === 'in-place' ? 'in-place' : 'worktree'}
-              </span>
-              <span className="text-muted-foreground/50">•</span>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {selected.repos.length} {selected.repos.length === 1 ? 'repo' : 'repos'}
-              </span>
-              {totalChangedFiles > 0 ? (
-                <>
-                  <span className="text-muted-foreground/50">•</span>
-                  <button
-                    type="button"
-                    onClick={() => onSelectTab(selected.branchName, 'changes')}
-                    className="inline-flex items-center gap-1 text-amber-400 font-semibold font-mono text-[11px] hover:underline cursor-pointer"
-                  >
-                    <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {totalChangedFiles} diffs
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="text-muted-foreground/50">•</span>
-                  <span className="inline-flex items-center gap-1 text-emerald-400 font-mono text-[11px]">
-                    <span className="size-1.5 rounded-full bg-emerald-400" />
-                    clean
-                  </span>
-                </>
-              )}
-              {sync && (
-                <>
-                  <span className="text-muted-foreground/50">•</span>
-                  <span className="font-mono text-[10px] text-primary">{sync.label}</span>
-                </>
-              )}
-            </div>
-
-            {/* Right: Compact Editor & Context Actions */}
-            <div className="flex items-center gap-1.5 shrink-0">
+        <WorkspaceHeader
+          workspaceId={selected.branchName}
+          title={selected.name || selected.branchName}
+          branchName={selected.name ? selected.branchName : undefined}
+          brief={cockpit.workspaceIntent || selected.description}
+          mode={selectedMode}
+          repoCount={selected.repos.length}
+          changedFiles={st ? totalChangedFiles : null}
+          stage={workGuidance?.assignment.stage}
+          milestones={lifecycleData?.lifecycle?.steps ?? []}
+          verification={cockpit.gateStatus}
+          actions={<>
               {primaryEditor && (
                 availableEditors.length > 1 ? (
                   <div className="inline-flex h-7 items-center rounded-md border border-border bg-secondary/80 text-xs">
@@ -729,9 +646,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   </MenuItem>
                 </MenuPopup>
               </Menu>
-            </div>
-          </div>
-        )}
+          </>}
+        />
+        <WorkspaceNav
+          workspaceId={selected.branchName}
+          section={subTab}
+          lastVisited={lastVisited}
+          badges={{ changes: totalChangedFiles, skills: activeSkills.length }}
+        />
 
         {/* Tab Navigation & Content Container */}
         <div className="px-6 pt-5">
@@ -739,9 +661,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           {isLegacy && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent p-3 backdrop-blur-md shadow-xs">
               <div className="flex items-center gap-2.5 text-xs text-amber-200">
-                <Sparkles size={16} className="text-amber-400 shrink-0 animate-pulse" />
+                <Sparkles size={16} className="text-warning-foreground shrink-0 animate-pulse" />
                 <span>
-                  <strong className="font-semibold text-amber-300">Legacy {LEGACY_BRAND_NAME} Workspace:</strong> Upgrade to native {BRAND_NAME} manifest and synchronized artifacts.
+                  <strong className="font-semibold text-warning-foreground">Legacy {LEGACY_BRAND_NAME} Workspace:</strong> Upgrade to native {BRAND_NAME} manifest and synchronized artifacts.
                 </span>
               </div>
               <button
@@ -756,54 +678,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </div>
           )}
 
-          <Tabs
-            value={subTab}
-            onValueChange={(v) => typeof v === 'string' && onSelectTab(selected.branchName, v as SubTab)}
-            className="mb-6"
-          >
-            {/* Minimalist Cockpit Editor Tabstrip */}
-            <TabsList className="w-full flex-nowrap overflow-x-auto justify-start gap-1 p-1 rounded-lg border border-border bg-card shadow-xs">
-              {TABS.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = subTab === tab.value;
-                let badge: React.ReactNode = null;
-
-                if (tab.value === 'changes' && totalChangedFiles > 0) {
-                  badge = (
-                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-amber-400">
-                      {totalChangedFiles}
-                    </span>
-                  );
-                } else if (tab.value === 'skills' && activeSkills.length > 0) {
-                  badge = (
-                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-bold text-primary">
-                      {activeSkills.length}
-                    </span>
-                  );
-                }
-
-                return (
-                  <TabsTab
-                    key={tab.value}
-                    value={tab.value}
-                    aria-label={tab.ariaLabel || tab.label}
-                    className={cn(
-                      'flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
-                      isActive
-                        ? 'bg-secondary text-foreground shadow-xs border border-border font-bold'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
-                    )}
-                  >
-                    <Icon size={13} className={cn('shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')} />
-                    <span>{tab.label}</span>
-                    {badge}
-                  </TabsTab>
-                );
-              })}
-            </TabsList>
-
-            {/* Tab Panels */}
-            <TabsPanel value={subTab} className="animate-fade-in pt-4">
+          <div role="region" aria-label={SECTION_LABELS[subTab]} className="pb-6">
               {subTab === 'overview' && (
                 <div className="flex flex-col gap-6">
                   {/* HIGH-DENSITY TELEMETRY STRIP */}
@@ -821,9 +696,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Git Status</div>
                           <div className="text-sm font-extrabold font-mono text-foreground truncate">
                             {totalChangedFiles > 0 ? (
-                              <span className="text-amber-400">{totalChangedFiles} Modified</span>
+                              <span className="text-warning-foreground">{totalChangedFiles} Modified</span>
                             ) : (
-                              <span className="text-emerald-400">Clean Tree</span>
+                              <span className="text-success-foreground">Clean Tree</span>
                             )}
                           </div>
                         </div>
@@ -860,11 +735,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         <div className="min-w-0">
                           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">AI Assistant</div>
                           <div className="text-sm font-extrabold text-foreground capitalize truncate">
-                            {selected.assistants[0] || 'Antigravity'}
+                            {selected.assistants[0] || 'None chosen'}
                           </div>
                         </div>
                       </div>
-                      <span className="text-[10px] font-mono text-muted-foreground">Ready</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">Sessions</span>
                     </div>
 
                     {/* Stat 4: Attached Skills */}
@@ -941,7 +816,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                   <div className="font-mono font-bold text-foreground text-xs sm:text-sm truncate">
                                     {r.name}
                                   </div>
-                                  <div className="font-mono text-[10px] text-muted-foreground/80 truncate max-w-xs">
+                                  <div className="font-mono text-[10px] text-muted-foreground truncate max-w-xs">
                                     {r.path}
                                   </div>
                                 </div>
@@ -953,8 +828,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                   r.changedCount === null
                                     ? 'border-border bg-muted/60 text-muted-foreground'
                                     : r.changedCount > 0
-                                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                                    ? 'border-amber-500/30 bg-amber-500/10 text-warning-foreground'
+                                    : 'border-emerald-500/30 bg-emerald-500/10 text-success-foreground'
                                 )}>
                                   {r.changedCount === null ? '—' : r.changedCount > 0 ? `${r.changedCount} mod` : 'Clean'}
                                 </span>
@@ -964,8 +839,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                         </div>
                       </Card>
 
-                      {/* SECTION: ENTERPRISE CONTEXT, DOMAIN PACKS & FEATURE SPEC */}
-                      <Card className="p-4 border-border/80 bg-card/70 backdrop-blur-md rounded-xl shadow-xs space-y-3">
+                      {/* SECTION: ENTERPRISE CONTEXT, DOMAIN PACKS & FEATURE SPEC (optional, collapsed) */}
+                      <details className="group rounded-xl border border-border/80 bg-card/70 shadow-xs">
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+                          <span>Domain context and category rules <span className="font-normal text-muted-foreground">— optional</span></span>
+                          <ChevronDown aria-hidden="true" size={14} className="text-muted-foreground transition-transform group-open:rotate-180" />
+                        </summary>
+                      <Card className="p-4 border-0 border-t border-border/60 bg-transparent rounded-none rounded-b-xl shadow-none space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <Zap size={14} className="text-primary" />
@@ -1049,15 +929,15 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                           className={cn(
                                             'inline-flex items-center gap-1 px-2 py-0.5 rounded-l-md text-xs font-medium transition-all cursor-pointer',
                                             isRootAssigned
-                                              ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-xs'
+                                              ? 'bg-emerald-500/20 text-success-foreground font-semibold shadow-xs'
                                               : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                           )}
                                           title={`${root.name}: ${root.description} (Click to toggle)`}
                                         >
-                                          <Tag size={10} className={isRootAssigned ? 'text-emerald-400' : 'text-muted-foreground'} />
+                                          <Tag size={10} className={isRootAssigned ? 'text-success-foreground' : 'text-muted-foreground'} />
                                           <span>{root.name}</span>
                                           {!root.isTemplate && (
-                                            <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                            <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                           )}
                                           {isRootAssigned ? (
                                             <span className="size-1.5 rounded-full bg-emerald-400" />
@@ -1072,8 +952,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                             handleOpenTagDetails(root);
                                           }}
                                           className={cn(
-                                            'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer',
-                                            isRootAssigned ? 'bg-emerald-500/20 text-emerald-300/80 hover:text-emerald-200' : '',
+                                            'px-1 py-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer',
+                                            isRootAssigned ? 'bg-emerald-500/20 text-success-foreground/80 hover:text-emerald-200' : '',
                                           )}
                                           title={`Inspect & edit ${root.name} details`}
                                           aria-label={`Inspect & edit ${root.name} details`}
@@ -1092,14 +972,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                                 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l-md text-[11px] font-medium transition-all cursor-pointer border-y border-l',
                                                 isChildAssigned
                                                   ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200 font-semibold shadow-xs'
-                                                  : 'border-transparent text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground',
+                                                  : 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                               )}
                                               title={`${child.name} (Inherits ${root.name}): ${child.description} (Click to toggle)`}
                                             >
                                               <span className="text-muted-foreground text-[10px]">↳</span>
                                               <span>{child.name.replace(/^.*\s*›\s*/, '')}</span>
                                               {!child.isTemplate && (
-                                                <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                                <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                               )}
                                               {isChildAssigned ? (
                                                 <span className="size-1.5 rounded-full bg-emerald-400" />
@@ -1114,7 +994,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                                 handleOpenTagDetails(child);
                                               }}
                                               className={cn(
-                                                'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer border-y border-r',
+                                                'px-1 py-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer border-y border-r',
                                                 isChildAssigned ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200/80 hover:text-emerald-100' : 'border-transparent',
                                               )}
                                               title={`Inspect & edit ${child.name} details`}
@@ -1154,7 +1034,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                         <span>{trait.name}</span>
                                         <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-200 font-mono">Trait</span>
                                         {!trait.isTemplate && (
-                                          <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                          <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                         )}
                                         {isAssigned ? (
                                           <span className="size-1.5 rounded-full bg-indigo-400" />
@@ -1168,7 +1048,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                           e.stopPropagation();
                                           handleOpenTagDetails(trait);
                                         }}
-                                        className="p-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                                        className="p-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
                                         title={`Inspect & edit ${trait.name} details`}
                                         aria-label={`Inspect & edit ${trait.name} details`}
                                       >
@@ -1236,7 +1116,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                             />
                             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                               <span className="flex items-center gap-1">
-                                <Sparkles size={11} className="text-amber-400" />
+                                <Sparkles size={11} className="text-warning-foreground" />
                                 <span>Auto-detects subsystem domain tags upon saving</span>
                               </span>
                               <span>{specInput.length} chars</span>
@@ -1259,20 +1139,20 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                <ShieldCheck size={12} className="text-emerald-400" />
+                                <ShieldCheck size={12} className="text-success-foreground" />
                                 <span>Active Rules & Verification ({domainData.allRules.length})</span>
                               </div>
                               <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
                                 <span className="px-1 py-0.2 rounded bg-purple-500/10 text-purple-300">Org Root</span>
                                 <span>›</span>
-                                <span className="px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-300">Verticals</span>
+                                <span className="px-1 py-0.2 rounded bg-emerald-500/10 text-success-foreground">Verticals</span>
                                 <span>›</span>
                                 <span className="px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-300">Traits</span>
                               </div>
                             </div>
                             <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
                               {domainData.allRules.slice(0, 4).map((rule, idx) => (
-                                <div key={idx} className="text-[11px] text-muted-foreground/90 flex items-start gap-1.5 leading-snug">
+                                <div key={idx} className="text-[11px] text-muted-foreground flex items-start gap-1.5 leading-snug">
                                   <span className="text-primary font-bold">›</span>
                                   <span className="truncate">{rule}</span>
                                 </div>
@@ -1286,6 +1166,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           </div>
                         )}
                       </Card>
+                      </details>
 
                       {/* SECTION: ATTACHED SKILLS */}
                       <Card className="border-border/80 bg-card/70 backdrop-blur-md rounded-xl p-4 shadow-xs">
@@ -1352,20 +1233,21 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
-              {subTab === 'documents' && <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />}
+              {visitedSections.has('documents') && <div hidden={subTab !== 'documents'}>
+                <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
+              </div>}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
-              {subTab === 'plan' && <>
+              {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">
                 <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} onPlanChanged={() => {
                   setPlanVersion((version) => version + 1);
                   void planProps.handleRetryPlan(selected.branchName);
                 }} />
                 <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} />
-              </>}
+              </div>}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
-            </TabsPanel>
-          </Tabs>
+          </div>
         </div>
       </div>
     );
@@ -1554,7 +1436,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     'text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold border',
                     inspectingTag.isTemplate
                       ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
-                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+                      : 'border-amber-500/30 bg-amber-500/10 text-warning-foreground',
                   )}
                 >
                   {inspectingTag.isTemplate ? 'Built-in Template' : 'Custom / Overridden'}

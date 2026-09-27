@@ -100,7 +100,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
       <div className="relative w-full">
         <Search
           size={12}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
         />
         <input
           type="text"
@@ -145,7 +145,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
 
                   {group.isHostRepo && (
                     <span
-                      className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground/80 border border-border/40 uppercase"
+                      className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground border border-border/40 uppercase"
                       title="Read-only reference: prepare it for editing to change it here"
                     >
                       ro
@@ -154,7 +154,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className="font-mono text-[10px] text-muted-foreground/70">
+                  <span className="font-mono text-[10px] text-muted-foreground">
                     {group.worktrees.length} wt
                   </span>
 

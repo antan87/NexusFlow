@@ -1,6 +1,7 @@
 import { HarnessIcon } from '../components/icons/HarnessIcon.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ResourcePreview } from '../features/workspace-launch/ResourcePreview.js';
 import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw, Tag } from 'lucide-react';
 
 import { Badge } from '../components/ui/badge.js';
@@ -175,7 +176,8 @@ export function StartWorkPage() {
   const [workspaceName, setWorkspaceName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [adHocPaths, setAdHocPaths] = useState<string[]>([]);
+  // Setup hands over the repositories picked for the first task as ?repo=…
+  const [adHocPaths, setAdHocPaths] = useState<string[]>(() => searchParams.getAll('repo'));
   const [setupOpen, setSetupOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
@@ -887,7 +889,7 @@ export function StartWorkPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-5 px-1.5 text-[11px] text-amber-500 hover:text-amber-600"
+                            className="h-5 px-1.5 text-[11px] text-warning-foreground hover:text-amber-600"
                             onClick={() =>
                               handlePullSingle(
                                 repo.path,
@@ -905,7 +907,7 @@ export function StartWorkPage() {
                 })}
               </ul>
               {pullWarning && (
-                <p className="mt-2 text-xs text-amber-500">{pullWarning}</p>
+                <p className="mt-2 text-xs text-warning-foreground">{pullWarning}</p>
               )}
             </div>
           )}
@@ -1156,7 +1158,9 @@ export function StartWorkPage() {
           </div>}
         </section>
 
-        {submitError && <p className="text-sm text-destructive-foreground">{submitError}</p>}
+        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={assistants} tagCount={selectedTags.length} />
+
+        {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
 
         <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

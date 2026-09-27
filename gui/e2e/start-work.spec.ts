@@ -219,60 +219,6 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     ],
   });
 
-  test('should run the onboarding flow when config does not exist', async ({ page }) => {
-    await page.route('**/api/config', async (route, request) => {
-      if (request.method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            exists: false,
-            config: {
-              version: '0.2.7',
-              devDir: '',
-              workspacesDir: '',
-              defaultAssistant: null,
-              scanDepth: 2,
-            },
-          }),
-        });
-      } else if (request.method() === 'POST') {
-        const body = request.postDataJSON();
-        expect(body.devDir).toBe('C:\\mock-dev');
-        expect(body.workspacesDir).toBe('C:\\mock-dev\\workspaces');
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ success: true, config: body }),
-        });
-      }
-    });
-
-    await page.route('**/api/repos', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/ai-detect', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-    });
-
-    await page.route('**/api/workflows/templates', async (route) => {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ templates: [] }) });
-    });
-
-    await page.goto('/');
-
-    await expect(page.locator('h1')).toContainText('Welcome to ContextSpace');
-    await expect(page.locator('h2')).toContainText('Initialize Config');
-
-    await page.getByPlaceholder('e.g. C:\\Users\\username\\dev', { exact: true }).fill('C:\\mock-dev');
-    await page
-      .getByPlaceholder('e.g. C:\\Users\\username\\dev\\workspaces', { exact: true })
-      .fill('C:\\mock-dev\\workspaces');
-
-    await page.locator('button:has-text("Save & Get Started")').click();
-  });
-
   test('should create a workspace in worktree mode from the new workspace flow', async ({ page }) => {
     await mockCompletedCreationStream(page);
     const chatFrames: Array<Record<string, unknown>> = [];
@@ -373,6 +319,11 @@ test.describe('NexusFlow E2E GUI Tests', () => {
   test('starts from repos, task, name, and skills without a size preset', async ({ page }) => {
     await mockRunningCreationStream(page);
     await page.route('**/api/skills', (route) => route.fulfill({ json: { skills: [{ id: 'work-lifecycle', name: 'Work lifecycle', title: 'Work lifecycle', description: 'Workspace guidance' }] } }));
+    let previewRequest: any;
+    await page.route('**/api/resources/preview', (route) => {
+      previewRequest = route.request().postDataJSON();
+      return route.fulfill({ json: { resources: [{ kind: 'skill', id: 'work-lifecycle', title: 'Work lifecycle', description: 'Workspace guidance', files: ['.agents/skills/work-lifecycle/SKILL.md'] }] } });
+    });
     let payload: any;
     await page.route('**/api/workspace', async (route) => {
       payload = route.request().postDataJSON();
@@ -390,7 +341,13 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Simple start');
     await page.getByLabel('What do you want to do?').fill('Simplify creation');
+    await expect(page.getByText('No skills or agents selected', { exact: false })).toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Work lifecycle' }).check();
+    // Before anything is installed, the user sees each file and where it goes.
+    const preview = page.getByRole('region', { name: 'What this adds to the workspace' });
+    await expect(preview).toContainText('Work lifecycle');
+    await expect(preview).toContainText('.agents/skills/work-lifecycle/SKILL.md');
+    expect(previewRequest).toMatchObject({ skills: ['work-lifecycle'], agents: [] });
     await page.getByRole('button', { name: 'Create workspace' }).click();
     await expect.poll(() => payload?.name).toBe('Simple start');
     expect(payload.mode).toBe('in-place');

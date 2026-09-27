@@ -186,7 +186,7 @@ export function FinishPanel({ ws, onClose, onGitChanged }: Props) {
             <p role="alert" className="text-destructive-foreground">Finish refused, nothing changed: {result.policy.blockers.join(' ')}</p>
           ) : (
             <>
-              {result.override && <p className="text-amber-600">Finished without fresh verification. Recorded reason: {result.override.reason}</p>}
+              {result.override && <p className="text-amber-700">Finished without fresh verification. Recorded reason: {result.override.reason}</p>}
               {result.repos.map((r) => (
                 <p key={r.name} className="font-mono text-[11px]">
                   {r.name}: {r.skipped ? `skipped — ${r.skipped}` : [

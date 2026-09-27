@@ -8,6 +8,8 @@ import {
 } from '../core/constants.js';
 import { getAllSkills } from '../utils/skills-catalog.js';
 import { getAllAgents } from './agents-catalog.js';
+import { previewResourceFiles } from './materializer.js';
+import type { AIAssistant } from '../types.js';
 
 const runResourceAdministration = createMutationQueue();
 
@@ -59,4 +61,31 @@ export async function validateResourceSelections(
   if (missingSkills.length || missingAgents.length) {
     throw new ResourceSelectionError(missingSkills, missingAgents);
   }
+}
+
+export interface ResourcePreviewItem {
+  kind: 'skill' | 'agent';
+  id: string;
+  title: string;
+  description: string;
+  /** Workspace-relative files this resource adds. */
+  files: string[];
+}
+
+/** What creating a workspace with these selections would install, and where. */
+export async function previewResourceSelections(
+  enabledSkills: string[],
+  enabledAgents: string[],
+  assistants: AIAssistant[],
+): Promise<ResourcePreviewItem[]> {
+  await validateResourceSelections(enabledSkills, enabledAgents);
+  const [skills, agents] = await Promise.all([getAllSkills(), getAllAgents()]);
+  const selectedSkills = skills.filter((skill) => enabledSkills.includes(skill.id));
+  const selectedAgents = agents.filter((agent) => enabledAgents.includes(agent.id));
+  const files = await previewResourceFiles(assistants, selectedSkills, selectedAgents);
+  const filesOf = (kind: string, id: string) => files.filter((file) => file.kind === kind && file.resourceId === id).map((file) => file.path);
+  return [
+    ...selectedSkills.map((skill) => ({ kind: 'skill' as const, id: skill.id, title: skill.title || skill.name, description: skill.description, files: filesOf('skill', skill.id) })),
+    ...selectedAgents.map((agent) => ({ kind: 'agent' as const, id: agent.id, title: agent.name, description: agent.description ?? '', files: filesOf('codex-agent', agent.id) })),
+  ];
 }

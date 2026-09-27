@@ -444,6 +444,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
             {/* Quick File Selector Dropdown */}
             <select
+              aria-label="Jump to changed file"
               value={selectedFileIndex}
               onChange={(e) => void jumpToFile(Number(e.target.value))}
               className="ml-2 max-w-[240px] sm:max-w-[360px] rounded-lg border border-border bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"

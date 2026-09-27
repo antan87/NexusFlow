@@ -8,7 +8,8 @@ import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'r
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
-import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
+import { SetupPage } from './features/setup/SetupPage.js';
+import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
 import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
@@ -101,12 +102,14 @@ function AppInner() {
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [saveError, setSaveError] = useState<{ message: string; fields: ConfigPathsReport | null } | null>(null);
   const [adapters, setAdapters] = useState<StorageAdapterMeta[]>([]);
 
   // Update Check State
   const [updateStatus, setUpdateStatus] = useState<UiUpdateStatus | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
+  const [serverPlatform, setServerPlatform] = useState<string | undefined>(undefined);
   const [updateDeferred, setUpdateDeferred] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
 
@@ -367,11 +370,12 @@ function AppInner() {
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
+      setServerPlatform(typeof data.platform === 'string' ? data.platform : undefined);
 
       if (!(data.exists && data.config.devDir)) {
         setDefaultPaths({
-          devDir: data.config.devDir || '',
-          workspacesDir: data.config.workspacesDir || '',
+          devDir: data.suggested?.devDir || data.config.devDir || '',
+          workspacesDir: data.suggested?.workspacesDir || data.config.workspacesDir || '',
         });
         setConfig({
           version: '1.0.0',
@@ -389,25 +393,20 @@ function AppInner() {
   };
 
   const saveAppConfig = async (newConfig: ContextSpaceConfig) => {
+    setSaveError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig),
-      });
-      if (res.ok) {
-        setSaveStatus('success');
-        setConfig(newConfig);
-        setConfigExists(true);
-        queryClient.invalidateQueries({ queryKey: ['repos'] });
-        fetchWorkspaces();
-      } else {
-        setSaveStatus('error');
-      }
-    } catch {
+      const result = await postConfig(newConfig);
+      setSaveStatus('success');
+      setConfig({ ...newConfig, ...result.config });
+      setConfigExists(true);
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      fetchWorkspaces();
+      setTimeout(() => setSaveStatus((status) => status === 'success' ? null : status), 3000);
+    } catch (error) {
+      // Keep the error until the next save: the user needs it to fix the entry.
       setSaveStatus('error');
+      setSaveError({ message: error instanceof Error ? error.message : 'Could not save settings.', fields: folderErrors(error) });
     }
-    setTimeout(() => setSaveStatus(null), 3000);
   };
 
   // Kept as the single "refresh workspaces" entry point for the handlers and
@@ -949,12 +948,16 @@ Core Instructions:
 
   if (!configExists && config) {
     return (
-      <OnboardingScreen
-        config={config}
-        setConfig={setConfig}
-        defaultPaths={defaultPaths}
+      <SetupPage
+        initialConfig={config}
+        suggested={defaultPaths}
+        platform={serverPlatform}
         adapters={adapters}
-        saveAppConfig={saveAppConfig}
+        onComplete={(saved) => {
+          setConfig(saved);
+          setConfigExists(true);
+          void fetchWorkspaces();
+        }}
       />
     );
   }
@@ -1052,7 +1055,7 @@ Core Instructions:
 
   const settingsPage = config ? (
     <SettingsPage
-      config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
+      config={config} setConfig={setConfig} saveStatus={saveStatus} saveError={saveError} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
       fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}
@@ -1086,7 +1089,7 @@ Core Instructions:
               <div className="min-w-0">
                 <span className="font-semibold text-foreground">Desktop updates</span>
                 {updateCheckError ? (
-                  <p className="mt-0.5 truncate text-red-300" role="alert">{updateCheckError}</p>
+                  <p className="mt-0.5 truncate text-destructive-foreground" role="alert">{updateCheckError}</p>
                 ) : (
                   <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
                 )}
@@ -1105,15 +1108,15 @@ Core Instructions:
             {updateStatus && updateStatus.updateAvailable && !updateDeferred && (
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-warning-foreground shrink-0">
                     {updatingApp ? (
-                      <RefreshCw size={20} className="animate-spin text-amber-400" />
+                      <RefreshCw size={20} className="animate-spin text-warning-foreground" />
                     ) : (
                       <Sparkles size={20} />
                     )}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-amber-300">
+                    <h4 className="text-sm font-bold text-warning-foreground">
                       {updateStep === 'error' ? `${BRAND_NAME} update needs attention` : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : `A new version of ${BRAND_NAME} is available!`}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -1179,7 +1182,7 @@ Core Instructions:
             {!config && (
               <div className="flex flex-col items-center justify-center py-40 gap-6">
                 <div className="bg-red-500/10 p-6 rounded-full">
-                  <AlertTriangle className="text-red-400" size={48} />
+                  <AlertTriangle className="text-destructive-foreground" size={48} />
                 </div>
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>

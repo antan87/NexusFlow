@@ -45,10 +45,10 @@ test('a verification run updates the shared header gate in the same interaction'
     return route.fulfill({ json: { report } });
   });
   await page.goto('/#/workspaces/demo/plan');
-  await expect(page.getByText('Gate: IDLE ○')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Not verified yet')).toBeVisible();
   await page.getByRole('button', { name: 'Run verification', exact: true }).click();
   // No navigation or re-entry: the header reads the same, now refreshed, evidence.
-  await expect(page.getByText('Gate: PASS (2.4s)')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Verified (2.4s)')).toBeVisible();
 });
 
 test('a pass without a recorded duration shows no invented one', async ({ page }) => {
@@ -58,6 +58,6 @@ test('a pass without a recorded duration shows no invented one', async ({ page }
     report: { overallStatus: 'pass', canProgress: true, repos: [] },
   } }));
   await page.goto('/#/workspaces/demo/plan');
-  await expect(page.getByText('Gate: PASS', { exact: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Verified', { exact: true })).toBeVisible();
   await expect(page.getByText(/120ms/)).toHaveCount(0);
 });

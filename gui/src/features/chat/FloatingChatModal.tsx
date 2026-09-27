@@ -255,7 +255,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         )}
       >
         <div className="flex items-center gap-2 min-w-0 shrink-0">
-          {!isMaximized && <GripHorizontal className="size-4 text-muted-foreground/50 shrink-0" />}
+          {!isMaximized && <GripHorizontal className="size-4 text-muted-foreground shrink-0" />}
           <div className="size-5 rounded-md bg-primary/15 grid place-items-center text-primary shrink-0" aria-hidden="true">
             <MessagesSquare className="size-3.5" />
           </div>
@@ -289,7 +289,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                     e.stopPropagation();
                     removeTab(branchName);
                   }}
-                  className="size-3.5 rounded grid place-items-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  className="size-3.5 rounded grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                   title={`Close ${branchName} tab`}
                   aria-label={`Close ${branchName} tab`}
                 >

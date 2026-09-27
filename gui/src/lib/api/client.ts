@@ -40,11 +40,14 @@ async function getWorkroomBootstrap(): Promise<string> {
 /** Error thrown for non-2xx API responses, carrying the HTTP status. */
 export class ApiError extends Error {
   readonly status: number;
+  /** Parsed JSON body of the failed response, for field-level details. */
+  readonly body: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -85,7 +88,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       }
       continue;
     }
-    if (!res.ok) throw new ApiError(message, res.status);
+    if (!res.ok) throw new ApiError(message, res.status, data);
     return data as T;
   }
   throw new ApiError('Could not re-establish the Workroom dashboard boundary.', 403);
