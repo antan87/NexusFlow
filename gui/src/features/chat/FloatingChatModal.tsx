@@ -3,7 +3,6 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MessagesSquare,
-  TerminalSquare,
   X,
   Minus,
   Maximize2,
@@ -20,8 +19,7 @@ import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
-import { useFloatingChat } from './floatingChatStore.js';
-import { WorkspaceServicesControl } from './WorkspaceServicesControl.js';
+import { useFloatingChat, CHAT_GEOMETRY, clampChatSize } from './floatingChatStore.js';
 
 interface FloatingChatModalProps {
   workspaces: Feature[];
@@ -62,9 +60,9 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const splitDragRef = useRef(false);
-  const [wideEnough, setWideEnough] = useState(() => window.innerWidth >= 900);
+  const [wideEnough, setWideEnough] = useState(() => window.innerWidth >= CHAT_GEOMETRY.splitBreakpointPx);
   useEffect(() => {
-    const update = () => setWideEnough(window.innerWidth >= 900);
+    const update = () => setWideEnough(window.innerWidth >= CHAT_GEOMETRY.splitBreakpointPx);
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
@@ -137,7 +135,6 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
 
     const newX = Math.min(Math.max(10, dragRef.current.startPosX + deltaX), maxX);
     const newY = Math.min(Math.max(10, dragRef.current.startPosY + deltaY), maxY);
-
     setPosition({ x: newX, y: newY });
   }, [size, setPosition]);
 
@@ -171,11 +168,10 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
     if (!resizeRef.current) return;
     const deltaX = e.clientX - resizeRef.current.startX;
     const deltaY = e.clientY - resizeRef.current.startY;
-
-    const newW = Math.max(380, Math.min(resizeRef.current.startW + deltaX, window.innerWidth - 40));
-    const newH = Math.max(420, Math.min(resizeRef.current.startH + deltaY, window.innerHeight - 40));
-
-    setSize({ width: newW, height: newH });
+    setSize(clampChatSize({
+      width: resizeRef.current.startW + deltaX,
+      height: resizeRef.current.startH + deltaY,
+    }));
   }, [setSize]);
 
   const handleResizeEnd = useCallback((e: React.PointerEvent) => {
@@ -245,29 +241,148 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         isMaximized && 'inset-0 w-auto h-auto rounded-none',
       )}
     >
-      {/* Header Bar & Drag Handle */}
+      {/* Window chrome. The workspace tabs used to sit on a second row and the
+          per-pane sub-header on a third, so three bars and three "CLI chat"
+          labels appeared before any terminal output. Tabs are now inline with
+          the title and the sub-header is gone. */}
       <div
         onPointerDown={handleDragStart}
         onPointerMove={handleDragMove}
         onPointerUp={handleDragEnd}
         className={cn(
-          'flex items-center justify-between px-3 py-2 border-b border-border/80 bg-muted/40 select-none shrink-0',
+          'flex items-center gap-2 px-2.5 py-1.5 border-b border-border/80 bg-muted/40 select-none shrink-0',
           !isMaximized && 'cursor-grab active:cursor-grabbing',
         )}
       >
-        <div className="flex items-center gap-2 min-w-0 pr-2">
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
           {!isMaximized && <GripHorizontal className="size-4 text-muted-foreground/50 shrink-0" />}
-          <div className="size-5 rounded-md bg-primary/15 grid place-items-center text-primary shrink-0">
+          <div className="size-5 rounded-md bg-primary/15 grid place-items-center text-primary shrink-0" aria-hidden="true">
             <MessagesSquare className="size-3.5" />
           </div>
-          <span className="text-xs font-bold text-foreground shrink-0">ContextSpace</span>
-          <span className="text-muted-foreground/70" aria-hidden="true">/</span>
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary shrink-0">CLI chat</span>
-          {activeWorkspace && <span className="truncate text-[11px] text-muted-foreground" title={activeWorkspace.branchName}>{activeWorkspace.branchName}</span>}
+          <span className="text-xs font-bold text-foreground shrink-0">CLI chat</span>
+        </div>
+
+        <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto no-scrollbar" data-no-drag>
+          {openTabs.map((branchName) => {
+            const isActive = branchName === activeTab;
+            return (
+              <div
+                key={branchName}
+                className={cn(
+                  'group flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer border shrink-0 max-w-[170px]',
+                  isActive || splitTab === branchName
+                    ? 'bg-card border-border shadow-xs text-foreground font-semibold'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                )}
+              >
+                <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
+                  className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
+                  <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{branchName}</span>
+                  {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
+                  {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
+                  {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTab(branchName);
+                  }}
+                  className="size-3.5 rounded grid place-items-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  title={`Close ${branchName} tab`}
+                  aria-label={`Close ${branchName} tab`}
+                >
+                  <X className="size-2.5" />
+                </button>
+              </div>
+            );
+          })}
+
+          {/* Plus / Add Workspace Dropdown Menu */}
+          <Menu>
+            <MenuTrigger aria-label="Add workspace" className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-dashed border-border/70 hover:border-border transition-colors cursor-pointer shrink-0" title="Add workspace">
+              <Plus className="size-3" />
+              <span className="hidden sm:inline">Workspace</span>
+            </MenuTrigger>
+            <MenuPopup align="start" className="w-64 p-1.5">
+              <MenuItem onClick={() => { minimize(); navigate('/new?from=chat'); }} className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold">
+                <Plus className="size-3" />New workspace
+              </MenuItem>
+              <p className="border-t border-border px-2 pt-2 text-[10px] text-muted-foreground">Open existing</p>
+              <div className="px-2 py-1 mb-1">
+                <div className="relative">
+                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Search workspaces..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-7 pr-2 py-1 text-xs rounded-md bg-muted/50 border border-border focus:outline-hidden focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto space-y-0.5">
+                {filteredWorkspaces.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No workspaces found
+                  </div>
+                ) : (
+                  filteredWorkspaces.map((ws) => {
+                    const isOpen = openTabs.includes(ws.branchName);
+                    return (
+                      <MenuItem
+                        key={ws.branchName}
+                        onClick={() => {
+                          if (isOpen) {
+                            setActiveTab(ws.branchName);
+                          } else {
+                            addTab(ws.branchName);
+                          }
+                          setSearchQuery('');
+                        }}
+                        className={cn(
+                          'flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer',
+                          ws.branchName === activeTab && 'bg-accent/70 font-semibold',
+                        )}
+                      >
+                        <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="font-medium text-foreground truncate">{ws.branchName}</span>
+                          {ws.description && (
+                            <span className="text-[10px] text-muted-foreground truncate">{ws.description}</span>
+                          )}
+                        </div>
+                        {isOpen && (
+                          <span className="text-[10px] text-primary font-medium px-1.5 py-0.5 rounded bg-primary/10">
+                            Open
+                          </span>
+                        )}
+                      </MenuItem>
+                    );
+                  })
+                )}
+              </div>
+            </MenuPopup>
+          </Menu>
         </div>
 
         {/* Window Control Buttons */}
         <div className="flex items-center gap-1 shrink-0" data-no-drag>
+          {activeTab && <Menu>
+            <MenuTrigger aria-label="Dock a second workspace" className="inline-flex items-center gap-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer" title="Dock a second workspace beside this one">
+              <Columns2 className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-56 max-h-72 overflow-y-auto p-1.5">
+              {splitTab && <MenuItem onClick={() => setSplitTab(null)} className="text-xs">Close docked workspace</MenuItem>}
+              {workspaces.filter(workspace => workspace.branchName !== activeTab).map(workspace => <MenuItem key={workspace.branchName}
+                onClick={() => setSplitTab(workspace.branchName)} className="flex items-center gap-2 text-xs">
+                <FolderGit2 className="size-3" /><span className="truncate">{workspace.branchName}</span>{splitTab === workspace.branchName && <span className="ml-auto text-primary">Docked</span>}
+              </MenuItem>)}
+              {workspaces.length < 2 && <p className="p-2 text-xs text-muted-foreground">Open another workspace to dock it here.</p>}
+            </MenuPopup>
+          </Menu>}
           <button
             onClick={minimize}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
@@ -295,128 +410,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
         </div>
       </div>
 
-      {/* Tabs Row */}
-      <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-border/60 bg-muted/20 overflow-x-auto no-scrollbar shrink-0" data-no-drag>
-        {openTabs.map((branchName) => {
-          const isActive = branchName === activeTab;
-
-          return (
-            <div
-              key={branchName}
-              className={cn(
-                'group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer border shrink-0 max-w-[170px]',
-                isActive || splitTab === branchName
-                  ? 'bg-card border-border shadow-xs text-foreground font-semibold'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-              )}
-            >
-              <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
-                className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
-                <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                <span className="truncate">{branchName}</span>
-                {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
-                {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
-                {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTab(branchName);
-                }}
-                className="size-3.5 rounded grid place-items-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity ml-0.5"
-                title={`Close ${branchName} tab`}
-                aria-label={`Close ${branchName} tab`}
-              >
-                <X className="size-2.5" />
-              </button>
-            </div>
-          );
-        })}
-
-        {/* Plus / Add Workspace Dropdown Menu */}
-        <Menu>
-          <MenuTrigger className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-dashed border-border/70 hover:border-border transition-colors cursor-pointer shrink-0">
-            <Plus className="size-3" />
-            <span>Add Workspace</span>
-          </MenuTrigger>
-          <MenuPopup align="start" className="w-64 p-1.5">
-            <MenuItem onClick={() => { minimize(); navigate('/new?from=chat'); }} className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold">
-              <Plus className="size-3" />New workspace
-            </MenuItem>
-            <p className="border-t border-border px-2 pt-2 text-[10px] text-muted-foreground">Open existing</p>
-            <div className="px-2 py-1 mb-1">
-              <div className="relative">
-                <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search workspaces..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-7 pr-2 py-1 text-xs rounded-md bg-muted/50 border border-border focus:outline-hidden focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
-                  autoFocus
-                />
-              </div>
-            </div>
-            <div className="max-h-56 overflow-y-auto space-y-0.5">
-              {filteredWorkspaces.length === 0 ? (
-                <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                  No workspaces found
-                </div>
-              ) : (
-                filteredWorkspaces.map((ws) => {
-                  const isOpen = openTabs.includes(ws.branchName);
-                  return (
-                    <MenuItem
-                      key={ws.branchName}
-                      onClick={() => {
-                        if (isOpen) {
-                          setActiveTab(ws.branchName);
-                        } else {
-                          addTab(ws.branchName);
-                        }
-                        setSearchQuery('');
-                      }}
-                      className={cn(
-                        'flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer',
-                        ws.branchName === activeTab && 'bg-accent/70 font-semibold',
-                      )}
-                    >
-                      <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <span className="font-medium text-foreground truncate">{ws.branchName}</span>
-                        {ws.description && (
-                          <span className="text-[10px] text-muted-foreground truncate">{ws.description}</span>
-                        )}
-                      </div>
-                      {isOpen && (
-                        <span className="text-[10px] text-primary font-medium px-1.5 py-0.5 rounded bg-primary/10">
-                          Open
-                        </span>
-                      )}
-                    </MenuItem>
-                  );
-                })
-              )}
-            </div>
-          </MenuPopup>
-        </Menu>
-        {activeTab && <Menu>
-          <MenuTrigger className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border/70 cursor-pointer shrink-0">
-            <Columns2 className="size-3" /><span>{splitTab ? 'Split view' : 'Split right'}</span>
-          </MenuTrigger>
-          <MenuPopup align="start" className="w-56 max-h-72 overflow-y-auto p-1.5">
-            {splitTab && <MenuItem onClick={() => setSplitTab(null)} className="text-xs">Close split</MenuItem>}
-            {workspaces.filter(workspace => workspace.branchName !== activeTab).map(workspace => <MenuItem key={workspace.branchName}
-              onClick={() => setSplitTab(workspace.branchName)} className="flex items-center gap-2 text-xs">
-              <FolderGit2 className="size-3" /><span className="truncate">{workspace.branchName}</span>{splitTab === workspace.branchName && <span className="ml-auto text-primary">Right</span>}
-            </MenuItem>)}
-            {workspaces.length < 2 && <p className="p-2 text-xs text-muted-foreground">Open another workspace to split the view.</p>}
-          </MenuPopup>
-        </Menu>}
-      </div>
-
-      {splitTab && (!wideEnough || !isMaximized) && <p className="border-b border-border px-3 py-1 text-xs text-muted-foreground">Split view is paused. Maximize the window on a wide screen to resume it.</p>}
+      {splitTab && (!wideEnough || !isMaximized) && <p className="border-b border-border px-3 py-1 text-xs text-muted-foreground">Docking is paused. Maximize the window on a wide screen to resume it.</p>}
       {/* Main Chat Body (Multi-Tab Mounted Execution) */}
       <div ref={bodyRef} className="flex flex-1 min-h-0 relative overflow-hidden bg-card" data-no-drag>
         {openTabs.length === 0 ? (
@@ -459,12 +453,10 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 className={cn('h-full min-w-0 flex-col', visible ? 'flex' : 'hidden', isSecondary && 'border-l border-border')}
                 style={visible ? { order: isPrimary ? 1 : 3, flex: showSplit ? isPrimary ? `0 0 ${splitRatio}%` : '1 1 0%' : '1 1 100%' } : undefined}
               >
-                <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1" data-no-drag>
-                  <span className="max-w-[32%] truncate text-[10px] font-semibold" title={branchName}>{branchName}</span>
-                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><TerminalSquare className="size-3" />CLI</span>
-                  {ws && <WorkspaceServicesControl workspace={branchName} active={visible && isOpen && !isMinimized} />}
-                  {isSecondary && <Button size="xs" variant="ghost" aria-label="Close split view" onClick={() => setSplitTab(null)}><X className="size-3" /></Button>}
-                </div>
+                {isSecondary && <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border px-2 py-1" data-no-drag>
+                  <span className="min-w-0 truncate text-[10px] text-muted-foreground" title={branchName}>{branchName}</span>
+                  <Button size="xs" variant="ghost" aria-label="Undock this workspace" onClick={() => setSplitTab(null)}><X className="size-3" /></Button>
+                </div>}
                 {!ws ? <div role="status" className="space-y-2 p-4 text-xs text-muted-foreground"><p>This workspace is unavailable. It may have been removed or is still loading.</p><Button size="xs" variant="outline" onClick={() => removeTab(branchName)}>Close unavailable tab</Button></div> : <>
                   <div className="flex-1 min-h-0">
                     <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} active={isOpen && !isMinimized && visible} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}

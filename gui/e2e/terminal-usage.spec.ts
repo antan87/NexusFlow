@@ -38,7 +38,11 @@ test('CLI chat shows exact saved-session usage and quota without a passive launc
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  const usage = chat.getByRole('region', { name: 'CLI session usage' });
+  const openPaneOptions = () => chat.getByRole('button', { name: 'Pane options' }).click();
+  // The overflow popup is portalled to the document body, so it is not a
+  // descendant of the chat region and must be queried from the page.
+  const usage = page.getByRole('region', { name: 'CLI session usage' });
+  await openPaneOptions();
   await expect(usage).toContainText('Input 1,000 · Output 240 · Cached input 300 tokens');
   await expect(usage).toContainText('7 requests remaining');
   await expect(usage).toContainText('Context window 12.0% used');
@@ -47,9 +51,10 @@ test('CLI chat shows exact saved-session usage and quota without a passive launc
   await page.screenshot({ path: 'test-results/cli-usage-active.png' });
   expect(launches).toHaveLength(0);
   remaining = 6;
-  await usage.getByRole('button', { name: 'Refresh session usage' }).click();
+  await page.getByRole('menuitem', { name: 'Refresh usage' }).click();
+  await openPaneOptions();
   await expect(usage).toContainText('6 requests remaining');
-  await chat.getByRole('button', { name: 'Resume session' }).click();
+  await page.getByRole('menuitem', { name: 'Continue a conversation…' }).click();
   const history = chat.getByRole('region', { name: 'Continue a conversation' });
   await expect(history.getByTestId('resume-session-row').filter({ hasText: saved.title })).toContainText('Input 1,000 · Output 240 · Cached input 300 tokens');
   await expect(history.getByTestId('resume-session-row').filter({ hasText: unknown.title })).toContainText('Token usage unavailable');
@@ -62,7 +67,9 @@ test('a new terminal does not borrow another conversation’s usage', async ({ p
   await page.route('**/api/workspace/feature-x/sessions*', route => route.fulfill({ json: { sessions: [saved] } }));
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const usage = page.getByRole('region', { name: 'CLI session usage' });
+  await chat.getByRole('button', { name: 'Pane options' }).click();
   await expect(usage).toContainText('No matching saved usage is available');
   await expect(usage).not.toContainText('Input 1,000');
 });
@@ -73,11 +80,15 @@ test('a new terminal finds usage after its harness saves one matching conversati
   await page.route('**/api/workspace/feature-x/sessions*', route => route.fulfill({ json: { sessions } }));
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  const openPaneOptions = () => chat.getByRole('button', { name: 'Pane options' }).click();
   const usage = page.getByRole('region', { name: 'CLI session usage' });
+  await openPaneOptions();
   await expect(usage).toContainText('No matching saved usage is available');
 
   sessions = [{ ...saved, id: '0199a213-81c0-7800-8aa1-bbab2a035a53', recordedCwd: feature.workspacePath, createdAt: '2026-09-21T10:01:00Z' }, saved];
-  await usage.getByRole('button', { name: 'Refresh session usage' }).click();
+  await page.getByRole('menuitem', { name: 'Refresh usage' }).click();
+  await openPaneOptions();
   await expect(usage).toContainText('Input 1,000 · Output 240 · Cached input 300 tokens');
 });
 
@@ -88,7 +99,9 @@ test('parallel fresh terminals do not claim the same saved usage', async ({ page
   await page.route('**/api/workspace/feature-x/sessions*', route => route.fulfill({ json: { sessions: [matchingSession] } }));
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const usage = page.getByRole('region', { name: 'CLI session usage' });
+  await chat.getByRole('button', { name: 'Pane options' }).click();
   await expect(usage).toContainText('No matching saved usage is available');
   await expect(usage).not.toContainText('Input 1,000');
 });
@@ -102,6 +115,7 @@ for (const target of ['claude', 'antigravity', 'copilot'] as const) {
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
     const usage = page.getByRole('region', { name: 'CLI session usage' });
+    await page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('button', { name: 'Pane options' }).click();
     await expect(usage).toContainText('Input 1,000 · Output 240 · Cached input 300 tokens');
     await expect(usage).not.toContainText('99,999');
   });
