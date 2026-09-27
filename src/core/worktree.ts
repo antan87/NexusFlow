@@ -65,7 +65,7 @@ export async function createWorktree(
   }
 
   // Resolve tracking branch for baseBranch (checks origin, upstream, etc.)
-  const { trackingBranch, remoteName, hasRemote } = await resolveTrackingBranch(
+  const { trackingBranch, hasRemote } = await resolveTrackingBranch(
     repoPath,
     baseBranch,
   );

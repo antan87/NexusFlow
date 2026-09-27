@@ -12,48 +12,14 @@ import { randomUUID } from 'node:crypto';
 import fse from 'fs-extra';
 import { execa } from 'execa';
 
-import type {
-  Feature,
-  WorkspaceContext,
-  RepoInfo,
-  SkillItem,
-  DomainPack,
-  ToolResult,
-  WorkspaceSkillsConfig,
-  WorkspaceLifecycle,
-} from '../../src/types.js';
-import {
-  getAllSkills,
-  saveSkill,
-  deleteSkill,
-  parseSkillMarkdown,
-  serializeSkillMarkdown,
-  getWorkspaceSkillsConfig,
-  saveWorkspaceSkillsConfig,
-  DEFAULT_SKILLS,
-  DEFAULT_CATEGORIES,
-} from '../../src/utils/skills-catalog.js';
-import {
-  getDomainPack,
-  getAvailableDomainPacks,
-  resolveActiveDomainRules,
-  BUILTIN_DOMAIN_PACKS,
-} from '../../src/core/domain-packs.js';
-import {
-  buildHarnessCliCommand,
-  launchExternalTerminal,
-  isValidSessionId,
-  SUPPORTED_ASSISTANTS,
-} from '../../src/utils/terminal-launch.js';
+import { Feature, WorkspaceContext, RepoInfo, ToolResult, WorkspaceSkillsConfig } from '../../src/types.js';
+import { getAllSkills, saveSkill, parseSkillMarkdown, DEFAULT_SKILLS } from '../../src/utils/skills-catalog.js';
+import { getDomainPack } from '../../src/core/domain-packs.js';
+
 import { buildContextContent } from '../../src/generators/base.js';
-import { refreshWorkspace } from '../../src/core/refresh.js';
-import { reconcileWorkspaceResources } from '../../src/resources/materializer.js';
-import { findTool, enabledTools } from '../../src/mcp/tools.js';
-import {
-  resourceIdSchema,
-  skillFrontmatterSchema,
-  workspaceResourcesConfigSchema,
-} from '../../src/resources/contracts.js';
+
+import { findTool } from '../../src/mcp/tools.js';
+import { skillFrontmatterSchema } from '../../src/resources/contracts.js';
 
 // ─── Progressive Testability Feature Gates ─────────────────────────────
 

@@ -6,7 +6,7 @@
 import { execa, execaSync } from 'execa';
 import * as path from 'node:path';
 
-import { isValidSessionId, isValidSessionUuid } from '../agent/session.js';
+import { isValidSessionId } from '../agent/session.js';
 import { TERMINAL_TITLE_PREFIX, TERMINAL_DEFAULT_TITLE } from '../core/constants.js';
 
 export interface TerminalLaunchOptions {

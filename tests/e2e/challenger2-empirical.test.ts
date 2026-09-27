@@ -19,12 +19,7 @@ import { createHash } from 'node:crypto';
 import fse from 'fs-extra';
 
 import type { AIAssistant, SkillItem } from '../../src/types.js';
-import {
-  getAllSkills,
-  saveSkill,
-  getWorkspaceSkillsConfig,
-  saveWorkspaceSkillsConfig,
-} from '../../src/utils/skills-catalog.js';
+import { getAllSkills, saveSkill, saveWorkspaceSkillsConfig } from '../../src/utils/skills-catalog.js';
 import {
   reconcileWorkspaceResources,
   ResourceConflictError,

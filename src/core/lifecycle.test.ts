@@ -7,7 +7,6 @@ import {
 import { legacyDefaultSteps } from './legacy-lifecycle.js';
 import * as workspaceState from './workspace-state.js';
 import * as workspaceCore from './workspace.js';
-import * as featureUtils from '../utils/feature.js';
 import * as multiGit from '../utils/multi-git.js';
 import { execa } from 'execa';
 

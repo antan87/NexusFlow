@@ -166,6 +166,12 @@ export async function saveConfig(config: NexusFlowConfig): Promise<void> {
   }
 
   const data = JSON.stringify(config, null, 2) + '\n';
+  // codeql[js/http-to-file-access] — the write target is not derived from the payload.
+  // configPath is resolveBrandHomeDir() joined with a constant, and the guard above rejects any
+  // redirection before the write. Callers do pass network-derived config (POST /api/config), but it
+  // is JSON that loadConfig reads back with JSON.parse, and `storageProvider` is a registry lookup
+  // that falls back to local storage rather than a module specifier. Locked in by the
+  // "ignores a config value that tries to become the write path" test in config.test.ts.
   await fs.writeFile(configPath, data, 'utf-8');
 
   // Re-activate the storage provider based on the saved configuration.
