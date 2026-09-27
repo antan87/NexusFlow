@@ -46,7 +46,7 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
 
       if (line.startsWith('@@')) {
         bgClass = 'bg-sky-500/15';
-        textClass = 'text-sky-400 font-bold italic';
+        textClass = 'text-info-foreground font-bold italic';
         const orig = line.match(/-(\d+)/);
         if (orig?.[1]) {
           currentOrigLine = parseInt(orig[1], 10) - 1;
@@ -59,12 +59,12 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
         }
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
         bgClass = 'bg-emerald-500/15';
-        textClass = 'text-emerald-400 font-semibold';
+        textClass = 'text-success-foreground font-semibold';
         currentModLine++;
         lineModNum = currentModLine;
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         bgClass = 'bg-rose-500/15';
-        textClass = 'text-rose-400 font-semibold';
+        textClass = 'text-destructive-foreground font-semibold';
         currentOrigLine++;
         lineOrigNum = currentOrigLine;
       } else if (line.startsWith(' ')) {
@@ -112,10 +112,10 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
           data-is-target={item.isTarget ? 'true' : undefined}
           className={`flex px-3 py-0.5 hover:bg-accent/40 ${item.isTarget ? 'bg-primary/25 border-l-2 border-primary font-bold' : item.bgClass}`}
         >
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground/60">
+          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
             {item.lineOrigNum ?? ''}
           </span>
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground/60">
+          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
             {item.lineModNum ?? ''}
           </span>
           <span className={`whitespace-pre flex-1 ${item.textClass}`}>{item.line}</span>

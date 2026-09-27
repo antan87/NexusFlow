@@ -21,25 +21,26 @@
   --card-foreground: #1f2328;
   --popover: #ffffff;
   --popover-foreground: #1f2328;
-  --primary: #0969da;
+  --primary: #0966d3;
   --primary-foreground: #ffffff;
   --secondary: #eaeef2;
   --secondary-foreground: #1f2328;
   --muted: #f6f8fa;
-  --muted-foreground: #656d76;
+  --muted-foreground: #5f6771;
   --accent: #eaeef2;
-  --accent-foreground: #0969da;
-  --destructive: #cf222e;
-  --destructive-foreground: #ffffff;
+  --accent-foreground: #0966d3;
+  --destructive: #c9212d;
+  /* Status *-foreground tokens are text colours on light surfaces (≥4.5:1), not text on a solid fill. */
+  --destructive-foreground: #a40e26;
   --border: #d0d7de;
   --input: #d0d7de;
   --ring: #0969da;
   --info: #0969da;
   --info-foreground: #0550ae;
-  --success: #1a7f37;
-  --success-foreground: #ffffff;
-  --warning: #9a6700;
-  --warning-foreground: #ffffff;
+  --success: #187733;
+  --success-foreground: #116329;
+  --warning: #8d5e00;
+  --warning-foreground: #7d4e00;
   --running: #0969da;
   --running-foreground: #ffffff;
 
@@ -59,7 +60,7 @@
     --muted-foreground: #8b949e;
     --accent: #21262d;
     --accent-foreground: #58a6ff;
-    --destructive: #f85149;
+    --destructive: #f8655d;
     --destructive-foreground: #fecdd3;
     --border: #30363d;
     --input: #30363d;
@@ -308,7 +309,7 @@
   --card-foreground: #112738;
   --popover: #ffffff;
   --popover-foreground: #112738;
-  --primary: #087e8b;
+  --primary: #087683;
   --primary-foreground: #ffffff;
   --secondary: #e6f0f5;
   --secondary-foreground: #112738;
@@ -354,7 +355,7 @@
   --card-foreground: #132a1c;
   --popover: #ffffff;
   --popover-foreground: #132a1c;
-  --primary: #15803d;
+  --primary: #147c3b;
   --primary-foreground: #ffffff;
   --secondary: #e6f4ea;
   --secondary-foreground: #132a1c;

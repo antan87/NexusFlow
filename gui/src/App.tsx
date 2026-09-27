@@ -1089,7 +1089,7 @@ Core Instructions:
               <div className="min-w-0">
                 <span className="font-semibold text-foreground">Desktop updates</span>
                 {updateCheckError ? (
-                  <p className="mt-0.5 truncate text-red-300" role="alert">{updateCheckError}</p>
+                  <p className="mt-0.5 truncate text-destructive-foreground" role="alert">{updateCheckError}</p>
                 ) : (
                   <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
                 )}
@@ -1108,15 +1108,15 @@ Core Instructions:
             {updateStatus && updateStatus.updateAvailable && !updateDeferred && (
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-warning-foreground shrink-0">
                     {updatingApp ? (
-                      <RefreshCw size={20} className="animate-spin text-amber-400" />
+                      <RefreshCw size={20} className="animate-spin text-warning-foreground" />
                     ) : (
                       <Sparkles size={20} />
                     )}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-amber-300">
+                    <h4 className="text-sm font-bold text-warning-foreground">
                       {updateStep === 'error' ? `${BRAND_NAME} update needs attention` : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : `A new version of ${BRAND_NAME} is available!`}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -1182,7 +1182,7 @@ Core Instructions:
             {!config && (
               <div className="flex flex-col items-center justify-center py-40 gap-6">
                 <div className="bg-red-500/10 p-6 rounded-full">
-                  <AlertTriangle className="text-red-400" size={48} />
+                  <AlertTriangle className="text-destructive-foreground" size={48} />
                 </div>
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>

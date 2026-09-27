@@ -441,10 +441,10 @@ const MessageBubble = memo(function MessageBubble({
             {msg.usage && (
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground font-mono">
                 <span className="inline-flex items-center gap-1 bg-muted/60 px-1.5 py-0.5 rounded border border-border/40">
-                  <Zap size={10} className="text-amber-500 shrink-0" />
+                  <Zap size={10} className="text-warning-foreground shrink-0" />
                   <span>{msg.usage.inputTokens.toLocaleString()} in</span>
                   {typeof msg.usage.cachedInputTokens === 'number' && msg.usage.cachedInputTokens > 0 && (
-                    <span className="text-muted-foreground/70">({msg.usage.cachedInputTokens.toLocaleString()} cached)</span>
+                    <span className="text-muted-foreground">({msg.usage.cachedInputTokens.toLocaleString()} cached)</span>
                   )}
                   <span>·</span>
                   <span>{msg.usage.outputTokens.toLocaleString()} out</span>
@@ -1709,7 +1709,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-muted/60 border border-border/60 text-muted-foreground shrink-0"
               title={`Session Total: ${sessionUsage.inputTokens.toLocaleString()} in${sessionUsage.cachedInputTokens ? ` (${sessionUsage.cachedInputTokens.toLocaleString()} cached)` : ''} · ${sessionUsage.outputTokens.toLocaleString()} out${sessionUsage.costUsdEstimate !== undefined ? ` · ~$${sessionUsage.costUsdEstimate.toFixed(3)}` : ''}`}
             >
-              <Zap size={11} className="text-amber-500 shrink-0" />
+              <Zap size={11} className="text-warning-foreground shrink-0" />
               <span>{formatCompact(sessionUsage.totalTokens ?? (sessionUsage.inputTokens + sessionUsage.outputTokens))}</span>
             </div>
           )}
@@ -1720,7 +1720,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                 sessionQuota.tokens?.status === 'exceeded' || sessionQuota.requests?.status === 'exceeded'
                   ? "bg-destructive/10 border-destructive/30 text-destructive-foreground"
                   : sessionQuota.tokens?.status === 'approaching_limit' || sessionQuota.requests?.status === 'approaching_limit'
-                  ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
+                  ? "bg-amber-500/10 border-amber-500/30 text-warning-foreground"
                   : "bg-muted/60 border-border/60 text-muted-foreground"
               )}
               title={
@@ -1739,7 +1739,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
             >
               <Hash size={11} className="opacity-60" />
               <span>{activeSessionId.slice(0, 8)}...</span>
-              {copiedSessionId ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} className="opacity-60" />}
+              {copiedSessionId ? <Check size={11} className="text-success-foreground" /> : <Copy size={11} className="opacity-60" />}
             </button>
           )}
           {messages.length > 0 && (
@@ -1862,10 +1862,10 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
             className="flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs shadow-xs animate-fade-in"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2 font-semibold text-amber-500">
+              <div className="flex flex-wrap items-center gap-2 font-semibold text-warning-foreground">
                 <Shield size={14} className="animate-pulse shrink-0" />
                 <span>Tool Approval Required</span>
-                <Badge variant="outline" className="text-[10px] uppercase font-mono border-amber-500/40 text-amber-600 dark:text-amber-400">
+                <Badge variant="outline" className="text-[10px] uppercase font-mono border-amber-500/40 text-amber-700 dark:text-amber-400">
                   {req.tool}
                 </Badge>
                 {req.description && (
@@ -1946,7 +1946,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                     disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
                     className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Sparkles size={12} className="text-amber-500 shrink-0" />
+                    <Sparkles size={12} className="text-warning-foreground shrink-0" />
                     <span className="max-w-44 truncate">{modelLabelForId(currentProvider, modelsByProvider[currentProvider.id] ?? '')}</span>
                     <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
@@ -1961,7 +1961,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                       >
                         <span className="flex flex-col">
                           <span className="font-medium flex items-center gap-1.5">
-                            <Sparkles size={11} className="text-amber-500" />
+                            <Sparkles size={11} className="text-warning-foreground" />
                             {m.label}
                           </span>
                           <span className="text-xs text-muted-foreground">{m.description}</span>
@@ -1981,7 +1981,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                     className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                     title={currentExecutionProfile.description}
                   >
-                    <Shield size={12} className={currentExecutionProfile.id === 'workspace-write' ? "text-amber-500 shrink-0" : "text-emerald-500 shrink-0"} />
+                    <Shield size={12} className={currentExecutionProfile.id === 'workspace-write' ? "text-warning-foreground shrink-0" : "text-success-foreground shrink-0"} />
                     <span>{formatShortProfileLabel(currentExecutionProfile.label)}</span>
                     <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
@@ -1996,7 +1996,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                       >
                         <span className="flex flex-col">
                           <span className="font-medium flex items-center gap-1.5">
-                            <Shield size={12} className={profile.id === 'workspace-write' ? "text-amber-500" : "text-emerald-500"} />
+                            <Shield size={12} className={profile.id === 'workspace-write' ? "text-warning-foreground" : "text-success-foreground"} />
                             {profile.label}
                           </span>
                           <span className="text-xs text-muted-foreground">{profile.description}</span>
@@ -2015,7 +2015,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                     disabled={connected || connecting || busy || sessionSwitching || Boolean(retryableKickoff)}
                     className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-2xs transition-colors hover:bg-accent hover:border-border disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Zap size={12} className={effortsByProvider[currentProvider.id] ? "text-amber-500 fill-amber-500/20 shrink-0" : "text-muted-foreground shrink-0"} />
+                    <Zap size={12} className={effortsByProvider[currentProvider.id] ? "text-warning-foreground fill-amber-500/20 shrink-0" : "text-muted-foreground shrink-0"} />
                     <span>{reasoningEffortLabelForId(effortsByProvider[currentProvider.id] ?? '')}</span>
                     <ChevronDown size={11} className="opacity-50 ml-0.5" />
                   </MenuTrigger>
@@ -2030,7 +2030,7 @@ export function AgentChat({ ws, draft, onDraftConsumed }: AgentChatProps) {
                       >
                         <span className="flex flex-col">
                           <span className="font-medium flex items-center gap-1.5">
-                            {e.id && <Zap size={12} className="text-amber-500" />}
+                            {e.id && <Zap size={12} className="text-warning-foreground" />}
                             {e.label}
                           </span>
                           <span className="text-xs text-muted-foreground">{e.description}</span>

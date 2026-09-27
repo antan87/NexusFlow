@@ -331,9 +331,9 @@ export function DashboardPage({
               ? `${workspacesWithChanges} ${workspacesWithChanges === 1 ? 'workspace' : 'workspaces'} with diffs`
               : workspacesLoading ? 'Checking workspace changes…'
                 : `Checking ${checkedWorkspaceCount} of ${workspaces.length} workspaces`,
-            accent: 'border-t-amber-500/70', iconStyle: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+            accent: 'border-t-amber-500/70', iconStyle: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
           { label: 'Tracked repos', value: workspacesLoading ? '—' : trackedRepos, icon: Boxes,
-            accent: 'border-t-emerald-500/70', iconStyle: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
+            accent: 'border-t-emerald-500/70', iconStyle: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },
           { label: 'AI assistants', value: aiDetect.isLoading || launchTargets.isLoading || aiDetect.isError || launchTargets.isError
             ? '—' : readyAssistants, icon: Sparkles,
             accent: 'border-t-violet-500/70', iconStyle: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
@@ -346,7 +346,7 @@ export function DashboardPage({
                   <Icon size={15} />
                 </span>
               </div>
-              <div className={`mt-1 text-2xl font-semibold tracking-tight tabular-nums ${label === 'Review queue' && changedFiles > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
+              <div className={`mt-1 text-2xl font-semibold tracking-tight tabular-nums ${label === 'Review queue' && changedFiles > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-foreground'}`}>
                 {value}{label === 'Review queue' && typeof value === 'number' && <> <span className="text-[10px] font-normal text-muted-foreground">files</span></>}
               </div>
               {detail && <p className="mt-0.5 text-[11px] text-muted-foreground">{detail}</p>}

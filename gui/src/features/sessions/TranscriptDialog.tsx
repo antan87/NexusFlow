@@ -216,7 +216,7 @@ export function TranscriptDialog({
                       {typeof msg.usage.costUsdEstimate === 'number' && (
                         <>
                           <span>•</span>
-                          <span className="text-emerald-600 dark:text-emerald-400">~${msg.usage.costUsdEstimate.toFixed(3)}</span>
+                          <span className="text-emerald-700 dark:text-emerald-400">~${msg.usage.costUsdEstimate.toFixed(3)}</span>
                         </>
                       )}
                     </div>

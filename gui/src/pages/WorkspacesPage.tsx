@@ -50,10 +50,10 @@ const renderEditorIcon = (id: string, name: string) => {
     return <Sparkles size={14} className="text-purple-400 shrink-0" />;
   }
   if (lower.includes('powershell') || lower.includes('pwsh')) {
-    return <Terminal size={14} className="text-sky-400 shrink-0" />;
+    return <Terminal size={14} className="text-info-foreground shrink-0" />;
   }
   if (lower.includes('cmd') || lower.includes('command prompt')) {
-    return <Terminal size={14} className="text-amber-400 shrink-0" />;
+    return <Terminal size={14} className="text-warning-foreground shrink-0" />;
   }
   return <Code2 size={14} className="shrink-0" />;
 };
@@ -661,9 +661,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           {isLegacy && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent p-3 backdrop-blur-md shadow-xs">
               <div className="flex items-center gap-2.5 text-xs text-amber-200">
-                <Sparkles size={16} className="text-amber-400 shrink-0 animate-pulse" />
+                <Sparkles size={16} className="text-warning-foreground shrink-0 animate-pulse" />
                 <span>
-                  <strong className="font-semibold text-amber-300">Legacy {LEGACY_BRAND_NAME} Workspace:</strong> Upgrade to native {BRAND_NAME} manifest and synchronized artifacts.
+                  <strong className="font-semibold text-warning-foreground">Legacy {LEGACY_BRAND_NAME} Workspace:</strong> Upgrade to native {BRAND_NAME} manifest and synchronized artifacts.
                 </span>
               </div>
               <button
@@ -696,9 +696,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Git Status</div>
                           <div className="text-sm font-extrabold font-mono text-foreground truncate">
                             {totalChangedFiles > 0 ? (
-                              <span className="text-amber-400">{totalChangedFiles} Modified</span>
+                              <span className="text-warning-foreground">{totalChangedFiles} Modified</span>
                             ) : (
-                              <span className="text-emerald-400">Clean Tree</span>
+                              <span className="text-success-foreground">Clean Tree</span>
                             )}
                           </div>
                         </div>
@@ -816,7 +816,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                   <div className="font-mono font-bold text-foreground text-xs sm:text-sm truncate">
                                     {r.name}
                                   </div>
-                                  <div className="font-mono text-[10px] text-muted-foreground/80 truncate max-w-xs">
+                                  <div className="font-mono text-[10px] text-muted-foreground truncate max-w-xs">
                                     {r.path}
                                   </div>
                                 </div>
@@ -828,8 +828,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                   r.changedCount === null
                                     ? 'border-border bg-muted/60 text-muted-foreground'
                                     : r.changedCount > 0
-                                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                                    ? 'border-amber-500/30 bg-amber-500/10 text-warning-foreground'
+                                    : 'border-emerald-500/30 bg-emerald-500/10 text-success-foreground'
                                 )}>
                                   {r.changedCount === null ? '—' : r.changedCount > 0 ? `${r.changedCount} mod` : 'Clean'}
                                 </span>
@@ -929,15 +929,15 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                           className={cn(
                                             'inline-flex items-center gap-1 px-2 py-0.5 rounded-l-md text-xs font-medium transition-all cursor-pointer',
                                             isRootAssigned
-                                              ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-xs'
+                                              ? 'bg-emerald-500/20 text-success-foreground font-semibold shadow-xs'
                                               : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                           )}
                                           title={`${root.name}: ${root.description} (Click to toggle)`}
                                         >
-                                          <Tag size={10} className={isRootAssigned ? 'text-emerald-400' : 'text-muted-foreground'} />
+                                          <Tag size={10} className={isRootAssigned ? 'text-success-foreground' : 'text-muted-foreground'} />
                                           <span>{root.name}</span>
                                           {!root.isTemplate && (
-                                            <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                            <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                           )}
                                           {isRootAssigned ? (
                                             <span className="size-1.5 rounded-full bg-emerald-400" />
@@ -952,8 +952,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                             handleOpenTagDetails(root);
                                           }}
                                           className={cn(
-                                            'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer',
-                                            isRootAssigned ? 'bg-emerald-500/20 text-emerald-300/80 hover:text-emerald-200' : '',
+                                            'px-1 py-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer',
+                                            isRootAssigned ? 'bg-emerald-500/20 text-success-foreground/80 hover:text-emerald-200' : '',
                                           )}
                                           title={`Inspect & edit ${root.name} details`}
                                           aria-label={`Inspect & edit ${root.name} details`}
@@ -972,14 +972,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                                 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l-md text-[11px] font-medium transition-all cursor-pointer border-y border-l',
                                                 isChildAssigned
                                                   ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200 font-semibold shadow-xs'
-                                                  : 'border-transparent text-muted-foreground/80 hover:bg-muted/50 hover:text-foreground',
+                                                  : 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                                               )}
                                               title={`${child.name} (Inherits ${root.name}): ${child.description} (Click to toggle)`}
                                             >
                                               <span className="text-muted-foreground text-[10px]">↳</span>
                                               <span>{child.name.replace(/^.*\s*›\s*/, '')}</span>
                                               {!child.isTemplate && (
-                                                <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                                <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                               )}
                                               {isChildAssigned ? (
                                                 <span className="size-1.5 rounded-full bg-emerald-400" />
@@ -994,7 +994,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                                 handleOpenTagDetails(child);
                                               }}
                                               className={cn(
-                                                'px-1 py-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer border-y border-r',
+                                                'px-1 py-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer border-y border-r',
                                                 isChildAssigned ? 'border-emerald-500/40 bg-emerald-500/25 text-emerald-200/80 hover:text-emerald-100' : 'border-transparent',
                                               )}
                                               title={`Inspect & edit ${child.name} details`}
@@ -1034,7 +1034,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                         <span>{trait.name}</span>
                                         <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-200 font-mono">Trait</span>
                                         {!trait.isTemplate && (
-                                          <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">custom</span>
+                                          <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-warning-foreground font-mono">custom</span>
                                         )}
                                         {isAssigned ? (
                                           <span className="size-1.5 rounded-full bg-indigo-400" />
@@ -1048,7 +1048,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                                           e.stopPropagation();
                                           handleOpenTagDetails(trait);
                                         }}
-                                        className="p-1 rounded-r-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                                        className="p-1 rounded-r-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
                                         title={`Inspect & edit ${trait.name} details`}
                                         aria-label={`Inspect & edit ${trait.name} details`}
                                       >
@@ -1116,7 +1116,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                             />
                             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                               <span className="flex items-center gap-1">
-                                <Sparkles size={11} className="text-amber-400" />
+                                <Sparkles size={11} className="text-warning-foreground" />
                                 <span>Auto-detects subsystem domain tags upon saving</span>
                               </span>
                               <span>{specInput.length} chars</span>
@@ -1139,20 +1139,20 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                           <div className="mt-2 pt-2 border-t border-border/50 space-y-1.5">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                <ShieldCheck size={12} className="text-emerald-400" />
+                                <ShieldCheck size={12} className="text-success-foreground" />
                                 <span>Active Rules & Verification ({domainData.allRules.length})</span>
                               </div>
                               <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
                                 <span className="px-1 py-0.2 rounded bg-purple-500/10 text-purple-300">Org Root</span>
                                 <span>›</span>
-                                <span className="px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-300">Verticals</span>
+                                <span className="px-1 py-0.2 rounded bg-emerald-500/10 text-success-foreground">Verticals</span>
                                 <span>›</span>
                                 <span className="px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-300">Traits</span>
                               </div>
                             </div>
                             <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
                               {domainData.allRules.slice(0, 4).map((rule, idx) => (
-                                <div key={idx} className="text-[11px] text-muted-foreground/90 flex items-start gap-1.5 leading-snug">
+                                <div key={idx} className="text-[11px] text-muted-foreground flex items-start gap-1.5 leading-snug">
                                   <span className="text-primary font-bold">›</span>
                                   <span className="truncate">{rule}</span>
                                 </div>
@@ -1436,7 +1436,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     'text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold border',
                     inspectingTag.isTemplate
                       ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
-                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+                      : 'border-amber-500/30 bg-amber-500/10 text-warning-foreground',
                   )}
                 >
                   {inspectingTag.isTemplate ? 'Built-in Template' : 'Custom / Overridden'}

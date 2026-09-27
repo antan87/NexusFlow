@@ -889,7 +889,7 @@ export function StartWorkPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-5 px-1.5 text-[11px] text-amber-500 hover:text-amber-600"
+                            className="h-5 px-1.5 text-[11px] text-warning-foreground hover:text-amber-600"
                             onClick={() =>
                               handlePullSingle(
                                 repo.path,
@@ -907,7 +907,7 @@ export function StartWorkPage() {
                 })}
               </ul>
               {pullWarning && (
-                <p className="mt-2 text-xs text-amber-500">{pullWarning}</p>
+                <p className="mt-2 text-xs text-warning-foreground">{pullWarning}</p>
               )}
             </div>
           )}

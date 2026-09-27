@@ -513,7 +513,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
             <span className="size-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="truncate">
               <strong>Opened in ContextSpace:</strong>{' '}
-              <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded text-emerald-400">
+              <code className="font-mono bg-background/80 px-1.5 py-0.5 rounded text-success-foreground">
                 {launchedInfo.cmd}
               </code>
             </span>
@@ -525,7 +525,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                 await safeCopyToClipboard(launchedInfo.cmd);
                 showToast?.('Command copied to clipboard!', 'success');
               }}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border border-emerald-500/40 bg-emerald-500/15 text-success-foreground hover:bg-emerald-500/25 transition-colors cursor-pointer"
             >
               <Copy size={11} /> Copy
             </button>
@@ -562,7 +562,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : 'Copilot'}
                       </span>
                       <span>•</span>
-                      <span className="font-mono text-muted-foreground/80">{sess.id.slice(0, 8)}</span><SessionKind session={sess} />
+                      <span className="font-mono text-muted-foreground">{sess.id.slice(0, 8)}</span><SessionKind session={sess} />
                       <span>•</span>
                       <SessionActivity session={sess} />
                       <span>•</span>
@@ -573,7 +573,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         <>
                           <span>•</span>
                           <span
-                            className="font-mono text-muted-foreground/90"
+                            className="font-mono text-muted-foreground"
                             title={`Input: ${(sess.usage.inputTokens ?? 0).toLocaleString()} (${(sess.usage.cachedInputTokens ?? 0).toLocaleString()} cached) · Output: ${(sess.usage.outputTokens ?? 0).toLocaleString()}`}
                           >
                             {formatCompact(sess.usage.totalTokens ?? ((sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0)))} tokens
@@ -764,7 +764,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                                 <>
                                   <span>•</span>
                                   <span
-                                    className="text-muted-foreground/90"
+                                    className="text-muted-foreground"
                                     title={`Input: ${(sess.usage.inputTokens ?? 0).toLocaleString()} (${(sess.usage.cachedInputTokens ?? 0).toLocaleString()} cached) · Output: ${(sess.usage.outputTokens ?? 0).toLocaleString()}`}
                                   >
                                     {formatCompact(sess.usage.totalTokens ?? ((sess.usage.inputTokens ?? 0) + (sess.usage.outputTokens ?? 0)))} tokens

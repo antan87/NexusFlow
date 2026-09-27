@@ -310,7 +310,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             {repoName}
           </span>
           {hunks.length > 0 && (
-            <span className="font-mono text-[10px] text-muted-foreground/80">
+            <span className="font-mono text-[10px] text-muted-foreground">
               {hunks.length} {hunks.length === 1 ? 'hunk' : 'hunks'}
             </span>
           )}
@@ -430,8 +430,8 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
                   <span>Section {i + 1}</span>
                   {(adds > 0 || dels > 0) && (
                     <span className="ml-1 text-[9px] opacity-80">
-                      {adds > 0 && <span className="text-emerald-300">+{adds}</span>}
-                      {dels > 0 && <span className="text-rose-300">-{dels}</span>}
+                      {adds > 0 && <span className="text-success-foreground">+{adds}</span>}
+                      {dels > 0 && <span className="text-destructive-foreground">-{dels}</span>}
                     </span>
                   )}
                 </button>
@@ -537,7 +537,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             <span className="px-1.5 text-muted-foreground">
               Hunk <strong className="text-foreground">{activeHunkIndex + 1}</strong> of {hunks.length}
               {currentHunk && (
-                <span className="text-[10px] text-muted-foreground/70 ml-1">
+                <span className="text-[10px] text-muted-foreground ml-1">
                   (Orig L{currentHunk.startLineOriginal} → Mod L{currentHunk.startLineModified})
                 </span>
               )}
@@ -559,10 +559,10 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
                 className={cn(
                   'font-mono text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ml-1 border',
                   hunkStates[currentHunk.id] === 'accepted'
-                    ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-400'
+                    ? 'border-emerald-500/30 bg-emerald-500/15 text-success-foreground'
                     : hunkStates[currentHunk.id] === 'rejected'
-                      ? 'border-rose-500/30 bg-rose-500/15 text-rose-400'
-                      : 'border-amber-500/30 bg-amber-500/15 text-amber-400'
+                      ? 'border-rose-500/30 bg-rose-500/15 text-destructive-foreground'
+                      : 'border-amber-500/30 bg-amber-500/15 text-warning-foreground'
                 )}
               >
                 {hunkStates[currentHunk.id]}
@@ -593,7 +593,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             <button
               type="button"
               onClick={() => void handleAcceptHunk()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-colors cursor-pointer shadow-2xs"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-success-foreground border border-emerald-500/30 transition-colors cursor-pointer shadow-2xs"
               title="Accept this hunk (Shortcut: a)"
             >
               <Check size={12} />
@@ -604,7 +604,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             <button
               type="button"
               onClick={() => void handleRejectHunk()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 transition-colors cursor-pointer shadow-2xs"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-destructive-foreground border border-rose-500/30 transition-colors cursor-pointer shadow-2xs"
               title="Reject this hunk (Shortcut: r)"
             >
               <X size={12} />
@@ -617,7 +617,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             <button
               type="button"
               onClick={handleOpenRefineModal}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 transition-colors cursor-pointer shadow-2xs"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-warning-foreground border border-amber-500/30 transition-colors cursor-pointer shadow-2xs"
               title="Prepare refinement instructions in AI chat"
             >
               <RefreshCw size={11} />

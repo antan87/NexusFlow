@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Menu as MenuIcon,
   FolderGit2,
@@ -28,7 +28,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { BRAND_NAME } from '../brand.js';
 import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
-import { useIsMobile } from '../components/ui/use-mobile.js';
+import { useIsMobile, useMediaQuery } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
@@ -92,7 +92,17 @@ function SidebarContents({
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
-  const { isCollapsed, toggleCollapsed, customTitles, updateTitle } = useWorktreeNavigationState();
+  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved, customTitles, updateTitle } = useWorktreeNavigationState();
+  // In a narrow window (split screen, 200% zoom) the rail is the default so the
+  // task keeps the room; expanding it there is temporary and leaves the saved choice alone.
+  const narrow = useMediaQuery('(min-width: 768px) and (max-width: 1099px)');
+  const [narrowExpanded, setNarrowExpanded] = useState(false);
+  const isCollapsed = narrow ? !narrowExpanded : savedCollapsed;
+  const toggleCollapsed = useCallback(() => {
+    if (narrow) setNarrowExpanded((expanded) => !expanded);
+    else toggleSaved();
+  }, [narrow, toggleSaved]);
+  useEffect(() => { setNarrowExpanded(false); }, [pathname]);
   const cockpit = useCockpitStore();
 
   // Detect if on a workspace route
@@ -184,12 +194,13 @@ function SidebarContents({
       <aside className="context-sidebar flex w-14 shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden transition-[width] duration-200 items-center py-3 justify-between z-30">
         {/* Top Icons */}
         <div className="flex flex-col items-center gap-3">
-          <Link to="/overview" title={`${BRAND_NAME} v${appVersion}`}>
+          <Link to="/overview" aria-label={`${BRAND_NAME} overview`} title={`${BRAND_NAME} v${appVersion}`}>
             <ContextSpaceIcon size={24} className="rounded-md shadow-xs hover:scale-105 transition-transform" />
           </Link>
 
           <NavLink
             to="/overview"
+            aria-label="Overview Activity"
             title="Overview Activity"
             className={({ isActive }) =>
               cn(
@@ -203,6 +214,7 @@ function SidebarContents({
 
           <NavLink
             to="/new"
+            aria-label="Start new work"
             title="Start new work"
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
@@ -217,6 +229,7 @@ function SidebarContents({
             <button
               type="button"
               onClick={toggleCollapsed}
+              aria-label={`Active Workspace: ${activeWorkspace.branchName} (Click to expand)`}
               title={`Active Workspace: ${activeWorkspace.branchName} (Click to expand)`}
               className="relative p-2 rounded-lg bg-primary/15 text-primary border border-primary/30 cursor-pointer hover:bg-primary/25 transition-colors"
             >
@@ -233,6 +246,7 @@ function SidebarContents({
           <button
             type="button"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
@@ -242,6 +256,7 @@ function SidebarContents({
           <button
             type="button"
             onClick={toggleCollapsed}
+            aria-label="Expand Cockpit Sidebar (Shortcut: z)"
             title="Expand Cockpit Sidebar (Shortcut: z)"
             className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 border border-border/50 transition-colors cursor-pointer"
           >
@@ -263,7 +278,7 @@ function SidebarContents({
             {BRAND_NAME}
           </span>
         </Link>
-        <span className="text-[10px] font-mono text-muted-foreground/60">v{appVersion}</span>
+        <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
       </div>
 
       {/* Main Content Area */}
@@ -320,7 +335,7 @@ function SidebarContents({
                 <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                   Workspaces
                 </span>
-                <span className="text-[10px] font-mono text-muted-foreground/80">
+                <span className="text-[10px] font-mono text-muted-foreground">
                   {workspaces.length}
                 </span>
               </div>
@@ -328,7 +343,7 @@ function SidebarContents({
               {/* Filter Search & Sort */}
               <div className="flex items-center gap-1 mb-2">
                 <div className="relative flex-1">
-                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input
                     type="text"
                     value={search}
@@ -390,11 +405,11 @@ function SidebarContents({
                           <span className="truncate font-medium text-foreground" title={w.name || w.branchName}>
                             {w.name || w.branchName}
                           </span>
-                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground/80">
+                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
                             {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
                             {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
                             <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
-                            {hasChanges && <span className="text-amber-500 font-semibold">• ±{st!.changedFiles}</span>}
+                            {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
                         </Link>
                         <div className="flex items-center gap-1 shrink-0">
@@ -499,7 +514,7 @@ function SidebarContents({
           <span>Collapse (z)</span>
         </button>
 
-        <span className="font-mono text-[10px] text-muted-foreground/50">256px</span>
+        <span className="font-mono text-[10px] text-muted-foreground">256px</span>
       </div>
     </aside>
   );
