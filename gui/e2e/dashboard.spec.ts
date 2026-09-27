@@ -87,6 +87,52 @@ test.describe('Overview diffs', () => {
   });
 });
 
+test.describe('Many workspaces', () => {
+  const workspaces = Array.from({ length: 33 }, (_, index) => ({
+    ...feature,
+    id: `feature-${index}`,
+    branchName: `feature-${index}`,
+    description: `Workspace ${index}`,
+    workspacePath: `C:/ws/feature-${index}`,
+    createdAt: new Date(Date.UTC(2026, 5, 33 - index)).toISOString(),
+  }));
+  test.use({
+    workspacesData: [workspaces, { scope: 'test' }],
+    workspacesStatusData: Object.fromEntries(workspaces.map((ws, index) => [ws.branchName, {
+      id: ws.id, branchName: ws.branchName, changedFiles: index === 32 ? 7 : 0,
+      dirtyRepos: index === 32 ? 1 : 0, runningServices: 0,
+      syncStatus: 'up-to-date', pendingValidation: false,
+    }])),
+  });
+
+  test('loads status in pages, then reveals cards and sidebar rows on demand', async ({ page }) => {
+    const offsets: number[] = [];
+    let releaseSecondPage = () => {};
+    const secondPageHeld = new Promise<void>((resolve) => { releaseSecondPage = resolve; });
+    await page.route('**/api/workspaces/status?*', async (route) => {
+      if (new URL(route.request().url()).searchParams.get('offset') === '24') await secondPageHeld;
+      await route.fallback();
+    });
+    page.on('request', (request) => {
+      if (request.url().includes('/api/workspaces/status?')) {
+        offsets.push(Number(new URL(request.url()).searchParams.get('offset')));
+      }
+    });
+    await page.goto('/');
+    const totals = page.getByRole('region', { name: 'Overview totals' });
+    await expect(page.getByRole('article')).toHaveCount(12);
+    await expect(totals.getByRole('group', { name: 'Review queue' })).toContainText('Checking 24 of 33 workspaces');
+    releaseSecondPage();
+    await expect(totals.getByRole('group', { name: 'Review queue' })).toContainText('7');
+    expect(offsets).toContain(0);
+    expect(offsets).toContain(24);
+    await page.getByRole('button', { name: /Show more workspaces \(21 remaining\)/ }).click();
+    await expect(page.getByRole('article')).toHaveCount(24);
+    await page.getByRole('button', { name: /Show more workspaces \(3 remaining\)/ }).click();
+    await expect(page.getByRole('link', { name: /feature-32/ })).toBeVisible();
+  });
+});
+
 test.describe('Narrow-screen navigation', () => {
   test.use({ viewport: { width: 390, height: 844 }, workspacesData: [feature] });
 

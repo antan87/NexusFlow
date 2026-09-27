@@ -154,18 +154,28 @@ function AppInner() {
   // Workspaces list + at-a-glance statuses live in the shared react-query
   // cache — the same one the StartWorkPage/ProjectsPage mutations invalidate,
   // so a created or deleted workspace shows up here without manual syncing.
-  // Status polling is expensive server-side (git status across every repo of
-  // every workspace), so it only runs on the routes that display statuses.
+  // Status checks are expensive server-side, so fetch bounded pages only on
+  // routes that display them. The overview shows progress until totals settle.
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
   const statusesQuery = useWorkspacesStatus({
-    enabled: configExists && !configLoading,
-    intervalMs: onStatusRoute ? 15_000 : false,
+    enabled: configExists && !configLoading && onStatusRoute,
+    intervalMs: onStatusRoute && (workspacesQuery.data?.length ?? 0) <= 24 ? 15_000 : false,
   });
+  const { hasNextPage, isFetching: isFetchingStatuses, isError: statusesError, fetchNextPage } = statusesQuery;
+  useEffect(() => {
+    if (onStatusRoute && hasNextPage && !isFetchingStatuses && !statusesError) {
+      void fetchNextPage();
+    }
+  }, [onStatusRoute, hasNextPage, isFetchingStatuses, statusesError, fetchNextPage]);
   const workspaces: Feature[] = workspacesQuery.data ?? [];
   const workspacesLoading = workspacesQuery.isLoading;
-  const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
+  const workspaceStatuses: Record<string, WorkspaceStatus> = Object.assign({},
+    ...(statusesQuery.data?.pages.map((page) => page.statuses) ?? []));
+  const lastStatusPage = statusesQuery.data?.pages.at(-1);
+  const checkedWorkspaceCount = lastStatusPage?.nextOffset ?? lastStatusPage?.total ?? 0;
+  const statusesComplete = !statusesQuery.isLoading && !statusesQuery.hasNextPage && !statusesQuery.isError;
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
@@ -990,6 +1000,10 @@ Core Instructions:
       workspaces={workspaces}
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
+      checkedWorkspaceCount={checkedWorkspaceCount}
+      statusesComplete={statusesComplete}
+      statusesError={statusesQuery.isError}
+      onRetryStatuses={() => { void statusesQuery.refetch(); }}
       onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onNewWorkspace={() => navigate('/new')}
       showToast={showToast}

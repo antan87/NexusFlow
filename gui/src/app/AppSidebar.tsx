@@ -86,6 +86,7 @@ function SidebarContents({
   const { openCli } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
+  const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
@@ -338,7 +339,7 @@ function SidebarContents({
                   <input
                     type="text"
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => { setSearch(e.target.value); setVisibleWorkspaceCount(30); }}
                     placeholder="Filter..."
                     className="w-full rounded-md border border-border/60 bg-muted/30 pl-6 pr-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
                   />
@@ -353,7 +354,7 @@ function SidebarContents({
                   </MenuTrigger>
                   <MenuPopup side="bottom" align="end" className="w-36 text-xs">
                     {(Object.keys(sortLabelMap) as WorkspaceSortOption[]).map((key) => (
-                      <MenuItem key={key} onClick={() => setSortBy(key)} className="flex items-center justify-between">
+                      <MenuItem key={key} onClick={() => { setSortBy(key); setVisibleWorkspaceCount(30); }} className="flex items-center justify-between">
                         <span>{sortLabelMap[key]}</span>
                         {sortBy === key && <Check size={12} className="text-primary" />}
                       </MenuItem>
@@ -373,7 +374,7 @@ function SidebarContents({
                     No workspaces match
                   </div>
                 ) : (
-                  filteredWorkspaces.map((w) => {
+                  filteredWorkspaces.slice(0, visibleWorkspaceCount).map((w) => {
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
@@ -434,6 +435,12 @@ function SidebarContents({
                   })
                 )}
               </div>
+              {filteredWorkspaces.length > visibleWorkspaceCount && (
+                <button type="button" className="mt-2 w-full rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => setVisibleWorkspaceCount((count) => count + 30)}>
+                  Show more workspaces ({filteredWorkspaces.length - visibleWorkspaceCount} remaining)
+                </button>
+              )}
             </div>
           </div>
         )}

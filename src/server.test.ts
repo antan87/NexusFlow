@@ -2755,6 +2755,44 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('GET /api/workspaces/status', () => {
+    it('checks only the requested page and rejects invalid page sizes', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue(Array.from({ length: 30 }, (_, index) => ({
+        id: `ws-${index}`,
+        branchName: `feature-${index}`,
+        workspacePath: `/workspaces/feature-${index}`,
+        repos: [],
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      })) as any);
+      const findActive = vi.spyOn(sessionFinder, 'findActiveAssistants').mockResolvedValue([]);
+      try {
+        const first = await app.request('/api/workspaces/status?offset=0&limit=24');
+        expect(first.status).toBe(200);
+        const firstPage = await first.json();
+        expect(firstPage.total).toBe(30);
+        expect(firstPage.snapshot).toEqual(expect.any(String));
+        expect(firstPage.nextOffset).toBe(24);
+        expect(Object.keys(firstPage.statuses)).toHaveLength(24);
+        expect(firstPage.statuses['feature-29']).toBeDefined();
+        expect(firstPage.statuses['feature-0']).toBeUndefined();
+        expect(findActive).toHaveBeenCalledTimes(24);
+
+        const second = await app.request(`/api/workspaces/status?offset=24&limit=24&snapshot=${firstPage.snapshot}`);
+        expect(second.status).toBe(200);
+        const secondPage = await second.json();
+        expect(secondPage.nextOffset).toBeNull();
+        expect(Object.keys(secondPage.statuses)).toHaveLength(6);
+        expect(findActive).toHaveBeenCalledTimes(30);
+        expect(workspace.listWorkspaces).toHaveBeenCalledTimes(1);
+        expect((await app.request('/api/workspaces/status?offset=0&limit=100')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=-1&limit=24')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=24&limit=24')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=24&limit=24&snapshot=missing')).status).toBe(410);
+      } finally {
+        findActive.mockRestore();
+      }
+    });
+
     it('returns workspace statuses including active AI assistants', async () => {
       vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
       vi.mocked(workspace.listWorkspaces).mockResolvedValue([

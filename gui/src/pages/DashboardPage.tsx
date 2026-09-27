@@ -185,6 +185,10 @@ interface DashboardPageProps {
   workspaces: Feature[];
   workspaceStatuses: Record<string, WorkspaceStatus>;
   workspacesLoading?: boolean;
+  checkedWorkspaceCount?: number;
+  statusesComplete?: boolean;
+  statusesError?: boolean;
+  onRetryStatuses?: () => void;
   onOpenWorkspace: (id: string) => void;
   onNewWorkspace: () => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -194,6 +198,10 @@ export function DashboardPage({
   workspaces,
   workspaceStatuses,
   workspacesLoading = false,
+  checkedWorkspaceCount = 0,
+  statusesComplete = false,
+  statusesError = false,
+  onRetryStatuses,
   onOpenWorkspace,
   onNewWorkspace,
   showToast,
@@ -204,11 +212,13 @@ export function DashboardPage({
 
   const [search, setSearch] = useState('');
   const [changesOnly, setChangesOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(12);
   const [launchWorkspace, setLaunchWorkspace] = useState('');
   const targetWorkspace = workspaces.find((w) => w.branchName === launchWorkspace) ?? workspaces[0];
   const visibleWorkspaces = workspaces.filter((w) =>
     `${w.name ?? ''} ${w.branchName} ${w.description ?? ''} ${w.repos.join(' ')}`.toLowerCase().includes(search.trim().toLowerCase())
     && (!changesOnly || (workspaceStatuses[w.branchName]?.changedFiles ?? 0) > 0));
+  const shownWorkspaces = visibleWorkspaces.slice(0, visibleCount);
 
   const [launchingKey, setLaunchingKey] = useState<string | null>(null);
 
@@ -316,9 +326,11 @@ export function DashboardPage({
         {[
           { label: 'Workspaces', value: workspacesLoading ? '—' : workspaces.length, icon: FolderGit2,
             accent: 'border-t-primary/70', iconStyle: 'bg-primary/10 text-primary' },
-          { label: 'Review queue', value: statuses.length || !workspaces.length ? changedFiles : '—', icon: GitBranch,
-            detail: statuses.length || !workspaces.length
-              ? `${workspacesWithChanges} ${workspacesWithChanges === 1 ? 'workspace' : 'workspaces'} with diffs` : undefined,
+          { label: 'Review queue', value: statusesComplete && !workspacesLoading ? changedFiles : '—', icon: GitBranch,
+            detail: statusesError ? 'Could not check workspace changes' : statusesComplete
+              ? `${workspacesWithChanges} ${workspacesWithChanges === 1 ? 'workspace' : 'workspaces'} with diffs`
+              : workspacesLoading ? 'Checking workspace changes…'
+                : `Checking ${checkedWorkspaceCount} of ${workspaces.length} workspaces`,
             accent: 'border-t-amber-500/70', iconStyle: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
           { label: 'Tracked repos', value: workspacesLoading ? '—' : trackedRepos, icon: Boxes,
             accent: 'border-t-emerald-500/70', iconStyle: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
@@ -345,9 +357,12 @@ export function DashboardPage({
               className={`rounded-xl border border-border border-t-2 bg-card px-3.5 py-3 shadow-xs transition-colors ${accent} ${label === 'Review queue' && changesOnly ? 'border-amber-500/60 bg-amber-500/5' : ''}`}>
               {label === 'Review queue' ? (
                 <button type="button" className="w-full cursor-pointer rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring hover:opacity-75 disabled:cursor-default disabled:hover:opacity-100"
-                  aria-label={changesOnly ? 'Show all workspaces' : 'Show workspaces with diffs'}
-                  aria-pressed={changesOnly} disabled={!workspacesWithChanges && !changesOnly}
-                  onClick={() => { setSearch(''); setChangesOnly(!changesOnly); }}>
+                  aria-label={statusesError ? 'Retry workspace changes' : changesOnly ? 'Show all workspaces' : 'Show workspaces with diffs'}
+                  aria-pressed={changesOnly} disabled={!statusesError && (!statusesComplete || (!workspacesWithChanges && !changesOnly))}
+                  onClick={() => {
+                    if (statusesError) { onRetryStatuses?.(); return; }
+                    setSearch(''); setVisibleCount(12); setChangesOnly(!changesOnly);
+                  }}>
                   {content}
                 </button>
               ) : content}
@@ -368,13 +383,14 @@ export function DashboardPage({
                 <input
                   aria-label="Search workspaces"
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => { setSearch(event.target.value); setVisibleCount(12); }}
                   placeholder="Search workspaces"
                   className="h-8 w-44 rounded-md border border-input bg-card pl-8 pr-3 text-xs text-foreground outline-none focus:border-primary sm:w-56"
                 />
               </div>
               <Button variant={changesOnly ? 'secondary' : 'ghost'} size="xs" className="h-8 text-xs"
-                aria-pressed={changesOnly} onClick={() => setChangesOnly(!changesOnly)}>
+                aria-pressed={changesOnly} disabled={!statusesComplete}
+                onClick={() => { setVisibleCount(12); setChangesOnly(!changesOnly); }}>
                 <GitBranch size={13} /> With changes
               </Button>
             </div>
@@ -397,13 +413,14 @@ export function DashboardPage({
         ) : !visibleWorkspaces.length ? (
           <div className="rounded-xl border border-border bg-card p-8 text-center">
             <p className="text-sm text-muted-foreground">No workspaces match your filter.</p>
-            <Button variant="ghost" size="xs" className="mt-2" onClick={() => { setSearch(''); setChangesOnly(false); }}>
+            <Button variant="ghost" size="xs" className="mt-2" onClick={() => { setSearch(''); setChangesOnly(false); setVisibleCount(12); }}>
               Clear filter
             </Button>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {visibleWorkspaces.map((ws) => {
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+            {shownWorkspaces.map((ws) => {
               const status = workspaceStatuses[ws.branchName];
               const changedFiles = status?.changedFiles ?? 0;
               const title = customTitles[ws.branchName]?.title || ws.name || ws.description || ws.branchName;
@@ -427,6 +444,7 @@ export function DashboardPage({
                       {changedFiles > 0 ? `${changedFiles} modified ${changedFiles === 1 ? 'file' : 'files'}` : 'Clean'}
                     </div>
                   )}
+                  {!status && !statusesError && <p className="mb-3 mt-3 text-xs text-muted-foreground">Checking changes…</p>}
                   <div className="mt-auto min-w-0 border-t border-border pt-2">
                     <WorkspaceChatResume workspace={ws.branchName} />
                     <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
@@ -443,6 +461,14 @@ export function DashboardPage({
                 </article>
               );
             })}
+            </div>
+            {visibleWorkspaces.length > visibleCount && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={() => setVisibleCount((count) => count + 12)}>
+                  Show more workspaces ({visibleWorkspaces.length - visibleCount} remaining)
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </section>

@@ -88,6 +88,23 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     await page.route('**/api/adapters', json(adaptersData));
     await page.route('**/api/workspaces', json(workspacesData));
     await page.route('**/api/workspaces/status', json(workspacesStatusData));
+    await page.route('**/api/workspaces/status?*', async (route) => {
+      const url = new URL(route.request().url());
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const limit = Number(url.searchParams.get('limit') ?? 24);
+      const list = Array.isArray(workspacesData) ? workspacesData : [];
+      const selected = list.slice(offset, offset + limit);
+      const statuses = Object.fromEntries(selected.flatMap((workspace: { branchName: string }) =>
+        workspacesStatusData[workspace.branchName]
+          ? [[workspace.branchName, workspacesStatusData[workspace.branchName]]]
+          : []));
+      await route.fulfill({ json: {
+        statuses,
+        total: list.length,
+        nextOffset: offset + selected.length < list.length ? offset + selected.length : null,
+        snapshot: 'fixture',
+      } });
+    });
     await page.route('**/api/editor-detect', json(editorDetectData));
     await page.route('**/api/workspace-launch-targets', json(workspaceLaunchTargetsData));
     await page.route('**/api/update-status', json(updateStatusData));

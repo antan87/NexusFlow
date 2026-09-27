@@ -23,7 +23,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 import * as os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
@@ -1005,19 +1005,67 @@ function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
   return worst;
 }
 
+// A paged status scan keeps one stable catalog and PM2 snapshot across requests.
+// The small bounded cache avoids rescanning every manifest for each page.
+const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+const statusSnapshots = new Map<string, {
+  workspacesDir: string;
+  workspaces: Feature[];
+  pm2List: Promise<any[]>;
+  expiresAt: number;
+}>();
+
 // 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
-// Cheap on purpose: git status + cached running/sync state only — never fetch/rebase.
+// Git status is read-only; never fetch/rebase here.
 app.get('/api/workspaces/status', async (c) => {
   try {
     const config = await loadConfig();
-    const workspaces = await listWorkspaces(config.workspacesDir);
+    const offsetParam = c.req.query('offset');
+    const limitParam = c.req.query('limit');
+    const snapshotParam = c.req.query('snapshot');
+    const paged = offsetParam !== undefined || limitParam !== undefined || snapshotParam !== undefined;
+    if (paged && (!/^(0|[1-9]\d*)$/.test(offsetParam ?? '') || !/^[1-9]\d*$/.test(limitParam ?? ''))) {
+      return c.json({ error: 'offset and limit must be non-negative and positive integers' }, 400);
+    }
+    const offset = Number(offsetParam ?? 0);
+    const limit = Number(limitParam ?? 0);
+    if (paged && (!Number.isSafeInteger(offset) || !Number.isSafeInteger(limit) || limit > 24)) {
+      return c.json({ error: 'limit must be at most 24' }, 400);
+    }
+    if (paged && offset > 0 && !snapshotParam) {
+      return c.json({ error: 'snapshot is required after the first page' }, 400);
+    }
+    const now = Date.now();
+    for (const [key, snapshot] of statusSnapshots) {
+      if (snapshot.expiresAt < now) statusSnapshots.delete(key);
+    }
+    let snapshotId = snapshotParam;
+    let snapshot = snapshotParam ? statusSnapshots.get(snapshotParam) : undefined;
+    if (snapshotParam && (!snapshot || snapshot.workspacesDir !== config.workspacesDir)) {
+      return c.json({ error: 'Status snapshot expired; restart from the first page' }, 410);
+    }
+    if (paged && !snapshot) {
+      const workspaces = await listWorkspaces(config.workspacesDir);
+      workspaces.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      snapshot = {
+        workspacesDir: config.workspacesDir,
+        workspaces,
+        pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
+      };
+      snapshotId = randomUUID();
+      statusSnapshots.set(snapshotId, snapshot);
+      while (statusSnapshots.size > 16) statusSnapshots.delete(statusSnapshots.keys().next().value!);
+    }
+    const workspaces = snapshot?.workspaces ?? await listWorkspaces(config.workspacesDir);
+    const selected = paged ? workspaces.slice(offset, offset + limit) : workspaces;
 
     // Fetch the PM2 process list once for the whole overview instead of
     // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
-    const pm2List = await getPm2List();
+    const pm2List = selected.length ? await (snapshot?.pm2List ?? getPm2List()) : [];
 
     const entries = await Promise.all(
-      workspaces.map(async (ws) => {
+      selected.map(async (ws) => {
         const workspacePath =
           ws.workspacePath || path.join(config.workspacesDir, ws.branchName);
         const status: WorkspaceStatus = {
@@ -1069,7 +1117,12 @@ app.get('/api/workspaces/status', async (c) => {
     // Keyed by branchName to match how the GUI looks up a workspace.
     const byWorkspace: Record<string, (typeof entries)[number]> = {};
     for (const entry of entries) byWorkspace[entry.branchName] = entry;
-    return c.json(byWorkspace);
+    return c.json(paged ? {
+      statuses: byWorkspace,
+      total: workspaces.length,
+      nextOffset: offset + selected.length < workspaces.length ? offset + selected.length : null,
+      snapshot: snapshotId,
+    } : byWorkspace);
   } catch (error) {
     return errorResponse(c, error);
   }
