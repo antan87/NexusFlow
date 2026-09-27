@@ -65,14 +65,14 @@ const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: strin
   {
     value: 'in-place',
     icon: Zap,
-    title: 'Current checkouts',
-    body: 'Work in the selected repositories without creating branches.',
+    title: 'Reference checkouts',
+    body: 'Read your checkouts as they are; nothing changes them. Prepare a repository for editing to give it its own branch and worktree in this workspace.',
   },
   {
     value: 'worktree',
     icon: GitBranch,
     title: 'New worktrees',
-    body: 'Create a branch and isolated worktree for each repository.',
+    body: 'Create a branch and editable worktree for each repository now.',
   },
 ];
 
@@ -817,7 +817,7 @@ export function StartWorkPage() {
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Checkbox checked={autoUpdateBase} onCheckedChange={(checked) => setAutoUpdateBase(Boolean(checked))}
                 aria-label="Fast-forward clean repository branches before creating workspace" />
-              Update clean {inPlace ? 'current checkouts' : 'base branches'} from their remotes before creating the workspace
+              Fast-forward your clean {inPlace ? 'checkouts' : 'base branches'} from their remotes before creating the workspace (this changes your own checkouts)
             </label>
 
           {selectedRepos.length > 0 && (

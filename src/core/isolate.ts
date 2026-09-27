@@ -31,6 +31,25 @@ export interface IsolateRepoResult {
   alreadyIsolated: boolean;
 }
 
+/** What {@link isolateWorkspaceRepo} would do, computed without changing anything. */
+export interface IsolationPlan extends IsolateRepoResult {
+  /**
+   * Reasons isolation cannot proceed (path or branch collisions, a missing
+   * base). Isolation refuses to start while any are present, so a collision
+   * never leaves a half-created worktree or touches the source checkout.
+   */
+  conflicts: string[];
+}
+
+/** Raised when an isolation plan has conflicts; nothing was changed. */
+export class IsolationConflictError extends Error {
+  readonly code = 'ISOLATION_CONFLICT';
+  constructor(readonly plan: IsolationPlan) {
+    super(`Cannot prepare "${plan.repoName}" for editing: ${plan.conflicts.join(' ')}`);
+    this.name = 'IsolationConflictError';
+  }
+}
+
 function assertWithin(baseDir: string, target: string): string {
   const base = path.resolve(baseDir);
   const resolved = path.resolve(target);
@@ -40,22 +59,46 @@ function assertWithin(baseDir: string, target: string): string {
   return resolved;
 }
 
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Branch → checkout path for every worktree registered on the source repository. */
+async function checkedOutBranches(sourcePath: string): Promise<Map<string, string>> {
+  const branches = new Map<string, string>();
+  const { stdout } = await execa('git', ['worktree', 'list', '--porcelain'], { cwd: sourcePath, reject: false });
+  let current = '';
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
+    else if (line.startsWith('branch refs/heads/')) branches.set(line.slice('branch refs/heads/'.length), current);
+  }
+  return branches;
+}
+
+async function refExists(repoPath: string, ref: string): Promise<boolean> {
+  const result = await execa('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoPath, reject: false });
+  return result.exitCode === 0;
+}
+
 /**
- * Dynamically isolates a repository in an in-place workspace into a dedicated
- * worktree directory inside the workspace.
- *
- * If the workspace is in worktree mode, or the repository is already isolated,
- * this is a safe no-op that returns existing isolation details.
+ * Computes where and on which branch a repository would be prepared for
+ * editing, and whether anything is in the way. Read-only: it neither fetches
+ * nor prunes, so it is safe to call for a confirmation preview.
  *
  * @param workspacePath  - Absolute path to the workspace directory.
  * @param repoNameOrPath - Name or absolute path of the repository to isolate.
  * @param options        - Branch and base branch options.
  */
-export async function isolateWorkspaceRepo(
+export async function planRepoIsolation(
   workspacePath: string,
   repoNameOrPath: string,
   options: IsolateRepoOptions = {},
-): Promise<IsolateRepoResult> {
+): Promise<IsolationPlan> {
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) {
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
@@ -85,14 +128,14 @@ export async function isolateWorkspaceRepo(
 
   // If not in-place mode, all repos are already isolated worktrees
   if (!isInPlace(feature)) {
-    const worktreePath = path.resolve(workspacePath, repoName);
     return {
       repoName,
       sourcePath,
-      worktreePath,
+      worktreePath: path.resolve(workspacePath, repoName),
       branchName: feature.repoBranches?.[repoName] ?? feature.branchName,
       baseBranch: await detectDefaultBranch(sourcePath),
       alreadyIsolated: true,
+      conflicts: [],
     };
   }
 
@@ -101,24 +144,16 @@ export async function isolateWorkspaceRepo(
     (k) => k.toLowerCase() === repoName.toLowerCase() || k.toLowerCase() === trimmed.toLowerCase(),
   );
   const existingIsolation = isolatedKey ? feature.isolatedRepos?.[isolatedKey] : undefined;
-
-  if (existingIsolation) {
-    try {
-      await fs.access(existingIsolation.worktreePath);
-      return {
-        repoName,
-        sourcePath,
-        worktreePath: existingIsolation.worktreePath,
-        branchName: existingIsolation.branchName,
-        baseBranch: existingIsolation.baseBranch ?? (await detectDefaultBranch(sourcePath)),
-        alreadyIsolated: true,
-      };
-    } catch {
-      // Directory no longer exists on disk; prune worktree registration and recreate
-      try {
-        await execa('git', ['worktree', 'prune'], { cwd: sourcePath });
-      } catch {}
-    }
+  if (existingIsolation && await pathExists(existingIsolation.worktreePath)) {
+    return {
+      repoName,
+      sourcePath,
+      worktreePath: existingIsolation.worktreePath,
+      branchName: existingIsolation.branchName,
+      baseBranch: existingIsolation.baseBranch ?? (await detectDefaultBranch(sourcePath)),
+      alreadyIsolated: true,
+      conflicts: [],
+    };
   }
 
   const defaultBranch = await detectDefaultBranch(sourcePath);
@@ -137,6 +172,68 @@ export async function isolateWorkspaceRepo(
   }
 
   const worktreePath = assertWithin(workspacePath, path.join(workspacePath, repoName));
+  const conflicts: string[] = [];
+  if (await pathExists(worktreePath)) {
+    conflicts.push(`A folder already exists at ${worktreePath}. Move or remove it first.`);
+  }
+  const checkedOut = await checkedOutBranches(sourcePath);
+  const branchLocation = checkedOut.get(branchName);
+  if (branchLocation) {
+    conflicts.push(`Branch "${branchName}" is already checked out at ${branchLocation}. Choose another branch name.`);
+  }
+  const baseKnown = (await refExists(sourcePath, baseBranch))
+    || (await refExists(sourcePath, `refs/remotes/origin/${baseBranch}`));
+  if (!baseKnown) {
+    conflicts.push(`Base branch "${baseBranch}" was not found in ${sourcePath}.`);
+  }
+
+  return { repoName, sourcePath, worktreePath, branchName, baseBranch, alreadyIsolated: false, conflicts };
+}
+
+/**
+ * Prepares a reference repository for editing: creates a dedicated worktree
+ * inside the workspace on its own branch.
+ *
+ * If the workspace is in worktree mode, or the repository is already isolated,
+ * this is a safe no-op that returns existing isolation details. The source
+ * checkout is never changed: its branch, working tree and local base branch
+ * stay as they were (the worktree starts from the remote base when one exists).
+ *
+ * @param workspacePath  - Absolute path to the workspace directory.
+ * @param repoNameOrPath - Name or absolute path of the repository to isolate.
+ * @param options        - Branch and base branch options.
+ * @throws {IsolationConflictError} When a path or branch collision is detected.
+ */
+export async function isolateWorkspaceRepo(
+  workspacePath: string,
+  repoNameOrPath: string,
+  options: IsolateRepoOptions = {},
+): Promise<IsolateRepoResult> {
+  const feature = await loadFeatureConfig(workspacePath);
+  if (!feature) {
+    throw new Error(`Workspace manifest not found at ${workspacePath}`);
+  }
+
+  // A recorded worktree whose directory vanished: drop the stale registration
+  // so planning sees the real state.
+  const requestedName = path.basename(repoNameOrPath.trim()).toLowerCase();
+  const stale = Object.entries(feature.isolatedRepos ?? {})
+    .find(([key]) => key.toLowerCase() === requestedName)?.[1];
+  if (stale && !(await pathExists(stale.worktreePath))) {
+    const index = feature.repos.findIndex((r) => path.basename(r).toLowerCase() === requestedName);
+    const source = index >= 0 ? feature.originalRepos?.[index] ?? feature.repos[index] : undefined;
+    if (source) await execa('git', ['worktree', 'prune'], { cwd: source }).catch(() => {});
+  }
+
+  const plan = await planRepoIsolation(workspacePath, repoNameOrPath, options);
+  const { repoName, sourcePath, worktreePath, branchName, baseBranch } = plan;
+  if (plan.alreadyIsolated) {
+    const { conflicts: _conflicts, ...result } = plan;
+    return result;
+  }
+  if (plan.conflicts.length > 0) {
+    throw new IsolationConflictError(plan);
+  }
 
   // Prune any stale worktree registrations prior to creation
   try {
@@ -148,7 +245,9 @@ export async function isolateWorkspaceRepo(
 
   try {
     // 1. Create the git worktree
-    const wtRes = await createWorktree(sourcePath, worktreePath, branchName, baseBranch);
+    // Never fast-forward the source repository's base branch: that would change
+    // the user's own checkout. The worktree starts from the remote base instead.
+    const wtRes = await createWorktree(sourcePath, worktreePath, branchName, baseBranch, { autoUpdateBase: false });
     worktreeCreated = true;
     branchCreated = wtRes.createdBranch;
 

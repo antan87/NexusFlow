@@ -56,6 +56,7 @@ import type {
   StorageAdapterMeta,
   TranscriptMessage,
   WorkspaceStatus,
+  CommitRepoResult,
 } from './types.js';
 import {
   BRAND_NAME,
@@ -206,8 +207,7 @@ function AppInner() {
   const [syncResults, setSyncResults] = useState<any[] | null>(null);
   const [commitMessage, setCommitMessage] = useState<string>('');
   const [showCommitModal, setShowCommitModal] = useState<boolean>(false);
-  const [commitLoading, setCommitLoading] = useState<boolean>(false);
-  const [commitResults, setCommitResults] = useState<any[] | null>(null);
+  const [commitResults, setCommitResults] = useState<CommitRepoResult[] | null>(null);
   const [deleteWsLoading, setDeleteWsLoading] = useState<string | null>(null);
   const [addRepoLoading, setAddRepoLoading] = useState<boolean>(false);
 
@@ -670,30 +670,6 @@ function AppInner() {
     }
   };
 
-  const handleCommitAll = async (wsId: string) => {
-    if (!commitMessage.trim()) return;
-    setCommitLoading(true);
-    setCommitResults(null);
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commitMessage }),
-      });
-      const data = await res.json();
-      setCommitResults(data.results || []);
-      setCommitMessage('');
-      setShowCommitModal(false);
-      fetchGitChanges(wsId);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setCommitLoading(false);
-    }
-  };
-
-
   // ─── Actions ────────────────────────────────────────────────────────────
 
   const handleOpenDesktopSession = async (
@@ -1038,7 +1014,7 @@ Core Instructions:
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
-      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
+      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
       knowledgeProps={{
         knowledgeContent,
         knowledgeLoading,

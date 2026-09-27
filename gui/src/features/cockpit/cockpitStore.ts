@@ -5,13 +5,17 @@
  * File: gui/src/features/cockpit/cockpitStore.ts
  */
 import { useSyncExternalStore } from 'react';
-import type { Feature, WorkspaceLifecycle, WorkspaceStatus, WorkspaceVerificationReport } from '../../types.js';
+import type { Feature, WorkspaceLifecycle, WorkspaceStatus, WorkspaceVerificationReport, WorkspaceRepository } from '../../types.js';
 import type { WorktreeDescriptor } from '../worktrees/types.js';
 import { normalizeWorktreeGroups, formatBranchTitle } from '../worktrees/normalizeWorktrees.js';
 
 export type CockpitStage = 'diff' | 'plan' | 'knowledge' | 'overview';
 export type DiffViewMode = 'side-by-side' | 'unified';
-export type IterationStatus = 'review_ready' | 'agent_running' | 'done' | 'planned';
+/**
+ * `in_progress` is what a saved milestone can prove. `agent_running` and
+ * `review_ready` need live process or review evidence and are never inferred.
+ */
+export type IterationStatus = 'review_ready' | 'agent_running' | 'in_progress' | 'done' | 'planned';
 
 export interface DevelopmentIteration {
   id: string;
@@ -93,7 +97,7 @@ export const cockpitStore = {
       if (data.activeIterationId && data.iterations.some((it) => it.id === data.activeIterationId)) {
         activeIterationId = data.activeIterationId;
       } else {
-        const activeIter = data.iterations.find((it) => it.status === 'agent_running' || it.status === 'review_ready') || data.iterations[0];
+        const activeIter = data.iterations.find((it) => it.status === 'agent_running' || it.status === 'review_ready' || it.status === 'in_progress') || data.iterations[0];
         activeIterationId = activeIter?.id || null;
       }
     } else {
@@ -102,7 +106,7 @@ export const cockpitStore = {
       } else if (currentState.activeIterationId && data.iterations.some((it) => it.id === currentState.activeIterationId)) {
         activeIterationId = currentState.activeIterationId;
       } else {
-        const activeIter = data.iterations.find((it) => it.status === 'agent_running' || it.status === 'review_ready') || data.iterations[0];
+        const activeIter = data.iterations.find((it) => it.status === 'agent_running' || it.status === 'review_ready' || it.status === 'in_progress') || data.iterations[0];
         activeIterationId = activeIter?.id || null;
       }
     }
@@ -228,7 +232,8 @@ export function upcastWorkspaceToCockpit(
   lifecycle: WorkspaceLifecycle | null,
   status?: WorkspaceStatus,
   _planContent?: string | null,
-  verificationReport?: WorkspaceVerificationReport | null
+  verificationReport?: WorkspaceVerificationReport | null,
+  repositories?: WorkspaceRepository[],
 ): {
   workspaceTitle: string;
   workspaceIntent: string;
@@ -242,7 +247,7 @@ export function upcastWorkspaceToCockpit(
   const workspaceIntent = feature.description || 'Workspace Process and Code Review Cockpit';
 
   // Normalize worktree groups from feature
-  const groups = normalizeWorktreeGroups(feature, status);
+  const groups = normalizeWorktreeGroups(feature, status, repositories);
   const worktrees: Record<string, WorktreeDescriptor> = {};
   for (const group of groups) {
     for (const wt of group.worktrees) {
@@ -261,7 +266,7 @@ export function upcastWorkspaceToCockpit(
       if (step.status === 'completed' || step.status === 'verified') {
         iterStatus = 'done';
       } else if (step.status === 'in_progress') {
-        iterStatus = (status?.changedFiles ?? 0) > 0 ? 'review_ready' : 'agent_running';
+        iterStatus = 'in_progress';
       }
 
       const matchingWt = Object.values(worktrees).find((wt) => step.branch && wt.branchName === step.branch);

@@ -84,6 +84,15 @@ export interface RebaseResult {
 export interface CommitResult {
   /** Whether the commit (and optional push) succeeded. */
   success: boolean;
+  /**
+   * Whether a commit was created. A push can fail after this is true: the
+   * commit then exists locally (see `commitHash`) and only the push is retried.
+   */
+  committed?: boolean;
+  /** Whether the branch was pushed in this call. */
+  pushed?: boolean;
+  /** Why the push failed after a successful commit. */
+  pushError?: string;
   /** Short commit hash, e.g. 'a1b2c3d'. */
   commitHash: string;
   /** Number of files included in the commit. */
@@ -159,15 +168,20 @@ export async function getWorkspaceRepos(
     feature.repos.map(async (repoPath) => {
       const name = path.basename(repoPath);
       const absolutePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
-      // In-place features have no feature branch — the repo's current branch
-      // is whatever the user is working on right now ('HEAD' when detached).
+      const isolated = isInPlace(feature)
+        ? Object.entries(feature.isolatedRepos ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]
+        : undefined;
+      // An unisolated in-place repo has no feature branch — its current branch
+      // is whatever the user is working on ('HEAD' when detached). An isolated
+      // repo expects the branch it was prepared on, and a worktree repo its
+      // own existing branch when one was chosen at creation.
       const [defaultBranch, currentBranch] = await Promise.all([
         detectDefaultBranch(absolutePath),
-        isInPlace(feature) ? getRepoBranch(absolutePath) : Promise.resolve(null),
+        isInPlace(feature) && !isolated?.branchName ? getRepoBranch(absolutePath) : Promise.resolve(null),
       ]);
       const branchName = isInPlace(feature)
-        ? currentBranch ?? 'HEAD'
-        : feature.branchName;
+        ? isolated?.branchName || (currentBranch ?? 'HEAD')
+        : feature.repoBranches?.[name] ?? feature.branchName;
       return {
         name,
         path: absolutePath,
@@ -547,7 +561,10 @@ export async function rebaseRepo(
 export interface CommitAndPushOptions {
   /** Skip the push step. */
   noPush?: boolean;
-  /** Explicit files to stage instead of auto-staging. */
+  /**
+   * Commit only these paths. Other changes, including ones the user already
+   * staged, stay exactly as they were: staged, unstaged or untracked.
+   */
   files?: string[];
 }
 
@@ -568,16 +585,55 @@ export async function commitAndPush(
   branchName: string,
   options?: CommitAndPushOptions,
 ): Promise<CommitResult> {
+  let committed = false;
+  let commitHash = '';
+  let filesChanged = 0;
   try {
     const skippedSensitive: string[] = [];
+    const selected = options?.files && options.files.length > 0 ? options.files : null;
 
-    if (options?.files && options.files.length > 0) {
-      // Stage specific requested files in chunks to avoid argv limit
+    if (selected) {
+      // An explicit selection still never publishes an untracked secret.
+      const status = await getRepoStatus(repoPath);
+      const untracked = new Set(status.files.filter((f) => f.code === '??').map((f) => f.path));
+      const paths = selected.filter((file) => {
+        if (untracked.has(file) && isSensitiveFile(file)) {
+          skippedSensitive.push(file);
+          return false;
+        }
+        return true;
+      });
+      // Stage the selected paths in chunks to avoid argv limits. `-A` records
+      // deletions of selected tracked files as well.
       const BATCH_SIZE = 50;
-      for (let i = 0; i < options.files.length; i += BATCH_SIZE) {
-        const batch = options.files.slice(i, i + BATCH_SIZE);
-        await execa('git', ['add', '--', ...batch], { cwd: repoPath });
+      for (let i = 0; i < paths.length; i += BATCH_SIZE) {
+        await execa('git', ['add', '-A', '--', ...paths.slice(i, i + BATCH_SIZE)], { cwd: repoPath });
       }
+      let stagedSelection = '';
+      for (let i = 0; i < paths.length; i += BATCH_SIZE) {
+        const { stdout } = await execa('git', ['diff', '--cached', '--name-only', '--', ...paths.slice(i, i + BATCH_SIZE)], { cwd: repoPath });
+        stagedSelection += stdout;
+      }
+      if (!stagedSelection.trim()) {
+        return {
+          success: true,
+          committed: false,
+          pushed: false,
+          commitHash: '',
+          filesChanged: 0,
+          message: 'Nothing to commit in the selected files',
+          withheldFiles: skippedSensitive,
+        };
+      }
+      // `--only` commits exactly these paths and leaves every other staged
+      // change in the index, so unrelated work the user staged is untouched.
+      const { stdout: commitOutput } = await execa(
+        'git',
+        ['commit', '-m', message, '--only', '--pathspec-from-file=-', '--pathspec-file-nul'],
+        { cwd: repoPath, input: paths.join('\0') },
+      );
+      ({ commitHash, filesChanged } = parseCommitOutput(commitOutput));
+      committed = true;
     } else {
       const status = await getRepoStatus(repoPath);
 
@@ -624,44 +680,57 @@ export async function commitAndPush(
       }
     }
 
-    // Check if anything is staged to commit
-    const { stdout: stagedDiff } = await execa(
-      'git',
-      ['diff', '--cached', '--name-only'],
-      { cwd: repoPath },
-    );
-    if (!stagedDiff.trim()) {
-      return {
-        success: true,
-        commitHash: '',
-        filesChanged: 0,
-        message: skippedSensitive.length > 0
-          ? `Nothing staged to commit (${skippedSensitive.length} sensitive file(s) excluded)`
-          : 'Nothing staged to commit (working tree clean)',
-        withheldFiles: skippedSensitive,
-      };
+    if (!selected) {
+      // Check if anything is staged to commit
+      const { stdout: stagedDiff } = await execa(
+        'git',
+        ['diff', '--cached', '--name-only'],
+        { cwd: repoPath },
+      );
+      if (!stagedDiff.trim()) {
+        return {
+          success: true,
+          committed: false,
+          pushed: false,
+          commitHash: '',
+          filesChanged: 0,
+          message: skippedSensitive.length > 0
+            ? `Nothing staged to commit (${skippedSensitive.length} sensitive file(s) excluded)`
+            : 'Nothing staged to commit (working tree clean)',
+          withheldFiles: skippedSensitive,
+        };
+      }
+
+      const { stdout: commitOutput } = await execa(
+        'git',
+        ['commit', '-m', message],
+        { cwd: repoPath },
+      );
+      ({ commitHash, filesChanged } = parseCommitOutput(commitOutput));
+      committed = true;
     }
-
-    // Commit.
-    const { stdout: commitOutput } = await execa(
-      'git',
-      ['commit', '-m', message],
-      { cwd: repoPath },
-    );
-
-    // Parse short hash — git outputs something like "[branch abc1234] message"
-    const hashMatch = commitOutput.match(/\[[\w/.-]+\s+([a-f0-9]+)\]/);
-    const commitHash = hashMatch ? hashMatch[1] : '';
-
-    // Parse file count — e.g. "3 files changed"
-    const fileMatch = commitOutput.match(/(\d+)\s+file/);
-    const filesChanged = fileMatch ? parseInt(fileMatch[1], 10) : 0;
 
     // Push unless opted out. A detached HEAD ('HEAD' sentinel from in-place
     // features) has no branch to push — the commit still counts as success.
     const canPush = branchName !== 'HEAD';
+    const summary = `${filesChanged} file${filesChanged === 1 ? '' : 's'} (${commitHash})`;
     if (!options?.noPush && canPush) {
-      await execa('git', ['push', 'origin', branchName], { cwd: repoPath });
+      try {
+        await execa('git', ['push', 'origin', branchName], { cwd: repoPath });
+      } catch (error) {
+        // The commit exists; report it so a retry pushes instead of re-committing.
+        const pushError = errText(error).split('\n')[0] ?? 'push failed';
+        return {
+          success: false,
+          committed: true,
+          pushed: false,
+          pushError,
+          commitHash,
+          filesChanged,
+          message: `Committed ${summary}, but the push failed: ${pushError}`,
+          withheldFiles: skippedSensitive,
+        };
+      }
     }
 
     const action = options?.noPush
@@ -671,19 +740,34 @@ export async function commitAndPush(
         : 'Committed (detached HEAD — push skipped)';
     return {
       success: true,
+      committed: true,
+      pushed: !options?.noPush && canPush,
       commitHash,
       filesChanged,
-      message: `${action} ${filesChanged} file${filesChanged === 1 ? '' : 's'} (${commitHash})`,
+      message: `${action} ${summary}`,
       withheldFiles: skippedSensitive,
     };
   } catch (error) {
     return {
       success: false,
-      commitHash: '',
-      filesChanged: 0,
-      message: error instanceof Error ? error.message : String(error),
+      committed,
+      pushed: false,
+      commitHash,
+      filesChanged,
+      message: errText(error).split('\n')[0] ?? String(error),
     };
   }
+}
+
+/** Parses the short hash and file count from `git commit` output. */
+function parseCommitOutput(commitOutput: string): { commitHash: string; filesChanged: number } {
+  // git outputs something like "[branch abc1234] message" and "3 files changed"
+  const hashMatch = commitOutput.match(/\[[\w/.-]+\s+(?:\(root-commit\)\s+)?([a-f0-9]+)\]/);
+  const fileMatch = commitOutput.match(/(\d+)\s+file/);
+  return {
+    commitHash: hashMatch ? hashMatch[1]! : '',
+    filesChanged: fileMatch ? parseInt(fileMatch[1]!, 10) : 0,
+  };
 }
 
 /**

@@ -48,14 +48,40 @@ test('normal and legacy worktree manifests retain their feature branch and dirty
   }
 });
 
-test('in-place repositories are editable and missing per-repo telemetry stays unknown', () => {
+test('unprepared in-place repositories are read-only references and missing telemetry stays unknown', () => {
   const feature = { mode: 'in-place', branchName: 'workspace', repos: ['/source/a', '/source/b'], repoBranches: { a: 'develop' } } as Feature;
   const groups = normalizeWorktreeGroups(feature, { changedFiles: 3 } as any);
   assert.equal(groups[0].worktrees.length, 1);
+  assert.equal(groups[0].isHostRepo, true);
   assert.equal(groups[0].worktrees[0].branchName, 'develop');
-  assert.equal(groups[0].worktrees[0].isHostReadOnly, false);
+  assert.equal(groups[0].worktrees[0].isHostReadOnly, true);
+  assert.equal(groups[0].worktrees[0].status, 'host_readonly');
   assert.equal(groups[0].worktrees[0].dirtyFilesCount, null);
-  assert.equal(groups[1].worktrees[0].status, 'unknown');
+  assert.equal(groups[0].worktrees[0].commitSha, '');
+});
+
+test('live repository state replaces manifest guesses for branch, HEAD, path and changes', () => {
+  const feature = {
+    mode: 'in-place', branchName: 'workspace', repos: ['/source/a', '/source/b'],
+    isolatedRepos: { b: { worktreePath: '/ws/b', branchName: 'feat/b', baseBranch: 'main', isolatedAt: '2026-09-27T00:00:00Z' } },
+  } as unknown as Feature;
+  const live = (name: string, overrides: object) => ({
+    name, access: 'reference', editable: false, path: `/source/${name}`, sourcePath: `/source/${name}`, branch: 'main', expectedBranch: null,
+    onExpectedBranch: true, baseBranch: 'main', headSha: 'abcdef1234', dirty: false, changedFiles: [], ahead: 0, behind: 0, remoteUrl: null,
+    ...overrides,
+  }) as any;
+  const [a, b] = normalizeWorktreeGroups(feature, undefined, [
+    live('a', { branch: 'hotfix' }),
+    live('b', { access: 'isolated', editable: true, path: '/ws/b', branch: 'feat/b', expectedBranch: 'feat/b', dirty: true, changedFiles: [{ code: ' M', path: 'x.ts' }] }),
+  ]);
+  assert.equal(a.worktrees[0].branchName, 'hotfix');
+  assert.equal(a.worktrees[0].commitSha, 'abcdef1234');
+  assert.equal(a.worktrees[0].status, 'host_readonly');
+  assert.equal(b.isHostRepo, false);
+  assert.equal(b.worktrees[0].worktreePath, '/ws/b');
+  assert.equal(b.worktrees[0].status, 'dirty');
+  assert.equal(b.worktrees[0].dirtyFilesCount, 1);
+  assert.equal(b.worktrees[1].worktreePath, '/source/b');
 });
 
 test('normalizeWorktreeGroups generates unique IDs for repos with identical basenames', () => {

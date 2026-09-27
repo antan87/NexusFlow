@@ -100,9 +100,9 @@ The add flags are `-n/--name`, `-r/--repos <paths...>`, and `-d/--description`; 
 | Mode | What happens |
 | :--- | :--- |
 | **Isolated worktrees** | The classic flow: a feature branch and git worktree per repo inside the workspace directory. |
-| **In-place** | ContextSpace works directly in the source repositories. No branches or worktrees are created; the workspace directory holds only `contextspace.json` and generated AI context files. |
+| **In-place (reference checkouts)** | Your source repositories are attached as read-only references. No branches or worktrees are created up front; the workspace directory holds only `contextspace.json` and generated AI context files. |
 
-In-place workspaces expect you to manage branches yourself: `ctxspace sync` skips source-repo mutation and only reconciles stale generated views, `ctxspace finish` commits and pushes each repo's current branch, and PR/compare links are only offered when that branch differs from the default branch. `ctxspace list` tags them with `[in-place]`, deleting one never touches the source repositories, and agent sessions for single-repo in-place workspaces run in the repo root.
+In-place repositories are references until you **prepare one for editing** with `ctxspace isolate <repo>` (or the + action beside the repo in the app). That creates an editable worktree on its own branch inside the workspace; your checkout is never changed. Commit, finish, push and revert refuse to change a reference repo. `ctxspace sync` skips source-repo mutation and only reconciles stale generated views. `ctxspace list` tags these workspaces with `[in-place]`, deleting one never touches the source repositories, and agent sessions for single-repo in-place workspaces run in the repo root.
 
 For API users, `POST /api/workspace` accepts optional `mode` (`worktree` default, or `in-place`), `name` (required for in-place), and `projectId`. Existing workspace manifests without a `mode` field are treated as `worktree` mode.
 
@@ -164,10 +164,10 @@ This runs each repository's test runner sequentially, confirms the working tree 
 ### 9. Finish the Feature
 When the work is done, close the loop in one command:
 ```bash
-ctxspace finish --dry-run          # preview: what will be committed / pushed
-ctxspace finish -m "Ship feature"  # commit + push every repo, print PR links
+ctxspace finish --dry-run          # preview: what will be committed / pushed, and where
+ctxspace finish -m "Ship feature"  # commit + push every editable repo, print PR links
 ```
-`finish` shows a per-repo status table, commits and pushes each repo, and prints ready-to-open PR/compare links for each remote. In isolated worktree workspaces it uses the feature branches ContextSpace created; in-place workspaces use each repo's current branch and only offer PR/compare links when that branch differs from the default branch. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
+`finish` first checks verification evidence: it refuses while any editable repo's verification is missing, failed, timed out or stale for the current content, unless you pass `--override-verification "<reason>"` (the reason is recorded). It then shows a per-repo status table, commits and pushes each editable repo on its feature branch, and prints ready-to-open PR/compare links for each remote. Read-only reference repos are never touched. If a push fails, run `finish` again: it resumes without committing twice. It then offers to **promote** reusable learnings into each repo's persistent base knowledge, and — with `--cleanup` — removes the workspace once everything is safely pushed.
 
 
 ---
@@ -195,7 +195,7 @@ Here is a summary of the command-line interface:
 | **`ctxspace diff`** | `ctxspace diff` | Displays pending code changes across all active workspace repositories. |
 | **`ctxspace commit`** | `ctxspace commit` | Automates cross-repository git commit and branch pushes in the workspace. |
 | **`ctxspace sync`** | `ctxspace sync` | Rebases worktree-mode repos and reconciles generated views; in-place mode skips repo mutation. |
-| **`ctxspace finish`** | `ctxspace finish [-m <msg>] [--cleanup] [--dry-run]` | Closes out a feature: commits & pushes all repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
+| **`ctxspace finish`** | `ctxspace finish [-m <msg>] [--cleanup] [--dry-run] [--override-verification <reason>]` | Closes out a feature: checks verification, commits & pushes editable repos, opens PRs / prints compare links, promotes learnings, and optionally removes the workspace. |
 | **`ctxspace tag`** | `ctxspace tag list` / `add <id>` / `remove <id>` | Manages enterprise categories, vertical subsystems, and cross-cutting traits (alias: `category`). |
 | **`ctxspace skill`** | `ctxspace skill list` / `create` / `show` / `delete` | Manages portable agent skills aligned with the open `agentskills.io` standard. |
 | **`ctxspace knowledge`** | `ctxspace knowledge add -t <type> --title <title> -m <msg> [--scope ...]` / `show` / `promote` | Captures searchable scoped learnings; identical retries do not duplicate entries, and local Git commit failures are reported separately from successful storage writes. |

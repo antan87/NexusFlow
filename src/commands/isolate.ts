@@ -9,6 +9,7 @@ import { input, select } from '@inquirer/prompts';
 import * as path from 'node:path';
 
 import { loadFeatureConfig, isolateWorkspaceRepo } from '../core/workspace.js';
+import { planRepoIsolation } from '../core/isolate.js';
 import { isInPlace, isRepoIsolated } from '../utils/feature.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { BRAND_NAME } from '../core/constants.js';
@@ -17,6 +18,8 @@ interface IsolateCommandOptions {
   branch?: string;
   base?: string;
   workspace?: string;
+  /** Print the plan (path, branch, base, conflicts) without creating anything. */
+  dryRun?: boolean;
 }
 
 export async function isolateCommand(
@@ -79,7 +82,19 @@ export async function isolateCommand(
     }
   }
 
-  const spinner = ora(`Isolating repository "${repoName}" into a worktree...`).start();
+  if (options.dryRun) {
+    const plan = await planRepoIsolation(workspacePath, repoName, { branchName, baseBranch: options.base });
+    console.log(`Repository: ${chalk.bold(plan.repoName)} ${chalk.dim(`(reference: ${plan.sourcePath})`)}`);
+    console.log(`Editable copy: ${plan.worktreePath}`);
+    console.log(`Branch: ${chalk.green(plan.branchName)} from ${plan.baseBranch}`);
+    if (plan.alreadyIsolated) console.log(chalk.green('Already prepared for editing.'));
+    for (const conflict of plan.conflicts) console.log(chalk.red(`✖ ${conflict}`));
+    if (plan.conflicts.length > 0) process.exitCode = 1;
+    console.log();
+    return;
+  }
+
+  const spinner = ora(`Preparing "${repoName}" for editing...`).start();
   try {
     const result = await isolateWorkspaceRepo(workspacePath, repoName, {
       branchName,
@@ -90,7 +105,7 @@ export async function isolateCommand(
       spinner.succeed(`Repository "${repoName}" is already isolated at ${chalk.bold(result.worktreePath)} on branch "${result.branchName}".`);
     } else {
       spinner.succeed(
-        `Isolated ${chalk.bold(repoName)} into dedicated worktree at:\n  ${chalk.dim(result.worktreePath)}\n  Branch: ${chalk.green(result.branchName)} (from ${result.baseBranch})`,
+        `Prepared ${chalk.bold(repoName)} for editing at:\n  ${chalk.dim(result.worktreePath)}\n  Branch: ${chalk.green(result.branchName)} (from ${result.baseBranch})\n  Your checkout at ${chalk.dim(result.sourcePath)} was not changed.`,
       );
       console.log(chalk.green('\n✔ Context files (.code-workspace, AGENTS.md) refreshed successfully.\n'));
     }

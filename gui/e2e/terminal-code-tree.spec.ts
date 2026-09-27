@@ -148,6 +148,32 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, 
   expect(inputs.join('')).toBe(beforeImage);
 });
 
+test('Shift+Enter sends a new line to the CLI while Enter still submits', async ({ page }) => {
+  const inputs: string[] = [];
+  await page.routeWebSocket('**/ws/terminal', socket => {
+    socket.onMessage(message => {
+      const item = JSON.parse(String(message));
+      if (item.type === 'attach') {
+        socket.send(JSON.stringify({ type: 'ready', terminal, truncated: false }));
+        socket.send(JSON.stringify({ type: 'replayed' }));
+      }
+      if (item.type === 'input') inputs.push(item.data);
+    });
+  });
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const pane = page.getByTestId('terminal-pane');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
+  await page.keyboard.type('alpha');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('beta');
+  await page.keyboard.press('Enter');
+  // Exactly one line feed for Shift+Enter and one carriage return for Enter:
+  // the keypress that follows Shift+Enter must not add a second, submitting \r.
+  await expect.poll(() => inputs.join('')).toBe('alpha\nbeta\r');
+});
+
 test('restores CLI input focus and opens terminal file references in the code tree', async ({ page }) => {
   await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [{ repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/nested/clean.ts', type: 'unchanged' }] }] } }));
   await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: 'export const clean = true;\n' } }));
@@ -279,6 +305,10 @@ test('opens panels by keyboard, steps files with Alt+Arrow, and keeps hunk keys 
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = chat.getByTestId('terminal-pane');
+  // The pane focuses its terminal one frame after its session loads. Wait for
+  // that, or it can land after the Code button is focused below and swallow the
+  // Escape (inside the terminal, Escape belongs to the CLI, not the panel).
+  await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
 
   // The panel toggles are reachable without the mouse.
   await chat.getByRole('button', { name: 'Code', exact: true }).focus();

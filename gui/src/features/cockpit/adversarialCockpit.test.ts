@@ -152,7 +152,7 @@ test('SUITE 2.2: Workspace with 100 lifecycle steps under high load', () => {
   assert.equal(result.iterations.length, 100);
   assert.equal(result.iterations[0].status, 'done');
   assert.equal(result.iterations[39].status, 'done');
-  assert.equal(result.iterations[40].status, 'review_ready'); // in_progress with changedFiles > 0
+  assert.equal(result.iterations[40].status, 'in_progress'); // never inferred as review_ready from changed files
   assert.equal(result.iterations[40].changesCount, 7);
   assert.equal(result.iterations[41].status, 'planned');
   assert.equal(result.iterations[99].number, 100);
@@ -168,7 +168,7 @@ test('SUITE 2.2: Workspace with 100 lifecycle steps under high load', () => {
   });
 
   const state = cockpitStore.getState();
-  // Automatically selects in_progress (review_ready) iteration 41 (id: step-41)
+  // Automatically selects the in_progress iteration 41 (id: step-41)
   assert.equal(state.activeIterationId, 'iter-step-41');
 });
 

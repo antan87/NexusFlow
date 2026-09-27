@@ -35,6 +35,8 @@ import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { WorktreePicker } from '../features/worktrees/WorktreePicker.js';
 import { normalizeWorktreeGroups } from '../features/worktrees/normalizeWorktrees.js';
+import { PrepareRepoDialog } from '../features/worktrees/PrepareRepoDialog.js';
+import { useWorkspaceRepositories } from '../lib/api/queries.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
 import { useCockpitStore } from '../features/cockpit/cockpitStore.js';
 
@@ -103,10 +105,12 @@ function SidebarContents({
     return workspaces.find((w) => w.branchName === currentWsId || w.id === currentWsId) || null;
   }, [workspaces, currentWsId]);
 
+  const liveRepositories = useWorkspaceRepositories(activeWorkspace?.branchName ?? null);
+  const [preparingRepo, setPreparingRepo] = useState<string | null>(null);
   const repoGroups = useMemo(() => {
     if (!activeWorkspace) return [];
-    return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName]);
-  }, [activeWorkspace, workspaceStatuses]);
+    return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName], liveRepositories.data);
+  }, [activeWorkspace, workspaceStatuses, liveRepositories.data]);
 
   // Keyboard shortcut for toggling rail (Z or [)
   useEffect(() => {
@@ -298,10 +302,9 @@ function SidebarContents({
               onUpdateWorktreeTitle={(wtId, title, intent) => {
                 updateTitle(wtId, title, intent);
               }}
-              onNewWorktree={(repoName) => {
-                navigate(`/new?repo=${encodeURIComponent(repoName)}`);
-              }}
+              onPrepareForEditing={(repoName) => setPreparingRepo(repoName)}
             />
+            <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
           </div>
         ) : (
           /* ─── GLOBAL WORKSPACE SWITCHER LIST ───────────────────────────── */

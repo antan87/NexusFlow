@@ -557,7 +557,7 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Advanced setup' }).click();
-    await expect(page.getByRole('radio', { name: /Current checkouts/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('radio', { name: /Reference checkouts/ })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByLabel('Feature branch')).toBeHidden();
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
     await page.getByLabel('Workspace name').fill('Fix invoices');

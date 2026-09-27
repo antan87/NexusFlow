@@ -200,8 +200,9 @@ async function scaffoldWorkspaceDir(
 /** Options for {@link createWorkspace}. */
 export interface CreateWorkspaceOptions {
   /**
-   * Whether to fast-forward clean base repository branches to remote tracking commits before branching.
-   * Defaults to true.
+   * Fast-forward the source repositories' clean base branches to their remote
+   * tracking commits. Off unless explicitly `true`, because it changes the
+   * user's own checkouts.
    */
   autoUpdateBase?: boolean;
 }
@@ -282,8 +283,9 @@ export async function createWorkspace(
 ): Promise<string> {
   const workspacePath = feature.workspacePath;
 
-  // In-place mode operates directly in source repos; fast-forward them if requested
-  if (isInPlace(feature) && options?.autoUpdateBase !== false) {
+  // In-place repos are the user's own checkouts: fast-forward them only on an
+  // explicit request, never as a side effect of creating a workspace.
+  if (isInPlace(feature) && options?.autoUpdateBase === true) {
     try {
       await fastForwardRepos(
         repos.map((r) => ({
