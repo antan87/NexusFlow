@@ -586,7 +586,40 @@ async function insertIntoBase(
   if (!aliases) {
     throw new Error(`'${type}' entries cannot be stored in base (repo) knowledge.`);
   }
+  // Resolving the filename also merges older per-workspace copies into the store.
   const filename = await getBaseKnowledgeFilename(workspacePath, repoName);
+  return withBaseStoreLock(workspacePath, repoName, filename, () =>
+    insertIntoBaseUnlocked(workspacePath, repoName, filename, aliases, entryMarkdown));
+}
+
+/**
+ * Base knowledge is shared by every workspace that includes the repository,
+ * so the workspace knowledge lock is not enough: serialize the read-modify-
+ * write on the store file itself. Plugin adapters own their own concurrency.
+ */
+async function withBaseStoreLock<T>(workspacePath: string, repoName: string, filename: string, operation: () => Promise<T>): Promise<T> {
+  const location = resolveBaseFileUrl(workspacePath, repoName, filename);
+  if (getActiveStorageProvider().meta.name !== 'local' || !path.isAbsolute(location)) return operation();
+  await fs.mkdir(path.dirname(location), { recursive: true });
+  const release = await acquireLock(`${location}.lock`, {
+    staleMs: 60_000,
+    timeoutMs: 30_000,
+    timeoutMessage: `Another ${BRAND_NAME} operation is updating the base knowledge of ${repoName}.`,
+  });
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+
+async function insertIntoBaseUnlocked(
+  workspacePath: string,
+  repoName: string,
+  filename: string,
+  aliases: string[],
+  entryMarkdown: string,
+): Promise<KnowledgeWriteResult> {
   const exists = await baseFileExists(workspacePath, repoName, filename);
   const content = exists
     ? await readBaseFile(workspacePath, repoName, filename)
@@ -598,15 +631,14 @@ async function insertIntoBase(
     const updated = insertUnderHeading(content, aliases, entryMarkdown);
     await writeBaseFile(workspacePath, repoName, filename, updated);
   }
-  const configDir = resolveWorkspaceConfigDir(workspacePath).path;
-  const commit = await commitKnowledgeArtifact(
-    workspacePath,
-    `docs(knowledge): remember ${repoName} learning`,
-    path.join(path.basename(configDir), 'base', repoName, filename),
-  );
+  const location = resolveBaseFileUrl(workspacePath, repoName, filename);
+  const relative = path.relative(workspacePath, location);
+  const commit = relative.startsWith('..') || path.isAbsolute(relative)
+    ? { status: 'skipped' as const, message: 'Base knowledge is kept in the user-level store, outside the workspace artifact repository.' }
+    : await commitKnowledgeArtifact(workspacePath, `docs(knowledge): remember ${repoName} learning`, relative.split(path.sep).join('/'));
 
   return {
-    location: resolveBaseFileUrl(workspacePath, repoName, filename),
+    location,
     section: aliases[0],
     createdFile: !exists,
     duplicate,

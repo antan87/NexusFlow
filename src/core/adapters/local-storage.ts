@@ -1,8 +1,19 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { StoragePort, StorageAdapterMeta } from '../ports/storage.js';
-import { atomicWriteFile } from '../../resources/fs-safety.js';
+import { atomicWriteFile, atomicWriteJson } from '../../resources/fs-safety.js';
 import { resolveWorkspaceConfigDir } from '../constants.js';
+import { acquireLock } from '../locks.js';
+import { mergeKnowledge, storeDirFor, workspaceRepoIdentity, type RepoIdentity } from '../base-knowledge-store.js';
+
+/** Per-source record of what was merged into a store file. */
+interface StoreMigrations {
+  identity?: RepoIdentity & { repoName: string };
+  /** When every workspace in the workspaces folder was checked for older copies. */
+  sweptAt?: string;
+  sources: Record<string, { file: string; sha256: string; mergedAt: string; workspace: string; added: number; conflicts: string[] }>;
+}
 
 export class LocalStorageAdapter implements StoragePort {
   readonly meta: StorageAdapterMeta = {
@@ -13,14 +24,116 @@ export class LocalStorageAdapter implements StoragePort {
   };
 
   /**
-   * Per-repo base files live in their own directory so they never collide with
-   * the workspace-level files (which share filenames like `contextspace-knowledge.md`)
-   * or with each other across repos. Workspace files stay at the workspace root
-   * where the generated CLAUDE.md/WORKSPACE.md expect them.
+   * Base files outlive workspaces: they live in the user-level store keyed by
+   * repository identity, shared by every workspace that includes the repo.
+   * When the identity cannot be resolved (no manifest naming the repo, or its
+   * checkout is gone) the workspace-local location is used, as before.
    */
   private baseFilePath(workspacePath: string, repoName: string, filename: string): string {
+    const identity = workspaceRepoIdentity(workspacePath, repoName);
+    return identity ? path.join(storeDirFor(identity), filename) : this.workspaceBaseFilePath(workspacePath, repoName, filename);
+  }
+
+  /**
+   * Per-repo base files inside a workspace: where earlier versions kept them.
+   * Their own directory keeps them apart from workspace-level files that share
+   * a filename, and from each other across repos.
+   */
+  private workspaceBaseFilePath(workspacePath: string, repoName: string, filename: string): string {
     const configDir = resolveWorkspaceConfigDir(workspacePath).path;
     return path.join(configDir, 'base', repoName, filename);
+  }
+
+  /**
+   * Merges this workspace's own copies of a base file into the user-level
+   * store, once per source content. Idempotent; the originals are kept.
+   */
+  private async migrateWorkspaceBaseFile(workspacePath: string, repoName: string, filename: string): Promise<void> {
+    const identity = workspaceRepoIdentity(workspacePath, repoName);
+    if (!identity) return;
+    const storeFile = path.join(storeDirFor(identity), filename);
+    const recordPath = path.join(path.dirname(storeFile), 'migrations.json');
+    const names = [filename, this.getFallbackFilename(filename)].filter((name): name is string => Boolean(name));
+    const collect = async (owners: Array<{ workspacePath: string; repoName: string }>) => {
+      const found: Array<{ file: string; content: string; sha256: string; workspace: string }> = [];
+      const seen = new Set<string>();
+      for (const owner of owners) {
+        for (const name of names) {
+          for (const file of [
+            this.workspaceBaseFilePath(owner.workspacePath, owner.repoName, name),
+            this.legacyBaseFilePath(owner.workspacePath, owner.repoName, name),
+          ]) {
+            const key = path.resolve(file);
+            if (seen.has(key) || key === path.resolve(storeFile)) continue;
+            seen.add(key);
+            const content = await fs.readFile(file, 'utf8').catch(() => null);
+            if (content === null) continue;
+            found.push({ file, content, sha256: createHash('sha256').update(content).digest('hex'), workspace: owner.workspacePath });
+          }
+        }
+      }
+      return found;
+    };
+    const readRecordQuick = async () => fs.readFile(recordPath, 'utf8').then((raw) => JSON.parse(raw) as StoreMigrations, () => null);
+    const quick = await readRecordQuick();
+    // The first use of a store checks every workspace that includes the repo,
+    // so knowledge promoted in a workspace nobody has opened since is not missed.
+    const owners = [{ workspacePath, repoName }, ...(quick?.sweptAt ? [] : await workspacesWithRepo(identity))];
+    const sources = await collect(owners);
+    if (sources.length === 0 && quick?.sweptAt) return;
+
+    const readRecord = async (): Promise<StoreMigrations> => {
+      try {
+        const parsed = JSON.parse(await fs.readFile(recordPath, 'utf8')) as StoreMigrations;
+        return { ...parsed, sources: parsed.sources ?? {} };
+      } catch {
+        return { sources: {} };
+      }
+    };
+    const pending = (record: StoreMigrations) => sources.filter((source) => record.sources[source.file]?.sha256 !== source.sha256);
+    if (pending(await readRecord()).length === 0 && quick?.sweptAt) return;
+
+    await fs.mkdir(path.dirname(storeFile), { recursive: true });
+    const release = await acquireLock(`${storeFile}.lock`, {
+      staleMs: 60_000,
+      timeoutMs: 30_000,
+      timeoutMessage: `Another process is updating the base knowledge of ${repoName}. Retry the operation.`,
+    });
+    try {
+      const record = await readRecord();
+      const todo = pending(record);
+      if (todo.length === 0 && record.sweptAt) return;
+      const { insertUnderHeading } = await import('../knowledge.js');
+      let content = await fs.readFile(storeFile, 'utf8').catch(() => null);
+      for (const source of todo) {
+        const origin = path.basename(source.workspace);
+        let added = 0;
+        let conflicts: string[] = [];
+        if (content === null) {
+          content = source.content;
+          added = 1;
+        } else {
+          const merged = mergeKnowledge(content, source.content, origin, insertUnderHeading);
+          content = merged.content;
+          added = merged.added;
+          conflicts = merged.conflicts;
+        }
+        record.sources[source.file] = {
+          file: filename,
+          sha256: source.sha256,
+          mergedAt: new Date().toISOString(),
+          workspace: source.workspace,
+          added,
+          conflicts,
+        };
+      }
+      if (content !== null) await atomicWriteFile(storeFile, content);
+      record.identity = { ...identity, repoName };
+      record.sweptAt ??= new Date().toISOString();
+      await atomicWriteJson(recordPath, record);
+    } finally {
+      await release();
+    }
   }
 
   private legacyBaseFilePath(workspacePath: string, repoName: string, filename: string): string {
@@ -80,12 +193,14 @@ export class LocalStorageAdapter implements StoragePort {
   }
 
   async writeBaseFile(workspacePath: string, repoName: string, filename: string, content: string): Promise<void> {
+    await this.migrateWorkspaceBaseFile(workspacePath, repoName, filename);
     const filePath = this.baseFilePath(workspacePath, repoName, filename);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, 'utf8');
+    await atomicWriteFile(filePath, content);
   }
 
   async readBaseFile(workspacePath: string, repoName: string, filename: string): Promise<string> {
+    await this.migrateWorkspaceBaseFile(workspacePath, repoName, filename);
     const filePath = this.baseFilePath(workspacePath, repoName, filename);
     try {
       return await fs.readFile(filePath, 'utf8');
@@ -100,6 +215,7 @@ export class LocalStorageAdapter implements StoragePort {
   }
 
   async baseFileExists(workspacePath: string, repoName: string, filename: string): Promise<boolean> {
+    await this.migrateWorkspaceBaseFile(workspacePath, repoName, filename);
     const filePath = this.baseFilePath(workspacePath, repoName, filename);
     try {
       await fs.access(filePath);
@@ -120,6 +236,31 @@ export class LocalStorageAdapter implements StoragePort {
   }
 
   async deleteWorkspace(workspacePath: string, featureId: string): Promise<void> {
-    // NOP - local files are inside workspacePath, which is deleted directly on workspace removal.
+    // NOP - workspace files are inside workspacePath, which is deleted directly on
+    // workspace removal. Base knowledge lives in the user-level store and survives.
+  }
+}
+
+/**
+ * Every workspace in the configured workspaces folder that includes the
+ * repository with this identity, with the folder name it uses there.
+ */
+async function workspacesWithRepo(identity: RepoIdentity): Promise<Array<{ workspacePath: string; repoName: string }>> {
+  try {
+    const [{ loadConfig }, { listWorkspaces }] = await Promise.all([import('../config.js'), import('../workspace.js')]);
+    const config = await loadConfig({ quiet: true });
+    const owners: Array<{ workspacePath: string; repoName: string }> = [];
+    for (const feature of await listWorkspaces(config.workspacesDir)) {
+      for (const repo of feature.repos) {
+        const name = path.basename(repo);
+        const candidate = workspaceRepoIdentity(feature.workspacePath, name);
+        if (candidate && candidate.kind === identity.kind && candidate.value === identity.value) {
+          owners.push({ workspacePath: feature.workspacePath, repoName: name });
+        }
+      }
+    }
+    return owners;
+  } catch {
+    return [];
   }
 }

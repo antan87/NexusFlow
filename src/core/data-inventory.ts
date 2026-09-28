@@ -29,11 +29,11 @@ export const DATA_INVENTORY: readonly DataClass[] = [
   },
   {
     id: 'knowledge', title: 'Workspace and repository knowledge', owner: 'ContextSpace, authored by you',
-    storage: 'Workspace knowledge and .contextspace/base/<repo>/ through the storage adapter. Legacy .nexusflow locations remain readable.',
+    storage: 'Workspace knowledge in the workspace. With the local adapter, repository base knowledge is in the brand home under base/<repository>/, keyed by origin URL (or checkout path without a remote) and shared by every workspace with that repository. Older .contextspace/base/<repo>/ and legacy .nexusflow copies are merged in once and kept.',
     network: 'The local adapter does not upload knowledge. Assistants reading it and optional Workroom publication have separate sharing boundaries.',
-    retention: 'No automatic expiry. With the local adapter, workspace deletion removes both workspace and base knowledge in that workspace.',
-    controls: 'Knowledge commands and the Knowledge view manage entries. Base knowledge is per workspace, not a global repository archive.',
-    recovery: 'Preserve both workspace and base knowledge, including adapter-managed copies.',
+    retention: 'No automatic expiry. Deleting or archiving a workspace keeps repository base knowledge; deleting it removes that workspace’s own knowledge.',
+    controls: 'Knowledge commands and the Knowledge view manage entries. Base knowledge belongs to the repository, not to one workspace.',
+    recovery: 'Preserve workspace knowledge and the brand-home base/ folder, including adapter-managed copies.',
   },
   {
     id: 'lifecycle', title: 'Milestones and verification history', owner: 'ContextSpace',
