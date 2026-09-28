@@ -16,7 +16,13 @@ export function registerStorageProvider(name: string, provider: StoragePort) {
 // reads CLAUDE.md from the workspace root, `@AGENTS.md` resolves relative to it,
 // and Codex, Cursor and Devin read AGENTS.md from the root too. The removed
 // central-vault adapter wrote all of them to ~/.nexusflow/vault/ instead.
-registerStorageProvider('local', new LocalStorageAdapter());
+const builtInLocalProvider = new LocalStorageAdapter();
+registerStorageProvider('local', builtInLocalProvider);
+
+/** A plugin's self-reported name is not evidence of local-only behavior. */
+export function isBuiltInLocalStorageProvider(provider: StoragePort): boolean {
+  return provider === builtInLocalProvider;
+}
 
 /** Returns metadata for all registered storage providers. */
 export function listStorageProviders(): StorageAdapterMeta[] {

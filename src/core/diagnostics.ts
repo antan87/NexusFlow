@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getCurrentVersion } from '../utils/update-check.js';
 import { loadFeatureConfig } from './workspace.js';
-import { getActiveStorageProvider } from './adapters/registry.js';
+import { getActiveStorageProvider, isBuiltInLocalStorageProvider } from './adapters/registry.js';
 import { workspaceFileExists } from './storage.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { PRIMARY_KNOWLEDGE_FILE, PRIMARY_PLAN_FILE } from './constants.js';
@@ -88,7 +88,7 @@ export async function collectDiagnostics(workspacePath?: string): Promise<Diagno
       const feature = await loadFeatureConfig(workspacePath);
       if (!feature || !Array.isArray(feature.repos) || feature.repos.length > 9999
           || feature.repos.some(repo => typeof repo !== 'string')) throw new Error();
-      const local = getActiveStorageProvider().meta.name === 'local';
+      const local = isBuiltInLocalStorageProvider(getActiveStorageProvider());
       report.sections.workspace = { alias: 'workspace-1', mode: feature.mode === 'in-place' ? 'in-place' : 'worktree',
         repositoryCount: feature.repos.length, projectLinked: Boolean(feature.projectId), storage: local ? 'local' : 'plugin' };
       const checks: z.infer<typeof checkSchema>[] = [];

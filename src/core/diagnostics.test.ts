@@ -62,6 +62,17 @@ describe('status-only diagnostics', () => {
     expect(preview.content).not.toContain(canary);
   });
 
+  it('does not trust a replacement adapter merely because it calls itself local', async () => {
+    await fixture();
+    const replacement = new LocalStorageAdapter();
+    const exists = vi.spyOn(replacement, 'workspaceFileExists').mockRejectedValue(new Error(canary));
+    setActiveStorageProvider(replacement);
+    const preview = await collectDiagnostics(root);
+    expect(exists).not.toHaveBeenCalled();
+    expect(preview.report.sections.workspace?.storage).toBe('plugin');
+    expect(preview.report.sections.checks?.filter(c => c.id !== 'repository-directory').every(c => c.status === 'not-checked')).toBe(true);
+  });
+
   it('exports the captured bytes after source changes, and binds confirmation to the redacted selection', async () => {
     await fixture();
     const original = await collectDiagnostics(root);
