@@ -148,6 +148,14 @@ async function changedFileCount(repoPath: string): Promise<number | null> {
 }
 
 /** Branches checked out in any worktree of a repository, with their paths. */
+function editableSignature(entries: Array<[string, string]>): string {
+  return entries.map(([name, worktree]) => `${name}\0${path.resolve(worktree)}`).sort().join('\n');
+}
+
+async function realPath(target: string): Promise<string> {
+  return fs.realpath(target).catch(() => path.resolve(target));
+}
+
 async function checkedOutBranches(sourcePath: string): Promise<Map<string, string>> {
   const out = await gitOut(sourcePath, ['worktree', 'list', '--porcelain']);
   const branches = new Map<string, string>();
@@ -181,15 +189,23 @@ async function planBranches(feature: Feature, repos: ArchiveRepoPlan[], options:
     const created = feature.createdBranches?.[repo.name];
     const tip = await gitOut(repo.sourcePath, ['rev-parse', '--verify', '--quiet', `refs/heads/${repo.branch}`]);
     const defaultBranch = await detectDefaultBranch(repo.sourcePath);
-    const elsewhere = [...(await checkedOutBranches(repo.sourcePath)).entries()]
-      .find(([branch, worktree]) => branch === repo.branch && (!repo.worktreePath || path.resolve(worktree) !== path.resolve(repo.worktreePath)));
+    // The workspace's own worktree does not count while this run removes it;
+    // compare real paths, since Git records worktrees with symlinks resolved.
+    const own = repo.action === 'remove-worktree' && repo.worktreePath ? await realPath(repo.worktreePath) : null;
+    let elsewhere: [string, string] | undefined;
+    for (const [branch, worktree] of (await checkedOutBranches(repo.sourcePath)).entries()) {
+      if (branch === repo.branch && (await realPath(worktree)) !== own) {
+        elsewhere = [branch, worktree];
+        break;
+      }
+    }
 
     if (options.keepBranches) plan.reason = 'kept on request';
     else if (repo.branchState !== 'merged') plan.reason = 'not merged; kept so the work can be picked up again';
     else if (repo.branch === defaultBranch) plan.reason = 'the default branch is never deleted';
     else if (created === undefined) plan.reason = feature.createdBranches ? 'this workspace did not create it' : 'provenance unknown: this workspace predates branch records';
     else if (created !== repo.branch) plan.reason = `this workspace created "${created}", not this branch`;
-    else if (elsewhere) plan.reason = `checked out in ${elsewhere[1]}`;
+    else if (elsewhere) plan.reason = `checked out in ${path.resolve(elsewhere[1])}`;
     else if (tip !== null && tip !== repo.headSha) plan.reason = `moved to ${tip.slice(0, 7)} since it was merged`;
     else {
       plan.local = tip === null ? 'absent' : 'delete';
@@ -275,7 +291,9 @@ async function planRepo(
 
   const worktreePath = boundary.path;
   const previous = journal.get(boundary.name);
-  if (previous?.removed || (previous && !(await exists(worktreePath)))) {
+  // The journal only speaks for a worktree that is still gone. One that exists
+  // again (recreated since) is checked from scratch like any other.
+  if (previous && !(await exists(worktreePath))) {
     return recordFromJournal({ ...previous, worktreePath });
   }
 
@@ -485,15 +503,36 @@ async function stopWorkspaceServices(workspacePath: string, notes: string[]): Pr
  * interruption resumes from the journal.
  */
 export async function archiveWorkspace(workspacePath: string, options: ArchiveOptions = {}): Promise<ArchiveReport> {
+  const previousRun = (await loadWorkspaceState(workspacePath)).lastArchive;
   const report = await planArchive(workspacePath, options);
   if (report.alreadyArchived || !report.ready || options.dryRun) return report;
+
+  // Planning can take a while (fetches, gh). If a repository was prepared for
+  // editing or added meanwhile, the plan no longer covers it: stop, change nothing.
+  const planned = editableSignature(report.repos.filter((repo) => repo.access !== 'reference').map((repo) => [repo.name, repo.worktreePath ?? '']));
+  const changedSincePlanning = async () => {
+    const current = await loadFeatureConfig(workspacePath);
+    if (!current || isArchived(current)) return true;
+    const editable = describeEditBoundaries(current, workspacePath).filter((boundary) => boundary.editable);
+    return editableSignature(editable.map((boundary) => [boundary.name, boundary.path])) !== planned;
+  };
+  const refuseChanged = () => {
+    report.ready = false;
+    report.blockers = ['The workspace changed while archive was checking it (a repository was prepared for editing or added). Nothing more was removed; run archive again.'];
+  };
+  if (await changedSincePlanning()) {
+    refuseChanged();
+    return report;
+  }
 
   const startedAt = new Date().toISOString();
   const journal: ArchiveRunRepo[] = report.repos.map((repo) => ({
     ...toRecord(repo),
     removed: repo.action === 'already-removed',
   }));
-  const parked = Boolean(options.park) || report.repos.some((r) => r.branchState === 'parked' && r.action === 'remove-worktree');
+  const parked = Boolean(options.park)
+    || report.repos.some((r) => r.access !== 'reference' && r.branchState === 'parked')
+    || Boolean(previousRun && (previousRun.status === 'running' || previousRun.status === 'partial') && previousRun.parked);
   const persist = (status: ArchiveRun['status']) =>
     mutateWorkspaceState(workspacePath, (state) => {
       state.lastArchive = {
@@ -543,6 +582,12 @@ export async function archiveWorkspace(workspacePath: string, options: ArchiveOp
   }
   await persist('running');
 
+  if (await changedSincePlanning()) {
+    refuseChanged();
+    report.errors.push(report.blockers[0]!);
+    await persist('partial');
+    return report;
+  }
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) throw new Error(`No workspace manifest found at ${workspacePath}.`);
   const archivedAt = new Date().toISOString();

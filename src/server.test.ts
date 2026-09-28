@@ -1095,7 +1095,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
       const done = await post({ park: true });
       expect(done.status).toBe(200);
-      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.join('/mock/workspaces', 'ws'), { park: true, dryRun: false, keepBranches: false, deleteRemoteBranches: false });
+      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.resolve('/mock/workspaces', 'ws'), { park: true, dryRun: false, keepBranches: false, deleteRemoteBranches: false, fetch: undefined });
     });
 
     it('returns 404 for an unknown workspace instead of archiving', async () => {

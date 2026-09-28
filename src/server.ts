@@ -1666,7 +1666,7 @@ app.delete('/api/workspace/:id', async (c) => {
 app.post('/api/workspace/:id/archive', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
-    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown; keepBranches?: unknown; deleteRemoteBranches?: unknown };
+    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown; keepBranches?: unknown; deleteRemoteBranches?: unknown; fetch?: unknown };
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
@@ -1675,6 +1675,8 @@ app.post('/api/workspace/:id/archive', async (c) => {
       dryRun: body.dryRun === true,
       keepBranches: body.keepBranches === true,
       deleteRemoteBranches: body.deleteRemoteBranches === true,
+      // A preview may skip fetching when the caller fetched moments ago; archive itself always fetches.
+      fetch: body.dryRun === true && body.fetch === false ? false : undefined,
     });
     if (!report.dryRun && !report.alreadyArchived && !report.ready) return c.json({ ...report, error: report.blockers.join(' ') }, 409);
     if (report.errors.length > 0) return c.json({ ...report, error: report.errors.join(' ') }, 500);

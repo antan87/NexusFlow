@@ -17,8 +17,8 @@ import { detectDefaultBranch } from '../utils/git.js';
 import { fastForwardRepos } from '../utils/repo-freshness.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
-import { deleteWorkspaceFiles } from './storage.js';
-import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
+import { baseFileExists, deleteWorkspaceFiles } from './storage.js';
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, PRIMARY_KNOWLEDGE_FILE, BRAND_CONFIG } from './constants.js';
 import { atomicWriteFile } from '../resources/fs-safety.js';
 import { assertWorkspaceActive } from './archive-guard.js';
 
@@ -542,6 +542,16 @@ export async function deleteWorkspace(
     }
   }
   if (feature) {
+    // Merge this workspace's base knowledge into the shared store first, so a
+    // workspace nobody opened since the store existed does not take it along.
+    // Best-effort: failing to merge never blocks the delete the user asked for.
+    for (const repo of feature.repos) {
+      try {
+        await baseFileExists(workspacePath, path.basename(repo), PRIMARY_KNOWLEDGE_FILE);
+      } catch {
+        // Keep deleting.
+      }
+    }
     try {
       await deleteWorkspaceFiles(workspacePath, feature.id);
     } catch (error) {

@@ -716,8 +716,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
           {archived && <ArchivedNotice workspace={selected} onRestore={() => void handleRestore()} restoring={restoring} />}
 
-          {/* An archived workspace is a read-only record: a disabled fieldset turns every control inside it off. */}
-          <fieldset disabled={archived} className="m-0 min-w-0 border-0 p-0">
           <div role="region" aria-label={SECTION_LABELS[subTab]} className="pb-6">
               {subTab === 'overview' && archived && <ArchivedWorkspaceView workspace={selected} />}
               {subTab === 'overview' && !archived && (
@@ -1278,18 +1276,17 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
               </div>}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
-              {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
+              {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} readOnly={archived} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">
-                <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} onPlanChanged={() => {
+                <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} readOnly={archived} onPlanChanged={() => {
                   setPlanVersion((version) => version + 1);
                   void planProps.handleRetryPlan(selected.branchName);
                 }} />
-                <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} />
+                <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} readOnly={archived} />
               </div>}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
           </div>
-          </fieldset>
         </div>
       </div>
     );

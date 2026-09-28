@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execa } from 'execa';
 
 import { ArchivedWorkspaceError, archiveWorkspace, planArchive, unarchiveWorkspace } from './archive.js';
@@ -20,6 +20,21 @@ import { loadWorkspaceState } from './workspace-state.js';
 import type { Feature } from '../types.js';
 
 const git = async (cwd: string, ...args: string[]) => (await execa('git', args, { cwd })).stdout.trim();
+
+/** Runs inside archive's planning fetch, to change the workspace mid-archive. */
+const hooks: { duringFetch?: () => Promise<void> } = {};
+vi.mock('./merge-detection.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./merge-detection.js')>();
+  return {
+    ...actual,
+    fetchDefaultBranch: async (repoPath: string, defaultBranch: string) => {
+      const hook = hooks.duringFetch;
+      hooks.duringFetch = undefined;
+      await hook?.();
+      return actual.fetchDefaultBranch(repoPath, defaultBranch);
+    },
+  };
+});
 
 async function initRepo(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
@@ -447,6 +462,64 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
       expect(await git(host, 'ls-remote', '--heads', 'origin', 'feat/archive')).toContain(tip);
       expect((await loadFeatureConfig(workspacePath))?.archive?.repos[0]).toMatchObject({ branchDeleted: true });
       expect((await loadFeatureConfig(workspacePath))?.archive?.repos[0]?.remoteBranchDeleted).toBeUndefined();
+    });
+  });
+  describe('review regressions', () => {
+    it('re-checks a worktree that exists again after an interrupted run, instead of trusting the journal', async () => {
+      const a = await hostWithRemote(root, 'one');
+      const b = await hostWithRemote(root, 'two');
+      const workspacePath = await inPlaceWorkspace(root, [a.host, b.host]);
+      const one = (await isolateWorkspaceRepo(workspacePath, 'one', { branchName: 'feat/archive' })).worktreePath;
+      const two = (await isolateWorkspaceRepo(workspacePath, 'two', { branchName: 'feat/archive' })).worktreePath;
+      await git(b.host, 'worktree', 'lock', two);
+      expect((await archiveWorkspace(workspacePath)).archived).toBe(false);
+      expect(await exists(one)).toBe(false);
+      // The worktree is recreated on its branch and work starts again.
+      await git(a.host, 'worktree', 'add', one, 'feat/archive');
+      await fs.writeFile(path.join(one, 'new-work.txt'), 'uncommitted\n');
+      await git(b.host, 'worktree', 'unlock', two);
+
+      const report = await archiveWorkspace(workspacePath);
+      expect(report.archived).toBe(false);
+      expect(report.repos[0]).toMatchObject({ name: 'one', action: 'blocked', branchState: 'dirty' });
+      expect(await fs.readFile(path.join(one, 'new-work.txt'), 'utf-8')).toBe('uncommitted\n');
+      await expect(git(a.host, 'rev-parse', '--verify', 'refs/heads/feat/archive')).resolves.toMatch(/[0-9a-f]{40}/);
+    });
+
+    it('stops without removing anything when a repository is prepared for editing while archive checks', async () => {
+      const a = await hostWithRemote(root, 'api');
+      const b = await hostWithRemote(root, 'web');
+      const workspacePath = await inPlaceWorkspace(root, [a.host, b.host]);
+      const api = (await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' })).worktreePath;
+      let web = '';
+      hooks.duringFetch = async () => {
+        web = (await isolateWorkspaceRepo(workspacePath, 'web', { branchName: 'feat/late' })).worktreePath;
+      };
+
+      const report = await archiveWorkspace(workspacePath);
+
+      expect(report.archived).toBe(false);
+      expect(report.blockers[0]).toMatch(/changed while archive was checking it/);
+      expect(await exists(api)).toBe(true);
+      expect(await exists(web)).toBe(true);
+      const feature = (await loadFeatureConfig(workspacePath))!;
+      expect(feature.archivedAt).toBeUndefined();
+      expect(Object.keys(feature.isolatedRepos ?? {}).sort()).toEqual(['api', 'web']);
+    });
+
+    it('a resumed run without --park still records that unmerged work was parked', async () => {
+      const a = await hostWithRemote(root, 'parked');
+      const b = await hostWithRemote(root, 'other');
+      const workspacePath = await inPlaceWorkspace(root, [a.host, b.host]);
+      const parked = (await isolateWorkspaceRepo(workspacePath, 'parked', { branchName: 'feat/archive' })).worktreePath;
+      const other = (await isolateWorkspaceRepo(workspacePath, 'other', { branchName: 'feat/archive' })).worktreePath;
+      await commitAndPush(parked, 'unmerged.txt', 'feat/archive');
+      await git(b.host, 'worktree', 'lock', other);
+      expect((await archiveWorkspace(workspacePath, { park: true })).archived).toBe(false);
+      await git(b.host, 'worktree', 'unlock', other);
+
+      expect((await archiveWorkspace(workspacePath)).archived).toBe(true);
+      expect((await loadFeatureConfig(workspacePath))?.archive).toMatchObject({ parked: true, repos: [{ branchState: 'parked' }, { branchState: 'merged' }] });
     });
   });
 });

@@ -90,9 +90,10 @@ test('archive previews what happens, parks unmerged work on request, and restore
   await archiveButton.click();
   await expect(dialog).toBeHidden();
   const none = { keepBranches: false, deleteRemoteBranches: false };
+  // Only the first preview fetches; option changes re-plan without fetching again.
   expect(calls.filter((call) => call.path === 'archive').map((call) => call.body)).toEqual([
-    { park: false, ...none, dryRun: true }, { park: true, ...none, dryRun: true },
-    { park: true, keepBranches: false, deleteRemoteBranches: true, dryRun: true },
+    { park: false, ...none, dryRun: true }, { park: true, ...none, dryRun: true, fetch: false },
+    { park: true, keepBranches: false, deleteRemoteBranches: true, dryRun: true, fetch: false },
     { park: true, keepBranches: false, deleteRemoteBranches: true },
   ]);
 
@@ -117,6 +118,16 @@ test('archive previews what happens, parks unmerged work on request, and restore
   await expect(page.getByRole('table')).toBeVisible();
   await page.goto('/#/workspaces/demo/plan');
   await expect(page.getByLabel('Current objective')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save AI assignment' })).toHaveCount(0);
+  // Reading stays possible: the brief sections switch, nothing offers to change the record.
+  await page.getByRole('button', { name: 'Source documents' }).click();
+  await expect(page.getByRole('button', { name: 'Add document' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Run verification' })).toHaveCount(0);
+  await page.goto('/#/workspaces/demo/knowledge');
+  await expect(page.getByRole('region', { name: 'Knowledge' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Edit Knowledge/ })).toHaveCount(0);
+  await page.goto('/#/workspaces/demo/plan');
+  await page.getByRole('button', { name: 'AI assignment' }).click();
 
   await page.getByRole('button', { name: 'Restore workspace' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Archived on' })).toHaveCount(0);

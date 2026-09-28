@@ -17,6 +17,9 @@ import {
   storeDirName,
 } from './base-knowledge-store.js';
 import { addBaseKnowledge, insertUnderHeading, readBaseKnowledge, searchKnowledge } from './knowledge.js';
+import { runHoldingStoreLock } from './base-knowledge-store.js';
+import { resetMigrationPasses } from './adapters/local-storage.js';
+import { acquireLock } from './locks.js';
 import { deleteWorkspace, saveFeatureConfig } from './workspace.js';
 import { PRIMARY_KNOWLEDGE_FILE } from './constants.js';
 import type { Feature } from '../types.js';
@@ -72,6 +75,14 @@ describe('mergeKnowledge', () => {
     expect(mergeKnowledge(merged.content, incoming, 'ws-b', insertUnderHeading).added).toBe(0);
   });
 
+  it('never treats an entry as present because it is a prefix of another', () => {
+    const store = '## Known Gotchas\n\n- Use pnpm for installs, never npm\n';
+    const merged = mergeKnowledge(store, '## Known Gotchas\n\n- Use pnpm\n', 'ws-a', insertUnderHeading);
+    expect(merged.added).toBe(1);
+    expect(merged.content).toMatch(/^- Use pnpm$/m);
+    expect(merged.content).toContain('- Use pnpm for installs, never npm');
+  });
+
   it('ignores template placeholders', () => {
     expect(splitKnowledgeBlocks('## Architecture Decisions\n- None recorded yet.\n')).toEqual([]);
   });
@@ -91,6 +102,7 @@ describe('user-level base knowledge (real git)', { timeout: 60_000 }, () => {
     previousHome = process.env.CONTEXTSPACE_HOME;
     process.env.CONTEXTSPACE_HOME = home;
     resetBaseStoreIdentityCache();
+    resetMigrationPasses();
   });
 
   afterEach(async () => {
@@ -153,7 +165,7 @@ describe('user-level base knowledge (real git)', { timeout: 60_000 }, () => {
     const b = await workspace('ws-b', [api]);
 
     const written = await addBaseKnowledge(a, 'api', { type: 'gotcha', title: 'cache-warmup', message: 'Warm the cache before load tests.' });
-    expect(written.location.startsWith(path.join(home, 'base'))).toBe(true);
+    expect(path.normalize(written.location).startsWith(path.join(home, 'base'))).toBe(true);
     expect(written.commit.status).toBe('skipped');
 
     await deleteWorkspace(a);
@@ -192,6 +204,7 @@ describe('user-level base knowledge (real git)', { timeout: 60_000 }, () => {
     const [store] = await fs.readdir(path.join(home, 'base'));
     await fs.rm(path.join(home, 'base', store!, 'migrations.json'));
     resetBaseStoreIdentityCache();
+    resetMigrationPasses();
 
     expect(await readBaseKnowledge(a, 'api')).toBe(first);
   });
@@ -200,5 +213,44 @@ describe('user-level base knowledge (real git)', { timeout: 60_000 }, () => {
     const a = await workspace('ws-a', [path.join(root, 'missing')], { missing: legacy('### 2026-09-02 — kept\n**Gotcha:** still readable') });
     expect(await readBaseKnowledge(a, 'missing')).toContain('still readable');
     await expect(fs.access(path.join(home, 'base'))).rejects.toThrow();
+  });
+  it('deleting a workspace nobody opened since the store existed first merges its knowledge', async () => {
+    const api = await checkout('api', 'git@github.com:acme/api.git');
+    const a = await workspace('ws-a', [api]);
+    await addBaseKnowledge(a, 'api', { type: 'gotcha', title: 'from-a', message: 'Known from A.' });
+    // Created after the store was swept, with an older per-workspace copy.
+    const late = await workspace('ws-late', [api], { api: legacy('### 2026-09-05 — from-late\n**Gotcha:** only the late workspace knew') });
+    resetMigrationPasses();
+
+    const { deleteWorkspace: remove } = await import('./workspace.js');
+    await remove(late);
+
+    resetMigrationPasses();
+    const content = (await readBaseKnowledge(a, 'api'))!;
+    expect(content).toContain('only the late workspace knew');
+    expect(content).toContain('Known from A.');
+  });
+
+  it('a migration that becomes due while a knowledge write holds the store lock does not wait on itself', async () => {
+    const api = await checkout('api', 'git@github.com:acme/api.git');
+    const a = await workspace('ws-a', [api]);
+    await addBaseKnowledge(a, 'api', { type: 'gotcha', title: 'first', message: 'First entry.' });
+    const [store] = await fs.readdir(path.join(home, 'base'));
+    const storeFile = path.join(home, 'base', store!, PRIMARY_KNOWLEDGE_FILE);
+    // A workspace-local copy changes after the store was used: a migration is pending again.
+    const dir = path.join(a, '.contextspace', 'base', 'api');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, PRIMARY_KNOWLEDGE_FILE), legacy('### 2026-09-06 — pending\n**Gotcha:** merged under the held lock'));
+    resetMigrationPasses();
+
+    const release = await acquireLock(`${storeFile}.lock`, { staleMs: 60_000, timeoutMs: 1_000 });
+    try {
+      const started = Date.now();
+      const content = await runHoldingStoreLock(storeFile, () => readBaseKnowledge(a, 'api'));
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(content).toContain('merged under the held lock');
+    } finally {
+      await release();
+    }
   });
 });

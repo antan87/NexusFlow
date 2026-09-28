@@ -33,6 +33,8 @@ interface ImplementationPlanProps {
   handleRetryPlan: (wsId: string) => Promise<void>;
   workspaceId?: string;
   defaultViewMode?: 'flow' | 'preview' | 'raw';
+  /** Archived: show milestones and verification history, run nothing. */
+  readOnly?: boolean;
 }
 
 export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
@@ -42,6 +44,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   handleRetryPlan,
   workspaceId,
   defaultViewMode = 'flow',
+  readOnly = false,
 }) => {
   const [viewMode, setViewMode] = useState<'flow' | 'preview' | 'raw'>(defaultViewMode);
   const [milestoneMarkdown, setMilestoneMarkdown] = useState<string | null>(null);
@@ -277,10 +280,10 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           {hasMilestones && <Button size="xs" variant="outline" onClick={() => void loadLifecycle()} disabled={lifecycleLoading}>
             <RefreshCw size={12} className={lifecycleLoading ? 'animate-spin' : ''} /> Refresh Radar
           </Button>}
-          <Button size="xs" onClick={() => void handleVerify()} disabled={!workspaceId || verifying || actionLoading !== null}>
+          {!readOnly && <Button size="xs" onClick={() => void handleVerify()} disabled={!workspaceId || verifying || actionLoading !== null}>
             <ShieldCheck size={14} className={verifying ? 'animate-spin' : ''} />
             {verifying ? 'Running Tests...' : 'Run verification'}
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -387,7 +390,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {(step.status === 'in_progress' || step.status === 'verified') && (
+                        {!readOnly && (step.status === 'in_progress' || step.status === 'verified') && (
                           <Button
                             size="xs"
                             variant="outline"
@@ -398,7 +401,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             <Check size={12} /> {actionLoading === step.id ? 'Working...' : requiresVerification ? 'Verify & Complete' : 'Mark Complete'}
                           </Button>
                         )}
-                        {step.status === 'pending' && (
+                        {!readOnly && step.status === 'pending' && (
                           <Button
                             size="xs"
                             variant="ghost"

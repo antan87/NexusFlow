@@ -14,6 +14,7 @@
  * knowledge is used, idempotently, and are never deleted.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -164,6 +165,36 @@ export function resetBaseStoreIdentityCache(): void {
   identityCache.clear();
 }
 
+/**
+ * Store files whose lock the current async call chain holds. The lock is not
+ * reentrant, so code running inside it (a knowledge write) must not take it
+ * again; other concurrent requests in the same process still wait for it.
+ */
+const heldStoreLocks = new AsyncLocalStorage<ReadonlySet<string>>();
+
+/** Runs `operation` as the holder of the lock on `storeFile`. */
+export function runHoldingStoreLock<T>(storeFile: string, operation: () => Promise<T>): Promise<T> {
+  const held = new Set(heldStoreLocks.getStore() ?? []);
+  held.add(path.resolve(storeFile));
+  return heldStoreLocks.run(held, operation);
+}
+
+/** Whether the current async call chain holds the lock on `storeFile`. */
+export function holdsStoreLock(storeFile: string): boolean {
+  return heldStoreLocks.getStore()?.has(path.resolve(storeFile)) ?? false;
+}
+
+/** Async identity of a checkout, for sweeps that must not block the event loop. */
+export async function repoIdentityAsync(sourcePath: string): Promise<RepoIdentity | null> {
+  const { stat, realpath } = await import('node:fs/promises');
+  const { execa } = await import('execa');
+  if (!(await stat(sourcePath).then((s) => s.isDirectory(), () => false))) return null;
+  const remote = await execa('git', ['config', '--get', 'remote.origin.url'], { cwd: sourcePath, reject: false, timeout: 5_000 }).catch(() => null);
+  const normalized = remote && remote.exitCode === 0 ? normalizeRemoteIdentity(remote.stdout) : null;
+  if (normalized) return { kind: 'remote', value: normalized };
+  return realpath(sourcePath).then((value) => ({ kind: 'path' as const, value }), () => null);
+}
+
 // ── Merging per-workspace files into the store ─────────────────────────────
 
 interface KnowledgeBlock {
@@ -175,6 +206,11 @@ interface KnowledgeBlock {
 }
 
 const PLACEHOLDER = /^-\s+None recorded yet\.?\s*$/i;
+
+/** Line endings and trailing space do not make an entry different. */
+function normalizeBlock(text: string): string {
+  return text.split(/\r?\n/).map((line) => line.replace(/\s+$/, '')).join('\n').trim();
+}
 
 /** Splits knowledge Markdown into entries: `### ` headed blocks and top-level bullets. */
 export function splitKnowledgeBlocks(markdown: string): KnowledgeBlock[] {
@@ -240,16 +276,23 @@ export function mergeKnowledge(
   let content = existing;
   let added = 0;
   const conflicts: string[] = [];
+  // Whole entries are compared, never substrings: "- Use pnpm" is not a
+  // duplicate of "- Use pnpm for installs, never npm".
+  const present = new Set(splitKnowledgeBlocks(content).map((block) => normalizeBlock(block.text)));
+  const headings = new Set(splitKnowledgeBlocks(content).flatMap((block) => (block.heading ? [block.heading] : [])));
   for (const block of splitKnowledgeBlocks(incoming)) {
-    if (content.includes(block.text)) continue;
+    if (present.has(normalizeBlock(block.text))) continue;
     let text = block.text;
-    if (block.heading && content.split(/\r?\n/).some((line) => line.trim() === block.heading)) {
+    if (block.heading && headings.has(block.heading)) {
       const renamed = `${block.heading} (from ${origin})`;
       conflicts.push(block.heading.replace(/^###\s+/, ''));
       text = [renamed, ...block.text.split(/\r?\n/).slice(1)].join('\n');
-      if (content.includes(text)) continue;
+      if (present.has(normalizeBlock(text))) continue;
     }
     content = insert(content, [block.section || 'Notes'], text);
+    present.add(normalizeBlock(text));
+    const heading = text.split(/\r?\n/, 1)[0]!;
+    if (heading.startsWith('### ')) headings.add(heading.trim());
     added += 1;
   }
   return { content, added, conflicts };

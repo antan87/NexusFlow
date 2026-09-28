@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogPopup,
@@ -60,7 +60,7 @@ const ACTION_LABEL: Record<ArchivePreview['repos'][number]['action'], string> = 
   blocked: 'Blocks archive',
 };
 
-function archiveRequest(name: string, body: ArchiveChoices & { dryRun?: boolean }) {
+function archiveRequest(name: string, body: ArchiveChoices & { dryRun?: boolean; fetch?: boolean }) {
   return apiFetch<ArchivePreview>(`/api/workspace/${encodeURIComponent(name)}/archive`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -76,6 +76,8 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
   const [park, setPark] = useState(false);
   const [keepBranches, setKeepBranches] = useState(false);
   const [deleteRemoteBranches, setDeleteRemoteBranches] = useState(false);
+  // Fetch once when the dialog opens; option changes re-plan from that state.
+  const fetched = useRef(false);
   const [preview, setPreview] = useState<ArchivePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -88,7 +90,9 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
     setLoadingPreview(true);
     setPreviewError(null);
     setArchiveError(null);
-    archiveRequest(workspaceName, { park, keepBranches, deleteRemoteBranches, dryRun: true })
+    const fetch = !fetched.current;
+    fetched.current = true;
+    archiveRequest(workspaceName, { park, keepBranches, deleteRemoteBranches, dryRun: true, ...(fetch ? {} : { fetch: false }) })
       .then((result) => { if (!cancelled) setPreview(result); })
       .catch((error: unknown) => { if (!cancelled) setPreviewError(error instanceof Error ? error.message : String(error)); })
       .finally(() => { if (!cancelled) setLoadingPreview(false); });
@@ -99,6 +103,7 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
 
   const handleClose = () => {
     if (archiving) return;
+    fetched.current = false;
     setPark(false);
     setKeepBranches(false);
     setDeleteRemoteBranches(false);
@@ -115,6 +120,7 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
       const result = await archiveRequest(workspaceName, { park, keepBranches, deleteRemoteBranches });
       if (result.archived) {
         await onArchived(workspaceName);
+        fetched.current = false;
         setPark(false);
         setKeepBranches(false);
         setDeleteRemoteBranches(false);

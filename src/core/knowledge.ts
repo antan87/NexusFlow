@@ -35,6 +35,7 @@ import { commitExactWorkspaceArtifacts } from './workspace-git.js';
 import * as fs from 'node:fs/promises';
 import { getActiveStorageProvider } from './adapters/registry.js';
 import { acquireLock } from './locks.js';
+import { runHoldingStoreLock } from './base-knowledge-store.js';
 import { PRIMARY_KNOWLEDGE_FILE, LEGACY_KNOWLEDGE_FILE, BRAND_NAME, CLI_NAME, resolveWorkspaceConfigDir } from './constants.js';
 
 async function getWorkspaceKnowledgeFilename(workspacePath: string, featureId: string): Promise<string> {
@@ -607,7 +608,7 @@ async function withBaseStoreLock<T>(workspacePath: string, repoName: string, fil
     timeoutMessage: `Another ${BRAND_NAME} operation is updating the base knowledge of ${repoName}.`,
   });
   try {
-    return await operation();
+    return await runHoldingStoreLock(location, operation);
   } finally {
     await release();
   }

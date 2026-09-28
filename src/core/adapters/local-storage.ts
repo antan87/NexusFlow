@@ -5,7 +5,23 @@ import type { StoragePort, StorageAdapterMeta } from '../ports/storage.js';
 import { atomicWriteFile, atomicWriteJson } from '../../resources/fs-safety.js';
 import { resolveWorkspaceConfigDir } from '../constants.js';
 import { acquireLock } from '../locks.js';
-import { mergeKnowledge, storeDirFor, workspaceRepoIdentity, type RepoIdentity } from '../base-knowledge-store.js';
+import {
+  holdsStoreLock,
+  mergeKnowledge,
+  repoIdentityAsync,
+  sourceRepoPath,
+  storeDirFor,
+  workspaceRepoIdentity,
+  type RepoIdentity,
+} from '../base-knowledge-store.js';
+
+const MIGRATION_PASS_TTL_MS = 10_000;
+const recentMigrationPasses = new Map<string, number>();
+
+/** Test hook: forget which migration passes ran recently. */
+export function resetMigrationPasses(): void {
+  recentMigrationPasses.clear();
+}
 
 /** Per-source record of what was merged into a store file. */
 interface StoreMigrations {
@@ -74,13 +90,25 @@ export class LocalStorageAdapter implements StoragePort {
       }
       return found;
     };
+    // One knowledge operation reads, checks and writes the store several
+    // times; after a pass, skip further passes for this workspace briefly.
+    const memoKey = `${path.resolve(storeFile)}\0${path.resolve(workspacePath)}`;
+    const lastPass = recentMigrationPasses.get(memoKey);
+    if (lastPass !== undefined && Date.now() - lastPass < MIGRATION_PASS_TTL_MS) return;
+
     const readRecordQuick = async () => fs.readFile(recordPath, 'utf8').then((raw) => JSON.parse(raw) as StoreMigrations, () => null);
     const quick = await readRecordQuick();
     // The first use of a store checks every workspace that includes the repo,
     // so knowledge promoted in a workspace nobody has opened since is not missed.
-    const owners = [{ workspacePath, repoName }, ...(quick?.sweptAt ? [] : await workspacesWithRepo(identity))];
+    // A sweep that could not list the workspaces is not recorded as done.
+    const swept = quick?.sweptAt ? [] : await workspacesWithRepo(identity);
+    const sweepComplete = Boolean(quick?.sweptAt) || swept !== null;
+    const owners = [{ workspacePath, repoName }, ...(swept ?? [])];
     const sources = await collect(owners);
-    if (sources.length === 0 && quick?.sweptAt) return;
+    if (sources.length === 0 && quick?.sweptAt) {
+      recentMigrationPasses.set(memoKey, Date.now());
+      return;
+    }
 
     const readRecord = async (): Promise<StoreMigrations> => {
       try {
@@ -91,10 +119,15 @@ export class LocalStorageAdapter implements StoragePort {
       }
     };
     const pending = (record: StoreMigrations) => sources.filter((source) => record.sources[source.file]?.sha256 !== source.sha256);
-    if (pending(await readRecord()).length === 0 && quick?.sweptAt) return;
+    if (pending(await readRecord()).length === 0 && (quick?.sweptAt || !sweepComplete)) {
+      recentMigrationPasses.set(memoKey, Date.now());
+      return;
+    }
 
     await fs.mkdir(path.dirname(storeFile), { recursive: true });
-    const release = await acquireLock(`${storeFile}.lock`, {
+    // A knowledge write already holding this store's lock merges under it.
+    const held = holdsStoreLock(storeFile);
+    const release = held ? async () => {} : await acquireLock(`${storeFile}.lock`, {
       staleMs: 60_000,
       timeoutMs: 30_000,
       timeoutMessage: `Another process is updating the base knowledge of ${repoName}. Retry the operation.`,
@@ -102,7 +135,7 @@ export class LocalStorageAdapter implements StoragePort {
     try {
       const record = await readRecord();
       const todo = pending(record);
-      if (todo.length === 0 && record.sweptAt) return;
+      if (todo.length === 0 && (record.sweptAt || !sweepComplete)) return;
       const { insertUnderHeading } = await import('../knowledge.js');
       let content = await fs.readFile(storeFile, 'utf8').catch(() => null);
       for (const source of todo) {
@@ -129,8 +162,9 @@ export class LocalStorageAdapter implements StoragePort {
       }
       if (content !== null) await atomicWriteFile(storeFile, content);
       record.identity = { ...identity, repoName };
-      record.sweptAt ??= new Date().toISOString();
+      if (sweepComplete) record.sweptAt ??= new Date().toISOString();
       await atomicWriteJson(recordPath, record);
+      recentMigrationPasses.set(memoKey, Date.now());
     } finally {
       await release();
     }
@@ -245,7 +279,7 @@ export class LocalStorageAdapter implements StoragePort {
  * Every workspace in the configured workspaces folder that includes the
  * repository with this identity, with the folder name it uses there.
  */
-async function workspacesWithRepo(identity: RepoIdentity): Promise<Array<{ workspacePath: string; repoName: string }>> {
+async function workspacesWithRepo(identity: RepoIdentity): Promise<Array<{ workspacePath: string; repoName: string }> | null> {
   try {
     const [{ loadConfig }, { listWorkspaces }] = await Promise.all([import('../config.js'), import('../workspace.js')]);
     const config = await loadConfig({ quiet: true });
@@ -253,7 +287,8 @@ async function workspacesWithRepo(identity: RepoIdentity): Promise<Array<{ works
     for (const feature of await listWorkspaces(config.workspacesDir)) {
       for (const repo of feature.repos) {
         const name = path.basename(repo);
-        const candidate = workspaceRepoIdentity(feature.workspacePath, name);
+        const source = sourceRepoPath(feature.workspacePath, name);
+        const candidate = source ? await repoIdentityAsync(source) : null;
         if (candidate && candidate.kind === identity.kind && candidate.value === identity.value) {
           owners.push({ workspacePath: feature.workspacePath, repoName: name });
         }
@@ -261,6 +296,7 @@ async function workspacesWithRepo(identity: RepoIdentity): Promise<Array<{ works
     }
     return owners;
   } catch {
-    return [];
+    // Unknown: the next use tries the sweep again.
+    return null;
   }
 }
