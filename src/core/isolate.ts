@@ -299,6 +299,8 @@ export async function isolateWorkspaceRepo(
         isolatedAt: new Date().toISOString(),
       };
       freshFeature.isolatedRepos[repoName] = isolatedInfo;
+      // Provenance: archive deletes only branches this workspace created.
+      if (branchCreated) freshFeature.createdBranches = { ...freshFeature.createdBranches, [repoName]: branchName };
       await saveFeatureConfig(workspacePath, freshFeature);
     } finally {
       if (releaseLock) {

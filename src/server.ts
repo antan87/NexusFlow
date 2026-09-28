@@ -1666,11 +1666,16 @@ app.delete('/api/workspace/:id', async (c) => {
 app.post('/api/workspace/:id/archive', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
-    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown };
+    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown; keepBranches?: unknown; deleteRemoteBranches?: unknown };
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
-    const report = await archiveWorkspace(workspacePath, { park: body.park === true, dryRun: body.dryRun === true });
+    const report = await archiveWorkspace(workspacePath, {
+      park: body.park === true,
+      dryRun: body.dryRun === true,
+      keepBranches: body.keepBranches === true,
+      deleteRemoteBranches: body.deleteRemoteBranches === true,
+    });
     if (!report.dryRun && !report.alreadyArchived && !report.ready) return c.json({ ...report, error: report.blockers.join(' ') }, 409);
     if (report.errors.length > 0) return c.json({ ...report, error: report.errors.join(' ') }, 500);
     return c.json(report);

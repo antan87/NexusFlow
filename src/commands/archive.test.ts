@@ -19,7 +19,7 @@ vi.mock('@inquirer/prompts');
 function report(overrides: Partial<ArchiveReport> = {}): ArchiveReport {
   return {
     workspacePath: '/ws', workspaceId: 'ws', dryRun: false, alreadyArchived: false, ready: true,
-    blockers: [], repos: [], kept: ['contextspace.json'], notes: [], archived: false, errors: [],
+    blockers: [], repos: [], kept: ['contextspace.json'], notes: [], archived: false, errors: [], branches: [],
     ...overrides,
   };
 }
@@ -52,7 +52,7 @@ describe('archive commands', () => {
 
     await archiveCommand('ws', { json: true, park: true });
 
-    expect(archive.archiveWorkspace).toHaveBeenCalledWith('/ws', { park: true, dryRun: undefined });
+    expect(archive.archiveWorkspace).toHaveBeenCalledWith('/ws', { park: true, dryRun: undefined, keepBranches: undefined, deleteRemoteBranches: undefined });
     expect(JSON.parse(out.join('\n'))).toMatchObject({ ready: false, blockers: ['api: dirty'] });
     expect(process.exitCode).toBe(1);
   });
@@ -77,7 +77,7 @@ describe('archive commands', () => {
 
     await archiveCommand('ws');
 
-    expect(archive.archiveWorkspace).toHaveBeenCalledWith('/ws', { park: undefined });
+    expect(archive.archiveWorkspace).toHaveBeenCalledWith('/ws', { park: undefined, dryRun: false, keepBranches: undefined, deleteRemoteBranches: undefined });
     expect(out.join('\n')).toMatch(/Archived "ws"/);
     expect(process.exitCode).toBeUndefined();
   });

@@ -221,6 +221,7 @@ export interface Feature {
   repoBranches?: Record<string, string>;
   /** Set while archived: worktrees returned, record kept, read-only (mirrors src/types.ts). */
   archivedAt?: string;
+  archiveHistory?: NonNullable<Feature['archive']>[];
   archive?: {
     archivedAt: string;
     previousMode: WorkspaceMode;
@@ -236,6 +237,8 @@ export interface Feature {
       branchState: 'merged' | 'parked' | 'reference';
       mergeEvidence?: 'ancestor' | 'pull-request';
       prUrl?: string;
+      branchDeleted?: boolean;
+      remoteBranchDeleted?: boolean;
     }>;
   };
 }

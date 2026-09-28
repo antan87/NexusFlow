@@ -631,13 +631,14 @@ export const tools: NexusFlowTool[] = [
       type: 'object',
       properties: {
         park: { type: 'boolean', description: 'Preview archiving pushed-but-unmerged work too (its branch is kept).' },
+        keepBranches: { type: 'boolean', description: 'Preview keeping every branch.' },
         ...workspaceIdProp,
       },
     },
     handler: async (args, ctx) => {
       try {
         await requireWorkspace(ctx);
-        const report = await planArchive(ctx.workspacePath, { park: args.park === true, dryRun: true, fetch: false });
+        const report = await planArchive(ctx.workspacePath, { park: args.park === true, keepBranches: args.keepBranches === true, dryRun: true, fetch: false });
         return json({
           ...report,
           note: report.alreadyArchived

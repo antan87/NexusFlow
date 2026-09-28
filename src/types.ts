@@ -286,6 +286,12 @@ export interface Feature {
    */
   isolatedRepos?: Record<string, IsolatedRepoInfo>;
 
+  /**
+   * Branches this workspace created (repo name → branch), as opposed to
+   * branches that already existed. Archive only ever deletes these.
+   */
+  createdBranches?: Record<string, string>;
+
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];
 
@@ -325,6 +331,9 @@ export interface Feature {
 
   /** What the latest archive removed and kept. Retained after unarchive as history. */
   archive?: ArchiveRecord;
+
+  /** Earlier archive records, oldest first: archiving again never loses a delivery record. */
+  archiveHistory?: ArchiveRecord[];
 }
 
 /** How one repository stood when its workspace was archived. */
@@ -348,6 +357,10 @@ export interface ArchivedRepoRecord {
   /** Evidence that proved a merge. */
   mergeEvidence?: 'ancestor' | 'pull-request';
   prUrl?: string;
+  /** Archive deleted the local branch (its tip is {@link headSha}). */
+  branchDeleted?: boolean;
+  /** Archive deleted the branch on `origin`. */
+  remoteBranchDeleted?: boolean;
 }
 
 /** Manifest record of an archive. */

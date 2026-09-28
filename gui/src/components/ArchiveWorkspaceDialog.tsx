@@ -30,6 +30,19 @@ export interface ArchivePreview {
   notes: string[];
   errors: string[];
   archived: boolean;
+  branches: Array<{
+    repo: string;
+    branch: string;
+    local: 'delete' | 'keep' | 'absent';
+    remote: 'delete' | 'keep' | 'absent' | 'not-requested' | 'not-checked';
+    reason: string;
+  }>;
+}
+
+interface ArchiveChoices {
+  park: boolean;
+  keepBranches: boolean;
+  deleteRemoteBranches: boolean;
 }
 
 interface ArchiveWorkspaceDialogProps {
@@ -41,13 +54,13 @@ interface ArchiveWorkspaceDialogProps {
 }
 
 const ACTION_LABEL: Record<ArchivePreview['repos'][number]['action'], string> = {
-  'remove-worktree': 'Worktree removed',
+  'remove-worktree': 'Worktree will be removed',
   'already-removed': 'Worktree already removed',
-  untouched: 'Untouched reference',
+  untouched: 'Reference, not changed',
   blocked: 'Blocks archive',
 };
 
-function archiveRequest(name: string, body: { park: boolean; dryRun?: boolean }) {
+function archiveRequest(name: string, body: ArchiveChoices & { dryRun?: boolean }) {
   return apiFetch<ArchivePreview>(`/api/workspace/${encodeURIComponent(name)}/archive`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -61,6 +74,8 @@ function archiveRequest(name: string, body: { park: boolean; dryRun?: boolean })
  */
 export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchived }: ArchiveWorkspaceDialogProps) {
   const [park, setPark] = useState(false);
+  const [keepBranches, setKeepBranches] = useState(false);
+  const [deleteRemoteBranches, setDeleteRemoteBranches] = useState(false);
   const [preview, setPreview] = useState<ArchivePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -73,18 +88,20 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
     setLoadingPreview(true);
     setPreviewError(null);
     setArchiveError(null);
-    archiveRequest(workspaceName, { park, dryRun: true })
+    archiveRequest(workspaceName, { park, keepBranches, deleteRemoteBranches, dryRun: true })
       .then((result) => { if (!cancelled) setPreview(result); })
       .catch((error: unknown) => { if (!cancelled) setPreviewError(error instanceof Error ? error.message : String(error)); })
       .finally(() => { if (!cancelled) setLoadingPreview(false); });
     return () => { cancelled = true; };
-  }, [open, workspaceName, park]);
+  }, [open, workspaceName, park, keepBranches, deleteRemoteBranches]);
 
   if (!workspaceName) return null;
 
   const handleClose = () => {
     if (archiving) return;
     setPark(false);
+    setKeepBranches(false);
+    setDeleteRemoteBranches(false);
     setPreview(null);
     setPreviewError(null);
     setArchiveError(null);
@@ -95,10 +112,12 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
     setArchiving(true);
     setArchiveError(null);
     try {
-      const result = await archiveRequest(workspaceName, { park });
+      const result = await archiveRequest(workspaceName, { park, keepBranches, deleteRemoteBranches });
       if (result.archived) {
         await onArchived(workspaceName);
         setPark(false);
+        setKeepBranches(false);
+        setDeleteRemoteBranches(false);
         setPreview(null);
         onClose();
       } else {
@@ -127,8 +146,8 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
           <DialogTitle>Archive workspace</DialogTitle>
           <DialogDescription>
             Archiving <strong className="font-semibold text-foreground">{workspaceName}</strong> removes its worktrees once
-            their work is merged. Milestones, verification results, planning notes, knowledge and documents stay readable,
-            branches are kept, and your own checkouts are not changed. You can restore it later.
+            their work is merged, and deletes the merged branches it created. Milestones, verification results, planning notes,
+            knowledge and documents stay readable, and your own checkouts are not changed. You can restore it later.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-3 text-sm">
@@ -154,6 +173,22 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
                   </li>
                 ))}
               </ul>
+              {preview.branches.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Branches</p>
+                  <ul className="mt-1 space-y-1 text-xs" aria-label="Branches">
+                    {preview.branches.map((plan) => (
+                      <li key={`${plan.repo}:${plan.branch}`} className="text-muted-foreground">
+                        <span className="font-mono text-foreground">{plan.branch}</span> in {plan.repo}:{' '}
+                        {plan.local === 'delete' ? 'deleted' : plan.local === 'absent' ? 'already gone' : 'kept'}
+                        {plan.remote === 'delete' && ', also on origin'}
+                        {plan.remote === 'keep' && ', kept on origin because it moved'}
+                        {' '}— {plan.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {preview.kept.length > 0 && (
                 <p className="text-xs text-muted-foreground">Kept in the workspace folder: {preview.kept.join(', ')}</p>
               )}
@@ -168,6 +203,19 @@ export function ArchiveWorkspaceDialog({ workspaceName, open, onClose, onArchive
               <Checkbox checked={park} onCheckedChange={(checked) => setPark(Boolean(checked))} aria-label="Archive pushed but unmerged work" />
               <span>Archive pushed but unmerged work anyway. Its branch is kept, so it can be picked up again.</span>
             </label>
+          )}
+          {preview && !preview.alreadyArchived && (
+            <fieldset className="space-y-2 text-xs">
+              <legend className="sr-only">Branch options</legend>
+              <label className="flex items-start gap-2">
+                <Checkbox checked={keepBranches} onCheckedChange={(checked) => { setKeepBranches(Boolean(checked)); if (checked) setDeleteRemoteBranches(false); }} aria-label="Keep all branches" />
+                <span>Keep all branches, even merged ones this workspace created.</span>
+              </label>
+              <label className="flex items-start gap-2">
+                <Checkbox checked={deleteRemoteBranches} disabled={keepBranches} onCheckedChange={(checked) => setDeleteRemoteBranches(Boolean(checked))} aria-label="Also delete merged branches on origin" />
+                <span>Also delete merged branches on origin, unless someone pushed to them since.</span>
+              </label>
+            </fieldset>
           )}
           {archiveError && <p className="text-xs text-destructive-foreground" role="alert">{archiveError}</p>}
         </DialogPanel>

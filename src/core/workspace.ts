@@ -240,6 +240,7 @@ async function materializeWorktrees(
       },
     );
     rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
+    if (createdBranch) feature.createdBranches = { ...feature.createdBranches, [repo.name]: branchName };
   }
 }
 
@@ -670,6 +671,9 @@ export async function addRepoToWorkspace(
     }
 
     // 2. Update manifest
+    if (rollbackAction?.createdBranch) {
+      feature.createdBranches = { ...feature.createdBranches, [newRepoInfo.name]: feature.branchName };
+    }
     feature.repos.push(repoEntry);
     if (!feature.originalRepos) {
       feature.originalRepos = [];

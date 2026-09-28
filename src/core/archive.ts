@@ -66,6 +66,9 @@ export interface ArchiveRepoPlan {
   branchState: ArchivedRepoRecord['branchState'] | 'unmerged' | 'unpushed' | 'dirty' | 'unreadable';
   mergeEvidence?: MergeEvidence;
   prUrl?: string;
+  /** Carried from an interrupted run that already deleted the branch. */
+  branchDeleted?: boolean;
+  remoteBranchDeleted?: boolean;
 }
 
 /** Options for {@link planArchive} and {@link archiveWorkspace}. */
@@ -76,6 +79,25 @@ export interface ArchiveOptions {
   dryRun?: boolean;
   /** Fetch each default branch before judging merges (default true). */
   fetch?: boolean;
+  /** Keep every branch, even merged ones this workspace created. */
+  keepBranches?: boolean;
+  /** Also delete merged branches on `origin` (decision A: off by default). */
+  deleteRemoteBranches?: boolean;
+}
+
+/** What archive does with one feature branch, locally and on `origin`. */
+export interface BranchCleanupPlan {
+  repo: string;
+  branch: string;
+  /** The commit the branch must still point at to be deleted. */
+  sha: string;
+  sourcePath: string;
+  local: 'delete' | 'keep' | 'absent';
+  remote: 'delete' | 'keep' | 'absent' | 'not-requested' | 'not-checked';
+  /** Why, in one sentence. */
+  reason: string;
+  /** After the run: what actually happened. */
+  result?: { local: 'deleted' | 'kept' | 'absent' | 'failed'; remote: 'deleted' | 'kept' | 'absent' | 'failed' | 'not-requested' | 'not-checked'; error?: string };
 }
 
 /** Result of {@link planArchive} / {@link archiveWorkspace}. */
@@ -101,6 +123,8 @@ export interface ArchiveReport {
   archivedAt?: string;
   /** Failures while removing worktrees; re-run to resume. */
   errors: string[];
+  /** Feature branches and whether archive deletes them. */
+  branches: BranchCleanupPlan[];
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -123,6 +147,99 @@ async function changedFileCount(repoPath: string): Promise<number | null> {
   return out === null ? null : out.split('\n').filter(Boolean).length;
 }
 
+/** Branches checked out in any worktree of a repository, with their paths. */
+async function checkedOutBranches(sourcePath: string): Promise<Map<string, string>> {
+  const out = await gitOut(sourcePath, ['worktree', 'list', '--porcelain']);
+  const branches = new Map<string, string>();
+  let worktree = '';
+  for (const line of (out ?? '').split('\n')) {
+    if (line.startsWith('worktree ')) worktree = line.slice('worktree '.length);
+    else if (line.startsWith('branch refs/heads/')) branches.set(line.slice('branch refs/heads/'.length), worktree);
+  }
+  return branches;
+}
+
+/**
+ * Decides what happens to each feature branch. A branch is deleted only when
+ * it is proven merged, this workspace created it, it still points at the
+ * archived commit, and no other worktree has it checked out.
+ */
+async function planBranches(feature: Feature, repos: ArchiveRepoPlan[], options: ArchiveOptions): Promise<BranchCleanupPlan[]> {
+  const plans: BranchCleanupPlan[] = [];
+  for (const repo of repos) {
+    if (repo.access === 'reference' || !repo.branch || !repo.headSha || repo.action === 'blocked') continue;
+    const plan: BranchCleanupPlan = {
+      repo: repo.name,
+      branch: repo.branch,
+      sha: repo.headSha,
+      sourcePath: repo.sourcePath,
+      local: 'keep',
+      remote: options.deleteRemoteBranches ? 'keep' : 'not-requested',
+      reason: '',
+    };
+    plans.push(plan);
+    const created = feature.createdBranches?.[repo.name];
+    const tip = await gitOut(repo.sourcePath, ['rev-parse', '--verify', '--quiet', `refs/heads/${repo.branch}`]);
+    const defaultBranch = await detectDefaultBranch(repo.sourcePath);
+    const elsewhere = [...(await checkedOutBranches(repo.sourcePath)).entries()]
+      .find(([branch, worktree]) => branch === repo.branch && (!repo.worktreePath || path.resolve(worktree) !== path.resolve(repo.worktreePath)));
+
+    if (options.keepBranches) plan.reason = 'kept on request';
+    else if (repo.branchState !== 'merged') plan.reason = 'not merged; kept so the work can be picked up again';
+    else if (repo.branch === defaultBranch) plan.reason = 'the default branch is never deleted';
+    else if (created === undefined) plan.reason = feature.createdBranches ? 'this workspace did not create it' : 'provenance unknown: this workspace predates branch records';
+    else if (created !== repo.branch) plan.reason = `this workspace created "${created}", not this branch`;
+    else if (elsewhere) plan.reason = `checked out in ${elsewhere[1]}`;
+    else if (tip !== null && tip !== repo.headSha) plan.reason = `moved to ${tip.slice(0, 7)} since it was merged`;
+    else {
+      plan.local = tip === null ? 'absent' : 'delete';
+      plan.reason = repo.mergeEvidence === 'pull-request' ? `merged through ${repo.prUrl ?? 'a pull request'}` : 'merged into the default branch';
+    }
+
+    if (!options.deleteRemoteBranches || plan.local === 'keep') continue;
+    if (options.fetch === false) {
+      plan.remote = 'not-checked';
+      continue;
+    }
+    const remote = await execa('git', ['ls-remote', '--heads', 'origin', `refs/heads/${repo.branch}`], { cwd: repo.sourcePath, reject: false, timeout: 60_000 }).catch(() => null);
+    const remoteSha = remote && remote.exitCode === 0 ? remote.stdout.trim().split(/\s+/)[0] || null : undefined;
+    if (remoteSha === undefined) plan.remote = 'not-checked';
+    else if (remoteSha === null) plan.remote = 'absent';
+    else if (remoteSha === repo.headSha) plan.remote = 'delete';
+    else plan.remote = 'keep';
+  }
+  return plans;
+}
+
+/** Deletes the planned branches. Failures are reported, never fatal: the worktrees are already returned. */
+async function deleteBranches(plans: BranchCleanupPlan[], notes: string[]): Promise<void> {
+  for (const plan of plans) {
+    const result: NonNullable<BranchCleanupPlan['result']> = { local: plan.local === 'delete' ? 'kept' : plan.local === 'absent' ? 'absent' : 'kept', remote: plan.remote === 'delete' ? 'kept' : plan.remote === 'keep' ? 'kept' : plan.remote };
+    if (plan.local === 'delete') {
+      // Compare-and-delete: refuses when the branch moved after planning.
+      const deleted = await execa('git', ['update-ref', '-d', `refs/heads/${plan.branch}`, plan.sha], { cwd: plan.sourcePath, reject: false }).catch((error: unknown) => ({ exitCode: 1, stderr: String(error) }));
+      if (deleted.exitCode === 0) result.local = 'deleted';
+      else {
+        result.local = 'failed';
+        result.error = String(deleted.stderr ?? '').split('\n')[0];
+      }
+    }
+    if (plan.remote === 'delete') {
+      const pushed = await execa('git', ['push', `--force-with-lease=refs/heads/${plan.branch}:${plan.sha}`, 'origin', '--delete', `refs/heads/${plan.branch}`], { cwd: plan.sourcePath, reject: false, timeout: 120_000 })
+        .catch((error: unknown) => ({ exitCode: 1, stderr: String(error) }));
+      if (pushed.exitCode === 0) result.remote = 'deleted';
+      else {
+        result.remote = 'failed';
+        result.error = [result.error, String(pushed.stderr ?? '').split('\n').find((l) => l.trim())].filter(Boolean).join('; ');
+      }
+    }
+    if (result.local === 'failed' || result.remote === 'failed') {
+      notes.push(`${plan.repo}: branch "${plan.branch}" was not fully deleted (${result.error ?? 'unknown error'}); it points at ${plan.sha.slice(0, 7)}.`);
+    }
+    plan.result = result;
+  }
+}
+
 function recordFromJournal(entry: ArchiveRunRepo): ArchiveRepoPlan {
   return {
     name: entry.name,
@@ -136,6 +253,8 @@ function recordFromJournal(entry: ArchiveRunRepo): ArchiveRepoPlan {
     branchState: entry.branchState,
     mergeEvidence: entry.mergeEvidence,
     prUrl: entry.prUrl,
+    ...(entry.branchDeleted ? { branchDeleted: true } : {}),
+    ...(entry.remoteBranchDeleted ? { remoteBranchDeleted: true } : {}),
   };
 }
 
@@ -275,6 +394,7 @@ export async function planArchive(workspacePath: string, options: ArchiveOptions
     notes: [],
     archived: false,
     errors: [],
+    branches: [],
   };
   if (report.alreadyArchived) {
     report.archivedAt = feature.archivedAt;
@@ -303,6 +423,7 @@ export async function planArchive(workspacePath: string, options: ArchiveOptions
 
   report.blockers = report.repos.filter((r) => r.action === 'blocked').map((r) => r.reason);
   report.ready = report.blockers.length === 0;
+  if (report.ready) report.branches = await planBranches(feature, report.repos, options);
   report.kept = await keptEntries(
     workspacePath,
     report.repos.filter((r) => r.action === 'remove-worktree' && r.worktreePath).map((r) => r.worktreePath!),
@@ -321,6 +442,8 @@ function toRecord(repo: ArchiveRepoPlan): ArchivedRepoRecord {
     branchState,
     ...(repo.mergeEvidence && repo.mergeEvidence !== 'none' ? { mergeEvidence: repo.mergeEvidence } : {}),
     ...(repo.prUrl ? { prUrl: repo.prUrl } : {}),
+    ...(repo.branchDeleted ? { branchDeleted: true } : {}),
+    ...(repo.remoteBranchDeleted ? { remoteBranchDeleted: true } : {}),
   };
 }
 
@@ -334,6 +457,7 @@ function archivedManifest(feature: Feature, record: ArchiveRecord): Feature {
     originalRepos: sources,
     archivedAt: record.archivedAt,
     archive: record,
+    ...(feature.archive ? { archiveHistory: [...(feature.archiveHistory ?? []), feature.archive] } : {}),
   };
   delete next.isolatedRepos;
   delete next.repoBranches;
@@ -408,6 +532,16 @@ export async function archiveWorkspace(workspacePath: string, options: ArchiveOp
     await persist('partial');
     return report;
   }
+
+  // Branches go only after their worktrees: Git keeps a checked-out branch.
+  await deleteBranches(report.branches, report.notes);
+  for (const plan of report.branches) {
+    const entry = journal.find((repo) => repo.name === plan.repo);
+    if (!entry) continue;
+    if (plan.result?.local === 'deleted' || (plan.local === 'absent' && entry.branchDeleted)) entry.branchDeleted = true;
+    if (plan.result?.remote === 'deleted') entry.remoteBranchDeleted = true;
+  }
+  await persist('running');
 
   const feature = await loadFeatureConfig(workspacePath);
   if (!feature) throw new Error(`No workspace manifest found at ${workspacePath}.`);

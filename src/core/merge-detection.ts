@@ -46,12 +46,16 @@ export interface MergeCheckInput {
   usePullRequests?: boolean;
 }
 
-let ghStatus: Promise<{ installed: boolean; authenticated: boolean }> | null = null;
+const GH_STATUS_TTL_MS = 5 * 60_000;
+let ghStatus: { at: number; status: Promise<{ installed: boolean; authenticated: boolean }> } | null = null;
 
-/** `gh` availability, detected once per process. */
+/**
+ * `gh` availability, cached briefly: a long-running app server notices a later
+ * `gh auth login` without probing `gh` for every repository.
+ */
 function ghAvailable(): Promise<{ installed: boolean; authenticated: boolean }> {
-  ghStatus ??= detectGh();
-  return ghStatus;
+  if (!ghStatus || Date.now() - ghStatus.at > GH_STATUS_TTL_MS) ghStatus = { at: Date.now(), status: detectGh() };
+  return ghStatus.status;
 }
 
 /** Test hook: forget the cached `gh` detection. */

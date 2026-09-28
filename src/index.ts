@@ -447,10 +447,12 @@ program
   .description('Complete a workspace: remove its worktrees once their work is merged, keep its record')
   .argument('[workspace]', 'Workspace name or path (auto-detects from CWD)')
   .option('--park', 'Also archive pushed-but-unmerged work; its branch is kept')
+  .option('--keep-branches', 'Keep every branch, even merged ones this workspace created')
+  .option('--delete-remote-branches', 'Also delete merged branches on origin (only while they still point at the merged commit)')
   .option('--dry-run', 'Show what would be removed and kept without changing anything')
   .option('-y, --yes', 'Do not ask for confirmation')
   .option('--json', 'Output the archive report as JSON')
-  .action(runAction(async (workspace: string | undefined, options: { park?: boolean; dryRun?: boolean; yes?: boolean; json?: boolean }) => {
+  .action(runAction(async (workspace: string | undefined, options: { park?: boolean; keepBranches?: boolean; deleteRemoteBranches?: boolean; dryRun?: boolean; yes?: boolean; json?: boolean }) => {
     await archiveCommand(workspace, options);
   }));
 

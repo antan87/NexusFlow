@@ -310,7 +310,7 @@ function SidebarContents({
               onUpdateWorktreeTitle={(wtId, title, intent) => {
                 updateTitle(wtId, title, intent);
               }}
-              onPrepareForEditing={(repoName) => setPreparingRepo(repoName)}
+              onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
             />
             <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
           </div>

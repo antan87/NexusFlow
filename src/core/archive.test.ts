@@ -113,7 +113,7 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
 
-  it('removes a merged worktree, keeps the record and the branch, and never changes the checkout', async () => {
+  it('removes a merged worktree and its branch, keeps the record, and leaves the checkout otherwise unchanged', async () => {
     const { host, forge } = await hostWithRemote(root, 'api');
     const workspacePath = await inPlaceWorkspace(root, [host]);
     const { worktreePath } = await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' });
@@ -131,9 +131,16 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     const report = await archiveWorkspace(workspacePath);
 
     expect(report).toMatchObject({ archived: true, ready: true, errors: [] });
+    expect(report.branches).toEqual([expect.objectContaining({
+      repo: 'api', branch: 'feat/archive', local: 'delete', remote: 'not-requested', result: { local: 'deleted', remote: 'not-requested' },
+    })]);
     expect(await exists(worktreePath)).toBe(false);
-    expect(await checkoutIdentity(host)).toEqual(before);
-    expect(await git(host, 'rev-parse', 'refs/heads/feat/archive')).toBe(tip);
+    const after = await checkoutIdentity(host);
+    expect({ ...after, refs: undefined }).toEqual({ ...before, refs: undefined });
+    expect(after.refs.split('\n')).toEqual(before.refs.split('\n').filter((ref) => !ref.startsWith('refs/heads/feat/archive ')));
+    await expect(git(host, 'rev-parse', '--verify', 'refs/heads/feat/archive')).rejects.toThrow();
+    // The remote branch stays unless deleting it was asked for.
+    expect(await git(host, 'ls-remote', '--heads', 'origin', 'feat/archive')).toContain(tip);
     expect(await git(host, 'worktree', 'list', '--porcelain')).not.toContain(worktreePath);
     expect(await fs.readFile(path.join(workspacePath, 'contextspace-milestones.md'), 'utf-8')).toBe('# notes\n');
 
@@ -143,8 +150,9 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     expect(feature.repos).toEqual([host]);
     expect(feature.isolatedRepos).toBeUndefined();
     expect(feature.archive?.repos[0]).toMatchObject({
-      name: 'api', access: 'isolated', branch: 'feat/archive', headSha: tip, branchState: 'merged', worktreePath,
+      name: 'api', access: 'isolated', branch: 'feat/archive', headSha: tip, branchState: 'merged', worktreePath, branchDeleted: true,
     });
+    expect(feature.createdBranches).toEqual({ api: 'feat/archive' });
     expect((await loadWorkspaceState(workspacePath)).lastArchive?.status).toBe('completed');
     const listed = await listWorkspaces(root);
     expect(listed.find((w) => w.id === 'ws')?.archivedAt).toBe(report.archivedAt);
@@ -253,6 +261,7 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     const one = (await isolateWorkspaceRepo(workspacePath, 'one', { branchName: 'feat/archive' })).worktreePath;
     const two = (await isolateWorkspaceRepo(workspacePath, 'two', { branchName: 'feat/archive' })).worktreePath;
     const tipOne = await git(one, 'rev-parse', 'HEAD');
+    const tipTwo = await git(two, 'rev-parse', 'HEAD');
     // A locked worktree refuses removal without --force: the run stops part-way.
     await git(b.host, 'worktree', 'lock', two);
 
@@ -272,7 +281,7 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     expect(resumed.resumedFrom).toBe('partial');
     expect(resumed.archived).toBe(true);
     expect(resumed.repos[0]).toMatchObject({ name: 'one', action: 'already-removed', headSha: tipOne });
-    expect((await loadFeatureConfig(workspacePath))?.archive?.repos.map((r) => r.headSha)).toEqual([tipOne, await git(b.host, 'rev-parse', 'refs/heads/feat/archive')]);
+    expect((await loadFeatureConfig(workspacePath))?.archive?.repos.map((r) => r.headSha)).toEqual([tipOne, tipTwo]);
   });
 
   it('refuses to remove the worktree this process is running in', async () => {
@@ -312,5 +321,132 @@ describe('archiveWorkspace (real git)', { timeout: 90_000 }, () => {
     const again = await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/again' });
     expect(await exists(again.worktreePath)).toBe(true);
     expect((await unarchiveWorkspace(workspacePath)).restored).toBe(false);
+
+    // Archiving again keeps the first delivery record as history.
+    const first = feature.archive!;
+    expect((await archiveWorkspace(workspacePath)).archived).toBe(true);
+    const twice = (await loadFeatureConfig(workspacePath))!;
+    expect(twice.archive?.repos[0]).toMatchObject({ branch: 'feat/again' });
+    expect(twice.archiveHistory).toEqual([first]);
+    expect(twice.archiveHistory?.[0]?.repos[0]).toMatchObject({ branch: 'feat/archive' });
+  });
+  describe('merged branch cleanup', () => {
+    it('keeps a squash-merged branch without pull-request evidence: parking is required and the branch stays', async () => {
+      const { host, forge } = await hostWithRemote(root, 'api');
+      const workspacePath = await inPlaceWorkspace(root, [host]);
+      const { worktreePath } = await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' });
+      const tip = await commitAndPush(worktreePath, 'squashed.txt', 'feat/archive');
+      await git(forge, 'fetch', 'origin');
+      await git(forge, 'merge', '--squash', 'origin/feat/archive');
+      await git(forge, 'commit', '-m', 'squash');
+      await git(forge, 'push', 'origin', 'main');
+
+      expect((await archiveWorkspace(workspacePath)).repos[0]!.branchState).toBe('unmerged');
+      const parked = await archiveWorkspace(workspacePath, { park: true });
+      expect(parked.branches[0]).toMatchObject({ local: 'keep', reason: expect.stringMatching(/not merged/) });
+      expect(await git(host, 'rev-parse', 'refs/heads/feat/archive')).toBe(tip);
+    });
+
+    it('never deletes a branch the workspace did not create, or one with unknown provenance', async () => {
+      const a = await hostWithRemote(root, 'existing');
+      await git(a.host, 'branch', 'feat/shared');
+      const workspacePath = await inPlaceWorkspace(root, [a.host]);
+      await isolateWorkspaceRepo(workspacePath, 'existing', { branchName: 'feat/shared' });
+      expect((await loadFeatureConfig(workspacePath))?.createdBranches).toBeUndefined();
+
+      const report = await archiveWorkspace(workspacePath);
+      expect(report.archived).toBe(true);
+      expect(report.branches[0]).toMatchObject({ local: 'keep', reason: expect.stringMatching(/provenance unknown/) });
+      await expect(git(a.host, 'rev-parse', '--verify', 'refs/heads/feat/shared')).resolves.toMatch(/[0-9a-f]{40}/);
+
+      const b = await hostWithRemote(root, 'other');
+      const second = path.join(root, 'ws2');
+      await fs.mkdir(second);
+      await git(b.host, 'branch', 'feat/theirs');
+      await saveFeatureConfig(second, {
+        id: 'ws2', mode: 'in-place', branchName: 'feat/theirs', description: '', repos: [b.host], originalRepos: [b.host],
+        assistants: [], workspacePath: second, createdAt: new Date().toISOString(), createdBranches: { unrelated: 'feat/x' },
+      });
+      await isolateWorkspaceRepo(second, 'other', { branchName: 'feat/theirs' });
+      const other = await archiveWorkspace(second);
+      expect(other.branches[0]).toMatchObject({ local: 'keep', reason: 'this workspace did not create it' });
+    });
+
+    it('keeps a branch checked out in another worktree when an interrupted archive resumes', async () => {
+      const a = await hostWithRemote(root, 'one');
+      const b = await hostWithRemote(root, 'two');
+      const workspacePath = await inPlaceWorkspace(root, [a.host, b.host]);
+      const one = (await isolateWorkspaceRepo(workspacePath, 'one', { branchName: 'feat/archive' })).worktreePath;
+      const two = (await isolateWorkspaceRepo(workspacePath, 'two', { branchName: 'feat/archive' })).worktreePath;
+      await git(b.host, 'worktree', 'lock', two);
+      expect((await archiveWorkspace(workspacePath)).archived).toBe(false);
+      expect(await exists(one)).toBe(false);
+      // Meanwhile the user checks the merged branch out in their own checkout.
+      await git(a.host, 'checkout', 'feat/archive');
+      await git(b.host, 'worktree', 'unlock', two);
+
+      const resumed = await archiveWorkspace(workspacePath);
+      expect(resumed.archived).toBe(true);
+      const byRepo = Object.fromEntries(resumed.branches.map((plan) => [plan.repo, plan]));
+      expect(byRepo.one).toMatchObject({ local: 'keep', reason: `checked out in ${a.host}` });
+      expect(byRepo.two).toMatchObject({ local: 'delete', result: { local: 'deleted' } });
+      expect(await git(a.host, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat/archive');
+    });
+
+    it('keeps every branch on request', async () => {
+      const { host } = await hostWithRemote(root, 'api');
+      const workspacePath = await inPlaceWorkspace(root, [host]);
+      await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' });
+      const report = await archiveWorkspace(workspacePath, { keepBranches: true });
+      expect(report.branches[0]).toMatchObject({ local: 'keep', reason: 'kept on request' });
+      await expect(git(host, 'rev-parse', '--verify', 'refs/heads/feat/archive')).resolves.toMatch(/[0-9a-f]{40}/);
+    });
+
+    it('deletes a merged remote branch only on request and only while it still points at the merged commit', async () => {
+      const a = await hostWithRemote(root, 'api');
+      const b = await hostWithRemote(root, 'web');
+      const workspacePath = await inPlaceWorkspace(root, [a.host, b.host]);
+      const api = (await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' })).worktreePath;
+      const web = (await isolateWorkspaceRepo(workspacePath, 'web', { branchName: 'feat/archive' })).worktreePath;
+      await commitAndPush(api, 'api.txt', 'feat/archive');
+      await mergeOnForge(a.forge, 'feat/archive');
+      const webTip = await commitAndPush(web, 'web.txt', 'feat/archive');
+      await mergeOnForge(b.forge, 'feat/archive');
+      // Someone pushed to the web branch after it was merged: its remote tip moved.
+      await git(b.forge, 'checkout', '-b', 'feat/archive', 'origin/feat/archive');
+      await fs.writeFile(path.join(b.forge, 'late.txt'), 'late\n');
+      await git(b.forge, 'add', 'late.txt');
+      await git(b.forge, 'commit', '-m', 'late');
+      await git(b.forge, 'push', 'origin', 'feat/archive');
+
+      const report = await archiveWorkspace(workspacePath, { deleteRemoteBranches: true });
+      expect(report.archived).toBe(true);
+      const byRepo = Object.fromEntries(report.branches.map((plan) => [plan.repo, plan]));
+      expect(byRepo.api).toMatchObject({ local: 'delete', remote: 'delete', result: { local: 'deleted', remote: 'deleted' } });
+      expect(byRepo.web).toMatchObject({ local: 'delete', remote: 'keep', result: { local: 'deleted', remote: 'kept' } });
+      expect(await git(a.host, 'ls-remote', '--heads', 'origin', 'feat/archive')).toBe('');
+      expect(await git(b.host, 'ls-remote', '--heads', 'origin', 'feat/archive')).not.toContain(webTip);
+      expect((await loadFeatureConfig(workspacePath))?.archive?.repos[0]).toMatchObject({ branchDeleted: true, remoteBranchDeleted: true });
+    });
+
+    it('reports a failed remote deletion without failing the archive', async () => {
+      const { host, remote } = await hostWithRemote(root, 'api');
+      const workspacePath = await inPlaceWorkspace(root, [host]);
+      const { worktreePath } = await isolateWorkspaceRepo(workspacePath, 'api', { branchName: 'feat/archive' });
+      const tip = await commitAndPush(worktreePath, 'x.txt', 'feat/archive');
+      await git(host, 'push', 'origin', `${tip}:refs/heads/main`);
+      // The remote refuses every ref update from now on.
+      const hook = path.join(remote, 'hooks', 'pre-receive');
+      await fs.writeFile(hook, '#!/bin/sh\necho "protected by policy" >&2\nexit 1\n');
+      await fs.chmod(hook, 0o755);
+
+      const report = await archiveWorkspace(workspacePath, { deleteRemoteBranches: true });
+      expect(report.archived).toBe(true);
+      expect(report.branches[0]).toMatchObject({ remote: 'delete', result: { local: 'deleted', remote: 'failed' } });
+      expect(report.notes.join(' ')).toMatch(/was not fully deleted/);
+      expect(await git(host, 'ls-remote', '--heads', 'origin', 'feat/archive')).toContain(tip);
+      expect((await loadFeatureConfig(workspacePath))?.archive?.repos[0]).toMatchObject({ branchDeleted: true });
+      expect((await loadFeatureConfig(workspacePath))?.archive?.repos[0]?.remoteBranchDeleted).toBeUndefined();
+    });
   });
 });

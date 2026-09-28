@@ -14,6 +14,8 @@ import { resolveWorkspaceInteractive, resolveWorkspaceQuiet } from '../utils/res
 /** Options for {@link archiveCommand}. */
 export interface ArchiveCommandOptions {
   park?: boolean;
+  keepBranches?: boolean;
+  deleteRemoteBranches?: boolean;
   dryRun?: boolean;
   json?: boolean;
   /** Skip the confirmation prompt. */
@@ -31,9 +33,21 @@ function repoLine(repo: ArchiveReport['repos'][number]): string {
   return `  ${chalk.bold(repo.name)}: ${label}${sha} — ${repo.reason}`;
 }
 
+function branchLine(plan: ArchiveReport['branches'][number]): string {
+  const local = plan.result?.local ?? plan.local;
+  const remote = plan.result?.remote ?? plan.remote;
+  const localLabel = { delete: chalk.green('delete'), deleted: chalk.green('deleted'), keep: chalk.dim('keep'), kept: chalk.dim('kept'), absent: chalk.dim('already gone'), failed: chalk.red('failed') }[local];
+  const remoteLabel = remote === 'not-requested' ? '' : `, origin: ${{ delete: 'delete', deleted: 'deleted', keep: 'keep (moved)', kept: 'kept', absent: 'not there', failed: chalk.red('failed'), 'not-checked': 'not checked' }[remote]}`;
+  return `  ${chalk.bold(plan.repo)} ${plan.branch}: ${localLabel}${remoteLabel} — ${plan.reason}`;
+}
+
 /** Prints an archive plan or result for people. */
 export function printArchiveReport(report: ArchiveReport): void {
   for (const repo of report.repos) console.log(repoLine(repo));
+  if (report.branches.length > 0) {
+    console.log(chalk.bold('\n  Branches'));
+    for (const plan of report.branches) console.log(branchLine(plan));
+  }
   if (report.kept.length > 0) {
     console.log(chalk.dim(`\n  Kept in ${report.workspacePath}: ${report.kept.join(', ')}`));
   }
@@ -86,18 +100,18 @@ export async function archiveCommand(workspaceArg: string | undefined, options: 
   }
 
   if (options.json) {
-    const report = await archiveWorkspace(workspacePath, { park: options.park, dryRun: options.dryRun });
+    const report = await archiveWorkspace(workspacePath, archiveOptions(options));
     console.log(JSON.stringify(report, null, 2));
     if ((!report.ready && !report.alreadyArchived) || report.errors.length > 0) process.exitCode = 1;
     return;
   }
 
   if (options.dryRun) {
-    reportArchiveOutcome(await planArchive(workspacePath, { park: options.park, dryRun: true }));
+    reportArchiveOutcome(await planArchive(workspacePath, archiveOptions(options)));
     return;
   }
 
-  const plan = await planArchive(workspacePath, { park: options.park, dryRun: true });
+  const plan = await planArchive(workspacePath, { ...archiveOptions(options), dryRun: true });
   if (plan.alreadyArchived || !plan.ready) {
     reportArchiveOutcome(plan);
     return;
@@ -105,7 +119,7 @@ export async function archiveCommand(workspaceArg: string | undefined, options: 
   printArchiveReport(plan);
   if (!options.yes) {
     const proceed = await confirm({
-      message: `Archive "${plan.workspaceId}"? Its worktrees are removed; branches, notes, knowledge and documents are kept.`,
+      message: `Archive "${plan.workspaceId}"? Its worktrees and the branches marked delete are removed; notes, knowledge and documents are kept.`,
       default: true,
     });
     if (!proceed) {
@@ -113,7 +127,16 @@ export async function archiveCommand(workspaceArg: string | undefined, options: 
       return;
     }
   }
-  reportArchiveOutcome(await archiveWorkspace(workspacePath, { park: options.park }));
+  reportArchiveOutcome(await archiveWorkspace(workspacePath, { ...archiveOptions(options), dryRun: false }));
+}
+
+function archiveOptions(options: ArchiveCommandOptions) {
+  return {
+    park: options.park,
+    dryRun: options.dryRun,
+    keepBranches: options.keepBranches,
+    deleteRemoteBranches: options.deleteRemoteBranches,
+  };
 }
 
 /** Restores an archived workspace as active. */

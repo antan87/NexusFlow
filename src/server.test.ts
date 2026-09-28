@@ -1080,7 +1080,7 @@ describe('Server API Endpoints Unit Tests', () => {
       vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'ws', repos: [], assistants: [] } as any);
       const base = {
         workspacePath: '/mock/workspaces/ws', workspaceId: 'ws', dryRun: false, alreadyArchived: false,
-        repos: [], kept: [], notes: [], errors: [], archived: false,
+        repos: [], kept: [], notes: [], errors: [], archived: false, branches: [],
       };
       vi.mocked(archive.archiveWorkspace)
         .mockResolvedValueOnce({ ...base, ready: false, blockers: ['api: 2 uncommitted file(s).'] })
@@ -1095,7 +1095,7 @@ describe('Server API Endpoints Unit Tests', () => {
 
       const done = await post({ park: true });
       expect(done.status).toBe(200);
-      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.join('/mock/workspaces', 'ws'), { park: true, dryRun: false });
+      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.join('/mock/workspaces', 'ws'), { park: true, dryRun: false, keepBranches: false, deleteRemoteBranches: false });
     });
 
     it('returns 404 for an unknown workspace instead of archiving', async () => {

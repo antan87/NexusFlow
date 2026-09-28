@@ -12,13 +12,13 @@ const ARCHIVED = {
   archive: {
     archivedAt: '2026-09-28T10:00:00.000Z', previousMode: 'in-place', parked: true,
     repos: [
-      { name: 'api', access: 'isolated', sourcePath: '/dev/api', branch: 'feat/speed', headSha: '1234567890abcdef', branchState: 'merged', mergeEvidence: 'ancestor' },
+      { name: 'api', access: 'isolated', sourcePath: '/dev/api', branch: 'feat/speed', headSha: '1234567890abcdef', branchState: 'merged', mergeEvidence: 'ancestor', branchDeleted: true },
       { name: 'web', access: 'isolated', sourcePath: '/dev/web', branch: 'feat/speed', headSha: 'fedcba0987654321', branchState: 'parked' },
     ],
   },
 };
 
-function preview(park: boolean) {
+function preview(park: boolean, deleteRemoteBranches = false) {
   return {
     workspacePath: '/ws/demo', workspaceId: 'demo', dryRun: true, alreadyArchived: false,
     ready: park, blockers: park ? [] : ['web: "feat/speed" is pushed but not merged into main. Archive with --park to keep the branch and archive anyway.'],
@@ -29,6 +29,10 @@ function preview(park: boolean) {
         : { name: 'web', action: 'blocked', reason: 'web: "feat/speed" is pushed but not merged into main.', branchState: 'unmerged', headSha: 'fedcba0' },
     ],
     kept: ['contextspace-milestones.md', 'contextspace.json'], notes: [], errors: [], archived: false,
+    branches: park ? [
+      { repo: 'api', branch: 'feat/speed', local: 'delete', remote: deleteRemoteBranches ? 'delete' : 'not-requested', reason: 'merged into the default branch' },
+      { repo: 'web', branch: 'feat/speed', local: 'keep', remote: deleteRemoteBranches ? 'keep' : 'not-requested', reason: 'not merged; kept so the work can be picked up again' },
+    ] : [],
   };
 }
 
@@ -38,9 +42,9 @@ async function mockArchiveBackend(page: Page) {
   const calls: Array<{ path: string; body: unknown }> = [];
   await page.route('**/api/workspaces', (route) => route.fulfill({ json: [current] }));
   await page.route('**/api/workspace/demo/archive', async (route: Route) => {
-    const body = route.request().postDataJSON() as { park: boolean; dryRun?: boolean };
+    const body = route.request().postDataJSON() as { park: boolean; dryRun?: boolean; deleteRemoteBranches: boolean };
     calls.push({ path: 'archive', body });
-    if (body.dryRun) return route.fulfill({ json: preview(body.park) });
+    if (body.dryRun) return route.fulfill({ json: preview(body.park, body.deleteRemoteBranches) });
     current = ARCHIVED;
     return route.fulfill({ json: { ...preview(true), dryRun: false, archived: true, archivedAt: ARCHIVED.archivedAt } });
   });
@@ -78,10 +82,18 @@ test('archive previews what happens, parks unmerged work on request, and restore
   await dialog.getByRole('checkbox', { name: 'Archive pushed but unmerged work' }).click();
   await expect(dialog.getByRole('list', { name: 'Repositories' })).not.toContainText('Blocks archive');
   await expect(dialog).toContainText('Kept in the workspace folder: contextspace-milestones.md, contextspace.json');
+  const branches = dialog.getByRole('list', { name: 'Branches' });
+  await expect(branches).toContainText('feat/speed in api: deleted — merged into the default branch');
+  await expect(branches).toContainText('feat/speed in web: kept — not merged');
+  await dialog.getByRole('checkbox', { name: 'Also delete merged branches on origin' }).click();
+  await expect(branches).toContainText('feat/speed in api: deleted, also on origin');
   await archiveButton.click();
   await expect(dialog).toBeHidden();
+  const none = { keepBranches: false, deleteRemoteBranches: false };
   expect(calls.filter((call) => call.path === 'archive').map((call) => call.body)).toEqual([
-    { park: false, dryRun: true }, { park: true, dryRun: true }, { park: true },
+    { park: false, ...none, dryRun: true }, { park: true, ...none, dryRun: true },
+    { park: true, keepBranches: false, deleteRemoteBranches: true, dryRun: true },
+    { park: true, keepBranches: false, deleteRemoteBranches: true },
   ]);
 
   // The record is read-only and shows what archive kept.
@@ -91,6 +103,7 @@ test('archive previews what happens, parks unmerged work on request, and restore
   await expect(record).toContainText('feat/speed');
   await expect(record).toContainText('1234567890');
   await expect(record).toContainText('Parked (pushed, not merged)');
+  await expect(record).toContainText('branch deleted');
 
   // Out of the active list, one click away under Archived.
   await page.goto('/#/overview');
