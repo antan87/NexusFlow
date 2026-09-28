@@ -46,6 +46,7 @@ describe('built diagnostics CLI', () => {
   it.runIf(process.platform === 'linux')('keeps data commands offline in a real TTY while ordinary cold/warm update checks retain their documented behavior', async () => {
     const probe = path.join(root, 'probe.mjs');
     const log = path.join(root, 'requests.jsonl');
+    await fs.writeFile(log, '', { flag: 'wx' });
     await fs.writeFile(probe, `import { appendFileSync } from 'node:fs';
 globalThis.fetch = async (url, options) => {
   appendFileSync(${JSON.stringify(log)}, JSON.stringify({ url: String(url), headers: options?.headers, body: options?.body ?? null }) + '\\n');
@@ -57,7 +58,7 @@ globalThis.fetch = async (url, options) => {
     });
     expect((await tty('data')).exitCode).toBe(0);
     expect((await tty('diagnostics', 'preview')).exitCode).toBe(0);
-    await expect(fs.access(log)).rejects.toThrow();
+    expect(await fs.readFile(log, 'utf8')).toBe('');
     expect((await tty('config', 'get', 'scanDepth')).exitCode).toBe(0);
     const requests = (await fs.readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     expect(requests).toEqual([{ url: 'https://api.github.com/repos/antan87/NexusFlow/releases/latest', headers: { 'User-Agent': 'ContextSpace-Updater' }, body: null }]);
