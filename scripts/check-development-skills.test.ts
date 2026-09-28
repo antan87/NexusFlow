@@ -50,7 +50,11 @@ it('fails when SKILL.md is missing from a maintained skill directory', async () 
 });
 
 
-describe('onboarding documents', () => {
+// These run the full documented-command check, which spawns the built CLI's help
+// once per documented command, so they need more than the default timeout under load.
+const FULL_CHECK_TIMEOUT_MS = 120_000;
+
+describe('onboarding documents', { timeout: FULL_CHECK_TIMEOUT_MS }, () => {
   beforeEach(async () => {
     // The CLI help check runs the built CLI; CI builds before tests.
     await symlink(path.join(repositoryRoot, 'dist'), path.join(root, 'dist'), 'junction');
