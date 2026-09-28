@@ -7,8 +7,10 @@ import { collectDiagnostics, previewDiagnostics, reviewedDiagnostics, MAX_DIAGNO
 /** Mounted behind the main server's host/origin guards. No server-side file-write route. */
 export function dataRoutes(resolveWorkspace: (id: string) => Promise<string>) {
   const routes = new Hono();
-  routes.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
-  routes.use('*', bodyLimit({ maxSize: MAX_DIAGNOSTIC_BYTES + 8192,
+  for (const route of ['/data-guide', '/data-guide/*', '/diagnostics/*']) {
+    routes.use(route, async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
+  }
+  routes.use('/diagnostics/*', bodyLimit({ maxSize: MAX_DIAGNOSTIC_BYTES + 8192,
     onError: c => c.json({ error: 'Diagnostic request exceeds the size limit.' }, 413) }));
 
   routes.get('/data-guide', c => c.json(getDataGuide()));

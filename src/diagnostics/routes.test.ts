@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Hono } from 'hono';
 import { dataRoutes } from './routes.js';
 import { collectDiagnostics } from '../core/diagnostics.js';
 
@@ -6,6 +7,15 @@ describe('diagnostic HTTP contract', () => {
   const resolveWorkspace = vi.fn(async () => { throw new Error('SECRET_PATH'); });
   const app = dataRoutes(resolveWorkspace);
   const post = (route: string, body: unknown) => app.request(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  it('does not impose its diagnostic payload limit on unrelated API routes', async () => {
+    const server = new Hono().route('/api', app);
+    server.post('/api/unrelated', async c => c.text(String((await c.req.text()).length)));
+    const response = await server.request('/api/unrelated', { method: 'POST', body: 'x'.repeat(1100000) });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('1100000');
+    expect(response.headers.get('cache-control')).toBeNull();
+  });
 
   it('returns the guide without invoking workspace resolution, collectors or a network service', async () => {
     const network = vi.spyOn(globalThis, 'fetch');
