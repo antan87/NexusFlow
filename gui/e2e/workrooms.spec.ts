@@ -192,10 +192,16 @@ test.describe('Workrooms', () => {
   });
 
   test('makes a locked guest leave before joining again', async ({ page }) => {
-    await page.route('**/api/workrooms/status', async (route) => route.fulfill({ status: 401, json: { error: 'human session required' } }));
-    await page.route('**/api/workrooms/session', async (route) => route.fulfill({ json: { active: true, locked: true, roomType: 'guest' } }));
+    let left = false;
+    await page.route('**/api/workrooms/status', async (route) => left
+      ? route.fulfill({ json: { status: { mode: 'idle' } } })
+      : route.fulfill({ status: 401, json: { error: 'human session required' } }));
+    await page.route('**/api/workrooms/session', async (route) => route.fulfill({ json: left
+      ? { active: false, locked: false }
+      : { active: true, locked: true, roomType: 'guest' } }));
     await page.route('**/api/workrooms/session/abandon', async (route) => {
       expect(route.request().postDataJSON()).toEqual({ confirm: true });
+      left = true;
       await route.fulfill({ json: { success: true } });
     });
     await page.route('**/api/workrooms/interfaces', async (route) => route.fulfill({ json: { interfaces: [] } }));

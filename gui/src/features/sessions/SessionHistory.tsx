@@ -1,6 +1,7 @@
 import { SessionActivity } from './SessionActivity.js';
 import { SessionKind, mainSessionFor } from './SessionKind.js';
 import React, { useRef, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -374,6 +375,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">Discovery reads local assistant history. Resuming a session uses that assistant’s provider settings. <Link className="underline" to="/settings#data-and-privacy">Storage, sharing and deletion controls</Link>.</p>
       {/* Search, Filter & Sort Order Toolbar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-md border border-border/80">
         <div className="flex items-center gap-2 flex-1 min-w-0">

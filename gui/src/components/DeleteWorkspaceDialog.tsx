@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Dialog,
   DialogPopup,
@@ -54,6 +55,7 @@ export function DeleteWorkspaceDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
+          <p className="text-xs text-muted-foreground">Source repositories outside this workspace remain. Global ContextSpace chat and approvals, assistant-owned histories, and shared Workroom copies are separate. <Link className="underline" to="/settings#data-and-privacy" onClick={handleClose}>Review data and deletion boundaries</Link>.</p>
           <label className="block">
             <span className="mb-1 block text-xs text-muted-foreground">
               Please type <strong className="font-mono text-foreground">{workspaceName}</strong> to confirm:

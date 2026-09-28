@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { DataPrivacyPanel } from '../features/settings/DataPrivacyPanel.js';
 
 import { Alert } from '../components/ui/alert.js';
 import { Badge } from '../components/ui/badge.js';
@@ -26,6 +27,7 @@ interface ToolStatus {
 }
 
 interface SettingsPageProps {
+  workspaces: { id: string; branchName: string }[];
   config: ContextSpaceConfig | null;
   setConfig: (config: ContextSpaceConfig) => void;
   saveStatus: 'success' | 'error' | null;
@@ -43,6 +45,7 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({
+  workspaces,
   config,
   setConfig,
   saveStatus,
@@ -96,6 +99,8 @@ export function SettingsPage({
           Configure your local development directories, AI search parameters, storage adapters, and editor defaults.
         </p>
       </header>
+
+      <DataPrivacyPanel workspaces={workspaces} />
 
       {saveStatus === 'success' && (
         <Alert variant="success" className="mb-6">
@@ -262,7 +267,7 @@ export function SettingsPage({
               </Select>
               <span className="text-xs text-muted-foreground">
                 {selectedAdapter?.description ||
-                  'Choose where to store maps, plans, and knowledge files. Centralized vault keeps repositories 100% clean and allows Obsidian integration.'}
+                  'The built-in local adapter stores documents in the workspace. Plugin adapters define their own storage and sharing behavior.'}
               </span>
             </div>
 

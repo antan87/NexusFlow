@@ -41,6 +41,7 @@ import { refreshCommand } from './commands/refresh.js';
 import { progressCommand } from './commands/progress.js';
 import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
 import { doctorCommand } from './commands/doctor.js';
+import { dataGuideCommand, diagnosticPreviewCommand, diagnosticExportCommand } from './commands/diagnostics.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
 import { projectListCommand, projectAddCommand, projectShowCommand, projectRemoveCommand } from './commands/project.js';
@@ -486,6 +487,21 @@ program
     await doctorCommand(workspace);
   }));
 
+program.command('data')
+  .description('Explain data storage, sharing, retention and deletion')
+  .option('--json', 'Include effective local profile locations as JSON (private; not a support report)')
+  .action(runAction(dataGuideCommand));
+
+const diagnostics = program.command('diagnostics').description('Review and save a local support report without private content');
+diagnostics.command('preview').argument('[workspace]', 'Workspace path or name (defaults to current workspace, otherwise runtime only)')
+  .option('--candidate <file>', 'Save the sanitized candidate to a NEW file for review and later export')
+  .option('--omit <sections...>', 'Exclude sections: runtime, workspace, checks')
+  .action(runAction(diagnosticPreviewCommand));
+diagnostics.command('export').argument('<candidate>', 'Previously saved diagnostic candidate')
+  .requiredOption('--digest <sha256>', 'Digest from the reviewed preview')
+  .requiredOption('--output <file>', 'NEW destination file; existing files are never replaced')
+  .action(runAction(diagnosticExportCommand));
+
 program
   .command('migrate')
   .description('Migrate legacy NexusFlow workspaces and global config to ContextSpace')
@@ -801,7 +817,8 @@ mcp
 
 program.hook('postAction', async (thisCommand, actionCommand) => {
   // Skip update check for non-TTY streams and MCP runs to prevent contaminating stdout stream
-  if (!process.stdout.isTTY || (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp')) {
+  if (!process.stdout.isTTY || actionCommand.name() === 'data' || actionCommand.parent?.name() === 'diagnostics'
+      || (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp')) {
     return;
   }
 
