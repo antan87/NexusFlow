@@ -35,6 +35,7 @@
     "test:watch": "vitest",
     "test:gui": "npm run test:e2e --prefix gui",
     "check:skills": "node scripts/check-development-skills.mjs",
+    "perf:fixture": "node perf/fixture/generate.mjs",
     "smoke:chat": "npx tsx scripts/smoke-chat-engines.ts",
     "clean": "rimraf dist",
     "prepublishOnly": "npm run build",
