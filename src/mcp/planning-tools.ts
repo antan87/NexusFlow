@@ -23,7 +23,7 @@ function planningTool<T extends z.ZodObject>(
     annotations: { readOnlyHint: false, destructiveHint, idempotentHint: false, openWorldHint: false },
     inputSchema: { ...inputSchema, additionalProperties: false, properties: {
       ...inputSchema.properties,
-      workspaceId: { type: 'string', description: 'Optional workspace ID. Defaults to the active workspace.' },
+      workspaceId: { type: 'string', description: 'Optional ID/branchName of the workspace. Defaults to the workspace this server is bound to (or the current directory). Interactive and full sessions may name another workspace; other roles get an error for a different workspace.' },
     } },
     handler: async (args, ctx) => {
       try {
