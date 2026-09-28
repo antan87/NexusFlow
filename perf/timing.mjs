@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './lib/backend.mjs';
 import { launchDesktop } from './lib/desktop.mjs';
-import { ensureFixture, fixtureDir } from './lib/fixtures.mjs';
+import { ensureFixture, fixtureDir, stopFixtureDaemons } from './lib/fixtures.mjs';
 import { pageNow, readMarks, waitForMark } from './lib/marks.mjs';
 import { compareBudgets, summarize } from './lib/stats.mjs';
 import { describeMachine, sampleProcess } from './lib/system.mjs';
@@ -127,6 +127,26 @@ async function measureRun(d, fixture) {
   return { sample, errors };
 }
 
+/**
+ * Waits until the app has made no API request for `quietMs`, so first loads
+ * that trail the visible UI (lazy cards, session sources) are not counted as
+ * idle work. Returns how long settling took, or null if it never went quiet.
+ */
+async function settle(d, quietMs = 10_000, maxMs = 90_000) {
+  const started = Date.now();
+  await d.counters(true);
+  let lastCount = 0;
+  let quietSince = Date.now();
+  while (Date.now() - started < maxMs) {
+    await sleep(1_000);
+    const c = await d.counters();
+    const count = Object.values(c.requests).reduce((n, r) => n + r.count, 0);
+    if (count !== lastCount) { lastCount = count; quietSince = Date.now(); }
+    if (Date.now() - quietSince >= quietMs) return Date.now() - started - quietMs;
+  }
+  return null;
+}
+
 async function measureIdle(d, minutes) {
   const page = d.window;
   await waitForMark(page, 'cs:overview-status-complete', { timeout: 180_000 });
@@ -136,7 +156,7 @@ async function measureIdle(d, minutes) {
     ['workspace', async () => { await openWorkspaceTimed(page, TARGETS.dirty); }],
   ]) {
     await open();
-    await sleep(3_000);
+    const settledMs = await settle(d);
     await d.counters(true);
     const cpu0 = d.backendPid ? sampleProcess(d.backendPid) : null;
     const heap0 = await page.evaluate(() => performance.memory?.usedJSHeapSize ?? null);
@@ -147,6 +167,7 @@ async function measureIdle(d, minutes) {
     const requests = Object.values(c.requests).reduce((n, r) => n + r.count, 0);
     phases[label] = {
       minutes,
+      settledMs,
       requestsPerMin: Math.round((requests / minutes) * 10) / 10,
       gitPerMin: Math.round(((c.spawns.git ?? 0) / minutes) * 10) / 10,
       backendCpuPct: cpu0 && cpu1 ? Math.round(((cpu1.cpuSeconds - cpu0.cpuSeconds) / ((cpu1.at - cpu0.at) / 1000)) * 1000) / 10 : null,
@@ -185,13 +206,14 @@ function flatten(samples) {
 
 function markdown(report) {
   const lines = [
-    `# ${report.tier} timing — ${report.finishedAt}`, '',
+    `# ${report.tier} timing — ${report.finishedAt ?? report.startedAt}${report.complete ? '' : ' (incomplete)'}`, '',
     `Commit \`${report.machine.commit?.slice(0, 7)}\`${report.machine.uncommittedChanges ? ` (+${report.machine.uncommittedChanges} uncommitted)` : ''} · ${report.machine.cpu} · ${report.machine.logicalCpus} CPUs · ${report.machine.memoryGiB} GiB · ${report.machine.os} · governor ${report.machine.governor ?? 'n/a'} · AC ${report.machine.onAcPower ?? 'n/a'} · fixture on ${report.machine.fixtureFilesystem ?? 'n/a'}`,
     `App: ${report.options.packaged ? 'packaged' : 'unpacked'} Electron ${report.versions?.electron ?? '?'} · ${report.options.runs} runs, ${report.options.warmup} warm-up discarded · cold = new app process, warm OS cache`, '',
     '| Metric | n | p50 | p95 | max |', '|---|---|---|---|---|',
     ...Object.entries(report.summaries).map(([m, s]) => `| ${m} | ${s.n} | ${s.p50 ?? '—'} | ${s.p95 ?? '—'} | ${s.max ?? '—'} |`),
   ];
-  if (report.idle) {
+  if (report.idle?.error) lines.push('', `Idle phase failed: ${report.idle.error.message} (app alive: ${report.idle.error.appAlive})`);
+  else if (report.idle) {
     lines.push('', '| Idle phase | min | requests/min | git/min | backend CPU % | RSS drift MiB | heap drift MiB |', '|---|---|---|---|---|---|---|');
     for (const [phase, p] of Object.entries(report.idle)) lines.push(`| ${phase} | ${p.minutes} | ${p.requestsPerMin} | ${p.gitPerMin} | ${p.backendCpuPct ?? '—'} | ${p.backendRssDriftMiB ?? '—'} | ${p.heapDriftMiB ?? '—'} |`);
   }
@@ -200,62 +222,96 @@ function markdown(report) {
     for (const r of report.budgets) lines.push(`| ${r.metric} | ${r.stat} | ${r.budget} | ${r.limit} | ${r.observed ?? '—'} | ${r.verdict} |`);
   }
   const errorRuns = report.runs.filter((r) => Object.keys(r.errors).length);
-  if (errorRuns.length) lines.push('', `Errors in ${errorRuns.length} run(s): ${[...new Set(errorRuns.flatMap((r) => Object.entries(r.errors).map(([k, v]) => `${k}: ${v}`)))].slice(0, 5).join('; ')}`);
+  if (errorRuns.length) lines.push('', `Errors in ${errorRuns.length} run(s): ${[...new Set(errorRuns.flatMap((r) => Object.entries(r.errors).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.message}`)))].slice(0, 5).join('; ')}`);
   return lines.join('\n') + '\n';
 }
 
-export async function runTiming(options) {
+function buildReport(args, state) {
+  const measured = state.runs.filter((r) => !r.warmup).map((r) => r.sample);
+  const summaries = Object.fromEntries(Object.entries(flatten(measured)).map(([m, v]) => [m, summarize(v)]));
+  let budgets = null;
+  if (state.budgetFile) budgets = compareBudgets(summaries, state.budgetFile.tiers?.[args.tier] ?? {}, state.budgetFile.tolerance ?? 0.1);
+  const f = state.fixture;
+  return {
+    tier: args.tier, seed: args.seed, startedAt: state.startedAt, finishedAt: state.finishedAt ?? null, complete: Boolean(state.finishedAt),
+    options: { runs: args.runs, warmup: args.warmup, idleMinutes: args.idleMinutes, packaged: args.packaged, display: args.headless ? 'headless' : 'real display' },
+    machine: state.machine, versions: state.versions,
+    fixture: { treeDigest: f.treeDigest, workspaces: f.workspaces, repos: f.repos, codex: f.codex, claude: f.claude, faults: f.faults },
+    targets: TARGETS, summaries, idle: state.idle, budgets, runs: state.runs,
+  };
+}
+
+/**
+ * Runs every launch, calling `save(report)` after each one so a later failure
+ * never loses the samples already taken.
+ */
+export async function runTiming(options, save = async () => {}) {
   const args = { ...parseArgs([]), ...options };
   const fixture = await ensureFixture({ tier: args.tier, seed: args.seed, log: console.error });
   const logDir = path.join(REPO_ROOT, 'perf', 'results', 'logs');
-  const machine = describeMachine(fixtureDir(args.tier, args.seed));
-  const runs = [];
-  let versions = null;
+  const state = {
+    startedAt: new Date().toISOString(), fixture, runs: [], versions: null, idle: null,
+    machine: describeMachine(fixtureDir(args.tier, args.seed)),
+    budgetFile: args.budgets ? JSON.parse(await fs.readFile(path.resolve(REPO_ROOT, args.budgets), 'utf8')) : null,
+  };
   for (let r = 0; r < args.warmup + args.runs; r += 1) {
     await resetAppProfile(fixture.home);
-    const d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir });
+    let d;
     try {
-      versions ??= await d.versions();
+      d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir });
+      state.versions ??= await d.versions();
       const { sample, errors } = await measureRun(d, fixture);
-      runs.push({ run: r, warmup: r < args.warmup, sample, errors });
+      state.runs.push({ run: r, warmup: r < args.warmup, sample, errors });
       console.error(`run ${r + 1}/${args.warmup + args.runs}${r < args.warmup ? ' (warm-up)' : ''}: usable ${sample['S1.usable']} ms, status ${sample['S1.statusComplete']} ms${Object.keys(errors).length ? `, errors ${Object.keys(errors).join(',')}` : ''}`);
+    } catch (error) {
+      state.runs.push({ run: r, warmup: r < args.warmup, sample: {}, errors: { launch: failure(error, d) } });
+      console.error(`run ${r + 1}: failed — ${state.runs.at(-1).errors.launch.message}`);
     } finally {
-      await d.close();
+      await d?.close();
     }
+    await save(buildReport(args, state));
   }
-  let idle = null;
   if (args.idleMinutes > 0) {
     await resetAppProfile(fixture.home);
-    const d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir });
-    try { idle = await measureIdle(d, args.idleMinutes); } finally { await d.close(); }
+    let d;
+    try {
+      d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir });
+      state.idle = await measureIdle(d, args.idleMinutes);
+    } catch (error) {
+      state.idle = { error: failure(error, d) };
+      console.error(`idle: failed — ${state.idle.error.message}`);
+    } finally {
+      await d?.close();
+    }
   }
+  await stopFixtureDaemons(fixture.home);
+  state.finishedAt = new Date().toISOString();
+  const report = buildReport(args, state);
+  await save(report);
+  return report;
+}
 
-  const measured = runs.filter((r) => !r.warmup).map((r) => r.sample);
-  const summaries = Object.fromEntries(Object.entries(flatten(measured)).map(([m, v]) => [m, summarize(v)]));
-  let budgets = null;
-  if (args.budgets) {
-    const file = JSON.parse(await fs.readFile(path.resolve(REPO_ROOT, args.budgets), 'utf8'));
-    budgets = compareBudgets(summaries, file.tiers?.[args.tier] ?? {}, file.tolerance ?? 0.1);
-  }
+/** Error details plus whether the app was still running and the end of its log. */
+function failure(error, d) {
+  let appAlive = null;
+  if (d?.electronPid) { try { process.kill(d.electronPid, 0); appAlive = true; } catch { appAlive = false; } }
   return {
-    tier: args.tier, seed: args.seed, finishedAt: new Date().toISOString(),
-    options: { runs: args.runs, warmup: args.warmup, idleMinutes: args.idleMinutes, packaged: args.packaged, display: args.headless ? 'headless' : 'real display' },
-    machine, versions,
-    fixture: { treeDigest: fixture.treeDigest, workspaces: fixture.workspaces, repos: fixture.repos, codex: fixture.codex, claude: fixture.claude, faults: fixture.faults },
-    targets: TARGETS, summaries, idle, budgets, runs,
+    message: String(error?.message ?? error).split('\n')[0],
+    appAlive,
+    logTail: d ? d.log().slice(-5).map((l) => l.message.slice(0, 200)) : [],
   };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
-  const report = await runTiming(args);
   const outDir = path.join(REPO_ROOT, 'perf', 'results');
   await fs.mkdir(outDir, { recursive: true });
-  const stem = path.join(outDir, `timing-${report.tier}-${report.finishedAt.replace(/[:.]/g, '-')}`);
-  await fs.writeFile(`${stem}.json`, JSON.stringify(report, null, 2));
+  const stem = path.join(outDir, `timing-${args.tier}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  const report = await runTiming(args, (partial) => fs.writeFile(`${stem}.json`, JSON.stringify(partial, null, 2)));
   const md = markdown(report);
   await fs.writeFile(`${stem}.md`, md);
   process.stdout.write(md);
   console.error(`Report: ${path.relative(REPO_ROOT, stem)}.{json,md}`);
-  if (args.check && report.budgets?.some((b) => b.verdict !== 'pass')) process.exit(1);
+  // Playwright's Electron connection can keep the event loop alive; exit explicitly.
+  process.exit(args.check && report.budgets?.some((b) => b.verdict !== 'pass') ? 1 : 0);
 }

@@ -5,10 +5,12 @@
  * /tmp is often a RAM-backed tmpfs, which would hide the disk costs being
  * measured (and tier M alone is ~3 GB). Override with CONTEXTSPACE_PERF_DIR.
  */
+import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { GENERATOR_VERSION, generateFixture, removeFixture } from '../fixture/generate.mjs';
+import { fixtureEnv } from './env.mjs';
 
 export function fixturesRoot() {
   return process.env.CONTEXTSPACE_PERF_DIR || path.join(os.homedir(), '.cache', 'contextspace-perf');
@@ -43,4 +45,14 @@ export async function ensureFixture({ tier, seed = 1, faults, log = () => {} }) 
   if (existsSync(dir)) await removeFixture(dir);
   log(`Generating tier ${tier} (seed ${seed}) in ${dir}…`);
   return generateFixture({ tier, seed, out: dir, faults: wantFaults });
+}
+
+/**
+ * The app's status check runs `npx pm2 jlist`, which starts a PM2 daemon under
+ * the fixture's HOME. Stop it when a measurement ends so no process lingers.
+ */
+export async function stopFixtureDaemons(home) {
+  await new Promise((resolve) => {
+    execFile('npx', ['pm2', 'kill'], { env: fixtureEnv(home), timeout: 30_000 }, () => resolve());
+  });
 }

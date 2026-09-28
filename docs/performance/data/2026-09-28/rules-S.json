@@ -1,0 +1,130 @@
+{
+  "tier": "S",
+  "seed": 1,
+  "idleSeconds": 60,
+  "fixtureDigest": "3bed7ba32add0b42d4aec2ddb1a436baf1692f318584772e4892e6ff842e290f",
+  "results": [
+    {
+      "id": "R1",
+      "title": "Nothing polls in the background",
+      "expected": "0 API requests and 0 git processes while the window is hidden",
+      "verdict": "fail",
+      "cases": [
+        {
+          "case": "overview",
+          "visibility": "hidden",
+          "requests": 0,
+          "git": 0,
+          "byRoute": {}
+        },
+        {
+          "case": "workspace overview",
+          "visibility": "hidden",
+          "requests": 0,
+          "git": 0,
+          "byRoute": {}
+        },
+        {
+          "case": "code panel",
+          "visibility": "hidden",
+          "requests": 6,
+          "git": 12,
+          "byRoute": {
+            "GET /api/workspace/perf-ws-000/changes": {
+              "count": 6,
+              "aborted": 0
+            }
+          }
+        }
+      ],
+      "seconds": 195
+    },
+    {
+      "id": "R2a",
+      "title": "Unchanged session history is not re-read",
+      "expected": "0 full transcript reads on a repeated sessions request",
+      "verdict": "fail",
+      "observed": {
+        "fullReads": 4,
+        "historyBytesRead": 4659973,
+        "sessions": 4
+      },
+      "seconds": 0
+    },
+    {
+      "id": "R2b",
+      "title": "An open Code panel does not rescan an unchanged repo",
+      "expected": "at most 1 git process per 10 s tick while visible and idle",
+      "verdict": "inconclusive",
+      "reason": "Could not open the Code panel: locator.click: Timeout 10000ms exceeded.",
+      "seconds": 12
+    },
+    {
+      "id": "R3a",
+      "title": "A slow response never shows under another workspace",
+      "expected": "no workspace data applied for A or B after switching to C",
+      "verdict": "fail",
+      "observed": {
+        "staleApplied": [
+          "perf-ws-001:changes",
+          "perf-ws-001:sessions",
+          "perf-ws-000:changes",
+          "perf-ws-000:sessions"
+        ]
+      },
+      "seconds": 5
+    },
+    {
+      "id": "R3b",
+      "title": "Leaving a workspace cancels its requests",
+      "expected": "every held request for A and B is aborted by the app",
+      "verdict": "fail",
+      "observed": {
+        "held": 16,
+        "notAborted": [
+          "/api/workspace/perf-ws-000/repositories",
+          "/api/workspace/perf-ws-000/lifecycle",
+          "/api/workspace/perf-ws-000/work",
+          "/api/workspace/perf-ws-000/migration-status",
+          "/api/workspace/perf-ws-000/domain-packs",
+          "/api/workspace/perf-ws-000/changes",
+          "/api/workspace/perf-ws-000/sessions",
+          "/api/workspace/perf-ws-000/plan",
+          "/api/workspace/perf-ws-001/repositories",
+          "/api/workspace/perf-ws-001/lifecycle",
+          "/api/workspace/perf-ws-001/work",
+          "/api/workspace/perf-ws-001/migration-status",
+          "/api/workspace/perf-ws-001/domain-packs",
+          "/api/workspace/perf-ws-001/changes",
+          "/api/workspace/perf-ws-001/sessions",
+          "/api/workspace/perf-ws-001/plan"
+        ]
+      },
+      "seconds": 3
+    },
+    {
+      "id": "R4",
+      "title": "Startup does not wait for optional work",
+      "expected": "overview usable before delayed status, session and detection calls return",
+      "verdict": "pass",
+      "observed": {
+        "usableAtMs": 954,
+        "delayedByMs": 5000,
+        "thresholdMs": 4000
+      },
+      "seconds": 1
+    },
+    {
+      "id": "R5",
+      "title": "Caches notice nested changes",
+      "expected": "new Claude and Codex sessions and a new file appear on the next request",
+      "verdict": "pass",
+      "observed": {
+        "newClaudeSession": true,
+        "newCodexSession": true,
+        "newFileInChanges": true
+      },
+      "seconds": 1
+    }
+  ]
+}

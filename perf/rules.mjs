@@ -18,7 +18,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, startBackend } from './lib/backend.mjs';
-import { ensureFixture } from './lib/fixtures.mjs';
+import { ensureFixture, stopFixtureDaemons } from './lib/fixtures.mjs';
 import { pageNow, readMarks, waitForMark } from './lib/marks.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
 
@@ -280,18 +280,21 @@ export async function runRules(options = {}) {
   const backend = await startBackend({ home: fixture.home });
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width: 1450, height: 950 } });
-  const ctx = { backend, context, fixture, idleMs: args.idleSeconds * 1000 };
+  const ctx = { backend, context: null, fixture, idleMs: args.idleSeconds * 1000 };
   const results = [];
   try {
     for (const [id, rule] of Object.entries(RULES)) {
       if (args.only && !args.only.includes(id)) continue;
       const started = Date.now();
       let result;
+      // A fresh context per rule: the app keeps UI state (open chat, layout) in localStorage.
+      ctx.context = await browser.newContext({ viewport: { width: 1450, height: 950 } });
       try {
         result = await rule.run(ctx);
       } catch (error) {
         result = { verdict: 'error', reason: String(error?.stack ?? error).split('\n').slice(0, 3).join(' | ') };
+      } finally {
+        await ctx.context.close();
       }
       results.push({ id, title: rule.title, expected: rule.expected, ...result, seconds: Math.round((Date.now() - started) / 1000) });
       console.error(`${id.padEnd(4)} ${result.verdict.toUpperCase().padEnd(12)} ${rule.title}`);
@@ -299,6 +302,7 @@ export async function runRules(options = {}) {
   } finally {
     await browser.close();
     await backend.stop();
+    await stopFixtureDaemons(fixture.home);
   }
   return { tier: args.tier, seed: args.seed, idleSeconds: args.idleSeconds, fixtureDigest: fixture.treeDigest, results };
 }

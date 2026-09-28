@@ -1,0 +1,20 @@
+{
+  "tier": "S",
+  "seed": 1,
+  "idleSeconds": 60,
+  "fixtureDigest": "3bed7ba32add0b42d4aec2ddb1a436baf1692f318584772e4892e6ff842e290f",
+  "results": [
+    {
+      "id": "R2b",
+      "title": "An open Code panel does not rescan an unchanged repo",
+      "expected": "at most 1 git process per 10 s tick while visible and idle",
+      "verdict": "fail",
+      "observed": {
+        "gitProcesses": 24,
+        "allowed": 6,
+        "changesRequests": 6
+      },
+      "seconds": 65
+    }
+  ]
+}
