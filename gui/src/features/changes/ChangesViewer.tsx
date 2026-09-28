@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { CommitRepoResult, Feature } from '../../types.js';
 import { CommitReviewPanel } from './CommitReviewPanel.js';
+import { perfMark } from '../../lib/perfMarks.js';
 import { FinishPanel } from './FinishPanel.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { Button } from '../../components/ui/button.js';
@@ -246,6 +247,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
           }
           const data = await res.json();
           setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
+          perfMark('cs:diff-ready', { panel: 'changes', repo: repoName, file: fileName });
           if (data.fileContent) {
             setFileContentCache((prev) => ({ ...prev, [cacheKey]: data.fileContent }));
           }

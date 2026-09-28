@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { apiFetch } from '../../lib/api/client.js';
+import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
 import { cn } from '../../lib/utils.js';
 import { FileTree } from './FileTree.js';
@@ -118,6 +119,7 @@ export function WorkspaceCodePanel({
     void apiFetch<FileDiff>(`${base}/changes/diff?${query}`)
       .then(result => {
         if (cancelled) return;
+        perfMark('cs:diff-ready', { panel: 'code', repo: selection.repoName, file: selection.file });
         setDiff(prev => {
           if (
             prev &&

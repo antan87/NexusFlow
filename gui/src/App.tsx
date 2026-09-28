@@ -17,6 +17,7 @@ import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
+import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -163,6 +164,7 @@ function AppInner() {
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
+  useEffect(() => { if (config) perfMarkOnce('cs:shell'); }, [config]);
   const statusesQuery = useWorkspacesStatus({
     enabled: configExists && !configLoading && onStatusRoute,
     intervalMs: onStatusRoute && (workspacesQuery.data?.length ?? 0) <= 24 ? 15_000 : false,
@@ -510,6 +512,7 @@ function AppInner() {
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`);
       const data = await res.json();
       setGitChanges(data.changes || []);
+      perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: true });
     } catch (e) {
       console.error(e);
     } finally {
@@ -524,6 +527,7 @@ function AppInner() {
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`);
       const data = await res.json();
       setSessions(data.sessions || []);
+      perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: true });
     } catch (e) {
       console.error(e);
     } finally {
@@ -639,6 +643,7 @@ function AppInner() {
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
         throw new Error('plan response was malformed');
       }
+      perfMark('cs:ws-data', { id: wsId, kind: 'plan', applied: isCurrentRequest() });
       if (!isCurrentRequest()) return;
 
       setPlanContent((data as { content: string }).content);

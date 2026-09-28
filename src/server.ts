@@ -43,6 +43,7 @@ import {
   BRAND_NAME,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
+import { countRequest, installPerfCounters, resetPerfCounters, snapshotPerfCounters } from './core/perf-counters.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo, isValidProjectName } from './core/new-repo.js';
@@ -585,6 +586,20 @@ app.use('*', async (c, next) => {
   }
   await next();
 });
+
+// Work counters for the performance rule checks in perf/. Off unless
+// CONTEXTSPACE_PERF_COUNTERS=1, so normal runs register nothing here.
+if (installPerfCounters()) {
+  app.use('/api/*', async (c, next) => {
+    if (!c.req.path.startsWith('/api/perf/')) countRequest(c.req.method, c.req.path, c.req.raw.signal);
+    await next();
+  });
+  app.get('/api/perf/counters', (c) => {
+    const snapshot = snapshotPerfCounters();
+    if (c.req.query('reset') === '1') resetPerfCounters();
+    return c.json(snapshot);
+  });
+}
 
 // Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
 // cross-site request forgery and browser form posts from untrusted web pages.

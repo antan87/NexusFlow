@@ -28,6 +28,7 @@ import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
 import type { Feature, WorkspaceStatus, RepoInfo, DomainPack, ResolvedCategoryRules } from '../types.js';
 import { API_BASE } from '../lib/apiBase.js';
+import { perfMark } from '../lib/perfMarks.js';
 import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { WorkspaceHeader } from '../features/workspace-shell/WorkspaceHeader.js';
@@ -156,6 +157,10 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const [planVersion, setPlanVersion] = useState(0);
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
+  const selectedBranch = selected?.branchName;
+  useEffect(() => {
+    if (selectedBranch) perfMark('cs:ws-header', { id: selectedBranch, tab: subTab });
+  }, [selectedBranch, subTab]);
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openFloatingChat } = useFloatingChat();
 
