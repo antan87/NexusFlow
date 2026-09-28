@@ -904,13 +904,16 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
 // ─── High-Performance mtime-aware Session Caches ────────────────────────────
 let agHistoryCache: { mtime: number; workspaces: string[] } | null = null;
 let copilotSessionsCache: { mtime: number; cwds: string[] } | null = null;
-let codexSessionsCache: { mtime: number; cwds: string[] } | null = null;
+// Per-rollout cwd, keyed by file path. A rollout's cwd is fixed once its
+// session_meta record exists; files without one are retried when they change.
+type CodexCwdEntry = { cwd: string | null; mtimeMs: number; size: number };
+let codexCwdCache = new Map<string, CodexCwdEntry>();
 
 /** Clears internal caches used by session detection (primarily for unit tests). */
 export function clearSessionFinderCache(): void {
   agHistoryCache = null;
   copilotSessionsCache = null;
-  codexSessionsCache = null;
+  codexCwdCache = new Map();
 }
 
 async function getAntigravityWorkspaces(agDir: string): Promise<string[]> {
@@ -967,44 +970,56 @@ async function getCopilotCwds(): Promise<string[]> {
   }
 }
 
-async function getCodexCwds(codexHome: string): Promise<string[]> {
-  const codexSessionsDir = path.join(codexHome, 'sessions');
-  try {
-    const stat = await fs.stat(codexSessionsDir);
-    if (codexSessionsCache && codexSessionsCache.mtime === stat.mtimeMs) {
-      return codexSessionsCache.cwds;
-    }
-    const codexFiles = await getFilesRecursively(codexSessionsDir, '.jsonl');
-    const sortedCodexFiles = [...codexFiles].sort((a, b) => b.localeCompare(a));
-    const MAX_CODEX_SCAN = 100;
-    const filesToScan = sortedCodexFiles.slice(0, MAX_CODEX_SCAN);
-    const cwds: string[] = [];
-    for (const file of filesToScan) {
-      try {
-        const header = await codexSessionHeader(file);
-        if (header?.type === 'session_meta' && typeof header.payload?.cwd === 'string') {
-          cwds.push(header.payload.cwd);
-          continue;
-        }
-        const content = await fs.readFile(file, 'utf-8');
-        const lines = content.split('\n').filter(Boolean);
-        for (const line of lines) {
-          try {
-            const record = JSON.parse(line);
-            if (record.type === 'session_meta' && typeof record.payload?.cwd === 'string') {
-              cwds.push(record.payload.cwd);
-              break;
-            }
-          } catch {}
-        }
-      } catch {}
-    }
-    codexSessionsCache = { mtime: stat.mtimeMs, cwds };
-    return cwds;
-  } catch {
-    codexSessionsCache = null;
-    return [];
+/** Returns the cwd recorded by a rollout's session_meta record, if any. */
+async function readCodexRolloutCwd(file: string): Promise<string | null> {
+  const header = await codexSessionHeader(file);
+  if (header?.type === 'session_meta' && typeof header.payload?.cwd === 'string') {
+    return header.payload.cwd;
   }
+  const content = await fs.readFile(file, 'utf-8');
+  for (const line of content.split('\n')) {
+    if (!line) continue;
+    try {
+      const record = JSON.parse(line);
+      if (record.type === 'session_meta' && typeof record.payload?.cwd === 'string') {
+        return record.payload.cwd;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function getCodexCwds(codexHome: string): Promise<string[]> {
+  // Codex writes rollouts into nested YYYY/MM/DD folders, so the sessions
+  // root's mtime does not change when a session starts. List the tree on
+  // every call and cache per file instead.
+  const codexFiles = await getFilesRecursively(path.join(codexHome, 'sessions'), '.jsonl');
+  const MAX_CODEX_SCAN = 100;
+  const filesToScan = [...codexFiles].sort((a, b) => b.localeCompare(a)).slice(0, MAX_CODEX_SCAN);
+  const previous = codexCwdCache;
+  const next = new Map<string, CodexCwdEntry>();
+  const cwds: string[] = [];
+  for (const file of filesToScan) {
+    try {
+      const cached = previous.get(file);
+      if (cached?.cwd) {
+        next.set(file, cached);
+        cwds.push(cached.cwd);
+        continue;
+      }
+      const stat = await fs.stat(file);
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        next.set(file, cached);
+        continue;
+      }
+      const cwd = await readCodexRolloutCwd(file);
+      next.set(file, { cwd, mtimeMs: stat.mtimeMs, size: stat.size });
+      if (cwd) cwds.push(cwd);
+    } catch {}
+  }
+  // Rebuilding the map drops rollouts that were deleted or fell out of the scan window.
+  codexCwdCache = next;
+  return cwds;
 }
 
 /**
