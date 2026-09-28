@@ -219,6 +219,25 @@ export interface Feature {
   isolatedRepos?: Record<string, { worktreePath: string; branchName: string; baseBranch?: string; isolatedAt: string }>;
   originalRepos?: string[];
   repoBranches?: Record<string, string>;
+  /** Set while archived: worktrees returned, record kept, read-only (mirrors src/types.ts). */
+  archivedAt?: string;
+  archive?: {
+    archivedAt: string;
+    previousMode: WorkspaceMode;
+    parked: boolean;
+    unarchivedAt?: string;
+    repos: Array<{
+      name: string;
+      access: 'reference' | 'isolated' | 'worktree';
+      sourcePath: string;
+      worktreePath?: string;
+      branch?: string | null;
+      headSha?: string | null;
+      branchState: 'merged' | 'parked' | 'reference';
+      mergeEvidence?: 'ancestor' | 'pull-request';
+      prUrl?: string;
+    }>;
+  };
 }
 
 export interface OrganizationConventions {
