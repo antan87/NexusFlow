@@ -98,7 +98,7 @@ function errorResult(message: string): ToolResult {
 const workspaceIdProp = {
   workspaceId: {
     type: 'string',
-    description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
+    description: 'Optional ID/branchName of the workspace. Defaults to the workspace this server is bound to (or the current directory). Interactive and full sessions may name another workspace; other roles get an error for a different workspace.',
   },
 } as const;
 

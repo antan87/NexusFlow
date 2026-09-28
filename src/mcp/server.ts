@@ -25,40 +25,67 @@ export function resolveMcpExecutionRole(role: string | undefined): AgentRole {
   return role;
 }
 
+/** Roles driven by the user's own assistant session, which may address any workspace by ID. */
+const CROSS_WORKSPACE_ROLES: ReadonlySet<AgentRole> = new Set(['interactive', 'full']);
+
 /**
  * Resolves the workspace path for a tool call.
  *
- * Precedence: an explicit `startMcpServer` argument, then `args.workspaceId`
- * under `config.workspacesDir`, then the current working directory. A
- * `workspaceId` that resolves outside `workspacesDir` (via `..` or an absolute
- * path) is rejected — the HTTP server has this guard; the MCP server did not.
+ * Without a bound workspace, `args.workspaceId` is resolved under
+ * `config.workspacesDir`, falling back to the current working directory. A
+ * `workspaceId` that resolves outside `workspacesDir` (via `..`, an absolute
+ * path or a link) is rejected.
+ *
+ * A server bound to a workspace (`mcp run <path>`) uses it by default. A
+ * `workspaceId` naming that same workspace is accepted. One naming a different
+ * workspace is honored only for user-driven roles (`interactive`, `full`); for
+ * every other role it is an error. It is never silently ignored, because tools
+ * would otherwise write to the bound workspace while the caller believes it
+ * targeted another.
  */
 export async function resolveMcpWorkspacePath(
   explicit: string | undefined,
   config: NexusFlowConfig,
   args: Record<string, unknown> | undefined,
+  role?: AgentRole,
 ): Promise<string> {
-  if (explicit) return explicit;
+  const workspaceId = args && typeof args.workspaceId === 'string' && args.workspaceId.length > 0
+    ? args.workspaceId
+    : undefined;
 
-  if (args && typeof args.workspaceId === 'string' && args.workspaceId.length > 0) {
-    const base = path.resolve(config.workspacesDir);
-    const resolved = path.resolve(base, args.workspaceId);
-    const rel = path.relative(base, resolved);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
-      throw new Error(`Invalid workspaceId "${args.workspaceId}": resolves outside the workspaces directory.`);
-    }
-    const [canonicalBase, canonicalWorkspace] = await Promise.all([
-      fs.realpath(base),
-      fs.realpath(resolved),
-    ]);
-    const canonicalRel = path.relative(canonicalBase, canonicalWorkspace);
-    if (canonicalRel === '' || canonicalRel.startsWith('..') || path.isAbsolute(canonicalRel)) {
-      throw new Error(`Invalid workspaceId "${args.workspaceId}": resolves outside the workspaces directory through a linked path.`);
-    }
-    return canonicalWorkspace;
+  if (!workspaceId) return explicit ?? process.cwd();
+  if (explicit && workspaceId === path.basename(path.resolve(explicit))) return explicit;
+
+  const target = await resolveWorkspaceId(workspaceId, config);
+  if (!explicit) return target;
+  if (target === await fs.realpath(explicit).catch(() => path.resolve(explicit))) return explicit;
+  if (role && CROSS_WORKSPACE_ROLES.has(role)) return target;
+  throw new Error(
+    `This MCP server is bound to workspace "${path.basename(path.resolve(explicit))}" with role "${role ?? 'readonly'}", `
+    + `which cannot act on workspace "${workspaceId}". Omit workspaceId, or use that workspace's own session.`,
+  );
+}
+
+async function resolveWorkspaceId(workspaceId: string, config: NexusFlowConfig): Promise<string> {
+  const base = path.resolve(config.workspacesDir);
+  const resolved = path.resolve(base, workspaceId);
+  const rel = path.relative(base, resolved);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Invalid workspaceId "${workspaceId}": resolves outside the workspaces directory.`);
   }
-
-  return process.cwd();
+  let canonicalBase: string;
+  let canonicalWorkspace: string;
+  try {
+    [canonicalBase, canonicalWorkspace] = await Promise.all([fs.realpath(base), fs.realpath(resolved)]);
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') throw new Error(`Workspace "${workspaceId}" was not found in the workspaces directory.`);
+    throw error;
+  }
+  const canonicalRel = path.relative(canonicalBase, canonicalWorkspace);
+  if (canonicalRel === '' || canonicalRel.startsWith('..') || path.isAbsolute(canonicalRel)) {
+    throw new Error(`Invalid workspaceId "${workspaceId}": resolves outside the workspaces directory through a linked path.`);
+  }
+  return canonicalWorkspace;
 }
 
 export async function startMcpServer(optionsOrWorkspacePath?: string | McpServerOptions) {
@@ -111,7 +138,7 @@ export async function startMcpServer(optionsOrWorkspacePath?: string | McpServer
 
     let resolvedWorkspacePath: string;
     try {
-      resolvedWorkspacePath = await resolveMcpWorkspacePath(workspacePath, config, args as Record<string, unknown> | undefined);
+      resolvedWorkspacePath = await resolveMcpWorkspacePath(workspacePath, config, args as Record<string, unknown> | undefined, role);
     } catch (error: any) {
       return {
         content: [{ type: 'text', text: error.message }],

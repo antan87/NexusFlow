@@ -36,4 +36,57 @@ describe('MCP server execution policy', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  describe('a server bound to a workspace', () => {
+    async function withWorkspaces(run: (dirs: { config: any; bound: string; other: string; workspacesDir: string }) => Promise<void>) {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-mcp-bound-'));
+      const workspacesDir = path.join(root, 'workspaces');
+      const bound = path.join(workspacesDir, 'bound-workspace');
+      const other = path.join(workspacesDir, 'other-workspace');
+      await Promise.all([fs.mkdir(bound, { recursive: true }), fs.mkdir(other, { recursive: true })]);
+      try {
+        await run({ config: { workspacesDir }, bound, other: await fs.realpath(other), workspacesDir });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    }
+
+    it('uses the bound workspace when no workspaceId is given', () => withWorkspaces(async ({ config, bound }) => {
+      await expect(resolveMcpWorkspacePath(bound, config, {}, 'interactive')).resolves.toBe(bound);
+      await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: '' }, 'developer')).resolves.toBe(bound);
+    }));
+
+    it('accepts its own workspace ID for every role', () => withWorkspaces(async ({ config, bound }) => {
+      for (const role of ['interactive', 'developer', 'readonly'] as const) {
+        await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'bound-workspace' }, role)).resolves.toBe(bound);
+      }
+    }));
+
+    it('lets interactive and full sessions address another workspace instead of silently using the bound one', () =>
+      withWorkspaces(async ({ config, bound, other }) => {
+        await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'other-workspace' }, 'interactive')).resolves.toBe(other);
+        await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'other-workspace' }, 'full')).resolves.toBe(other);
+      }));
+
+    it.each(['developer', 'review', 'ci', 'readonly', undefined] as const)(
+      'rejects another workspace for role %s rather than acting on the bound one',
+      (role) => withWorkspaces(async ({ config, bound }) => {
+        await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'other-workspace' }, role))
+          .rejects.toThrow(/bound to workspace "bound-workspace".*cannot act on workspace "other-workspace"/);
+      }),
+    );
+
+    it('reports an unknown workspace instead of falling back to the bound one', () => withWorkspaces(async ({ config, bound }) => {
+      await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'missing-workspace' }, 'interactive'))
+        .rejects.toThrow(/"missing-workspace" was not found/);
+    }));
+
+    it('keeps rejecting IDs that escape the workspaces directory', () => withWorkspaces(async ({ config, bound, workspacesDir }) => {
+      await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: '../outside' }, 'full')).rejects.toThrow(/outside the workspaces directory/);
+      const outside = path.join(path.dirname(workspacesDir), 'outside');
+      await fs.mkdir(outside);
+      await fs.symlink(outside, path.join(workspacesDir, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+      await expect(resolveMcpWorkspacePath(bound, config, { workspaceId: 'linked' }, 'full')).rejects.toThrow(/linked path/);
+    }));
+  });
 });
