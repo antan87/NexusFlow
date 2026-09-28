@@ -86,6 +86,17 @@ describe('Server API Endpoints Unit Tests', () => {
     vi.clearAllMocks();
   });
 
+  it('keeps diagnostic capture and export behind the local host/origin guards', async () => {
+    for (const route of ['preview', 'review', 'export']) {
+      const response = await app.request(`/api/diagnostics/${route}`, {
+        method: 'POST', headers: { Origin: 'https://outside.example', 'Content-Type': 'application/json' }, body: '{}',
+      });
+      expect(response.status).toBe(403);
+    }
+    const response = await app.request('/api/data-guide', { headers: { Host: 'outside.example' } });
+    expect(response.status).toBe(403);
+  });
+
   it('rejects an invalid transcript session id at the HTTP boundary', async () => {
     const response = await app.request('/api/session/codex/53/transcript');
     expect(response.status).toBe(400);

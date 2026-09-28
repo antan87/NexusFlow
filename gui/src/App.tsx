@@ -800,12 +800,8 @@ function AppInner() {
     }
   };
 
-  // Load tool statuses and LLM recommendations when settings view is open
-  useEffect(() => {
-    if (location.pathname.startsWith('/settings')) {
-      fetchToolsStatus();
-    }
-  }, [location.pathname]);
+  // Tool registry requests are explicit (Settings → Check Now), so opening
+  // the data guide does not initiate a toolchain update check.
 
   // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
   useEffect(() => {
@@ -1055,6 +1051,7 @@ Core Instructions:
 
   const settingsPage = config ? (
     <SettingsPage
+      workspaces={workspaces}
       config={config} setConfig={setConfig} saveStatus={saveStatus} saveError={saveError} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}

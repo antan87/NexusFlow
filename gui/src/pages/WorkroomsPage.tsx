@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   ArrowLeft,
@@ -590,6 +591,7 @@ export function WorkroomsPage({ workspaces, showToast }: WorkroomsPageProps) {
           </div>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Share only the project context and reusable agent resources you explicitly review over a private LAN or VPN. {BRAND_NAME} never adds code, diffs, credentials, terminals, or AI sessions automatically.
+            {' '}<Link className="underline" to="/settings#data-and-privacy">Data, retention and export boundaries</Link>.
           </p>
         </header>
 

@@ -14,6 +14,10 @@ ContextSpace combines multiple Git repositories into a single feature workspace 
 
 > **New to ContextSpace?** Jump to the [Getting Started Guide](GETTING_STARTED.md) for a hands-on walkthrough.
 
+For storage, sharing, deletion and local support reports, see the
+[data and privacy guide](docs/data-and-privacy.md), Settings → Data and privacy,
+or `ctxspace data`.
+
 ## ✨ Features
 
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories

@@ -7,7 +7,8 @@ import type { FileHandle } from 'node:fs/promises';
 export function assertPathWithin(rootDir: string, targetPath: string): string {
   const root = path.resolve(rootDir);
   const target = path.resolve(targetPath);
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+  const relative = path.relative(root, target);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(`Path "${targetPath}" is outside the allowed root.`);
   }
   return target;

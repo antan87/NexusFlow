@@ -29,6 +29,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { loadConfig, saveConfig, getConfigDir, getDefaultConfig } from './core/config.js';
 import { checkConfigPaths, expandHome } from './core/config-paths.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
+import { dataRoutes } from './diagnostics/routes.js';
 import {
   PRIMARY_LOGS_DIR,
   LEGACY_LOGS_DIR,
@@ -744,6 +745,13 @@ app.delete('/api/chat/thread/:workspaceId', async (c) => {
     return errorResponse(c, error);
   }
 });
+
+app.route('/api', dataRoutes(async (id) => {
+  const config = await loadConfig();
+  const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, id);
+  if (!workspacePath) throw new Error('Workspace unavailable.');
+  return workspacePath;
+}));
 
 // 1. Get current configuration
 app.get('/api/config', async (c) => {
