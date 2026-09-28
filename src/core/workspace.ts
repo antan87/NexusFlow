@@ -19,6 +19,8 @@ import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
 import { deleteWorkspaceFiles } from './storage.js';
 import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
+import { atomicWriteFile } from '../resources/fs-safety.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 /** Name of the per-workspace manifest file. */
 const MANIFEST_FILE = PRIMARY_MANIFEST_FILE;
@@ -378,8 +380,8 @@ export async function saveFeatureConfig(
   // (where listWorkspaces scans and the git-worktree container lives),
   // independent of the storage adapter. Routing it through an adapter would
   // send it to a vault, invisible to the scan.
-  await fs.mkdir(workspacePath, { recursive: true });
-  await fs.writeFile(path.join(workspacePath, MANIFEST_FILE), data, 'utf-8');
+  // Atomic: an interrupted write (archive, isolate) must not leave a torn manifest.
+  await atomicWriteFile(path.join(workspacePath, MANIFEST_FILE), data);
 }
 
 /**
@@ -632,6 +634,7 @@ export async function addRepoToWorkspace(
   if (!feature) {
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
   }
+  assertWorkspaceActive(feature, 'add repositories');
 
   const newRepoInfo = await resolveRepoInfo(repoPath);
   const inPlace = isInPlace(feature);

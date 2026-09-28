@@ -4,7 +4,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { execa } from 'execa';
-import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
+import { AgentTurnGate, app, archiveRefusedAction, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
+import * as archive from './core/archive.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
 import * as configPaths from './core/config-paths.js';
@@ -28,6 +29,7 @@ import { workroomManager } from './workrooms/manager.js';
 vi.mock('node:fs/promises');
 vi.mock('execa');
 vi.mock('./core/workspace.js');
+vi.mock('./core/archive.js');
 vi.mock('./core/config.js');
 vi.mock('./core/config-paths.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./core/config-paths.js')>()),
@@ -1040,6 +1042,68 @@ describe('Server API Endpoints Unit Tests', () => {
         shell: isWin,
         windowsHide: true,
       });
+    });
+  });
+
+  describe('archived workspaces', () => {
+    const archived = { id: 'old-ws', repos: [], assistants: [], archivedAt: '2026-09-28T10:00:00.000Z' };
+
+    it('matches only actions that change repositories or start processes', () => {
+      expect(archiveRefusedAction('POST', '/api/workspace/feat%2Fx/commit')).toEqual({ id: 'feat/x', action: 'commit' });
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/services/api/start')).toEqual({ id: 'ws', action: 'services' });
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/services/stop')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/archive')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/unarchive')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/knowledge/entry')).toBeNull();
+      expect(archiveRefusedAction('DELETE', '/api/workspace/ws')).toBeNull();
+      expect(archiveRefusedAction('GET', '/api/workspace/ws/commit')).toBeNull();
+    });
+
+    it('refuses to resume a session in an archived workspace with a conflict', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(archived as any);
+
+      const response = await app.request('/api/workspace/old-ws/resume', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assistant: 'pi' }),
+      });
+
+      expect(response.status).toBe(409);
+      const data = await response.json() as { code: string; error: string };
+      expect(data.code).toBe('WORKSPACE_ARCHIVED');
+      expect(data.error).toMatch(/cannot start assistant sessions/);
+      expect(execa).not.toHaveBeenCalled();
+    });
+
+    it('archives with a report, and answers a blocked archive with 409 and its blockers', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'ws', repos: [], assistants: [] } as any);
+      const base = {
+        workspacePath: '/mock/workspaces/ws', workspaceId: 'ws', dryRun: false, alreadyArchived: false,
+        repos: [], kept: [], notes: [], errors: [], archived: false,
+      };
+      vi.mocked(archive.archiveWorkspace)
+        .mockResolvedValueOnce({ ...base, ready: false, blockers: ['api: 2 uncommitted file(s).'] })
+        .mockResolvedValueOnce({ ...base, ready: true, blockers: [], archived: true, archivedAt: 'now' });
+      const post = (body: object) => app.request('/api/workspace/ws/archive', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+
+      const blocked = await post({});
+      expect(blocked.status).toBe(409);
+      expect((await blocked.json() as { error: string }).error).toBe('api: 2 uncommitted file(s).');
+
+      const done = await post({ park: true });
+      expect(done.status).toBe(200);
+      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.join('/mock/workspaces', 'ws'), { park: true, dryRun: false });
+    });
+
+    it('returns 404 for an unknown workspace instead of archiving', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(null);
+      const response = await app.request('/api/workspace/missing/unarchive', { method: 'POST' });
+      expect(response.status).toBe(404);
+      expect(archive.unarchiveWorkspace).not.toHaveBeenCalled();
     });
   });
 

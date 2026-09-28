@@ -71,6 +71,7 @@ export async function resolveWorkspaceQuiet(workspaceArg?: string): Promise<stri
 export async function resolveWorkspaceInteractive(
   workspaceArg: string | undefined,
   promptMessage: string,
+  options: { archived?: 'exclude' | 'include' | 'only' } = {},
 ): Promise<string | null> {
   try {
     const quiet = await resolveWorkspaceQuiet(workspaceArg);
@@ -83,17 +84,22 @@ export async function resolveWorkspaceInteractive(
   }
 
   const config = await loadConfig();
-  const workspaces = await listWorkspaces(config.workspacesDir);
+  // Archived workspaces are records, not places to work: pickers leave them
+  // out unless the command acts on archived workspaces.
+  const archived = options.archived ?? 'exclude';
+  const workspaces = (await listWorkspaces(config.workspacesDir)).filter((ws) =>
+    archived === 'include' ? true : archived === 'only' ? Boolean(ws.archivedAt) : !ws.archivedAt,
+  );
 
   if (workspaces.length === 0) {
-    console.log(chalk.yellow('No workspaces found.\n'));
+    console.log(chalk.yellow(archived === 'only' ? 'No archived workspaces found.\n' : 'No workspaces found.\n'));
     return null;
   }
 
   const selected = await select({
     message: promptMessage,
     choices: workspaces.map((ws) => ({
-      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+      name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos${ws.archivedAt ? ', archived' : ''})`)}`,
       value: ws.workspacePath,
     })),
   });

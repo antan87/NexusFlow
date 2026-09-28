@@ -23,6 +23,7 @@ import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { getRepoStatus } from '../utils/multi-git.js';
 import { recordVerificationReport } from './workspace-state.js';
 import { resolveActiveDomainRules, getDomainPack } from './domain-packs.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 export interface VerifyCommandSpec {
   command: string;
@@ -436,6 +437,7 @@ export async function verifyWorkspace(
   if (!feature) {
     throw new Error(`Workspace configuration not found at ${workspacePath}`);
   }
+  assertWorkspaceActive(feature, 'run verification');
 
   const resolvedPaths = feature.repos.map((r) => resolveFeatureRepoPath(feature, workspacePath, r));
   const repoInfos = await resolveRepoInfos(resolvedPaths);
