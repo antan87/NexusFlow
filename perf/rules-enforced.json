@@ -1,0 +1,4 @@
+{
+  "description": "Rules that passed and must keep passing. `node perf/rules.mjs --enforce` fails when any of these does not pass. Add a rule here in the same change that makes it pass.",
+  "enforced": ["R4", "R5"]
+}
