@@ -310,6 +310,162 @@ async function codexSessionHeader(filePath: string): Promise<any | null> {
   }
 }
 
+// ─── Parsed transcript cache ───────────────────────────────────────────────
+// Session lists re-read every transcript on every request, which at scale is
+// hundreds of megabytes per call. A parse depends only on the file, so keep it
+// while the file's size and mtime are unchanged. Transcripts only grow while a
+// session is active, so a changed file is always re-parsed.
+interface ParsedTranscriptEntry { mtimeMs: number; size: number; value: unknown }
+const PARSED_TRANSCRIPT_LIMIT = 4_000;
+let parsedTranscripts = new Map<string, ParsedTranscriptEntry>();
+
+async function parsedTranscript<T>(filePath: string, parse: (content: string) => T): Promise<T> {
+  // Stat before reading: a write after this point changes the mtime, so the
+  // next request re-parses instead of trusting this result.
+  const stat = await fs.stat(filePath);
+  const hit = parsedTranscripts.get(filePath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.value as T;
+  const value = parse(await fs.readFile(filePath, 'utf-8'));
+  parsedTranscripts.delete(filePath);
+  parsedTranscripts.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value });
+  if (parsedTranscripts.size > PARSED_TRANSCRIPT_LIMIT) parsedTranscripts.delete(parsedTranscripts.keys().next().value!);
+  return value;
+}
+
+/** Workspace-independent summary of one Claude transcript. */
+function parseClaudeTranscript(content: string, sessionId: string, fileName: string): Omit<AISession, 'workspacePath'> {
+  let messageCount = 0;
+  const times = sessionTimes();
+  let title = 'Claude Session';
+  let recordedCwd: string | undefined;
+  let threadKind: AISession['threadKind'] = fileName.startsWith('agent-') ? 'subagent' : 'unknown';
+  let sessionUsage: NormalizedUsage | undefined;
+  let latestQuota: NormalizedRemainingQuota | undefined;
+
+  for (const line of content.split('\n')) {
+    if (!line) continue;
+    let record: any;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    times.add(record.timestamp);
+
+    if (record.sessionId === sessionId && typeof record.cwd === 'string') recordedCwd ??= record.cwd;
+    if (record.isSidechain === true) threadKind = 'subagent';
+    else if (record.isSidechain === false && threadKind === 'unknown') threadKind = 'main';
+
+    if (record.type === 'user' || record.type === 'assistant') {
+      const text = claudeRecordText(record);
+      // CLI-injected caveats, slash commands and tool results aren't
+      // real turns — exclude them from the count and the title.
+      const isNoise = record.type === 'user' && isNoiseUserRecord(record, text);
+      if (isNoise) continue;
+      messageCount++;
+      if (record.type === 'user' && title === 'Claude Session' && text.trim()) {
+        title = text.trim();
+      }
+    }
+    const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
+    if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+    if (turnQuota) latestQuota = turnQuota;
+  }
+
+  return {
+    id: sessionId,
+    assistant: 'claude',
+    title: sanitizeSessionTitle(title),
+    ...times.values(),
+    messageCount,
+    recordedCwd,
+    threadKind,
+    ...(sessionUsage ? { usage: sessionUsage } : {}),
+    ...(latestQuota ? { quota: latestQuota } : {}),
+  };
+}
+
+/** Workspace-independent summary of one Codex rollout. */
+interface CodexRollout {
+  sessionCwd: string | null;
+  sessionId: string | null;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  identity: Pick<AISession, 'threadKind' | 'parentSessionId'>;
+  usage?: NormalizedUsage;
+  quota?: NormalizedRemainingQuota;
+}
+
+function parseCodexRollout(content: string): CodexRollout {
+  let sessionCwd: string | null = null;
+  let sessionId: string | null = null;
+  let messageCount = 0;
+  const times = sessionTimes();
+  let title = 'Codex Session';
+  let identity: Pick<AISession, 'threadKind' | 'parentSessionId'> = { threadKind: 'unknown' };
+  let sessionUsage: NormalizedUsage | undefined;
+  let reportedTotalUsage: NormalizedUsage | undefined;
+  let latestQuota: NormalizedRemainingQuota | undefined;
+
+  for (const line of content.split('\n')) {
+    if (!line) continue;
+    let record: any;
+    try { record = JSON.parse(line); } catch { continue; }
+
+    times.add(record.timestamp);
+    times.add(record.payload?.timestamp);
+
+    if (record.type === 'session_meta') {
+      if (record.payload?.cwd) sessionCwd = record.payload.cwd;
+      sessionId = codexSessionId(record) ?? sessionId;
+      identity = codexThreadIdentity(record.payload);
+    } else if (record.type === 'response_item' && record.payload?.type === 'message') {
+      const role = record.payload.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const text = codexMessageText(record.payload).trim();
+      if (role === 'user' && (!text || isInjectedContextText(text))) continue;
+      messageCount++;
+      if (role === 'user' && title === 'Codex Session' && text) {
+        title = text;
+      }
+    }
+    // Interactive Codex writes cumulative totals in token_count events,
+    // rather than a top-level usage field. Keep the latest total instead
+    // of summing snapshots from each turn.
+    if (record.type === 'event_msg' && record.payload?.type === 'token_count') {
+      const total = record.payload.info?.total_token_usage;
+      if (total) {
+        const parsed = extractRecordUsage({ usage: total }).usage;
+        if (parsed) {
+          if (typeof total.cache_write_input_tokens === 'number') {
+            parsed.cachedInputTokens = (typeof total.cached_input_tokens === 'number' ? total.cached_input_tokens : 0)
+              + total.cache_write_input_tokens;
+          }
+          reportedTotalUsage = parsed;
+        }
+      }
+    }
+    const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
+    if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
+    if (turnQuota) latestQuota = turnQuota;
+  }
+
+  const usage = reportedTotalUsage ?? sessionUsage;
+  return {
+    sessionCwd, sessionId, title: sanitizeSessionTitle(title), ...times.values(), messageCount, identity,
+    ...(usage ? { usage } : {}),
+    ...(latestQuota ? { quota: latestQuota } : {}),
+  };
+}
+
+/** Older rollouts carry no cwd; match them by scanning their content, as before. */
+async function legacyRolloutMentions(file: string, normWorkspace: string, wsFolderName: string): Promise<boolean> {
+  const content = await fs.readFile(file, 'utf-8');
+  return content.toLowerCase().includes(normWorkspace) || content.includes(wsFolderName);
+}
+
 /**
  * Compare already-canonical paths without weakening case rules on POSIX.
  * Windows drive paths are case-insensitive; POSIX paths remain case-sensitive.
@@ -601,58 +757,8 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
           const sessionId = path.basename(file, '.jsonl');
 
           try {
-            const content = await fs.readFile(filePath, 'utf-8');
-            const lines = content.split('\n').filter(Boolean);
-            
-            let messageCount = 0;
-            const times = sessionTimes();
-            let title = 'Claude Session';
-            let recordedCwd: string | undefined;
-            let threadKind: AISession['threadKind'] = file.startsWith('agent-') ? 'subagent' : 'unknown';
-            let sessionUsage: NormalizedUsage | undefined;
-            let latestQuota: NormalizedRemainingQuota | undefined;
-
-            for (const line of lines) {
-              let record: any;
-              try {
-                record = JSON.parse(line);
-              } catch {
-                continue;
-              }
-              times.add(record.timestamp);
-
-              if (record.sessionId === sessionId && typeof record.cwd === 'string') recordedCwd ??= record.cwd;
-              if (record.isSidechain === true) threadKind = 'subagent';
-              else if (record.isSidechain === false && threadKind === 'unknown') threadKind = 'main';
-
-              if (record.type === 'user' || record.type === 'assistant') {
-                const text = claudeRecordText(record);
-                // CLI-injected caveats, slash commands and tool results aren't
-                // real turns — exclude them from the count and the title.
-                const isNoise = record.type === 'user' && isNoiseUserRecord(record, text);
-                if (isNoise) continue;
-                messageCount++;
-                if (record.type === 'user' && title === 'Claude Session' && text.trim()) {
-                  title = text.trim();
-                }
-              }
-              const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
-              if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
-              if (turnQuota) latestQuota = turnQuota;
-            }
-
-            sessions.push({
-              id: sessionId,
-              assistant: 'claude',
-              title: sanitizeSessionTitle(title),
-              ...times.values(),
-              messageCount,
-              workspacePath: targetPath,
-              recordedCwd,
-              threadKind,
-              ...(sessionUsage ? { usage: sessionUsage } : {}),
-              ...(latestQuota ? { quota: latestQuota } : {}),
-            });
+            const parsed = await parsedTranscript(filePath, (content) => parseClaudeTranscript(content, sessionId, file));
+            sessions.push({ ...parsed, workspacePath: targetPath });
           } catch {}
         }
       } catch {}
@@ -674,88 +780,44 @@ export async function findSessions(workspacePath: string, repoPaths: string[] = 
     const filesToScan = sortedCodexFiles.slice(0, MAX_CODEX_SCAN);
     for (const file of filesToScan) {
       try {
-        const header = await codexSessionHeader(file);
-        // Recent rollouts record cwd up front. Skip unrelated conversations
-        // before reading and parsing their full, sometimes very large logs.
-        if (header?.type === 'session_meta' && typeof header.payload?.cwd === 'string'
-          && !isPathMatch(header.payload.cwd)) continue;
-        const content = await fs.readFile(file, 'utf-8');
-        const lines = content.split('\n').filter(Boolean);
-
-        let sessionCwd: string | null = null;
-        let sessionId: string | null = null;
-        let messageCount = 0;
-        const times = sessionTimes();
-        let title = 'Codex Session';
-        let identity: Pick<AISession, 'threadKind' | 'parentSessionId'> = { threadKind: 'unknown' };
-        let sessionUsage: NormalizedUsage | undefined;
-        let reportedTotalUsage: NormalizedUsage | undefined;
-        let latestQuota: NormalizedRemainingQuota | undefined;
-
-        for (const line of lines) {
-          let record: any;
-          try { record = JSON.parse(line); } catch { continue; }
-
-          times.add(record.timestamp);
-          times.add(record.payload?.timestamp);
-
-          if (record.type === 'session_meta') {
-            if (record.payload?.cwd) sessionCwd = record.payload.cwd;
-            sessionId = codexSessionId(record) ?? sessionId;
-            identity = codexThreadIdentity(record.payload);
-          } else if (record.type === 'response_item' && record.payload?.type === 'message') {
-            const role = record.payload.role;
-            if (role !== 'user' && role !== 'assistant') continue;
-            const text = codexMessageText(record.payload).trim();
-            if (role === 'user' && (!text || isInjectedContextText(text))) continue;
-            messageCount++;
-            if (role === 'user' && title === 'Codex Session' && text) {
-              title = text;
-            }
+        // Rollouts record their cwd up front, and it never changes. Skip
+        // unrelated conversations before opening their sometimes very large logs.
+        let cwd = codexCwdCache.get(file)?.cwd ?? null;
+        if (!cwd) {
+          const header = await codexSessionHeader(file);
+          const headerCwd = header?.type === 'session_meta' ? header.payload?.cwd : undefined;
+          if (typeof headerCwd === 'string') {
+            cwd = headerCwd;
+            rememberCodexCwd(file, headerCwd);
           }
-          // Interactive Codex writes cumulative totals in token_count events,
-          // rather than a top-level usage field. Keep the latest total instead
-          // of summing snapshots from each turn.
-          if (record.type === 'event_msg' && record.payload?.type === 'token_count') {
-            const total = record.payload.info?.total_token_usage;
-            if (total) {
-              const parsed = extractRecordUsage({ usage: total }).usage;
-              if (parsed) {
-                if (typeof total.cache_write_input_tokens === 'number') {
-                  parsed.cachedInputTokens = (typeof total.cached_input_tokens === 'number' ? total.cached_input_tokens : 0)
-                    + total.cache_write_input_tokens;
-                }
-                reportedTotalUsage = parsed;
-              }
-            }
-          }
-          const { usage: turnUsage, quota: turnQuota } = extractRecordUsage(record);
-          if (turnUsage) sessionUsage = accumulateUsage(sessionUsage, turnUsage);
-          if (turnQuota) latestQuota = turnQuota;
         }
+        if (cwd && !isPathMatch(cwd)) continue;
 
+        const rollout = await parsedTranscript(file, parseCodexRollout);
+        if (rollout.sessionCwd) rememberCodexCwd(file, rollout.sessionCwd);
         // Match on the recorded cwd; fall back to a content scan for older files.
-        const matched = sessionCwd
-          ? isPathMatch(sessionCwd)
-          : (content.toLowerCase().includes(normWorkspace) || content.includes(wsFolderName));
+        const matched = rollout.sessionCwd
+          ? isPathMatch(rollout.sessionCwd)
+          : await legacyRolloutMentions(file, normWorkspace, wsFolderName);
         if (!matched) continue;
         // Skip contentless sessions (only injected context, no real turns).
-        if (messageCount === 0) continue;
+        if (rollout.messageCount === 0) continue;
 
         // Current rollout filenames include timestamps. The stable resume id is
         // session_meta.payload.id, not the filename.
-        if (!sessionId) continue;
+        if (!rollout.sessionId) continue;
         sessions.push({
-          id: sessionId,
+          id: rollout.sessionId,
           assistant: 'codex',
-          title: sanitizeSessionTitle(title),
-          ...times.values(),
-          messageCount,
-          workspacePath: resolveTargetCwd(sessionCwd || undefined),
-          recordedCwd: sessionCwd ?? undefined,
-          ...identity,
-          ...((reportedTotalUsage ?? sessionUsage) ? { usage: reportedTotalUsage ?? sessionUsage } : {}),
-          ...(latestQuota ? { quota: latestQuota } : {}),
+          title: rollout.title,
+          createdAt: rollout.createdAt,
+          updatedAt: rollout.updatedAt,
+          messageCount: rollout.messageCount,
+          workspacePath: resolveTargetCwd(rollout.sessionCwd || undefined),
+          recordedCwd: rollout.sessionCwd ?? undefined,
+          ...rollout.identity,
+          ...(rollout.usage ? { usage: rollout.usage } : {}),
+          ...(rollout.quota ? { quota: rollout.quota } : {}),
         });
       } catch {}
     }
@@ -909,11 +971,17 @@ let copilotSessionsCache: { mtime: number; cwds: string[] } | null = null;
 type CodexCwdEntry = { cwd: string | null; mtimeMs: number; size: number };
 let codexCwdCache = new Map<string, CodexCwdEntry>();
 
+/** Records a rollout's cwd, which never changes once written. */
+function rememberCodexCwd(file: string, cwd: string): void {
+  codexCwdCache.set(file, { cwd, mtimeMs: 0, size: 0 });
+}
+
 /** Clears internal caches used by session detection (primarily for unit tests). */
 export function clearSessionFinderCache(): void {
   agHistoryCache = null;
   copilotSessionsCache = null;
   codexCwdCache = new Map();
+  parsedTranscripts = new Map();
 }
 
 async function getAntigravityWorkspaces(agDir: string): Promise<string[]> {
@@ -996,29 +1064,24 @@ async function getCodexCwds(codexHome: string): Promise<string[]> {
   const codexFiles = await getFilesRecursively(path.join(codexHome, 'sessions'), '.jsonl');
   const MAX_CODEX_SCAN = 100;
   const filesToScan = [...codexFiles].sort((a, b) => b.localeCompare(a)).slice(0, MAX_CODEX_SCAN);
-  const previous = codexCwdCache;
-  const next = new Map<string, CodexCwdEntry>();
   const cwds: string[] = [];
   for (const file of filesToScan) {
     try {
-      const cached = previous.get(file);
+      const cached = codexCwdCache.get(file);
       if (cached?.cwd) {
-        next.set(file, cached);
         cwds.push(cached.cwd);
         continue;
       }
       const stat = await fs.stat(file);
-      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-        next.set(file, cached);
-        continue;
-      }
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) continue;
       const cwd = await readCodexRolloutCwd(file);
-      next.set(file, { cwd, mtimeMs: stat.mtimeMs, size: stat.size });
+      codexCwdCache.set(file, { cwd, mtimeMs: stat.mtimeMs, size: stat.size });
       if (cwd) cwds.push(cwd);
     } catch {}
   }
-  // Rebuilding the map drops rollouts that were deleted or fell out of the scan window.
-  codexCwdCache = next;
+  // The session list shares this map for a wider window; forget only deleted rollouts.
+  const listed = new Set(codexFiles);
+  for (const file of codexCwdCache.keys()) if (!listed.has(file)) codexCwdCache.delete(file);
   return cwds;
 }
 
