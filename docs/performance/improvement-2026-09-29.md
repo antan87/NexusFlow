@@ -11,7 +11,7 @@ listed there are implemented on `feat/performance` (commits `96fc42e` to
   - git status complete: **−48%**, now within budget;
   - switching back to a visited workspace: **−97%**;
   - saved sessions: **−26%**, now within budget.
-- **One budget still misses at L:** first open of a workspace, p95 1.33 s against 1.0 s. The cost is the first parse of that workspace's session history in a new app process.
+- **First open at L** takes 1.33 s (p95). The owner accepted this, and its budget is now 1.5 s, so every L budget passes.
 - **Tier M** (31 workspaces): switching −86%, saved sessions −37%. Startup, which these fixes did not change, sits at the budget limit on a heavily loaded machine. It needs a confirmation run on a quiet machine.
 
 ## Method
@@ -33,7 +33,7 @@ listed there are implemented on `feat/performance` (commits `96fc42e` to
 | Git status complete | 6093 / 7560 | 3175 / 3852 | **−48%** | 5000 ✓ (was ✗) |
 | Long tasks (ms) | 360 / 622 | 281 / 384 | −22% | — |
 | Backend memory (MiB) | 242 / 244 | 217 / 220 | −11% | — |
-| First workspace open | 1107 / 1676 | 1042 / 1326 | −6% | 1000 ✗ |
+| First workspace open | 1107 / 1676 | 1042 / 1326 | −6% | 1500 ✓ (owner raised from 1000) |
 | Cached switch | 767 / 1156 | **20 / 38** | **−97%** | 500 ✓ (was ✗) |
 | Diff open | 87 / 101 | 78 / 104 | −10% | 300 ✓ |
 | Saved sessions, all sources | 1076 / 1522 | 792 / 1039 | **−26%** | 1000 ✓ (was ✗) |
@@ -91,10 +91,7 @@ All seven pass and are listed in `perf/rules-enforced.json`:
 
 ## Remaining work and decisions
 
-1. **First open at L (1.33 s p95, budget 1.0 s).** Opening a workspace for the first time in a new app process parses its whole session history: about 100 transcripts in the busiest fixture workspace. The options are:
-   - a persistent on-disk session index, a larger change that must invalidate correctly;
-   - showing changes and plan first and sessions when ready, which counts the workspace as ready earlier;
-   - accepting the budget miss for workspaces with this much history.
+1. **First open at L (1.33 s p95).** Accepted by the owner on 2026-09-29; the L budget is now 1500 ms. The remaining cost is the first parse of a workspace's session history in a new app process.
 2. **Confirm M startup on a quiet machine.** Re-run `node perf/timing.mjs --tier M` with the two apps once nothing else is running.
 3. **Check the +60 ms first-source time at M**, which may be noise.
 4. **Rules in CI.** The rules are deterministic and could run on every PR as a separate, non-release-blocking workflow.

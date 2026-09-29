@@ -4,20 +4,47 @@
   "tolerance": 0.1,
   "tiers": {
     "M": {
-      "S1.usable": { "p95": 3000 },
-      "S1.statusComplete": { "p95": 5000 },
-      "S2.ready": { "p95": 1000 },
-      "S3.ready": { "p95": 500 },
-      "S4.diff": { "p95": 300 },
-      "S5.settled": { "p95": 1000 }
+      "S1.usable": {
+        "p95": 3000
+      },
+      "S1.statusComplete": {
+        "p95": 5000
+      },
+      "S2.ready": {
+        "p95": 1000
+      },
+      "S3.ready": {
+        "p95": 500
+      },
+      "S4.diff": {
+        "p95": 300
+      },
+      "S5.settled": {
+        "p95": 1000
+      }
     },
     "L": {
-      "S1.usable": { "p95": 3000 },
-      "S1.statusComplete": { "p95": 5000 },
-      "S2.ready": { "p95": 1000 },
-      "S3.ready": { "p95": 500 },
-      "S4.diff": { "p95": 300 },
-      "S5.settled": { "p95": 1000 }
+      "S1.usable": {
+        "p95": 3000
+      },
+      "S1.statusComplete": {
+        "p95": 5000
+      },
+      "S2.ready": {
+        "p95": 1500
+      },
+      "S3.ready": {
+        "p95": 500
+      },
+      "S4.diff": {
+        "p95": 300
+      },
+      "S5.settled": {
+        "p95": 1000
+      }
     }
+  },
+  "notes": {
+    "L.S2.ready": "Owner 2026-09-29: first open at 50 workspaces taking 1.3 s instead of 1.0 s does not matter; budget set to 1500 ms."
   }
 }
