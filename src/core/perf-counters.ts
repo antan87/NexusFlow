@@ -7,6 +7,7 @@
  * ES module bindings, so execa and the session readers are counted as-is.
  * Counting work instead of time gives the same answer on every machine.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -27,15 +28,18 @@ export interface RequestCount {
 export interface PerfCounters {
   since: string;
   spawns: Record<string, number>;
+  /** Child processes attributed to the API request that started them. */
+  spawnsByRequest: Record<string, Record<string, number>>;
   reads: Record<string, ReadBucket>;
   requests: Record<string, RequestCount>;
 }
 
 let counters: PerfCounters = emptyCounters();
 let installed = false;
+const currentRequest = new AsyncLocalStorage<string>();
 
 function emptyCounters(): PerfCounters {
-  return { since: new Date().toISOString(), spawns: {}, reads: {}, requests: {} };
+  return { since: new Date().toISOString(), spawns: {}, spawnsByRequest: {}, reads: {}, requests: {} };
 }
 
 export function perfCountersEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -76,6 +80,11 @@ function pathOf(target: unknown): string | null {
 function countSpawn(command: unknown): void {
   const name = typeof command === 'string' ? path.basename(command).replace(/\.(exe|cmd|bat)$/i, '') : 'unknown';
   counters.spawns[name] = (counters.spawns[name] ?? 0) + 1;
+  const request = currentRequest.getStore();
+  if (request) {
+    const byName = (counters.spawnsByRequest[request] ??= {});
+    byName[name] = (byName[name] ?? 0) + 1;
+  }
 }
 
 /**
@@ -139,10 +148,14 @@ export function installPerfCounters(env: NodeJS.ProcessEnv = process.env): boole
   return true;
 }
 
-/** Records one API request and whether the client went away before it finished. */
-export function countRequest(method: string, requestPath: string, signal?: AbortSignal): void {
+/**
+ * Records one API request and whether the client went away before it
+ * finished, and runs `handle` so that processes it starts are attributed to it.
+ */
+export function countRequest<T>(method: string, requestPath: string, signal: AbortSignal | undefined, handle: () => Promise<T>): Promise<T> {
   const key = `${method} ${requestPath}`;
   const entry = () => (counters.requests[key] ??= { count: 0, aborted: 0 });
   entry().count += 1;
   signal?.addEventListener('abort', () => { entry().aborted += 1; }, { once: true });
+  return currentRequest.run(key, handle);
 }

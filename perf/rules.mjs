@@ -127,9 +127,13 @@ const RULES = {
       await sleep(ctx.idleMs);
       const c = await ctx.backend.counters();
       await page.close();
-      const git = c.spawns.git ?? 0;
+      // Only processes started by the panel's own requests; overview status
+      // polling (≤ 24 workspaces) is a separate cost.
+      const git = Object.entries(c.spawnsByRequest)
+        .filter(([request]) => /\/changes/.test(request))
+        .reduce((n, [, byName]) => n + (byName.git ?? 0), 0);
       const allowed = Math.floor(ctx.idleMs / 10_000);
-      return { verdict: git <= allowed ? 'pass' : 'fail', observed: { gitProcesses: git, allowed, changesRequests: requestsMatching(c, /\/changes/) } };
+      return { verdict: git <= allowed ? 'pass' : 'fail', observed: { gitProcesses: git, allowedPer: `${allowed} in ${ctx.idleMs / 1000} s`, allGitProcesses: c.spawns.git ?? 0, changesRequests: requestsMatching(c, /\/changes/), byRoute: Object.fromEntries(Object.entries(c.requests).map(([k, v]) => [k, v.count])) } };
     },
   },
 

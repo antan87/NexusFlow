@@ -1,4 +1,4 @@
-import { listRepositoryChanges } from './core/repository-changes.js';
+import { listRepositoryChangesWithFingerprint } from './core/repository-changes.js';
 import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
@@ -591,8 +591,8 @@ app.use('*', async (c, next) => {
 // CONTEXTSPACE_PERF_COUNTERS=1, so normal runs register nothing here.
 if (installPerfCounters()) {
   app.use('/api/*', async (c, next) => {
-    if (!c.req.path.startsWith('/api/perf/')) countRequest(c.req.method, c.req.path, c.req.raw.signal);
-    await next();
+    if (c.req.path.startsWith('/api/perf/')) return next();
+    await countRequest(c.req.method, c.req.path, c.req.raw.signal, () => next());
   });
   app.get('/api/perf/counters', (c) => {
     const snapshot = snapshotPerfCounters();
@@ -2175,6 +2175,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
     }
 
     const results: any[] = [];
+    const fingerprints: string[] = [];
 
     // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
@@ -2182,24 +2183,31 @@ app.get('/api/workspace/:id/changes', async (c) => {
       const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
-        const files = await listRepositoryChanges(worktreePath, c.req.query('include') === 'all');
+        const listing = await listRepositoryChangesWithFingerprint(worktreePath, c.req.query('include') === 'all');
+        fingerprints.push(listing.fingerprint);
 
         results.push({
           repoName,
           repoPath: worktreePath,
-          files,
+          files: listing.files,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fingerprints.push(`error:${message}`);
         results.push({
           repoName,
           repoPath: worktreePath,
           files: [],
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
       }
     }
 
-    return c.json({ changes: results });
+    // A poller that already holds this state gets a small reply instead of
+    // the full listing (100k entries for a large repository in Files mode).
+    const token = createHash('sha1').update(JSON.stringify([id, feature.repos, fingerprints])).digest('hex');
+    if (c.req.query('known') === token) return c.json({ unchanged: true, token });
+    return c.json({ changes: results, token });
   } catch (error) {
     return errorResponse(c, error);
   }

@@ -31,8 +31,8 @@ describe('perf counters', () => {
   it('counts requests and aborts, including aborts that arrive after a reset', () => {
     resetPerfCounters();
     const controller = new AbortController();
-    countRequest('GET', '/api/workspaces', controller.signal);
-    countRequest('GET', '/api/workspaces');
+    void countRequest('GET', '/api/workspaces', controller.signal, async () => {});
+    void countRequest('GET', '/api/workspaces', undefined, async () => {});
     expect(snapshotPerfCounters().requests['GET /api/workspaces']).toEqual({ count: 2, aborted: 0 });
 
     resetPerfCounters();
@@ -42,9 +42,9 @@ describe('perf counters', () => {
 
   it('returns snapshots that later counting does not change', () => {
     resetPerfCounters();
-    countRequest('GET', '/api/config');
+    void countRequest('GET', '/api/config', undefined, async () => {});
     const before = snapshotPerfCounters();
-    countRequest('GET', '/api/config');
+    void countRequest('GET', '/api/config', undefined, async () => {});
     expect(before.requests['GET /api/config']?.count).toBe(1);
   });
 });
