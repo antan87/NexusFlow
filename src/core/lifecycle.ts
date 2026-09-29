@@ -221,7 +221,8 @@ export async function advanceLifecycleStep(
     ['verify_and_ship', 'step_verification', 'epic_slice_4'].includes(step.id);
   let gateFailed = false;
   if (action === 'verify' || (action === 'complete' && requiresVerification)) {
-    const report = await verifyWorkspace(workspacePath, { command: step.verificationCommand });
+    const timeoutSeconds = step.verificationTimeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS;
+    const report = await verifyWorkspace(workspacePath, { command: step.verificationCommand, timeoutMs: timeoutSeconds * 1000 });
     step.lastVerificationStatus = report.overallStatus;
     step.lastVerificationSha = report.repos[0]?.headSha;
     gateFailed = !report.canProgress;
@@ -260,11 +261,23 @@ export async function advanceLifecycleStep(
     return lifecycle;
   });
   if (gateFailed && action === 'complete') {
-    throw new Error(`Verification did not permit progress for step "${stepId}" (${step.lastVerificationStatus}).`);
+    const hint = step.lastVerificationStatus === 'timeout'
+      ? ` The gate stopped after ${Math.round((step.verificationTimeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS) / 60)} minutes; raise this milestone's verification time limit (verificationTimeoutSeconds) if the command needs longer.`
+      : '';
+    throw new Error(`Verification did not permit progress for step "${stepId}" (${step.lastVerificationStatus}).${hint}`);
   }
 
   return updated;
 }
+
+/**
+ * Milestone gates run deliberately configured commands, often a full test
+ * suite, a build and browser tests, so they get far longer than the ad-hoc
+ * verify default. A per-milestone limit can raise or lower it.
+ */
+export const DEFAULT_GATE_TIMEOUT_SECONDS = 30 * 60;
+export const MIN_GATE_TIMEOUT_SECONDS = 30;
+export const MAX_GATE_TIMEOUT_SECONDS = 2 * 60 * 60;
 
 const planStepSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]+$/).max(100),
@@ -274,6 +287,7 @@ const planStepSchema = z.object({
   unblockCondition: z.string().max(2000).optional(),
   dependsOn: z.array(z.string()).max(100).optional(),
   requiresVerification: z.boolean().optional(), verificationCommand: z.string().max(2000).optional(),
+  verificationTimeoutSeconds: z.number().int().min(MIN_GATE_TIMEOUT_SECONDS).max(MAX_GATE_TIMEOUT_SECONDS).optional(),
 });
 export const lifecyclePlanSchema = z.object({ revision: z.number().int().nonnegative(), steps: z.array(planStepSchema).max(100) });
 

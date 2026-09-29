@@ -3,6 +3,8 @@ import {
   loadWorkspaceLifecycle,
   advanceLifecycleStep,
   getBranchFleet,
+  DEFAULT_GATE_TIMEOUT_SECONDS,
+  lifecyclePlanSchema,
 } from './lifecycle.js';
 import { legacyDefaultSteps } from './legacy-lifecycle.js';
 import * as workspaceState from './workspace-state.js';
@@ -232,6 +234,41 @@ describe('core/lifecycle', () => {
       const result = await advanceLifecycleStep('/ws', 'verify_and_ship', 'complete');
       expect(result.steps.every((step) => step.status === 'completed')).toBe(true);
       expect(result.currentStepId).toBeUndefined();
+    });
+  });
+
+  describe('gate time limit', () => {
+    beforeEach(() => {
+      vi.mocked(workspaceCore.loadFeatureConfig).mockResolvedValue({ id: 'ws', branchName: 'fix/example', repos: [] } as any);
+      vi.mocked(workspaceState.loadWorkspaceState).mockResolvedValue({
+        workspacePath: '/ws', repos: {}, updatedAt: '',
+        lifecycle: { workspaceId: 'ws', flowType: 'quick', revision: 1, currentStepId: 'gate', updatedAt: '',
+          steps: [{ id: 'gate', title: 'Full journey', status: 'in_progress', verificationCommand: 'npm test && npm run test:e2e' }] },
+      });
+    });
+
+    it('gives milestone gates 30 minutes by default, far more than an ad-hoc verify', async () => {
+      const { verifyWorkspace } = await import('./verify.js');
+      vi.mocked(verifyWorkspace).mockResolvedValue({ canProgress: true, overallStatus: 'pass', repos: [] } as any);
+      await advanceLifecycleStep('/ws', 'gate', 'complete');
+      expect(verifyWorkspace).toHaveBeenCalledWith('/ws', { command: 'npm test && npm run test:e2e', timeoutMs: DEFAULT_GATE_TIMEOUT_SECONDS * 1000 });
+      expect(DEFAULT_GATE_TIMEOUT_SECONDS).toBe(1800);
+    });
+
+    it("uses the milestone's own limit, and says how to raise it when the gate times out", async () => {
+      const { verifyWorkspace } = await import('./verify.js');
+      const state = await workspaceState.loadWorkspaceState('/ws');
+      state.lifecycle!.steps[0].verificationTimeoutSeconds = 600;
+      vi.mocked(verifyWorkspace).mockResolvedValue({ canProgress: false, overallStatus: 'timeout', repos: [] } as any);
+      await expect(advanceLifecycleStep('/ws', 'gate', 'complete')).rejects.toThrow(/stopped after 10 minutes; raise this milestone's verification time limit/);
+      expect(verifyWorkspace).toHaveBeenCalledWith('/ws', { command: 'npm test && npm run test:e2e', timeoutMs: 600_000 });
+    });
+
+    it('accepts a bounded limit in the plan and rejects one outside it', () => {
+      const step = { id: 'gate', title: 'Gate', verificationCommand: 'npm test' };
+      expect(lifecyclePlanSchema.parse({ revision: 0, steps: [{ ...step, verificationTimeoutSeconds: 3600 }] }).steps[0]).toMatchObject({ verificationTimeoutSeconds: 3600 });
+      expect(() => lifecyclePlanSchema.parse({ revision: 0, steps: [{ ...step, verificationTimeoutSeconds: 10 }] })).toThrow();
+      expect(() => lifecyclePlanSchema.parse({ revision: 0, steps: [{ ...step, verificationTimeoutSeconds: 3 * 60 * 60 }] })).toThrow();
     });
   });
 

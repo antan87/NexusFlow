@@ -755,6 +755,12 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
   dependsOn?: string[];
   verificationCommand?: string;
+  /**
+   * Time limit for this milestone's gate, in seconds. Gates default to
+   * 30 minutes (DEFAULT_GATE_TIMEOUT_SECONDS); a gate that runs a full suite,
+   * a build and browser tests may need more.
+   */
+  verificationTimeoutSeconds?: number;
   requiresVerification?: boolean;
   lastVerificationSha?: string;
   lastVerificationStatus?: VerificationStatus;
