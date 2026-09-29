@@ -23,6 +23,7 @@ import * as sessionFinder from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { workroomManager } from './workrooms/manager.js';
+import { clearEditorDetectionCache } from './utils/detect-editors.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -84,6 +85,7 @@ vi.mock('./orchestration/index.js');
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearEditorDetectionCache();
   });
 
   it('rejects an invalid transcript session id at the HTTP boundary', async () => {

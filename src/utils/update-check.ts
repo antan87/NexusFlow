@@ -247,6 +247,7 @@ export function printUpdateBanner(status: UpdateStatus): void {
 }
 
 import { execa } from 'execa';
+import { PROBE_TIMEOUT_MS } from './probe.js';
 
 export interface ToolUpdateStatus {
   id: string;
@@ -288,6 +289,7 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
           const res = await execa('agy', ['--version'], {
             reject: false,
             shell: process.platform === 'win32',
+            timeout: PROBE_TIMEOUT_MS,
           });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}
@@ -305,6 +307,7 @@ export async function getToolsStatus(force = false): Promise<ToolUpdateStatus[]>
           const res = await execa('claude', ['--version'], {
             reject: false,
             shell: process.platform === 'win32',
+            timeout: PROBE_TIMEOUT_MS,
           });
           if (res.exitCode === 0) return res.stdout.trim();
         } catch {}

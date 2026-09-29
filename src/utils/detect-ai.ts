@@ -3,7 +3,7 @@
  * Detects which AI coding assistants are available on the system.
  */
 
-import { execa } from 'execa';
+import { probeCommand } from './probe.js';
 
 import type { AIAssistant, DetectedAI } from '../types.js';
 
@@ -12,16 +12,8 @@ import type { AIAssistant, DetectedAI } from '../types.js';
  * exits successfully (exit code 0).
  */
 async function commandExists(command: string): Promise<boolean> {
-  try {
-    const result = await execa(command, ['--version'], {
-      reject: false,
-      shell: process.platform === 'win32',
-    });
-    return result.exitCode === 0;
-  } catch {
-    // The command could not be spawned at all (not in PATH).
-    return false;
-  }
+  // A CLI that starts but does not answer in time is installed.
+  return (await probeCommand(command, ['--version'], { shell: process.platform === 'win32' })) !== 'failed';
 }
 
 /**
