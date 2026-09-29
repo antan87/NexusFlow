@@ -40,7 +40,7 @@ export function readDesktopLog(file) {
  * not open windows on the developer's screen; compositing then differs from a
  * real display, which the report records.
  */
-export async function launchDesktop({ home, packaged = true, headless = true, logDir }) {
+export async function launchDesktop({ home, packaged = true, headless = true, logDir, executable: executableOverride = null }) {
   assertFixtureHome(home);
   const { _electron: electron } = loadPlaywright('desktop');
   await fs.mkdir(logDir, { recursive: true });
@@ -52,13 +52,14 @@ export async function launchDesktop({ home, packaged = true, headless = true, lo
   });
   // The Chromium sandbox helper is not setuid-root in unpacked builds.
   const flags = ['--no-sandbox', ...(headless ? ['--ozone-platform=headless'] : [])];
-  const executable = packaged ? packagedExecutable() : null;
+  const executable = executableOverride ?? (packaged ? packagedExecutable() : null);
+  if (executableOverride && !existsSync(executableOverride)) throw new Error(`App not found at ${executableOverride}.`);
   if (packaged && !existsSync(executable)) {
     throw new Error(`Packaged app not found at ${executable}. Run \`npm run pack --prefix desktop\`, or pass --unpacked.`);
   }
 
   const launchedAt = Date.now();
-  const app = packaged
+  const app = executable
     ? await electron.launch({ executablePath: executable, args: flags, env })
     : await electron.launch({ args: [...flags, '.'], cwd: DESKTOP_DIR, env });
   const window = await app.firstWindow();

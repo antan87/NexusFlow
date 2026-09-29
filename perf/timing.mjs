@@ -180,7 +180,7 @@ async function measureIdle(d, minutes) {
 }
 
 function parseArgs(argv) {
-  const args = { tier: 'M', seed: 1, runs: 20, warmup: 2, idleMinutes: 5, packaged: true, headless: false, budgets: null, check: false };
+  const args = { tier: 'M', seed: 1, runs: 20, warmup: 2, idleMinutes: 5, packaged: true, headless: false, budgets: null, check: false, apps: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--tier') args.tier = argv[++i];
@@ -191,6 +191,11 @@ function parseArgs(argv) {
     else if (a === '--unpacked') args.packaged = false;
     else if (a === '--budgets') args.budgets = argv[++i];
     else if (a === '--check') args.check = true;
+    else if (a === '--app') {
+      // --app name=path: compare apps by alternating their launches (A B, B A, …).
+      const [name, ...rest] = argv[++i].split('=');
+      args.apps.push({ name, executable: rest.join('=') });
+    }
     else throw new Error(`Unknown argument: ${a}`);
   }
   return args;
@@ -212,6 +217,16 @@ function markdown(report) {
     '| Metric | n | p50 | p95 | max |', '|---|---|---|---|---|',
     ...Object.entries(report.summaries).map(([m, s]) => `| ${m} | ${s.n} | ${s.p50 ?? '—'} | ${s.p95 ?? '—'} | ${s.max ?? '—'} |`),
   ];
+  if (report.byApp) {
+    const [a, b] = Object.keys(report.byApp);
+    lines.push('', `### Interleaved comparison: ${a} vs ${b}`, '', `| Metric | ${a} p50 | ${a} p95 | ${b} p50 | ${b} p95 | p50 change |`, '|---|---|---|---|---|---|');
+    for (const metric of Object.keys(report.byApp[a] ?? {})) {
+      const x = report.byApp[a][metric];
+      const y = report.byApp[b]?.[metric] ?? {};
+      const change = x.p50 && y.p50 !== undefined && y.p50 !== null ? `${Math.round(((y.p50 - x.p50) / x.p50) * 100)}%` : '—';
+      lines.push(`| ${metric} | ${x.p50 ?? '—'} | ${x.p95 ?? '—'} | ${y.p50 ?? '—'} | ${y.p95 ?? '—'} | ${change} |`);
+    }
+  }
   if (report.idle?.error) lines.push('', `Idle phase failed: ${report.idle.error.message} (app alive: ${report.idle.error.appAlive})`);
   else if (report.idle) {
     lines.push('', '| Idle phase | min | requests/min | git/min | backend CPU % | RSS drift MiB | heap drift MiB |', '|---|---|---|---|---|---|---|');
@@ -226,18 +241,28 @@ function markdown(report) {
   return lines.join('\n') + '\n';
 }
 
+function summariesOf(runs) {
+  const measured = runs.filter((r) => !r.warmup).map((r) => r.sample);
+  return Object.fromEntries(Object.entries(flatten(measured)).map(([m, v]) => [m, summarize(v)]));
+}
+
 function buildReport(args, state) {
-  const measured = state.runs.filter((r) => !r.warmup).map((r) => r.sample);
-  const summaries = Object.fromEntries(Object.entries(flatten(measured)).map(([m, v]) => [m, summarize(v)]));
+  const summaries = summariesOf(state.runs);
+  const byApp = args.apps.length
+    ? Object.fromEntries(args.apps.map(({ name }) => [name, summariesOf(state.runs.filter((r) => r.app === name))]))
+    : null;
   let budgets = null;
-  if (state.budgetFile) budgets = compareBudgets(summaries, state.budgetFile.tiers?.[args.tier] ?? {}, state.budgetFile.tolerance ?? 0.1);
+  // When comparing apps, budgets apply to the last one (the candidate).
+  const budgeted = byApp ? byApp[args.apps.at(-1).name] : summaries;
+  if (state.budgetFile) budgets = compareBudgets(budgeted, state.budgetFile.tiers?.[args.tier] ?? {}, state.budgetFile.tolerance ?? 0.1);
   const f = state.fixture;
   return {
     tier: args.tier, seed: args.seed, startedAt: state.startedAt, finishedAt: state.finishedAt ?? null, complete: Boolean(state.finishedAt),
     options: { runs: args.runs, warmup: args.warmup, idleMinutes: args.idleMinutes, packaged: args.packaged, display: args.headless ? 'headless' : 'real display' },
     machine: state.machine, versions: state.versions,
     fixture: { treeDigest: f.treeDigest, workspaces: f.workspaces, repos: f.repos, codex: f.codex, claude: f.claude, faults: f.faults },
-    targets: TARGETS, summaries, idle: state.idle, budgets, runs: state.runs,
+    apps: args.apps.length ? args.apps : null,
+    targets: TARGETS, summaries, byApp, idle: state.idle, budgets, runs: state.runs,
   };
 }
 
@@ -254,22 +279,28 @@ export async function runTiming(options, save = async () => {}) {
     machine: describeMachine(fixtureDir(args.tier, args.seed)),
     budgetFile: args.budgets ? JSON.parse(await fs.readFile(path.resolve(REPO_ROOT, args.budgets), 'utf8')) : null,
   };
+  const apps = args.apps.length ? args.apps : [{ name: null, executable: null }];
   for (let r = 0; r < args.warmup + args.runs; r += 1) {
-    await resetAppProfile(fixture.home);
-    let d;
-    try {
-      d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir });
-      state.versions ??= await d.versions();
-      const { sample, errors } = await measureRun(d, fixture);
-      state.runs.push({ run: r, warmup: r < args.warmup, sample, errors });
-      console.error(`run ${r + 1}/${args.warmup + args.runs}${r < args.warmup ? ' (warm-up)' : ''}: usable ${sample['S1.usable']} ms, status ${sample['S1.statusComplete']} ms${Object.keys(errors).length ? `, errors ${Object.keys(errors).join(',')}` : ''}`);
-    } catch (error) {
-      state.runs.push({ run: r, warmup: r < args.warmup, sample: {}, errors: { launch: failure(error, d) } });
-      console.error(`run ${r + 1}: failed — ${state.runs.at(-1).errors.launch.message}`);
-    } finally {
-      await d?.close();
+    // Alternate the order each round so neither app always runs first.
+    const order = r % 2 === 0 ? apps : [...apps].reverse();
+    for (const app of order) {
+      await resetAppProfile(fixture.home);
+      const label = `run ${r + 1}/${args.warmup + args.runs}${app.name ? ` [${app.name}]` : ''}${r < args.warmup ? ' (warm-up)' : ''}`;
+      let d;
+      try {
+        d = await launchDesktop({ home: fixture.home, packaged: args.packaged, headless: args.headless, logDir, executable: app.executable });
+        state.versions ??= await d.versions();
+        const { sample, errors } = await measureRun(d, fixture);
+        state.runs.push({ run: r, app: app.name, warmup: r < args.warmup, sample, errors });
+        console.error(`${label}: usable ${sample['S1.usable']} ms, status ${sample['S1.statusComplete']} ms${Object.keys(errors).length ? `, errors ${Object.keys(errors).join(',')}` : ''}`);
+      } catch (error) {
+        state.runs.push({ run: r, app: app.name, warmup: r < args.warmup, sample: {}, errors: { launch: failure(error, d) } });
+        console.error(`${label}: failed — ${state.runs.at(-1).errors.launch.message}`);
+      } finally {
+        await d?.close();
+      }
+      await save(buildReport(args, state));
     }
-    await save(buildReport(args, state));
   }
   if (args.idleMinutes > 0) {
     await resetAppProfile(fixture.home);
