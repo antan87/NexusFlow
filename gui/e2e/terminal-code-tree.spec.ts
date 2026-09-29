@@ -504,3 +504,69 @@ test('supports keyboard resizing of code panel using arrow keys on separator', a
   await separator.press('ArrowRight');
   await expect(codeContainer).toHaveAttribute('style', /width:\s*50%/);
 });
+
+test.describe('assistant terminal lifecycle', () => {
+  const conversation = '0199a213-81c0-7800-8aa1-bbab2a035a70';
+  const codex = { ...terminal, id: '0199a213-81c0-7800-8aa1-bbab2a035a51', target: 'codex', label: 'Codex', sessionId: conversation };
+  const targets = [{ id: 'codex', name: 'Codex', available: true, reason: null }];
+
+  test('an ended terminal says so and resumes its conversation instead of offering Reconnect', async ({ page }) => {
+    let backendHasTerminal = true;
+    let dropConnection: (() => Promise<void>) | undefined;
+    const launches: Record<string, unknown>[] = [];
+    await page.route('**/api/terminals/feature-x/status', route => route.fulfill({ json: { available: true, sessions: backendHasTerminal ? [codex] : [], targets } }));
+    await page.route('**/api/terminals/feature-x/create', async route => {
+      launches.push(route.request().postDataJSON());
+      await route.fulfill({ status: 400, json: { error: 'Test launch intercepted' } });
+    });
+    await page.routeWebSocket('**/ws/terminal', socket => {
+      dropConnection = () => socket.close();
+      socket.onMessage(message => {
+        if (JSON.parse(String(message)).type !== 'attach') return;
+        if (!backendHasTerminal) {
+          socket.send(JSON.stringify({ type: 'error', code: 'terminal_not_found', message: 'Terminal not found in this workspace.' }));
+          void socket.close();
+          return;
+        }
+        socket.send(JSON.stringify({ type: 'ready', terminal: codex, truncated: false }));
+        socket.send(JSON.stringify({ type: 'replayed' }));
+      });
+    });
+    await page.goto('/#/workspaces/feature-x/sessions');
+    await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+    const pane = page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane');
+    await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+    // The backend restarts: the process is gone, not merely disconnected.
+    backendHasTerminal = false;
+    await dropConnection?.();
+    await pane.getByRole('button', { name: 'Reconnect', exact: true }).click();
+    await expect(pane.getByTestId('terminal-state')).toHaveText('Ended');
+    await expect(pane.getByTestId('terminal-state-help')).toContainText('no longer running');
+    await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
+    await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
+    await expect(pane.getByRole('alert')).toHaveCount(0);
+    await pane.getByRole('button', { name: 'Resume conversation', exact: true }).click();
+    await expect.poll(() => launches.length).toBe(1);
+    expect(launches[0]).toMatchObject({ target: 'codex', sessionId: conversation });
+  });
+
+  test('a tool that fails right after starting points to its output and sign-in', async ({ page }) => {
+    const fresh = { ...codex, sessionId: undefined, startedAt: new Date(Date.now() - 60_000).toISOString() };
+    await page.route('**/api/terminals/feature-x/status', route => route.fulfill({ json: { available: true, sessions: [fresh], targets } }));
+    await page.routeWebSocket('**/ws/terminal', socket => {
+      socket.onMessage(message => {
+        if (JSON.parse(String(message)).type !== 'attach') return;
+        socket.send(JSON.stringify({ type: 'ready', terminal: fresh, truncated: false }));
+        socket.send(JSON.stringify({ type: 'replayed' }));
+        // Replayed later than 15 s after the start: the backend's exit time decides.
+        socket.send(JSON.stringify({ type: 'exit', exitCode: 1, exitedAt: new Date(Date.parse(fresh.startedAt) + 2000).toISOString() }));
+      });
+    });
+    await page.goto('/#/workspaces/feature-x/sessions');
+    await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+    const pane = page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane');
+    await expect(pane.getByTestId('terminal-state')).toHaveText('Exited (1)');
+    await expect(pane.getByTestId('terminal-state-help')).toContainText('stopped right after starting');
+    await expect(pane.getByTestId('terminal-state-help')).toContainText('sign in or finish setup');
+  });
+});

@@ -248,10 +248,10 @@ export function DashboardPage({
       let statusLabel = 'Not found';
       let statusTone: 'success' | 'neutral' | 'idle' = 'neutral';
       if (availableOptions.length > 1) {
-        statusLabel = `${availableOptions.map((o) => o.shortLabel).join(' & ')} Ready`;
+        statusLabel = `${availableOptions.map((o) => o.shortLabel).join(' & ')} installed`;
         statusTone = 'success';
       } else if (availableOptions.length === 1) {
-        statusLabel = `${availableOptions[0].shortLabel} Ready`;
+        statusLabel = `${availableOptions[0].shortLabel} installed`;
         statusTone = 'success';
       }
 
@@ -524,7 +524,7 @@ export function DashboardPage({
                       : aiDetect.isError || launchTargets.isError
                         ? 'Check failed'
                         : isAnyAvailable
-                          ? 'Ready'
+                          ? 'Installed'
                           : 'Not detected'}
                   </StatusBadge>
                 </div>

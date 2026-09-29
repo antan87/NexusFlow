@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TerminalManager, type PtyProcess, type TerminalClient } from './manager.js';
+import { TerminalManager, TerminalNotFoundError, type PtyProcess, type TerminalClient } from './manager.js';
 
 function fixture(grace = 5000) {
   let output: (data: string) => void = () => {};
@@ -74,6 +74,68 @@ describe('backend-owned terminals', () => {
     const saved = await starting;
     expect((await f.manager.create({ ...resume, launchId: 'again' })).id).toBe(saved.id);
     f.manager.dispose();
+  });
+  it('binds a conversation to the one fresh terminal that created it, so resume reuses that process', async () => {
+    vi.useFakeTimers({ now: new Date('2026-09-29T10:00:00Z') });
+    const f = fixture(); const fresh = { ...f.input, target: 'claude', launchId: 'fresh' };
+    const started = await f.manager.create(fresh);
+    const claim = { owner: 'alice', workspace: 'workspace', target: 'claude', cwd: '/workspace', sessionId: 'conversation', createdAt: '2026-09-29T10:01:00Z', others: [] };
+    // An idle terminal cannot have created a conversation that was recorded later.
+    expect(f.manager.claimSession(claim)).toBeUndefined();
+    f.manager.attach('alice', 'workspace', started.id, f.client);
+    f.manager.control('alice', 'workspace', started.id, f.client, { type: 'input', data: 'hello\r' });
+    expect(f.manager.claimSession({ ...claim, cwd: '/elsewhere' })).toBeUndefined();
+    expect(f.manager.claimSession({ ...claim, target: 'codex' })).toBeUndefined();
+    expect(f.manager.claimSession({ ...claim, createdAt: '2026-09-29T09:00:00Z' })).toBeUndefined();
+    // Another browser's resume never rebinds this owner's terminal.
+    expect(f.manager.claimSession({ ...claim, owner: 'bob' })).toBeUndefined();
+    // Another conversation here since the terminal started makes ownership ambiguous.
+    expect(f.manager.claimSession({ ...claim, others: [{ cwd: '/workspace', createdAt: '2026-09-29T10:02:00Z' }] })).toBeUndefined();
+    const older = [{ cwd: '/workspace', createdAt: '2026-09-28T10:00:00Z' }, { cwd: '/elsewhere', createdAt: '2026-09-29T10:02:00Z' }];
+    expect(f.manager.claimSession({ ...claim, others: older })).toMatchObject({ id: started.id, sessionId: 'conversation' });
+    const resumed = await f.manager.create({ ...fresh, sessionId: 'conversation', launchId: 'resume' });
+    expect(resumed.id).toBe(started.id); expect(f.factory).toHaveBeenCalledTimes(1);
+    await expect(f.manager.create({ ...fresh, owner: 'bob', sessionId: 'conversation', launchId: 'foreign' })).rejects.toThrow('already has a running terminal');
+    f.manager.dispose();
+  });
+  it('leaves an ambiguous or exited fresh terminal unbound', async () => {
+    const f = fixture(); const fresh = { ...f.input, target: 'claude', launchId: 'a' };
+    const typeInto = (m: typeof f, id: string) => { m.manager.attach('alice', 'workspace', id, m.client); m.manager.control('alice', 'workspace', id, m.client, { type: 'input', data: 'x' }); };
+    typeInto(f, (await f.manager.create(fresh)).id);
+    const second = { send: vi.fn(), close: vi.fn() }; const b = await f.manager.create({ ...fresh, launchId: 'b' });
+    f.manager.attach('alice', 'workspace', b.id, second); f.manager.control('alice', 'workspace', b.id, second, { type: 'input', data: 'x' });
+    const claim = { owner: 'alice', workspace: 'workspace', target: 'claude', cwd: '/workspace', sessionId: 'conversation', createdAt: new Date(Date.now() + 60_000).toISOString(), others: [] };
+    expect(f.manager.claimSession(claim)).toBeUndefined();
+    const single = fixture(); typeInto(single, (await single.manager.create(fresh)).id); single.exit(0);
+    expect(single.manager.claimSession(claim)).toBeUndefined();
+    f.manager.dispose(); single.manager.dispose();
+  });
+  it('counts a recently exited terminal as a possible owner of the conversation', async () => {
+    const exits: ((event: { exitCode: number }) => void)[] = [];
+    const makePty = () => ({ pid: 1, write: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn(), kill: vi.fn(), onData: vi.fn(), onExit: vi.fn(fn => { exits.push(fn); }) }) as unknown as PtyProcess;
+    const manager = new TerminalManager(vi.fn(async () => makePty()), vi.fn(), 60_000);
+    const base = { owner: 'alice', workspace: 'workspace', cwd: '/workspace', target: 'claude', launch: { file: 'claude', args: [], env: {}, label: 'Claude' } };
+    await manager.create({ ...base, launchId: 'first' });
+    const second = await manager.create({ ...base, launchId: 'second' });
+    exits[0]({ exitCode: 0 });
+    const client = { send: vi.fn(), close: vi.fn() };
+    manager.attach('alice', 'workspace', second.id, client); manager.control('alice', 'workspace', second.id, client, { type: 'input', data: 'x' });
+    expect(manager.claimSession({ owner: 'alice', workspace: 'workspace', target: 'claude', cwd: '/workspace', sessionId: 'conversation', createdAt: new Date(Date.now() + 60_000).toISOString(), others: [] })).toBeUndefined();
+    manager.dispose();
+  });
+  it('reuses a running conversation even at the terminal limit', async () => {
+    const f = fixture(); const resume = { ...f.input, target: 'codex', sessionId: 'saved', launchId: 'resume' };
+    const saved = await f.manager.create(resume);
+    for (let i = 0; i < 7; i++) await f.manager.create({ ...f.input, launchId: `shell-${i}` });
+    await expect(f.manager.create({ ...f.input, launchId: 'one-more' })).rejects.toThrow('limit');
+    expect((await f.manager.create({ ...resume, launchId: 'again' })).id).toBe(saved.id);
+    f.manager.dispose();
+  });
+  it('reports a missing terminal with a stable code', async () => {
+    const f = fixture();
+    expect(() => f.manager.attach('alice', 'workspace', 'gone', f.client)).toThrow(TerminalNotFoundError);
+    let error: unknown; try { f.manager.stop('alice', 'workspace', 'gone'); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ code: 'terminal_not_found' });
   });
   it('does not write to an exited process', async () => {
     const f = fixture(); const { id } = await f.manager.create(f.input); f.manager.attach('alice', 'workspace', id, f.client);

@@ -62,6 +62,8 @@ const getResumeCliCommand = (assistant: string, sessionId: string): string => {
       return `copilot --resume ${sessionId}`;
     case 'cursor':
       return `cursor-agent --resume ${sessionId}`;
+    case 'pi':
+      return `pi --session ${sessionId}`;
     default:
       return `agy --conversation ${sessionId}`;
   }
@@ -171,13 +173,13 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         workspaceId: ws.branchName,
         assistant,
       });
-      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'claude' ? 'claude' : assistant === 'codex' ? 'codex' : 'copilot';
+      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'cursor' ? 'cursor-agent' : assistant;
       setLaunchedInfo({
         assistant,
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Opened ${assistant} inside ContextSpace`, 'success');
+      showToast?.(`Opening ${assistant} in CLI chat…`, 'info');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to launch terminal';
       showToast?.(message, 'error');
@@ -203,7 +205,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Opened ${assistant} resume inside ContextSpace`, 'success');
+      // The CLI chat window performs the launch and reports its own failures.
+      showToast?.(`Opening ${assistant} in CLI chat…`, 'info');
     } catch {
       const fallbackCmd = getResumeCliCommand(assistant, sessionId);
       await safeCopyToClipboard(fallbackCmd);
