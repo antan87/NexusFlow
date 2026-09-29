@@ -1,5 +1,5 @@
 {
-  "status": "proposed 2026-09-28 from the baseline in docs/performance/baseline-2026-09-28.md; the owner confirms once",
+  "status": "accepted 2026-09-29 (owner asked to proceed with the fixes); derived from docs/performance/baseline-2026-09-28.md",
   "description": "p95 limits in milliseconds for `node perf/timing.mjs --tier <T> --budgets perf/budgets.json --check`, on the reference laptop. A metric fails when it exceeds its limit by more than `tolerance`. M mirrors the reference laptop and must keep passing; L is the growth target for measured-improvement.",
   "tolerance": 0.1,
   "tiers": {

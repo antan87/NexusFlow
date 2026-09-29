@@ -60,21 +60,24 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     }
   }, [defaultViewMode]);
 
-  const loadLifecycle = useCallback(async () => {
+  const loadLifecycle = useCallback(async (signal?: AbortSignal) => {
     if (!workspaceId) return;
     setLifecycleLoading(true);
     try {
       const data = await apiFetch<{ lifecycle: WorkspaceLifecycle; report?: WorkspaceVerificationReport | null; plan?: string }>(
-        `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle`,
+        `/api/workspace/${encodeURIComponent(workspaceId)}/lifecycle`, { signal },
       );
+      // A response for a workspace the user already left must not replace the current one.
+      if (signal?.aborted) return;
       setLifecycle(data.lifecycle);
       if (data.plan !== undefined) setMilestoneMarkdown(data.plan);
       if (data.report !== undefined) setVerificationReport(data.report);
     } catch (error) {
+      if (signal?.aborted) return;
       // Missing lifecycle state is normal for newly initialized or test workspaces.
       console.warn('Could not load workspace lifecycle:', error);
     } finally {
-      setLifecycleLoading(false);
+      if (!signal?.aborted) setLifecycleLoading(false);
     }
   }, [workspaceId]);
 
@@ -82,7 +85,9 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
     setMilestoneMarkdown(null);
     setVerificationReport(null);
     setVerifyMessage(null);
-    void loadLifecycle();
+    const controller = new AbortController();
+    void loadLifecycle(controller.signal);
+    return () => controller.abort();
   }, [loadLifecycle]);
 
   const handleVerify = async () => {

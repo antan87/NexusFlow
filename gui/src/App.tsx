@@ -72,6 +72,17 @@ const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vsc
 const nativeUpdateBridge = typeof window !== 'undefined' ? (window.contextspaceBridge?.updates || window.nexusBridge?.updates) : undefined;
 let toastIdCounter = 0;
 
+/**
+ * Starts a load of one kind of workspace data, aborting the previous load of
+ * that kind so a slow response cannot land after a newer one.
+ */
+function beginWorkspaceLoad(loads: Map<string, AbortController>, kind: string): AbortSignal {
+  loads.get(kind)?.abort();
+  const controller = new AbortController();
+  loads.set(kind, controller);
+  return controller.signal;
+}
+
 type UiUpdateStatus = {
   currentVersion: string;
   latestVersion: string;
@@ -206,6 +217,8 @@ function AppInner() {
   const knowledgeLoadRequestRef = useRef(0);
   const planLoadRequestRef = useRef(0);
   const saveKnowledgeRequestRef = useRef(0);
+  // One in-flight load per kind of workspace data; see beginWorkspaceLoad.
+  const workspaceLoadsRef = useRef(new Map<string, AbortController>());
   const editedKnowledgeRef = useRef('');
   const isEditingKnowledgeRef = useRef(false);
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
@@ -506,32 +519,38 @@ function AppInner() {
   };
 
   const fetchGitChanges = async (wsId: string) => {
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'changes');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     setGitChangesLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`, { signal });
       const data = await res.json();
+      perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: isCurrent() });
+      if (!isCurrent()) return;
       setGitChanges(data.changes || []);
-      perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: true });
     } catch (e) {
-      console.error(e);
+      if (isCurrent()) console.error(e);
     } finally {
-      setGitChangesLoading(false);
+      if (isCurrent()) setGitChangesLoading(false);
     }
   };
 
   const fetchWorkspaceSessions = async (wsId: string) => {
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'sessions');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     setSessionsLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`, { signal });
       const data = await res.json();
+      perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: isCurrent() });
+      if (!isCurrent()) return;
       setSessions(data.sessions || []);
-      perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: true });
     } catch (e) {
-      console.error(e);
+      if (isCurrent()) console.error(e);
     } finally {
-      setSessionsLoading(false);
+      if (isCurrent()) setSessionsLoading(false);
     }
   };
 
@@ -554,11 +573,12 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && knowledgeLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'knowledge');
     setKnowledgeLoading(true);
     setKnowledgeError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`, { signal });
       if (!res.ok) throw new Error('knowledge request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
@@ -633,11 +653,12 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && planLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'plan');
     setPlanLoading(true);
     setPlanError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`, { signal });
       if (!res.ok) throw new Error('plan request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
@@ -821,8 +842,12 @@ function AppInner() {
     knowledgeLoadRequestRef.current += 1;
     planLoadRequestRef.current += 1;
     saveKnowledgeRequestRef.current += 1;
+    for (const controller of workspaceLoadsRef.current.values()) controller.abort();
+    workspaceLoadsRef.current.clear();
     setSessions([]);
+    setSessionsLoading(false);
     setGitChanges([]);
+    setGitChangesLoading(false);
     setKnowledgeContent('');
     setKnowledgeError(null);
     setKnowledgeLoading(false);

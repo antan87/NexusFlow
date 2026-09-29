@@ -39,14 +39,22 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
   const [preview, setPreview] = useState<{ title: string; content?: string; location: string } | null>(null);
   const base = `/api/workspace/${encodeURIComponent(workspaceId)}`;
   const queryClient = useQueryClient();
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setError('');
     try {
-      const result = await apiFetch<WorkContext>(`${base}/work`);
+      const result = await apiFetch<WorkContext>(`${base}/work`, { signal });
+      if (signal?.aborted) return;
       setContext(result); setDraft(result.guidance); setSteps(result.lifecycle?.steps ?? []);
-    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to load work brief.'); }
+    } catch (error) {
+      if (signal?.aborted) return;
+      setError(error instanceof Error ? error.message : 'Unable to load work brief.');
+    }
   }, [base]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   const perform = async (operation: () => Promise<void>) => {
     setBusy(true); setError(''); setMessage('');

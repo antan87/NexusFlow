@@ -201,18 +201,16 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       setIsLegacy(false);
       return;
     }
-    let active = true;
-    fetch(`${API_BASE}/api/workspace/${encodeURIComponent(selected.branchName)}/migration-status`)
+    const controller = new AbortController();
+    fetch(`${API_BASE}/api/workspace/${encodeURIComponent(selected.branchName)}/migration-status`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : { isLegacy: false }))
       .then((data) => {
-        if (active) setIsLegacy(Boolean(data?.isLegacy));
+        if (!controller.signal.aborted) setIsLegacy(Boolean(data?.isLegacy));
       })
       .catch(() => {
-        if (active) setIsLegacy(false);
+        if (!controller.signal.aborted) setIsLegacy(false);
       });
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, [selected?.branchName]);
 
   const handleMigrateWorkspace = async () => {
@@ -278,12 +276,13 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const [savingTagDetails, setSavingTagDetails] = useState(false);
   const [deletingTagDetails, setDeletingTagDetails] = useState(false);
 
-  const fetchDomainData = useCallback(async (wsId: string) => {
+  const fetchDomainData = useCallback(async (wsId: string, signal?: AbortSignal) => {
     try {
-      const res = await apiFetch<any>(`/api/workspace/${encodeURIComponent(wsId)}/domain-packs`);
-      if (res) setDomainData(res);
+      const res = await apiFetch<any>(`/api/workspace/${encodeURIComponent(wsId)}/domain-packs`, { signal });
+      // A response for a workspace the user already left must not replace the current one.
+      if (res && !signal?.aborted) setDomainData(res);
     } catch {
-      setDomainData(null);
+      if (!signal?.aborted) setDomainData(null);
     }
   }, []);
 
@@ -294,7 +293,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     }
     setSpecInput(selected.description || '');
     setEditingSpec(false);
-    void fetchDomainData(selected.branchName);
+    const controller = new AbortController();
+    void fetchDomainData(selected.branchName, controller.signal);
+    return () => controller.abort();
   }, [selected, fetchDomainData]);
 
   const toggleDomainPack = async (packId: string) => {
