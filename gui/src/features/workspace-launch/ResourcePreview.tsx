@@ -20,7 +20,8 @@ export function ResourcePreview({ skills, agents, assistants, tagCount }: { skil
   const selection = { skills: [...skills].sort(), agents: [...agents].sort(), assistants: [...assistants].sort() };
   const preview = useQuery({
     queryKey: ['resource-preview', selection],
-    queryFn: async () => (await apiFetch<{ resources: ResourcePreviewItem[] }>('/api/resources/preview', {
+    queryFn: async ({ signal }) => (await apiFetch<{ resources: ResourcePreviewItem[] }>('/api/resources/preview', {
+      signal,
       method: 'POST',
       body: JSON.stringify(selection),
     })).resources,
