@@ -14,6 +14,7 @@ export interface LocalMcpServerConfig {
  * harness sessions run against the exact local package version.
  */
 import { BRAND_NAME } from '../core/constants.js';
+import { generatedLauncher } from '../core/workspace-tools.js';
 
 export function getLocalCliEntry(distIndexOverride?: string): string {
   const currentFile = fileURLToPath(import.meta.url);
@@ -32,13 +33,20 @@ export function getLocalCliEntry(distIndexOverride?: string): string {
 
 /**
  * Constructs a local MCP server configuration object for Claude or Codex harnesses.
+ *
+ * Prefers the workspace's generated launcher when there is one. It already
+ * carries the right runtime, already sets up the desktop's Electron-as-node
+ * environment, already re-resolves the AppImage extraction after a reboot or an
+ * update, and lives at a stable path inside the workspace. Falling back to the
+ * raw process paths is what put ephemeral AppImage paths into SDK sessions on a
+ * desktop install.
  */
 export function getLocalMcpServerConfig(
   workspacePath: string,
   role: AgentRole = 'developer',
 ): LocalMcpServerConfig {
-  return {
-    command: process.execPath,
-    args: [getLocalCliEntry(), 'mcp', 'run', workspacePath, '--role', role],
-  };
+  const args = ['mcp', 'run', workspacePath, '--role', role];
+  const launcher = generatedLauncher(workspacePath);
+  if (launcher) return { command: launcher, args };
+  return { command: process.execPath, args: [getLocalCliEntry(), ...args] };
 }
