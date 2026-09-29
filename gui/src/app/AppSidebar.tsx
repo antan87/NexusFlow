@@ -346,7 +346,7 @@ function SidebarContents({
               {/* Filter Search & Sort */}
               <div className="flex items-center gap-1 mb-2">
                 <div className="relative flex-1">
-                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
                   <input
                     type="text"
                     value={search}

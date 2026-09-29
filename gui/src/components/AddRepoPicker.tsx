@@ -43,7 +43,7 @@ export function AddRepoPicker({
       <PopoverPopup align="end" className="w-[320px]" viewportClassName="p-0">
         <div className="border-b border-border p-2">
           <div className="relative">
-            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
             <Input
               autoFocus
               value={query}

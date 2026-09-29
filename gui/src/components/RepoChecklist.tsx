@@ -41,7 +41,7 @@ export function RepoChecklist({
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="relative">
-        <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
