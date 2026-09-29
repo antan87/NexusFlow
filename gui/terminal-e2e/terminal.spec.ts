@@ -32,11 +32,11 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/terminal-compact.png' });
   // The raw session <select> and the always-on tools row were replaced by one
-  // overflow menu, so the saved session and its usage live behind it now.
+  // overflow menu, so open terminals and their usage live behind it now.
   // Assert the section rather than a session label: the shell is named by
   // basename, so it is bash on Linux and pwsh.exe or powershell.exe on Windows.
   await openPaneOptions();
-  await expect(page.getByText(/saved sessions/i)).toBeVisible();
+  await expect(page.getByText(/open terminals/i)).toBeVisible();
   await page.screenshot({ path: 'test-results/terminal-pane-options.png' });
   await page.getByRole('menuitem', { name: /Screen reader mode/ }).click();
   const input = pane.locator('.xterm-helper-textarea');

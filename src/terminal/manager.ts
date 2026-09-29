@@ -7,13 +7,21 @@ import { preparePtyHelper } from './native.js';
 export type PtyProcess = Pick<IPty, 'pid' | 'write' | 'resize' | 'pause' | 'resume' | 'kill' | 'onData' | 'onExit'>;
 export type PtyFactory = (launch: LaunchSpec, cwd: string, cols: number, rows: number) => Promise<PtyProcess>;
 export interface TerminalClient { send(data: string): void; close(): void }
-export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; startedAt: string; state: 'running' | 'exited'; exitCode?: number }
+export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; startedAt: string; state: 'running' | 'exited'; exitCode?: number; exitedAt?: string }
 interface Session extends TerminalInfo {
-  owner: string; launchId: string; pty: PtyProcess; chunks: string[]; length: number; truncated: boolean;
+  owner: string; launchId: string; pty: PtyProcess; chunks: string[]; length: number; truncated: boolean; typed: boolean;
   client?: TerminalClient; unacked: number; paused: boolean; timer?: NodeJS.Timeout; stall?: NodeJS.Timeout;
 }
 const MAX_REPLAY = 512 * 1024;
 const HIGH_WATER = 128 * 1024;
+/** A saved conversation created within this window after a terminal started belongs to it. */
+const CLAIM_SKEW_MS = 5_000;
+
+/** The terminal ended (expired, or the backend restarted); only a new launch can continue its work. */
+export class TerminalNotFoundError extends Error {
+  readonly code = 'terminal_not_found';
+  constructor() { super('Terminal not found in this workspace.'); }
+}
 
 export async function nativePtyAvailable(): Promise<{ available: boolean; reason?: string }> {
   try { await preparePtyHelper(); await import('node-pty'); return { available: true }; }
@@ -49,16 +57,45 @@ export class TerminalManager {
   private resuming = new Set<string>();
   constructor(private factory: PtyFactory = spawnNativePty, private terminate = terminatePty, private graceMs = 5 * 60_000) {}
   private info(s: Session): TerminalInfo {
-    const { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode } = s;
-    return { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode };
+    const { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode, exitedAt } = s;
+    return { id, workspace, target, label, cwd, sessionId, startedAt, state, exitCode, exitedAt };
   }
   list(owner: string, workspace: string): TerminalInfo[] {
     return [...this.sessions.values()].filter(s => s.owner === owner && s.workspace === workspace).map(s => this.info(s));
   }
   private owned(owner: string, workspace: string, id: string): Session {
     const s = this.sessions.get(id);
-    if (!s || s.owner !== owner || s.workspace !== workspace) throw new Error('Terminal not found in this workspace.');
+    if (!s || s.owner !== owner || s.workspace !== workspace) throw new TerminalNotFoundError();
     return s;
+  }
+  /**
+   * Bind a saved conversation to the fresh terminal that created it.
+   *
+   * A terminal started without a session ID learns its conversation only after
+   * the harness records one. Resume requests arrive with that ID, so without
+   * this binding a second process would open the same conversation.
+   *
+   * The match must be one-to-one. Exactly one unbound terminal of the same
+   * tool and directory, running or recently exited, may have started before the
+   * conversation (within a few seconds of clock skew); it must belong to the
+   * requesting owner, still be running and have received input. No other
+   * conversation of that tool and directory may have started since that
+   * terminal did. Anything less certain stays unbound, and resume behaves as
+   * before this binding existed.
+   */
+  claimSession(input: { owner: string; workspace: string; target: string; cwd: string; sessionId: string; createdAt: string; others: { cwd: string; createdAt: string }[] }): TerminalInfo | undefined {
+    const created = Date.parse(input.createdAt);
+    if (!Number.isFinite(created)) return undefined;
+    const sameTool = [...this.sessions.values()].filter(s => s.target === input.target);
+    if (sameTool.some(s => s.state === 'running' && s.sessionId === input.sessionId)) return undefined;
+    const candidates = sameTool.filter(s => s.workspace === input.workspace && !s.sessionId && s.cwd === input.cwd && Date.parse(s.startedAt) <= created + CLAIM_SKEW_MS);
+    if (candidates.length !== 1) return undefined;
+    const [terminal] = candidates;
+    if (terminal.owner !== input.owner || terminal.state !== 'running' || !terminal.typed) return undefined;
+    const started = Date.parse(terminal.startedAt);
+    if (input.others.some(other => other.cwd === input.cwd && Date.parse(other.createdAt) >= started - CLAIM_SKEW_MS)) return undefined;
+    terminal.sessionId = input.sessionId;
+    return this.info(terminal);
   }
   async create(input: { owner: string; workspace: string; cwd: string; target: string; sessionId?: string; launchId: string; launch: LaunchSpec }): Promise<TerminalInfo> {
     if (this.closing) throw new Error('Terminal service is shutting down.');
@@ -67,11 +104,12 @@ export class TerminalManager {
     if (existing) return this.info(existing);
     const pending = this.pending.get(key);
     if (pending) return pending;
-    if (this.sessions.size + this.pending.size >= 32 || this.list(input.owner, input.workspace).filter(s => s.state === 'running').length + this.pending.size >= 8) throw new Error('Terminal limit reached. End an existing session first.');
     // Keep saved conversations single-writer even across separate browser owners.
+    // Reusing a running terminal needs no capacity, so check it before the limit.
     const resumeKey = input.sessionId ? `${input.target}:${input.sessionId}` : undefined;
     const running = [...this.sessions.values()].find(s => s.state === 'running' && s.target === input.target && s.sessionId === input.sessionId && !!input.sessionId);
     if (running?.owner === input.owner && running.workspace === input.workspace) return this.info(running);
+    if (this.sessions.size + this.pending.size >= 32 || this.list(input.owner, input.workspace).filter(s => s.state === 'running').length + this.pending.size >= 8) throw new Error('Terminal limit reached. End an existing session first.');
     if (resumeKey && this.resuming.has(resumeKey)) throw new Error('This saved conversation is already starting.');
     if (input.sessionId && [...this.sessions.values()].some(s => s.state === 'running' && s.target === input.target && s.sessionId === input.sessionId)) throw new Error('This saved conversation already has a running terminal.');
     if (resumeKey) this.resuming.add(resumeKey);
@@ -79,10 +117,10 @@ export class TerminalManager {
     const promise = (async () => {
       const pty = await this.factory(input.launch, input.cwd, 80, 24);
       if (this.closing) { this.terminate(pty); throw new Error('Terminal service is shutting down.'); }
-      const s: Session = { id: randomUUID(), workspace: input.workspace, owner: input.owner, cwd: input.cwd, target: input.target, sessionId: input.sessionId, startedAt, launchId: input.launchId, label: input.launch.label, pty, state: 'running', chunks: [], length: 0, truncated: false, unacked: 0, paused: false };
+      const s: Session = { id: randomUUID(), workspace: input.workspace, owner: input.owner, cwd: input.cwd, target: input.target, sessionId: input.sessionId, startedAt, launchId: input.launchId, label: input.launch.label, pty, state: 'running', chunks: [], length: 0, truncated: false, typed: false, unacked: 0, paused: false };
       this.sessions.set(s.id, s);
       pty.onData(data => this.output(s, data));
-      pty.onExit(({ exitCode }) => { s.state = 'exited'; s.exitCode = exitCode; this.send(s, { type: 'exit', exitCode }); this.expire(s); });
+      pty.onExit(({ exitCode }) => { s.state = 'exited'; s.exitCode = exitCode; s.exitedAt = new Date().toISOString(); this.send(s, { type: 'exit', exitCode, exitedAt: s.exitedAt }); this.expire(s); });
       this.expire(s);
       return this.info(s);
     })();
@@ -135,7 +173,7 @@ export class TerminalManager {
     this.send(s, { type: 'ready', terminal: this.info(s), truncated: s.truncated });
     for (const data of s.chunks) this.send(s, { type: 'output', data });
     this.send(s, { type: 'replayed' });
-    if (s.state === 'exited') { this.send(s, { type: 'exit', exitCode: s.exitCode }); this.expire(s); }
+    if (s.state === 'exited') { this.send(s, { type: 'exit', exitCode: s.exitCode, exitedAt: s.exitedAt }); this.expire(s); }
     this.flow(s);
   }
   detach(owner: string, workspace: string, id: string, client: TerminalClient) {
@@ -152,13 +190,13 @@ export class TerminalManager {
       s.unacked -= m.count as number; this.flow(s); return;
     }
     if (s.state !== 'running') throw new Error('This terminal has exited.');
-    if (m.type === 'input' && typeof m.data === 'string' && m.data.length <= 16_384) { s.pty.write(m.data); return; }
+    if (m.type === 'input' && typeof m.data === 'string' && m.data.length <= 16_384) { s.pty.write(m.data); s.typed = true; return; }
     if (m.type === 'resize' && Number.isInteger(m.cols) && Number.isInteger(m.rows) && Number(m.cols) >= 2 && Number(m.cols) <= 500 && Number(m.rows) >= 1 && Number(m.rows) <= 300) { s.pty.resize(Number(m.cols), Number(m.rows)); return; }
     throw new Error('Invalid or oversized terminal message.');
   }
   stop(owner: string, workspace: string, id: string) {
     const s = this.owned(owner, workspace, id);
-    if (s.state === 'running') { this.terminate(s.pty); s.state = 'exited'; this.send(s, { type: 'exit', exitCode: null }); }
+    if (s.state === 'running') { this.terminate(s.pty); s.state = 'exited'; s.exitedAt = new Date().toISOString(); this.send(s, { type: 'exit', exitCode: null, exitedAt: s.exitedAt }); }
     this.expire(s);
   }
   dispose() {

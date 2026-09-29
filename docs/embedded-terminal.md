@@ -17,8 +17,8 @@ Sessions tab. Choosing a conversation selects its recorded harness automatically
 Codex, Claude, AGY, and Copilot resume after verifying the provider record and its
 canonical directory inside the workspace. A fuzzy display match alone cannot
 authorize resume. Missing metadata offers the harness's own session picker.
-Cursor and Pi can start here, but their histories are not yet indexed; use their
-native picker. Cursor detection prefers `agent`, with `cursor-agent` as fallback.
+Cursor can start here, but its history is not yet indexed; use its native
+picker. Cursor detection prefers `agent`, with `cursor-agent` as fallback.
 Existing context files are available from the workspace directory; no kickoff
 prompt is submitted automatically.
 
@@ -51,7 +51,7 @@ Resume command references, checked September 2026:
 | Antigravity | `agy --conversation ID` | [`/resume`](https://antigravity.google/docs/cli/commands/resume) |
 | GitHub Copilot | `copilot --resume ID` | [`copilot --resume`](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/chronicle) |
 | Cursor Agent | Native picker for unindexed history | [`agent ls`](https://cursor.com/docs/cli/overview) |
-| Pi | Native picker for unindexed history | [`pi --resume`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) |
+| Pi | `pi --session ID` | [`pi --resume`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) |
 
 Hiding, minimizing, maximizing, and switching workspace tabs keep the terminal
 running. A browser reload reconnects to the same backend process. Closing a
@@ -67,6 +67,25 @@ terminal input/output is not written to a ContextSpace transcript. Harnesses may
 store their own histories. Search, selection copy, and a screen-reader option
 are available in the terminal footer. **External terminal** is an explicit
 fallback; failed embedded launches never silently open another app.
+
+A tool listed as available is **installed**: its executable was found on PATH.
+ContextSpace does not read tool credentials; each harness checks its own sign-in.
+A harness that exits with an error within 15 seconds of starting (measured by
+the backend, so a later reload reports it the same way) is flagged: its output
+explains why, and sign-in or setup can be finished in an external terminal.
+
+A conversation started in a fresh terminal belongs to that terminal once its
+harness records it. Resuming that conversation from Sessions or the overview
+reattaches to the running process instead of starting a second one on the same
+conversation. The link is made only when the match is one-to-one: exactly one
+terminal of that harness in the conversation's directory, running or recently
+exited, started before the conversation (allowing a few seconds of clock skew);
+it belongs to the same browser, is still running and has received input; and no
+other conversation of that harness there has started since. Otherwise resume
+starts a new process as before. A terminal that has ended (its grace period
+passed, or the backend restarted) is labeled **Ended** rather than offered for
+**Reconnect**. It offers **Resume conversation** when its conversation was
+linked, and **Continue a conversation** otherwise.
 
 ## Development and verification
 

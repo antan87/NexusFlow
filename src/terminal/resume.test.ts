@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Hono } from 'hono';
 import { registerTerminalRoutes } from './routes.js';
 import { getClaudeProjectFolderName, findSessions, codexThreadIdentity } from '../utils/session-finder.js';
-import type { TerminalManager } from './manager.js';
+import { TerminalManager as RealTerminalManager, type TerminalManager } from './manager.js';
 
 const testHome = vi.hoisted(() => ({ path: '' }));
 vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), homedir: () => testHome.path }));
@@ -33,16 +33,54 @@ async function codex(source: unknown = 'cli', cwd = workspace) {
     { type: 'response_item', payload: { type: 'message', role: 'user', content: 'Continue the main task' } },
   ].map(v => JSON.stringify(v)).join('\n'));
 }
-async function fixture() {
+async function fixture(manager?: TerminalManager) {
   const app = new Hono(); const create = vi.fn(async input => ({ id: input.launchId, target: input.target }));
-  registerTerminalRoutes(app, vi.fn() as any, async () => workspace, { create } as unknown as TerminalManager);
+  registerTerminalRoutes(app, vi.fn() as any, async () => workspace, manager ?? { create, claimSession: vi.fn() } as unknown as TerminalManager);
   const auth = await app.request('http://localhost/api/terminals/bootstrap', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': 'bootstrap' } });
   const { token } = await auth.json(); const cookie = auth.headers.get('set-cookie')!.split(';')[0];
-  const launch = (target: string, sessionId: string) => app.request('http://localhost/api/terminals/workspace/create', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': token, cookie, 'content-type': 'application/json' }, body: JSON.stringify({ target, sessionId, launchId: crypto.randomUUID() }) });
-  return { create, launch };
+  const launch = (target: string, sessionId?: string) => app.request('http://localhost/api/terminals/workspace/create', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': token, cookie, 'content-type': 'application/json' }, body: JSON.stringify({ target, sessionId, launchId: crypto.randomUUID() }) });
+  return { create, launch, owner: cookie.split('=')[1] };
 }
 
 describe('resume the histories already shown in Sessions', () => {
+  it('attaches a resume to the fresh terminal that recorded the conversation instead of starting a second process', async () => {
+    const pty = { pid: 1, write: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn(), kill: vi.fn(), onData: vi.fn(), onExit: vi.fn() };
+    const factory = vi.fn(async () => pty);
+    const manager = new RealTerminalManager(factory as any, vi.fn(), 60_000);
+    const f = await fixture(manager);
+    const fresh = await f.launch('claude');
+    expect(fresh.status, await fresh.clone().text()).toBe(200);
+    const { terminal } = await fresh.json();
+    // The user types the first message; the harness then records the conversation.
+    const client = { send: vi.fn(), close: vi.fn() };
+    manager.attach(f.owner, 'workspace', terminal.id, client);
+    manager.control(f.owner, 'workspace', terminal.id, client, { type: 'input', data: 'Started here\r' });
+    await writeFile(path.join(root, 'claude', 'projects', getClaudeProjectFolderName(workspace), `${ids.claude}.jsonl`), JSON.stringify({ sessionId: ids.claude, cwd: workspace, type: 'user', timestamp: new Date(Date.now() + 1000).toISOString(), message: { content: 'Started here' } }));
+    const resumed = await f.launch('claude', ids.claude);
+    expect(resumed.status, await resumed.clone().text()).toBe(200);
+    expect((await resumed.json()).terminal).toMatchObject({ id: terminal.id, sessionId: ids.claude });
+    expect(factory).toHaveBeenCalledTimes(1);
+    manager.dispose();
+  });
+  it('does not attach a resume to a fresh terminal when another conversation here could be its own', async () => {
+    const pty = { pid: 1, write: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn(), kill: vi.fn(), onData: vi.fn(), onExit: vi.fn() };
+    const factory = vi.fn(async () => pty);
+    const manager = new RealTerminalManager(factory as any, vi.fn(), 60_000);
+    const f = await fixture(manager);
+    const { terminal } = await (await f.launch('claude')).json();
+    const client = { send: vi.fn(), close: vi.fn() };
+    manager.attach(f.owner, 'workspace', terminal.id, client);
+    manager.control(f.owner, 'workspace', terminal.id, client, { type: 'input', data: 'Started here\r' });
+    const project = path.join(root, 'claude', 'projects', getClaudeProjectFolderName(workspace));
+    const later = new Date(Date.now() + 1000).toISOString();
+    await writeFile(path.join(project, `${ids.claude}.jsonl`), JSON.stringify({ sessionId: ids.claude, cwd: workspace, type: 'user', timestamp: later, message: { content: 'Opened in another terminal' } }));
+    await writeFile(path.join(project, `${ids.codex}.jsonl`), JSON.stringify({ sessionId: ids.codex, cwd: workspace, type: 'user', timestamp: later, message: { content: 'Started here' } }));
+    const resumed = await f.launch('claude', ids.claude);
+    expect(resumed.status, await resumed.clone().text()).toBe(200);
+    expect((await resumed.json()).terminal.id).not.toBe(terminal.id);
+    expect(factory).toHaveBeenCalledTimes(2);
+    manager.dispose();
+  });
   it('uses the latest valid recorded activity, independent of record order or discovery time', async () => {
     await codex();
     const file = path.join(root, 'codex', 'sessions', 'rollout.jsonl');
