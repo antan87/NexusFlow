@@ -167,6 +167,7 @@ import {
 } from './resources/service.js';
 
 import type { AIAssistant, Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus, OrganizationConventions, DomainPack } from './types.js';
+import { isAssistantHarnessId } from './harness/manifest.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 import {
   WorkroomAuthorizationError,
@@ -3575,7 +3576,9 @@ const resourcePreviewInput = z.object({
   agents: z.array(z.string().max(200)).max(200).default([]),
   assistants: z.array(z.string().max(40)).max(20).default([]),
 });
-const RESOURCE_ASSISTANTS = new Set(['claude', 'antigravity', 'codex', 'copilot', 'cursor']);
+// Assistants without resource support (e.g. a session-only harness) get no
+// files, so the filter is the manifest's role test rather than a list of ids
+// that has to be kept in step with it.
 
 // What a new workspace would receive for the chosen skills and agents.
 app.post('/api/resources/preview', async (c) => {
@@ -3583,7 +3586,7 @@ app.post('/api/resources/preview', async (c) => {
   if (!parsed.success) return c.json({ error: 'Invalid resource selection' }, 400);
   try {
     // Assistants without resource support (e.g. a CLI-only tool) simply get no files.
-    const assistants = parsed.data.assistants.filter((name) => RESOURCE_ASSISTANTS.has(name)) as AIAssistant[];
+    const assistants = parsed.data.assistants.filter(isAssistantHarnessId) as AIAssistant[];
     return c.json({ resources: await previewResourceSelections(parsed.data.skills, parsed.data.agents, assistants) });
   } catch (error) {
     if (error instanceof ResourceSelectionError) return c.json({ error: error.message }, 400);

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { z } from 'zod';
+import { isAssistantHarnessId } from '../harness/manifest.js';
 
 const absDir = z
   .string()
@@ -16,7 +17,17 @@ export const configPatchSchema = z
   .object({
     devDir: absDir.optional(),
     workspacesDir: absDir.optional(),
-    defaultAssistant: z.enum(['claude', 'antigravity', 'codex', 'copilot', 'cursor']).nullable().optional(),
+    /**
+     * Validated against the harness manifest rather than a literal union, so a
+     * new harness is accepted the moment it is declared and a retired one is
+     * rejected in one place. The error names the manifest instead of listing a
+     * snapshot of it, which would go stale on the next addition.
+     */
+    defaultAssistant: z
+      .string()
+      .refine(isAssistantHarnessId, { message: 'must be a known assistant harness' })
+      .nullable()
+      .optional(),
     defaultEditor: z.string().nullable().optional(),
     scanDepth: z.number().int().min(1).max(10).optional(),
     storageProvider: z.string().min(1).optional(),

@@ -16,6 +16,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
+import { HARNESS_LIST } from '../harness/manifest.js';
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
 
@@ -348,13 +349,11 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   }
 
   // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
-  const astMap: Record<string, string> = {
-    claude: 'claude',
-    codex: 'codex',
-    antigravity: 'agy',
-    copilot: 'copilot',
-    cursor: 'cursor-agent',
-  };
+  // Binary per harness comes from the manifest's launch command, so this check
+  // probes the CLI it would actually start rather than a second hand-kept map.
+  const astMap = Object.fromEntries(
+    HARNESS_LIST.map((harness) => [harness.id, harness.detection.launchCommand ?? harness.detection.probe]),
+  );
 
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {

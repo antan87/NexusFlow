@@ -7,6 +7,9 @@ import { parse, stringify, type TomlTable } from 'smol-toml';
 import type { AIAssistant } from '../types.js';
 import { BRAND_CONFIG } from './constants.js';
 import { assertNoLinkedPathComponents, atomicWriteFile } from '../resources/fs-safety.js';
+import { mcpTargetsFor } from '../harness/manifest.js';
+
+const CURSOR_MCP_CONFIG = '.cursor/mcp.json';
 
 export const CLI_LAUNCHER = '.contextspace/bin/ctxspace';
 export const CLI_ALIAS_LAUNCHER = '.contextspace/bin/contextspace';
@@ -110,23 +113,23 @@ export async function generateWorkspaceTools(root: string, assistants: AIAssista
   await fs.chmod(path.join(root, CLI_ALIAS_LAUNCHER), 0o755);
 
   const server = { command: launcherCommandPath(root), args: ['mcp', 'run', root, '--role', 'interactive'] };
-  const configs: Array<[string, string]> = [];
-  if (assistants.includes('claude') || assistants.includes('copilot')) configs.push(['.mcp.json', 'mcpServers']);
-  if (assistants.includes('cursor')) configs.push(['.cursor/mcp.json', 'mcpServers']);
-  if (assistants.includes('copilot')) configs.push(['.vscode/mcp.json', 'servers']);
-  // Antigravity uses a user-level MCP configuration. Do not write its global config on refresh.
-  for (const [relative, key] of configs) {
-    await assertNoLinkedPathComponents(root, path.join(root, relative));
+  // Which MCP configs to write comes from the harness manifest. Antigravity
+  // declares none because it reads a user-level config, and writing that on
+  // refresh would be a side effect outside the workspace.
+  const targets = mcpTargetsFor(assistants);
+  const configs = targets.filter((target) => target.format === 'json');
+  for (const target of configs) {
+    await assertNoLinkedPathComponents(root, path.join(root, target.path));
     let config: Record<string, any> = {};
-    try { config = JSON.parse(await fs.readFile(path.join(root, relative), 'utf8')); }
+    try { config = JSON.parse(await fs.readFile(path.join(root, target.path), 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (!config || Array.isArray(config) || typeof config !== 'object' || (config[key] && (Array.isArray(config[key]) || typeof config[key] !== 'object'))) throw new Error(`Invalid MCP configuration: ${relative}`);
-    config[key] = { ...config[key], [BRAND_CONFIG.mcp.serverName]: { ...(key === 'servers' ? { type: 'stdio' } : {}), ...server } };
-    await write(relative, JSON.stringify(config, null, 2) + '\n');
+    if (!config || Array.isArray(config) || typeof config !== 'object' || (config[target.key] && (Array.isArray(config[target.key]) || typeof config[target.key] !== 'object'))) throw new Error(`Invalid MCP configuration: ${target.path}`);
+    config[target.key] = { ...config[target.key], [BRAND_CONFIG.mcp.serverName]: { ...(target.entryType ? { type: target.entryType } : {}), ...server } };
+    await write(target.path, JSON.stringify(config, null, 2) + '\n');
   }
   // Remove only the exact Cursor server emitted unconditionally by older versions.
   // Leave custom entries and other servers alone when Cursor is not selected.
-  if (!assistants.includes('cursor')) {
+  if (!targets.some((target) => target.path === CURSOR_MCP_CONFIG)) {
     const target = path.join(root, '.cursor/mcp.json');
     await assertNoLinkedPathComponents(root, target);
     let old: Record<string, any> | undefined;
@@ -141,16 +144,15 @@ export async function generateWorkspaceTools(root: string, assistants: AIAssista
       else await atomicWriteFile(target, JSON.stringify(old, null, 2) + '\n');
     }
   }
-  if (assistants.includes('codex')) {
-    const relative = '.codex/config.toml';
-    await assertNoLinkedPathComponents(root, path.join(root, relative));
+  for (const target of targets.filter((candidate) => candidate.format === 'toml')) {
+    await assertNoLinkedPathComponents(root, path.join(root, target.path));
     let config: TomlTable = {};
-    try { config = parse(await fs.readFile(path.join(root, relative), 'utf8')); }
+    try { config = parse(await fs.readFile(path.join(root, target.path), 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    const existing = config.mcp_servers;
-    if (existing && (typeof existing !== 'object' || Array.isArray(existing))) throw new Error('Invalid Codex mcp_servers table.');
-    config.mcp_servers = { ...(existing as Record<string, any>), [BRAND_CONFIG.mcp.serverName]: server };
-    await write(relative, stringify(config));
+    const existing = config[target.key];
+    if (existing && (typeof existing !== 'object' || Array.isArray(existing))) throw new Error(`Invalid ${target.key} table in ${target.path}.`);
+    config[target.key] = { ...(existing as Record<string, any>), [BRAND_CONFIG.mcp.serverName]: server };
+    await write(target.path, stringify(config));
   }
   return outputs;
 }

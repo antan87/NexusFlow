@@ -54,7 +54,10 @@ export function resolveLaunch(target: string, sessionId?: string, env = terminal
   if (!isCliHarnessId(target)) throw new Error('This harness does not have an embedded terminal target.');
   const harness = CLI_HARNESSES[target];
   let file: string | null | undefined;
-  for (const binary of ('terminalBinaries' in harness ? harness.terminalBinaries : [harness.binary])) {
+  // Only harnesses that declare extra terminal binaries carry the key at all,
+  // so the guard has to survive a declared-but-absent value.
+  const binaries = 'terminalBinaries' in harness && harness.terminalBinaries ? harness.terminalBinaries : [harness.binary];
+  for (const binary of binaries) {
     file = findExecutable(binary, env, platform);
     if (file) break;
   }
