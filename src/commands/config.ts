@@ -9,6 +9,7 @@
  */
 
 import { loadConfig, saveConfig } from '../core/config.js';
+import { checkConfigPaths } from '../core/config-paths.js';
 import { BRAND_NAME } from '../core/constants.js';
 
 /**
@@ -43,7 +44,17 @@ export async function configSetCommand(key: string, value: string): Promise<void
 
   // Parse booleans and numbers
   let parsed: unknown = value;
-  if (value === 'true') parsed = true;
+  if (key === 'devDir' || key === 'workspacesDir') {
+    // Same checks as setup and POST /api/config: a folder that cannot be used
+    // is refused here rather than failing later when a workspace is created.
+    const report = await checkConfigPaths({ devDir: config.devDir, workspacesDir: config.workspacesDir, [key]: value });
+    const check = report[key]!;
+    if (check.status !== 'ok') {
+      const hint = check.status === 'missing' && check.canCreate ? ' Create it first, then run this again.' : '';
+      throw new Error(`${key}: ${check.message}${hint}`);
+    }
+    parsed = check.path;
+  } else if (value === 'true') parsed = true;
   else if (value === 'false') parsed = false;
   else if (!isNaN(Number(value)) && value.trim() !== '') parsed = Number(value);
 
