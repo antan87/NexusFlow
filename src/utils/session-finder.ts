@@ -296,15 +296,24 @@ async function getFilesRecursively(dir: string, extension: string): Promise<stri
   return result;
 }
 
+// Real session_meta lines carry Codex's base instructions and measure about
+// 20 KB, so a first read of 32 KB almost always suffices.
+const CODEX_HEADER_READS = [32 * 1024, 256 * 1024];
+
 /** Read the first Codex record without loading a potentially large rollout. */
 async function codexSessionHeader(filePath: string): Promise<any | null> {
   const file = await fs.open(filePath, 'r');
   try {
-    const buffer = Buffer.alloc(256 * 1024);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    const end = buffer.subarray(0, bytesRead).indexOf(10);
-    if (end < 0) return null;
-    try { return JSON.parse(buffer.toString('utf8', 0, end)); } catch { return null; }
+    for (const size of CODEX_HEADER_READS) {
+      const buffer = Buffer.alloc(size);
+      const { bytesRead } = await file.read(buffer, 0, size, 0);
+      const end = buffer.subarray(0, bytesRead).indexOf(10);
+      if (end >= 0) {
+        try { return JSON.parse(buffer.toString('utf8', 0, end)); } catch { return null; }
+      }
+      if (bytesRead < size) return null; // the whole file had no line break
+    }
+    return null;
   } finally {
     await file.close();
   }
@@ -1057,7 +1066,22 @@ async function readCodexRolloutCwd(file: string): Promise<string | null> {
   return null;
 }
 
-async function getCodexCwds(codexHome: string): Promise<string[]> {
+// The status overview checks up to 24 workspaces at once. Without sharing,
+// each check scanned every rollout header before any of them filled the
+// cache: 600 MiB of reads for one page at tier L. Callers that arrive while a
+// scan is running share it.
+let codexCwdsInFlight: { codexHome: string; result: Promise<string[]> } | null = null;
+
+function getCodexCwds(codexHome: string): Promise<string[]> {
+  if (codexCwdsInFlight?.codexHome === codexHome) return codexCwdsInFlight.result;
+  const result = scanCodexCwds(codexHome).finally(() => {
+    if (codexCwdsInFlight?.result === result) codexCwdsInFlight = null;
+  });
+  codexCwdsInFlight = { codexHome, result };
+  return result;
+}
+
+async function scanCodexCwds(codexHome: string): Promise<string[]> {
   // Codex writes rollouts into nested YYYY/MM/DD folders, so the sessions
   // root's mtime does not change when a session starts. List the tree on
   // every call and cache per file instead.

@@ -1080,13 +1080,28 @@ function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
 
 // A paged status scan keeps one stable catalog and PM2 snapshot across requests.
 // The small bounded cache avoids rescanning every manifest for each page.
+// Many workspaces use the same repository in place, so one scan also runs
+// `git status` once per distinct repository and shares it across its pages;
+// the next scan (a new snapshot) reads fresh status.
 const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+type RepoStatusMemo = Map<string, ReturnType<typeof getRepoStatus>>;
 const statusSnapshots = new Map<string, {
   workspacesDir: string;
   workspaces: Feature[];
   pm2List: Promise<any[]>;
+  repoStatus: RepoStatusMemo;
   expiresAt: number;
 }>();
+
+function memoizedRepoStatus(memo: RepoStatusMemo, repoPath: string): ReturnType<typeof getRepoStatus> {
+  const key = path.resolve(repoPath);
+  let status = memo.get(key);
+  if (!status) {
+    status = getRepoStatus(key, { readOnly: true });
+    memo.set(key, status);
+  }
+  return status;
+}
 
 // 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
 // Git status is read-only; never fetch/rebase here.
@@ -1124,6 +1139,7 @@ app.get('/api/workspaces/status', async (c) => {
         workspacesDir: config.workspacesDir,
         workspaces,
         pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        repoStatus: new Map(),
         expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
       };
       snapshotId = randomUUID();
@@ -1131,6 +1147,7 @@ app.get('/api/workspaces/status', async (c) => {
       while (statusSnapshots.size > 16) statusSnapshots.delete(statusSnapshots.keys().next().value!);
     }
     const workspaces = snapshot?.workspaces ?? await listWorkspaces(config.workspacesDir);
+    const repoStatusMemo: RepoStatusMemo = snapshot?.repoStatus ?? new Map();
     const selected = paged ? workspaces.slice(offset, offset + limit) : workspaces;
 
     // Fetch the PM2 process list once for the whole overview instead of
@@ -1157,7 +1174,7 @@ app.get('/api/workspaces/status', async (c) => {
           // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
             const worktreePath = resolveFeatureRepoPath(ws, workspacePath, repoPath);
-            const repoStatus = await getRepoStatus(worktreePath);
+            const repoStatus = await memoizedRepoStatus(repoStatusMemo, worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
               status.changedFiles += repoStatus.changedFiles.length;

@@ -529,6 +529,16 @@ describe('JSON error boundaries and malformed lines resilience', () => {
       expect(await findActiveAssistants(workspaceDir)).toContain('codex');
     });
 
+    it('reads a session header that is longer than the first read', async () => {
+      // Real session_meta lines carry base instructions (~20 KB); make this one exceed 32 KB.
+      await fs.writeFile(
+        path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-06T10-00-00-long.jsonl'),
+        JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a53', cwd: workspaceDir, instructions: 'x'.repeat(40_000) } }) + '\n',
+      );
+
+      expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+    });
+
     it('rechecks a Codex rollout whose session header was not written yet', async () => {
       const rollout = path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-03T10-00-00-c.jsonl');
       await fs.writeFile(rollout, '');
