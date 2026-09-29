@@ -349,6 +349,8 @@ ctxspace verify --command "npm test" --timeout 120
 ctxspace verify --json
 ```
 
+A milestone gate (`ctxspace flow --step <id> --action complete`) runs that milestone's verification command with a 30-minute limit, since gates usually run a full suite, a build and browser tests. Set a different limit per milestone with `verificationTimeoutSeconds` (30 seconds to 2 hours) in the plan, or "verification time limit" in the milestone editor. A gate that runs out of time records `timeout` and says which limit it hit.
+
 ### Verification Invariants & Security
 - **Strict Sequential Execution**: Tests are executed sequentially per repository to prevent resource starvation and test harness interference.
 - **Dangerous Operator Rejection**: Command strings containing shell operators (`&&`, `||`, `;`, `|`, `` ` ``, `$()`) are rejected to eliminate command injection risks and ensure deterministic status reporting.

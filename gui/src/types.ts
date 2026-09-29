@@ -582,6 +582,8 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
   dependsOn?: string[];
   verificationCommand?: string;
+  /** Gate time limit in seconds; gates default to 30 minutes. */
+  verificationTimeoutSeconds?: number;
   lastVerificationSha?: string;
   lastVerificationStatus?: string;
   completedAt?: string;

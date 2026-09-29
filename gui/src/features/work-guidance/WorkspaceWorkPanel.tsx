@@ -248,6 +248,10 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
           </fieldset>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(step.requiresVerification || step.verificationCommand)} disabled={step.status === 'completed'} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, requiresVerification: event.target.checked, ...(!event.target.checked ? { verificationCommand: '' } : {}) } : item))} />Verify before completing milestone {index + 1}</label>
           {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification command (optional)<Input value={step.verificationCommand ?? ''} disabled={step.status === 'completed'} placeholder="Uses the workspace test command unless overridden" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationCommand: event.target.value } : item))} /></label>}
+          {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification time limit in minutes (optional)<Input type="number" min={1} max={120} step={1} value={step.verificationTimeoutSeconds ? Math.round(step.verificationTimeoutSeconds / 60) : ''} placeholder="30" onChange={(event) => {
+            const minutes = Number.parseInt(event.target.value, 10);
+            setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationTimeoutSeconds: Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 120) * 60 : undefined } : item));
+          }} /></label>}
         </fieldset>)}
         {!readOnly && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>}
       </fieldset>}

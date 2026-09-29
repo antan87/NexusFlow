@@ -13,7 +13,12 @@ const run = (...args: string[]) => execa(process.execPath, [cli, ...args], {
   cwd: root, reject: false, env: { CONTEXTSPACE_HOME: path.join(root, 'profile'), NEXUSFLOW_HOME: path.join(root, 'profile') },
 });
 
-describe('built diagnostics CLI', () => {
+// Each test starts the built CLI several times in a row (a real TTY via
+// `script` in one of them). A cold start takes seconds on a loaded machine, so
+// the default 30 s per test is too tight; correctness, not speed, is tested here.
+const BUILT_CLI_TIMEOUT_MS = 120_000;
+
+describe('built diagnostics CLI', { timeout: BUILT_CLI_TIMEOUT_MS }, () => {
   it('leaves complete sanitized staging bytes and preserves the destination when interrupted before publication', async () => {
     const destination = path.join(root, 'existing.json');
     await fs.writeFile(destination, 'previous output');
