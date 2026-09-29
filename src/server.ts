@@ -99,6 +99,8 @@ import { commitWorkspace, pushWorkspace } from './core/commit.js';
 import { finishWorkspace } from './core/finish.js';
 import { IsolationConflictError, planRepoIsolation } from './core/isolate.js';
 import { ReferenceRepoError, describeEditBoundaries, referenceRepoMessage } from './core/edit-policy.js';
+import { ArchivedWorkspaceError, assertWorkspaceActive } from './core/archive-guard.js';
+import { archiveWorkspace, unarchiveWorkspace } from './core/archive.js';
 import { evaluateProgression } from './core/progression-policy.js';
 import { getWorkspaceStatusReport } from './core/status.js';
 import { refreshWorkspace } from './core/refresh.js';
@@ -505,6 +507,9 @@ function errorResponse(c: any, error: unknown) {
   if (error instanceof ReferenceRepoError) {
     return c.json({ error: error.message, code: error.code, repos: error.repos }, 409);
   }
+  if (error instanceof ArchivedWorkspaceError) {
+    return c.json({ error: error.message, code: error.code }, 409);
+  }
   if (error instanceof IsolationConflictError) {
     return c.json({ error: error.message, code: error.code, plan: error.plan }, 409);
   }
@@ -606,6 +611,60 @@ app.use('/api/*', async (c, next) => {
   }
   await next();
 });
+
+// Archived workspaces keep a readable record. Routes that change repositories
+// or start processes refuse them here, before any handler runs; the core
+// operations refuse them too, so CLI and MCP callers get the same answer.
+const ARCHIVE_REFUSED_ACTIONS = new Set([
+  'launch', 'terminal', 'stream', 'resume', 'sync', 'commit', 'push', 'finish', 'isolate', 'repo',
+  'verify', 'migrate', 'update-spec', 'domain-packs', 'services', 'orchestrators', 'changes',
+]);
+
+/** The workspace action a mutating request targets, when archive must refuse it. */
+export function archiveRefusedAction(method: string, requestPath: string): { id: string; action: string } | null {
+  if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) return null;
+  const segments = requestPath.split('/');
+  // ['', 'api', 'workspace', ':id', ':action', ...rest]
+  if (segments[1] !== 'api' || segments[2] !== 'workspace' || segments.length < 5) return null;
+  const action = segments[4] ?? '';
+  if (!ARCHIVE_REFUSED_ACTIONS.has(action)) return null;
+  // Stopping is how an archived workspace's leftovers are cleaned up.
+  if ((action === 'services' || action === 'orchestrators') && segments.slice(5).includes('stop')) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(segments[3] ?? '');
+  } catch {
+    return null;
+  }
+  return id ? { id, action } : null;
+}
+
+app.use('/api/workspace/*', async (c, next) => {
+  const target = archiveRefusedAction(c.req.method, c.req.path);
+  if (target) {
+    try {
+      const config = await loadConfig();
+      const feature = await loadFeatureConfig(resolveWorkspacePath(config.workspacesDir, target.id));
+      assertWorkspaceActive(feature, operationLabel(target.action));
+    } catch (error) {
+      if (error instanceof ArchivedWorkspaceError) return errorResponse(c, error);
+      // Anything else (unknown workspace, bad path) is the handler's to report.
+    }
+  }
+  await next();
+});
+
+function operationLabel(action: string): string {
+  switch (action) {
+    case 'launch': case 'terminal': case 'stream': case 'resume': return 'start assistant sessions';
+    case 'services': case 'orchestrators': return 'start services';
+    case 'isolate': return 'prepare repositories for editing';
+    case 'repo': return 'add repositories';
+    case 'changes': return 'change files';
+    case 'verify': return 'run verification';
+    default: return action.replace(/-/g, ' ');
+  }
+}
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
 
@@ -1145,6 +1204,10 @@ app.get('/api/workspaces/status', async (c) => {
           activeAssistants: [],
         };
 
+        // An archived workspace has no worktrees of its own; its references'
+        // changes belong to the user's checkouts, not to this workspace.
+        if (ws.archivedAt) return status;
+
         try {
           // Uncommitted changes across the workspace's repos: worktrees inside
           // the workspace dir, or the source repos themselves for in-place.
@@ -1594,6 +1657,43 @@ app.delete('/api/workspace/:id', async (c) => {
 
     await deleteWorkspace(workspacePath);
     return c.json({ success: true });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 7.6a. Archive a workspace: return its worktrees, keep its record.
+app.post('/api/workspace/:id/archive', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown; keepBranches?: unknown; deleteRemoteBranches?: unknown; fetch?: unknown };
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
+    const report = await archiveWorkspace(workspacePath, {
+      park: body.park === true,
+      dryRun: body.dryRun === true,
+      keepBranches: body.keepBranches === true,
+      deleteRemoteBranches: body.deleteRemoteBranches === true,
+      // A preview may skip fetching when the caller fetched moments ago; archive itself always fetches.
+      fetch: body.dryRun === true && body.fetch === false ? false : undefined,
+    });
+    if (!report.dryRun && !report.alreadyArchived && !report.ready) return c.json({ ...report, error: report.blockers.join(' ') }, 409);
+    if (report.errors.length > 0) return c.json({ ...report, error: report.errors.join(' ') }, 500);
+    return c.json(report);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 7.6b. Restore an archived workspace as active (repositories stay references).
+app.post('/api/workspace/:id/unarchive', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
+    return c.json(await unarchiveWorkspace(workspacePath));
   } catch (error) {
     return errorResponse(c, error);
   }

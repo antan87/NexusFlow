@@ -21,7 +21,7 @@ const CORE_ALLOWED_TOOLS = new Set([
 
 const READONLY_MCP_TOOLS = new Set([
   'search_workspace', 'workspace_status', 'get_workspace_diff',
-  'run_doctor', 'get_service_logs', 'list_workspaces', 'list_repos',
+  'run_doctor', 'get_service_logs', 'list_workspaces', 'list_repos', 'preview_archive',
   'add_knowledge', 'promote_knowledge', 'search_knowledge',
   'read_workroom_stream', 'refresh_context',
   'get_work_context', 'get_planning_notes', 'read_work_document',

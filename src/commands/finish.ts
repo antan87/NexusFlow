@@ -16,13 +16,19 @@ import { evaluateProgression } from '../core/progression-policy.js';
 import { getWorkspaceRepos } from '../utils/multi-git.js';
 import { resolveWorkspaceInteractive } from '../utils/resolve-workspace.js';
 import { readWorkspaceKnowledge, parseKnowledgeEntries, promoteKnowledge, type KnowledgeEntryType } from '../core/knowledge.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
+import { archiveWorkspace } from '../core/archive.js';
+import { reportArchiveOutcome } from './archive.js';
 
 interface FinishCommandOptions {
   message?: string;
   pr?: boolean; // --no-pr → false
   knowledge?: boolean; // --no-knowledge → false
   cleanup?: boolean;
+  /** Archive afterwards: remove worktrees, keep the record. */
+  archive?: boolean;
+  /** With `archive`: also archive pushed-but-unmerged work, keeping its branch. */
+  park?: boolean;
   /** Accepts non-destructive defaults. Never bypasses verification. */
   yes?: boolean;
   dryRun?: boolean;
@@ -161,10 +167,10 @@ export async function finishCommand(
     await promoteInteractively(workspacePath);
   }
 
-  // ── Cleanup ────────────────────────────────────────────────────────────
+  // ── Archive or cleanup ─────────────────────────────────────────────────
   if (!report.safeToCleanup) {
-    if (options.cleanup) {
-      console.log(chalk.yellow('⚠  Not removing the workspace — some repos are still dirty or unpushed:'));
+    if (options.cleanup || options.archive) {
+      console.log(chalk.yellow(`⚠  Not ${options.archive ? 'archiving' : 'removing'} the workspace — some repos are still dirty or unpushed:`));
       for (const r of report.repos) {
         if (r.error) console.log(`    - ${r.name}: ${r.error}`);
         else if (r.skipped) console.log(`    - ${r.name}: ${r.skipped}`);
@@ -175,15 +181,36 @@ export async function finishCommand(
     return;
   }
 
-  const wantsCleanup = options.cleanup
-    ? true
-    : options.yes
-      ? false
-      : await confirm({ message: 'Everything is pushed. Remove this workspace now?', default: false });
+  if (options.archive) {
+    reportArchiveOutcome(await archiveWorkspace(workspacePath, { park: options.park }));
+    return;
+  }
 
-  if (wantsCleanup) {
-    const confirmed = options.cleanup && !options.yes
-      ? await confirm({ message: `Delete workspace "${feature.branchName}"? All worktrees will be force-removed.`, default: false })
+  const choice: 'archive' | 'delete' | 'keep' = options.cleanup
+    ? 'delete'
+    : options.yes
+      ? 'keep'
+      : await select({
+          message: 'Everything is pushed. What now?',
+          default: 'keep',
+          choices: [
+            { name: 'Keep the workspace', value: 'keep' as const },
+            { name: `Archive it — remove worktrees once merged, keep milestones, notes, knowledge and documents`, value: 'archive' as const },
+            { name: 'Delete it and its record', value: 'delete' as const },
+          ],
+        });
+
+  if (choice === 'archive') {
+    reportArchiveOutcome(await archiveWorkspace(workspacePath, {}));
+    return;
+  }
+
+  if (choice === 'delete') {
+    const confirmed = !options.yes
+      ? await confirm({
+          message: `Delete workspace "${feature.branchName}" and its record — milestones, verification history, planning notes, knowledge (including promoted base knowledge) and documents? Worktrees are force-removed. \`${CLI_NAME} archive\` keeps the record instead.`,
+          default: false,
+        })
       : true;
     if (confirmed) {
       try {

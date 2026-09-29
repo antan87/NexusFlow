@@ -52,17 +52,18 @@ describe('Storage Adapters', () => {
       expect(fs.rm).not.toHaveBeenCalled();
     });
 
-    it('should write base files into a per-repo base directory', async () => {
+    it('without a resolvable repository, writes base files into a per-repo directory of the workspace, atomically', async () => {
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      vi.mocked(fs.rename).mockResolvedValue(undefined);
 
       await adapter.writeBaseFile('/ws/path', 'RepoName', 'contextspace-knowledge.md', 'base');
 
-      expect(fs.writeFile).toHaveBeenCalledWith(
-        path.normalize('/ws/path/.contextspace/base/RepoName/contextspace-knowledge.md'),
-        'base',
-        'utf8'
-      );
+      const target = path.normalize('/ws/path/.contextspace/base/RepoName/contextspace-knowledge.md');
+      const [temp, content] = vi.mocked(fs.writeFile).mock.calls[0]!;
+      expect(String(temp).startsWith(`${target}.tmp-`)).toBe(true);
+      expect(content).toBe('base');
+      expect(fs.rename).toHaveBeenCalledWith(temp, target);
     });
 
     it('should not collide base and workspace files that share a filename (A1.2)', () => {

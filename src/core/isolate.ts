@@ -14,6 +14,7 @@ import { acquireLock, type ReleaseLock } from './locks.js';
 import { detectDefaultBranch, isValidBranchName } from '../utils/git.js';
 import { isInPlace } from '../utils/feature.js';
 import type { Feature, IsolatedRepoInfo } from '../types.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 export interface IsolateRepoOptions {
   /** Target feature branch name to create/checkout in the worktree. */
@@ -103,6 +104,7 @@ export async function planRepoIsolation(
   if (!feature) {
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
   }
+  assertWorkspaceActive(feature, 'prepare repositories for editing');
 
   const trimmed = repoNameOrPath.trim();
   if (!trimmed || /[\r\n]/.test(trimmed)) {
@@ -213,6 +215,7 @@ export async function isolateWorkspaceRepo(
   if (!feature) {
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
   }
+  assertWorkspaceActive(feature, 'prepare repositories for editing');
 
   // A recorded worktree whose directory vanished: drop the stale registration
   // so planning sees the real state.
@@ -296,6 +299,8 @@ export async function isolateWorkspaceRepo(
         isolatedAt: new Date().toISOString(),
       };
       freshFeature.isolatedRepos[repoName] = isolatedInfo;
+      // Provenance: archive deletes only branches this workspace created.
+      if (branchCreated) freshFeature.createdBranches = { ...freshFeature.createdBranches, [repoName]: branchName };
       await saveFeatureConfig(workspacePath, freshFeature);
     } finally {
       if (releaseLock) {

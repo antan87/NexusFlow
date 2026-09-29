@@ -17,6 +17,7 @@ import {
 import { loadFeatureConfig } from './workspace.js';
 import { getOrganization } from './domain-packs.js';
 import { ReferenceRepoError, referenceRepoMessage, referenceRepoNames } from './edit-policy.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 /** Options for {@link commitWorkspace}. */
 export interface WorkspaceCommitOptions {
@@ -85,6 +86,7 @@ export async function commitWorkspace(
 ): Promise<WorkspaceCommitReport> {
   let repos = await getWorkspaceRepos(workspacePath);
   const feature = await loadFeatureConfig(workspacePath).catch(() => null);
+  assertWorkspaceActive(feature, 'commit');
   const references = new Set(feature ? referenceRepoNames(feature, workspacePath) : []);
 
   const fileSelection = options?.files;
@@ -198,6 +200,7 @@ export async function pushWorkspace(workspacePath: string, repoNames: string[]):
   const unknown = repoNames.filter((name) => !repos.some((r) => r.name === name));
   if (unknown.length > 0) throw new Error(`Not in this workspace: ${unknown.join(', ')}`);
   const feature = await loadFeatureConfig(workspacePath).catch(() => null);
+  assertWorkspaceActive(feature, 'push');
   const references = new Set(feature ? referenceRepoNames(feature, workspacePath) : []);
   const blocked = repoNames.filter((name) => references.has(name));
   if (blocked.length > 0) throw new ReferenceRepoError(blocked);

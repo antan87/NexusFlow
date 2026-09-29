@@ -67,10 +67,12 @@ Keep authored rationale in `contextspace-milestones.md`, not in generated views 
 a competing milestone tracker. Read it directly or through MCP `get_planning_notes`. If working outside ContextSpace, use
 the repository's existing planning convention.
 
-With local storage, knowledge promoted to a repo's base file is kept in that
-workspace's configuration directory. Other workspaces do not read it, and
-workspace cleanup removes it. Before closing a workspace, put learnings that later
-work needs into versioned skill sources or shared project sources.
+With local storage, knowledge promoted to a repo's base file is kept in the
+ContextSpace home, keyed by the repository, so every workspace with that repository
+reads it and it survives removing the workspace. Close finished workspaces with
+`ctxspace archive`, which keeps milestones, notes, knowledge and documents; delete
+only what no one needs. Put guidance that should travel beyond one machine into
+versioned skill sources or shared project sources.
 
 ## Execute only the current stage
 

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, type ComponentProps } from 'react';
 import {
   MoreVertical,
+  Archive,
+  ArchiveRestore,
   Copy,
   Trash2,
   FolderGit2,
@@ -32,7 +34,8 @@ import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { WorkspaceHeader } from '../features/workspace-shell/WorkspaceHeader.js';
 import { WorkspaceNav } from '../features/workspace-shell/WorkspaceNav.js';
-import { SECTION_LABELS, destinationOf, type WorkspaceDestination, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
+import { SECTION_LABELS, destinationOf, visibleSection, type WorkspaceDestination, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
+import { ArchivedNotice, ArchivedWorkspaceView } from '../features/workspace-shell/ArchivedWorkspaceView.js';
 import { useCockpitStore, cockpitStore, upcastWorkspaceToCockpit } from '../features/cockpit/cockpitStore.js';
 
 const renderEditorIcon = (id: string, name: string) => {
@@ -123,6 +126,10 @@ interface WorkspacesPageProps {
   onSelectTab: (id: string, tab: SubTab) => void;
   handleCopyPrompt: (ws: Feature) => void;
   handleDeleteWorkspace: (wsName: string) => Promise<void>;
+  /** Opens the archive dialog for a workspace. */
+  handleArchiveWorkspace?: (wsName: string) => void;
+  /** Restores an archived workspace as active. */
+  handleUnarchiveWorkspace?: (wsName: string) => Promise<void>;
   deleteWsLoading: string | null;
   repos: RepoInfo[];
   addRepoLoading: boolean;
@@ -139,10 +146,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     workspaces,
     workspaceStatuses,
     selectedId,
-    subTab,
+    subTab: requestedSubTab,
     onSelectTab,
     handleCopyPrompt,
     handleDeleteWorkspace,
+    handleArchiveWorkspace,
+    handleUnarchiveWorkspace,
     deleteWsLoading,
     repos,
     addRepoLoading,
@@ -156,6 +165,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
   const [planVersion, setPlanVersion] = useState(0);
   const selected = workspaces.find((w) => w.branchName === selectedId) ?? null;
+  // An archived workspace shows only its record; deep links elsewhere land on its overview.
+  const archived = Boolean(selected?.archivedAt);
+  const subTab = visibleSection(requestedSubTab, archived);
+  const [restoring, setRestoring] = useState(false);
+  const handleRestore = async () => {
+    if (!selected || !handleUnarchiveWorkspace) return;
+    setRestoring(true);
+    try {
+      await handleUnarchiveWorkspace(selected.branchName);
+    } finally {
+      setRestoring(false);
+    }
+  };
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openFloatingChat } = useFloatingChat();
 
@@ -563,7 +585,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           milestones={lifecycleData?.lifecycle?.steps ?? []}
           verification={cockpit.gateStatus}
           actions={<>
-              {primaryEditor && (
+              {primaryEditor && !archived && (
                 availableEditors.length > 1 ? (
                   <div className="inline-flex h-7 items-center rounded-md border border-border bg-secondary/80 text-xs">
                     <button
@@ -636,13 +658,26 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <MenuItem onClick={() => handleCopyPrompt(selected)} className="flex items-center gap-2 text-xs py-1.5">
                     <Copy size={12} /> <span>Copy AI Context</span>
                   </MenuItem>
+                  {archived ? (
+                    handleUnarchiveWorkspace && (
+                      <MenuItem onClick={() => void handleRestore()} disabled={restoring} className="flex items-center gap-2 text-xs py-1.5">
+                        <ArchiveRestore size={12} /> <span>{restoring ? 'Restoring…' : 'Restore workspace'}</span>
+                      </MenuItem>
+                    )
+                  ) : (
+                    handleArchiveWorkspace && (
+                      <MenuItem onClick={() => handleArchiveWorkspace(selected.branchName)} className="flex items-center gap-2 text-xs py-1.5">
+                        <Archive size={12} /> <span>Archive workspace…</span>
+                      </MenuItem>
+                    )
+                  )}
                   <MenuItem
                     onClick={() => void handleDeleteWorkspace(selected.branchName)}
                     disabled={deleteWsLoading === selected.branchName}
                     className="flex items-center gap-2 text-xs py-1.5 text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 size={12} />
-                    <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete Worktree'}</span>
+                    <span>{deleteWsLoading === selected.branchName ? 'Deleting…' : 'Delete workspace…'}</span>
                   </MenuItem>
                 </MenuPopup>
               </Menu>
@@ -652,6 +687,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           workspaceId={selected.branchName}
           section={subTab}
           lastVisited={lastVisited}
+          archived={archived}
           badges={{ changes: totalChangedFiles, skills: activeSkills.length }}
         />
 
@@ -678,8 +714,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             </div>
           )}
 
+          {archived && <ArchivedNotice workspace={selected} onRestore={() => void handleRestore()} restoring={restoring} />}
+
           <div role="region" aria-label={SECTION_LABELS[subTab]} className="pb-6">
-              {subTab === 'overview' && (
+              {subTab === 'overview' && archived && <ArchivedWorkspaceView workspace={selected} />}
+              {subTab === 'overview' && !archived && (
                 <div className="flex flex-col gap-6">
                   {/* HIGH-DENSITY TELEMETRY STRIP */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1237,14 +1276,14 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                 <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
               </div>}
               {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
-              {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} />}
+              {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} readOnly={archived} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">
-                <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} onPlanChanged={() => {
+                <WorkspaceWorkPanel key={selected.branchName} workspaceId={selected.branchName} readOnly={archived} onPlanChanged={() => {
                   setPlanVersion((version) => version + 1);
                   void planProps.handleRetryPlan(selected.branchName);
                 }} />
-                <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} />
+                <ImplementationPlan key={`${selected.branchName}-${planVersion}`} workspaceId={selected.branchName} defaultViewMode="flow" {...planProps} readOnly={archived} />
               </div>}
               {subTab === 'services' && <ServiceConsole ws={selected} />}
           </div>

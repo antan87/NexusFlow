@@ -13,6 +13,7 @@ import { getWorkspaceRepos, getRepoBranch, getRepoStatus, getDiffSummary, commit
 import { referenceRepoMessage, referenceRepoNames } from '../core/edit-policy.js';
 import { BRAND_NAME, PRIMARY_MANIFEST_FILE } from '../core/constants.js';
 import { getOrganization } from '../core/domain-packs.js';
+import { assertWorkspaceActive } from '../core/archive-guard.js';
 
 interface CommitOptions {
   /**
@@ -60,6 +61,7 @@ export async function commitCommand(
     console.error(chalk.red('✖ Failed to load workspace configuration.'));
     return;
   }
+  assertWorkspaceActive(feature, 'commit');
 
   if (feature.organizationId) {
     const org = getOrganization(feature.organizationId);
