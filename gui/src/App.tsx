@@ -83,6 +83,17 @@ function beginWorkspaceLoad(loads: Map<string, AbortController>, kind: string): 
   return controller.signal;
 }
 
+/** The last changes, sessions and plan shown for a workspace. */
+interface RecentWorkspaceData { changes?: any[]; sessions?: AISession[]; plan?: string }
+const RECENT_WORKSPACE_DATA_LIMIT = 16;
+
+function rememberWorkspaceData(recent: Map<string, RecentWorkspaceData>, wsId: string, data: RecentWorkspaceData): void {
+  const merged = { ...recent.get(wsId), ...data };
+  recent.delete(wsId);
+  recent.set(wsId, merged);
+  if (recent.size > RECENT_WORKSPACE_DATA_LIMIT) recent.delete(recent.keys().next().value!);
+}
+
 type UiUpdateStatus = {
   currentVersion: string;
   latestVersion: string;
@@ -219,6 +230,9 @@ function AppInner() {
   const saveKnowledgeRequestRef = useRef(0);
   // One in-flight load per kind of workspace data; see beginWorkspaceLoad.
   const workspaceLoadsRef = useRef(new Map<string, AbortController>());
+  // Switching back to a recent workspace shows its last data at once while a
+  // fresh load runs, instead of an empty view until every request returns.
+  const recentWorkspaceDataRef = useRef(new Map<string, RecentWorkspaceData>());
   const editedKnowledgeRef = useRef('');
   const isEditingKnowledgeRef = useRef(false);
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
@@ -529,6 +543,7 @@ function AppInner() {
       perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: isCurrent() });
       if (!isCurrent()) return;
       setGitChanges(data.changes || []);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes: data.changes || [] });
     } catch (e) {
       if (isCurrent()) console.error(e);
     } finally {
@@ -547,6 +562,7 @@ function AppInner() {
       perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: isCurrent() });
       if (!isCurrent()) return;
       setSessions(data.sessions || []);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { sessions: data.sessions || [] });
     } catch (e) {
       if (isCurrent()) console.error(e);
     } finally {
@@ -668,6 +684,7 @@ function AppInner() {
       if (!isCurrentRequest()) return;
 
       setPlanContent((data as { content: string }).content);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { plan: (data as { content: string }).content });
       setPlanError(null);
     } catch (e) {
       if (!isCurrentRequest()) return;
@@ -844,9 +861,10 @@ function AppInner() {
     saveKnowledgeRequestRef.current += 1;
     for (const controller of workspaceLoadsRef.current.values()) controller.abort();
     workspaceLoadsRef.current.clear();
-    setSessions([]);
+    const recent = activeWsId ? recentWorkspaceDataRef.current.get(activeWsId) : undefined;
+    setSessions(recent?.sessions ?? []);
     setSessionsLoading(false);
-    setGitChanges([]);
+    setGitChanges(recent?.changes ?? []);
     setGitChangesLoading(false);
     setKnowledgeContent('');
     setKnowledgeError(null);
@@ -857,9 +875,14 @@ function AppInner() {
     isEditingKnowledgeRef.current = false;
     setEditedKnowledge('');
     setIsEditingKnowledge(false);
-    setPlanContent('');
+    setPlanContent(recent?.plan ?? '');
     setPlanError(null);
     setPlanLoading(false);
+    if (activeWsId && recent) {
+      for (const kind of ['changes', 'sessions', 'plan'] as const) {
+        if (recent[kind] !== undefined) perfMark('cs:ws-data', { id: activeWsId, kind, applied: true, cached: true });
+      }
+    }
   }, [activeWsId]);
 
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
