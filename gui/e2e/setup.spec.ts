@@ -32,7 +32,8 @@ async function firstRun(page: Page, options: {
     posts.push(body);
     if (options.save) return options.save(route, body);
     saved = true;
-    const { createWorkspacesDir: _flag, ...stored } = body;
+    const stored = { ...body };
+    delete stored.createWorkspacesDir;
     return route.fulfill({ json: { success: true, config: stored } });
   });
   await page.route('**/api/config/validate', (route) => {
@@ -70,6 +71,18 @@ test('first run suggests working folders, labels them, and hands repositories to
   expect(posts[0]).toMatchObject({ devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' });
   expect(posts[0]).not.toHaveProperty('createWorkspacesDir');
 
+  // The filter's search icon is drawn on top of the field, not hidden behind it.
+  const iconOnTop = await page.getByLabel('Filter repositories').evaluate((input) => {
+    const icon = input.closest('div')?.querySelector('svg');
+    if (!icon) return false;
+    const box = icon.getBoundingClientRect();
+    // Hit testing skips pointer-events: none, so allow it briefly to probe stacking only.
+    icon.style.pointerEvents = 'auto';
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    icon.style.pointerEvents = '';
+    return Boolean(hit && (hit === icon || icon.contains(hit)));
+  });
+  expect(iconOnTop).toBe(true);
   await page.getByRole('checkbox', { name: /web/ }).check();
   await page.getByRole('button', { name: /Start your first task/ }).click();
   await expect(page).toHaveURL(/#\/new\?repo=%2Fhome%2Fme%2Fdev%2Fweb$/);

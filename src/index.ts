@@ -28,6 +28,7 @@ import { syncCommand } from './commands/sync.js';
 import { commitCommand } from './commands/commit.js';
 import { diffCommand } from './commands/diff.js';
 import { removeCommand } from './commands/remove.js';
+import { archiveCommand, unarchiveCommand } from './commands/archive.js';
 import { loadConfig } from './core/config.js';
 import { debugLog } from './utils/debug.js';
 import { loadPlugins } from './core/plugins/loader.js';
@@ -41,6 +42,7 @@ import { refreshCommand } from './commands/refresh.js';
 import { progressCommand } from './commands/progress.js';
 import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
 import { doctorCommand } from './commands/doctor.js';
+import { dataGuideCommand, diagnosticPreviewCommand, diagnosticExportCommand } from './commands/diagnostics.js';
 import { knowledgeAddCommand, knowledgeShowCommand, knowledgePromoteCommand } from './commands/knowledge.js';
 import { strategyListCommand, strategyCreateCommand, strategyEditCommand, strategyDeleteCommand, strategyShowCommand } from './commands/strategy.js';
 import { projectListCommand, projectAddCommand, projectShowCommand, projectRemoveCommand } from './commands/project.js';
@@ -147,8 +149,10 @@ program
 program
   .command('list')
   .alias('ls')
-  .description('List all existing workspaces')
+  .description('List workspaces (archived ones are hidden unless asked for)')
   .option('--json', 'Output as JSON')
+  .option('--archived', 'List only archived workspaces')
+  .option('--all', 'List active and archived workspaces')
   .action(runAction(listCommand));
 
 program
@@ -432,10 +436,33 @@ skillCmd
 program
   .command('remove')
   .alias('rm')
-  .description('Delete a workspace and cleanly prune/remove its git worktrees')
+  .description('Delete a workspace and its record (force-removes its worktrees); consider archive instead')
   .argument('[workspace]', 'Workspace name or path')
   .action(runAction(async (workspace?: string) => {
     await removeCommand(workspace);
+  }));
+
+program
+  .command('archive')
+  .description('Complete a workspace: remove its worktrees once their work is merged, keep its record')
+  .argument('[workspace]', 'Workspace name or path (auto-detects from CWD)')
+  .option('--park', 'Also archive pushed-but-unmerged work; its branch is kept')
+  .option('--keep-branches', 'Keep every branch, even merged ones this workspace created')
+  .option('--delete-remote-branches', 'Also delete merged branches on origin (only while they still point at the merged commit)')
+  .option('--dry-run', 'Show what would be removed and kept without changing anything')
+  .option('-y, --yes', 'Do not ask for confirmation')
+  .option('--json', 'Output the archive report as JSON')
+  .action(runAction(async (workspace: string | undefined, options: { park?: boolean; keepBranches?: boolean; deleteRemoteBranches?: boolean; dryRun?: boolean; yes?: boolean; json?: boolean }) => {
+    await archiveCommand(workspace, options);
+  }));
+
+program
+  .command('unarchive')
+  .description('Restore an archived workspace as active (its repositories stay read-only references)')
+  .argument('[workspace]', 'Workspace name or path')
+  .option('--json', 'Output the result as JSON')
+  .action(runAction(async (workspace: string | undefined, options: { json?: boolean }) => {
+    await unarchiveCommand(workspace, options);
   }));
 
 program
@@ -486,6 +513,21 @@ program
     await doctorCommand(workspace);
   }));
 
+program.command('data')
+  .description('Explain data storage, sharing, retention and deletion')
+  .option('--json', 'Include effective local profile locations as JSON (private; not a support report)')
+  .action(runAction(dataGuideCommand));
+
+const diagnostics = program.command('diagnostics').description('Review and save a local support report without private content');
+diagnostics.command('preview').argument('[workspace]', 'Workspace path or name (defaults to current workspace, otherwise runtime only)')
+  .option('--candidate <file>', 'Save the sanitized candidate to a NEW file for review and later export')
+  .option('--omit <sections...>', 'Exclude sections: runtime, workspace, checks')
+  .action(runAction(diagnosticPreviewCommand));
+diagnostics.command('export').argument('<candidate>', 'Previously saved diagnostic candidate')
+  .requiredOption('--digest <sha256>', 'Digest from the reviewed preview')
+  .requiredOption('--output <file>', 'NEW destination file; existing files are never replaced')
+  .action(runAction(diagnosticExportCommand));
+
 program
   .command('migrate')
   .description('Migrate legacy NexusFlow workspaces and global config to ContextSpace')
@@ -506,11 +548,13 @@ program
   .option('-m, --message <msg>', 'Commit message for any remaining changes')
   .option('--no-pr', 'Skip PR creation and compare links')
   .option('--no-knowledge', 'Skip the knowledge promotion step')
-  .option('--cleanup', 'Remove the workspace after everything is confirmed pushed (still asks for confirmation)')
+  .option('--archive', 'Archive the workspace afterwards: remove its worktrees, keep its record')
+  .option('--park', 'With --archive: also archive pushed-but-unmerged work, keeping its branch')
+  .option('--cleanup', 'Delete the workspace and its record after everything is confirmed pushed (asks for confirmation)')
   .option('-y, --yes', 'Accept defaults for non-destructive prompts')
   .option('--dry-run', 'Show what finish would do without changing anything')
   .option('--override-verification <reason>', 'Finish although verification is missing, failed or stale; the reason is recorded')
-  .action(runAction(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean; overrideVerification?: string }) => {
+  .action(runAction(async (workspace: string | undefined, options: { message?: string; pr?: boolean; knowledge?: boolean; archive?: boolean; park?: boolean; cleanup?: boolean; yes?: boolean; dryRun?: boolean; overrideVerification?: string }) => {
     await finishCommand(workspace, options);
   }));
 
@@ -801,7 +845,8 @@ mcp
 
 program.hook('postAction', async (thisCommand, actionCommand) => {
   // Skip update check for non-TTY streams and MCP runs to prevent contaminating stdout stream
-  if (!process.stdout.isTTY || (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp')) {
+  if (!process.stdout.isTTY || actionCommand.name() === 'data' || actionCommand.parent?.name() === 'diagnostics'
+      || (actionCommand.name() === 'run' && actionCommand.parent?.name() === 'mcp')) {
     return;
   }
 

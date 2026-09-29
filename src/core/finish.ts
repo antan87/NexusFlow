@@ -23,6 +23,8 @@ import {
   type VerificationOverride,
 } from './progression-policy.js';
 import { loadWorkspaceState, mutateWorkspaceState } from './workspace-state.js';
+import { assertWorkspaceActive } from './archive-guard.js';
+import { loadFeatureConfig } from './workspace.js';
 import { pushRepo } from '../utils/multi-git.js';
 import { detectGh, createPrWithGh, parseRemoteUrl, buildCompareUrl } from '../utils/pr.js';
 import type { FinishRecord, VerificationOverrideRecord } from '../types.js';
@@ -123,6 +125,8 @@ export async function finishWorkspace(
     const invalid = validateOverrideReason(options.override.reason);
     if (invalid) throw new Error(invalid);
   }
+
+  assertWorkspaceActive(await loadFeatureConfig(workspacePath), 'finish');
 
   const preflight = await getWorkspaceStatusReport(workspacePath);
   const policy = await evaluateProgression(workspacePath);

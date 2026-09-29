@@ -50,3 +50,22 @@ export function entrySection(destination: WorkspaceDestination, lastVisited: Par
   const remembered = lastVisited[destination.id];
   return remembered && destination.sections.includes(remembered) ? remembered : destination.sections[0];
 }
+
+/**
+ * An archived workspace shows its record, not the places where work happens:
+ * no changes, services, sessions or skills to act on.
+ */
+export const ARCHIVED_SECTIONS: readonly WorkspaceSection[] = ['overview', 'plan', 'documents', 'knowledge'];
+
+/** The destinations to show, trimmed to the record for an archived workspace. */
+export function destinationsFor(archived: boolean): WorkspaceDestination[] {
+  if (!archived) return WORKSPACE_DESTINATIONS;
+  return WORKSPACE_DESTINATIONS
+    .map((destination) => ({ ...destination, sections: destination.sections.filter((section) => ARCHIVED_SECTIONS.includes(section)) }))
+    .filter((destination) => destination.sections.length > 0);
+}
+
+/** The section to render: an archived workspace falls back to its overview. */
+export function visibleSection(section: WorkspaceSection, archived: boolean): WorkspaceSection {
+  return archived && !ARCHIVED_SECTIONS.includes(section) ? 'overview' : section;
+}

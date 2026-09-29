@@ -17,6 +17,7 @@ import {
 } from '../orchestration/index.js';
 
 import { BRAND_NAME, CLI_NAME, PRIMARY_LOGS_DIR } from '../core/constants.js';
+import { assertWorkspaceActive } from '../core/archive-guard.js';
 
 /**
  * Start services for a workspace.
@@ -30,6 +31,7 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
 
   const workspacePath = await resolveWorkspace(workspaceArg);
   if (!workspacePath) return;
+  assertWorkspaceActive(await loadFeatureConfig(workspacePath), 'start services');
 
   // Check for existing orchestration tools first
   const tools = await detectOrchestrationTools(workspacePath);

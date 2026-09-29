@@ -29,31 +29,38 @@ import type { AISession } from '../../types.js';
 type PaneState =
   | { kind: 'connecting' }
   | { kind: 'running' }
-  | { kind: 'exited'; code: number | null }
-  | { kind: 'disconnected'; detail?: string };
+  | { kind: 'exited'; code: number | null; early?: boolean }
+  | { kind: 'disconnected'; detail?: string }
+  /** The backend no longer has this terminal: it expired or the backend restarted. */
+  | { kind: 'ended' };
+
+/** A harness that exits with an error this soon after starting could not begin its work. */
+const EARLY_EXIT_MS = 15_000;
 
 const PANE_STATE_LABEL: Record<PaneState['kind'], string> = {
   connecting: 'Connecting…',
   running: 'Running',
   exited: 'Exited',
   disconnected: 'Disconnected',
+  ended: 'Ended',
 };
 
 const PANE_STATE_HELP: Record<PaneState['kind'], string> = {
   connecting: 'Input is paused while the terminal connects.',
   running: 'Input is ready. Hiding this window keeps the CLI running.',
   exited: 'The terminal has stopped. Its output stays available.',
-  disconnected: 'Input is paused; the CLI may still be running.',
+  disconnected: 'Input is paused. The CLI keeps running for up to 5 minutes without a connected window; reconnect to continue.',
+  ended: 'This terminal is no longer running. Terminals end when ContextSpace restarts or after 5 minutes with no window connected.',
 };
 
 /** Reported to the modal, which paints the per-tab status dot. */
 export type PaneStatus = 'idle' | 'running' | 'exited' | 'disconnected';
 
-const paneStatusFor = (state: PaneState): PaneStatus => {
-  switch (state.kind) {
+const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
+  switch (kind) {
     case 'running': return 'running';
     case 'disconnected': return 'disconnected';
-    case 'exited': return 'exited';
+    case 'exited': case 'ended': return 'exited';
     case 'connecting': return 'idle';
   }
 };
@@ -95,6 +102,12 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const usageSession = terminal && usageHistory.data
     ? findTerminalUsageSession(terminal, usageHistory.data.sessions, status?.sessions)
     : undefined;
+  // Derived from the backend's list, so a refresh after an expiry or restart
+  // reports the terminal as ended rather than as a connection problem.
+  const gone = !!terminal && !!status && !status.sessions.some(s => s.id === terminal.id);
+  const shownState: PaneState = gone ? { kind: 'ended' } : paneState;
+  const shownKind = shownState.kind;
+  const live = !!terminal && !gone && terminal.state === 'running';
   const activeRef = useRef(active);
   const openFileRef = useRef(onOpenFileReference);
   const statusChangeRef = useRef(onStatusChange);
@@ -103,12 +116,17 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
   useEffect(() => { statusChangeRef.current = onStatusChange; backgroundOutputRef.current = onBackgroundOutput; }, [onStatusChange, onBackgroundOutput]);
   useEffect(() => {
-    statusChangeRef.current?.(paneStatusFor(paneState));
-  }, [paneState]);
+    statusChangeRef.current?.(paneStatusFor(shownKind));
+  }, [shownKind]);
   const send = useCallback((message: object) => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)); }, []);
+  // Only the latest status request may replace the list; an older response that
+  // lacks a just-created terminal would otherwise report it as ended.
+  const refreshSeq = useRef(0);
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     try {
       const next = await terminalRequest<TerminalStatus>(workspace, 'status');
+      if (seq !== refreshSeq.current) return;
       setStatus(next);
       // Recover backend-owned sessions after reloading or reopening a workspace.
       // Prefer the backend's view of the session we already track, so a session
@@ -250,6 +268,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     let cancelled = false;
     let ws: WebSocket | undefined;
     let ended = terminal.state === 'exited';
+    let missing = false;
     let replayed = false;
     const term = renderer.current;
     if (!term) return;
@@ -273,16 +292,25 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           term.write('', () => {
             if (cancelled) return;
             term.options.disableStdin = ended;
-            setPaneState(ended ? { kind: 'exited', code: null } : { kind: 'running' });
+            // An exit that arrived while the replay flushed keeps its code.
+            setPaneState(current => ended ? (current.kind === 'exited' ? current : { kind: 'exited', code: null }) : { kind: 'running' });
             if (!ended) { fit.current?.fit(); send({ type: 'resize', cols: Math.min(term.cols, 500), rows: Math.min(term.rows, 300) }); if (activeRef.current) term.focus(); }
           });
         } else if (message.type === 'exit') {
-          ended = true; term.options.disableStdin = true; setPaneState({ kind: 'exited', code: message.exitCode ?? null });
+          const code = message.exitCode ?? null;
+          // Measured with the backend's exit time, so a replayed exit is judged the same way.
+          const early = terminal.target !== 'shell' && code !== null && code !== 0 && Date.parse(message.exitedAt ?? '') - Date.parse(terminal.startedAt ?? '') < EARLY_EXIT_MS;
+          ended = true; term.options.disableStdin = true; setPaneState({ kind: 'exited', code, early });
           setTerminal(current => current?.id === terminal.id ? { ...current, state: 'exited', exitCode: message.exitCode } : current);
           setStatus(current => current && ({ ...current, sessions: current.sessions.map(s => s.id === terminal.id ? { ...s, state: 'exited' } : s) }));
-        } else if (message.type === 'error') { setError(message.message); term.options.disableStdin = true; }
+        } else if (message.type === 'error') {
+          term.options.disableStdin = true;
+          // An ended terminal cannot be reconnected; say so instead of offering Reconnect forever.
+          if (message.code === 'terminal_not_found') { missing = true; setError(''); void refresh(); }
+          else setError(message.message);
+        }
       };
-      ws.onclose = () => { if (!cancelled) { term.options.disableStdin = true; setPaneState(ended ? { kind: 'exited', code: null } : { kind: 'disconnected' }); } };
+      ws.onclose = () => { if (!cancelled) { term.options.disableStdin = true; setPaneState(missing ? { kind: 'ended' } : ended ? { kind: 'exited', code: null } : { kind: 'disconnected' }); } };
       ws.onerror = () => { if (!cancelled) setError('Connection failed. Reconnect to the existing terminal; it may still be running.'); };
     }).catch(e => { if (!cancelled) { setError((e as Error).message); setPaneState({ kind: 'disconnected' }); } });
     return () => { cancelled = true; term.options.disableStdin = true; ws?.close(); if (socket.current === ws) socket.current = null; };
@@ -294,6 +322,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     lastLaunch.current = request; setRetryLaunch(request); setBusy(true); setError(''); setTarget(request.target);
     try {
       const { terminal: created } = await terminalRequest<{ terminal: TerminalInfo }>(workspace, 'create', { launchId: request.id, target: request.target, sessionId: request.sessionId, cwd: request.cwd });
+      setStatus(current => current && ({ ...current, sessions: [...current.sessions.filter(s => s.id !== created.id), created] }));
       setTerminal(created);
       setShowHistory(false);
       await refresh();
@@ -303,8 +332,10 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   // A launch for a session that is already running must attach to it. Creating a
   // second terminal would leave two shells on one session and lose the first.
   const resume = useCallback((request: TerminalLaunch): Promise<void> => {
-    const existing = request.sessionId && [terminal, ...(status?.sessions ?? [])].find(item =>
-      item?.state === 'running' && item.target === request.target && item.sessionId === request.sessionId);
+    // Only the backend's list is authoritative: the pane's own copy of an ended
+    // terminal still reads as running and must not swallow the resume.
+    const existing = request.sessionId && (status?.sessions ?? []).find(item =>
+      item.state === 'running' && item.target === request.target && item.sessionId === request.sessionId);
     if (existing) {
       setTerminal(existing);
       setTarget(existing.target);
@@ -312,7 +343,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       return Promise.resolve();
     }
     return start(request);
-  }, [terminal, status, start, setTarget]);
+  }, [status, start, setTarget]);
   useEffect(() => {
     if (!launch || launchSeen.current === launch.id) return;
     launchSeen.current = launch.id;
@@ -372,18 +403,26 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           : chosenTool && !chosenTool.available
             ? `${harnessName(target)} is unavailable: ${chosenTool.reason || 'not installed'}. Choose another tool or refresh after installing it.`
             : target
-              ? `${harnessName(target)} is ready. The session starts only when you press Start session.`
+              ? `${harnessName(target)} is installed and uses its own sign-in. The session starts only when you press Start session.`
               : 'Choose a CLI tool to start a new session. Your choice is remembered for this workspace.';
   const harnessSelect = <Select value={target || null} onValueChange={value => { if (typeof value === 'string') setTarget(value); }}>
     <SelectTrigger aria-label="CLI harness" size="sm" className="w-auto min-w-40 text-xs">{target ? <span className="flex items-center gap-2"><HarnessIcon harness={target} />{harnessName(target)}</span> : 'Choose a CLI tool'}</SelectTrigger>
     <SelectPopup popupClassName="w-60 max-w-[calc(100vw-2rem)]">{(status?.targets ?? []).map(item => <SelectItem key={item.id} value={item.id} disabled={!item.available} title={item.reason || undefined}><span className="flex min-w-0 items-center gap-2"><HarnessIcon harness={item.id} /><span className="truncate">{harnessName(item.id)}</span>{!item.available && <span className="text-[10px] text-muted-foreground">· Unavailable<span className="sr-only">: {item.reason || 'Not installed'}</span></span>}</span></SelectItem>)}</SelectPopup>
   </Select>;
-  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart} title={terminal ? 'Start another terminal; the current one keeps running' : undefined}><Plus className="size-3" />{busy ? 'Starting…' : terminal ? 'Start another' : 'Start session'}</Button>;
-  const disconnected = paneState.kind === 'disconnected';
-  const exited = paneState.kind === 'exited';
-  const running = paneState.kind === 'running';
-  const stateLabel = exited && endedByUser ? 'Ended' : exited && paneState.code != null ? `Exited (${paneState.code})` : PANE_STATE_LABEL[paneState.kind];
-  const stateHelp = PANE_STATE_HELP[paneState.kind];
+  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart} title={live ? 'Start another terminal; the current one keeps running' : undefined}><Plus className="size-3" />{busy ? 'Starting…' : live ? 'Start another' : 'Start session'}</Button>;
+  const disconnected = shownState.kind === 'disconnected';
+  const exited = shownState.kind === 'exited' || shownState.kind === 'ended';
+  const running = shownState.kind === 'running';
+  const stateLabel = shownState.kind === 'exited' && endedByUser ? 'Ended' : shownState.kind === 'exited' && shownState.code != null ? `Exited (${shownState.code})` : PANE_STATE_LABEL[shownState.kind];
+  const stateHelp = shownState.kind === 'exited' && shownState.early
+    ? `${harnessName(terminal?.target ?? target)} stopped right after starting. Check its output above: if it asks you to sign in or finish setup, do that in an External terminal, then start again.`
+    : PANE_STATE_HELP[shownState.kind];
+  // Only the backend's link says which conversation an ended terminal ran; the
+  // usage heuristic can pick a sibling's conversation once the list is empty.
+  const resumableId = terminal && terminal.target !== 'shell' ? terminal.sessionId : undefined;
+  const resumeButton = gone && terminal && (resumableId
+    ? <Button size="xs" variant="outline" disabled={busy} onClick={() => void resume({ id: crypto.randomUUID(), target: terminal.target, sessionId: resumableId })}><History className="size-3" />Resume conversation</Button>
+    : terminal.target !== 'shell' && <Button size="xs" variant="outline" onClick={() => setShowHistory(true)}><History className="size-3" />Continue a conversation</Button>);
   const stateDotClass = running ? 'bg-emerald-500' : exited ? 'bg-muted-foreground' : disconnected ? 'bg-warning' : 'bg-amber-500';
   const usageSummary = useMemo(() => {
     if (usageHistory.isPending) return 'Checking session usage…';
@@ -421,17 +460,17 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       {inspectorControls}
       {inspectorExpandControl}
       <Menu open={paneMenuOpen} onOpenChange={setPaneMenuOpen}>
-        <MenuTrigger aria-label="Pane options" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" title="Saved sessions, usage and terminal tools">
+        <MenuTrigger aria-label="Pane options" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" title="Open terminals, usage and terminal tools">
           <MoreHorizontal className="size-3" />
         </MenuTrigger>
         <MenuPopup align="end" className="w-64 p-1">
           {!!status?.sessions.length && <>
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Saved sessions</div>
+            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Open terminals</div>
             {status.sessions.map(s => <MenuItem key={s.id} onClick={() => { setTerminal(s); setTarget(s.target); }}
               className="flex items-center gap-2 text-xs">
               <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${s.state === 'running' ? 'bg-emerald-500' : 'bg-muted-foreground'}`} />
-              <span className="min-w-0 flex-1 truncate">{s.label}</span>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{s.id.slice(0, 8)}</span>
+              <span className="min-w-0 flex-1 truncate">{s.label}<span className="sr-only">, {s.state === 'running' ? 'running' : 'exited'}</span></span>
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground" title={s.sessionId ? `Conversation ${s.sessionId}` : `Terminal ${s.id}`}>{(s.sessionId ?? s.id).slice(0, 8)}</span>
             </MenuItem>)}
             <MenuItem onClick={() => setShowHistory(true)} className="flex items-center gap-2 text-xs"><History className="size-3" />Continue a conversation…</MenuItem>
             <div className="my-1 border-t border-border" />
@@ -464,6 +503,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           <p className="truncate px-2 py-1 font-mono text-[10px] text-muted-foreground" title={terminal.cwd}>{terminal.cwd}</p>
         </MenuPopup>
       </Menu>
+      {resumeButton}
       {disconnected && <Button size="xs" variant="outline" onClick={() => setRetry(value => value + 1)}><PlugZap className="size-3" />Reconnect</Button>}
       {!exited && terminal.state !== 'exited' && <Button size="xs" variant="ghost" onClick={() => void stop()}><Square className="size-3" />End</Button>}
     </div>}

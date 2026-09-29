@@ -4,7 +4,7 @@ import * as path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { assertFileHandleMatchesPath, assertNoLinkedPathComponents, readFileHandleAtMost } from './fs-safety.js';
+import { assertFileHandleMatchesPath, assertNoLinkedPathComponents, assertPathWithin, readFileHandleAtMost } from './fs-safety.js';
 
 const cleanupPaths: string[] = [];
 
@@ -18,6 +18,13 @@ afterEach(async () => {
 });
 
 describe('filesystem safety', () => {
+  it('supports filesystem roots without admitting sibling paths or traversal', () => {
+    const root = path.parse(path.resolve(os.tmpdir())).root;
+    expect(assertPathWithin(root, os.tmpdir())).toBe(path.resolve(os.tmpdir()));
+    const managed = path.join(os.tmpdir(), 'managed');
+    expect(() => assertPathWithin(managed, `${managed}-other/file`)).toThrow('outside');
+    expect(() => assertPathWithin(managed, path.join(managed, '..', 'outside'))).toThrow('outside');
+  });
   it('matches a normal file descriptor to its path', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-matching-file-'));
     cleanupPaths.push(root);

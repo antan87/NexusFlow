@@ -89,6 +89,9 @@ function SidebarContents({
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
+  // Archived workspaces are records, listed separately so they stay out of the way.
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = useMemo(() => workspaces.filter((w) => w.archivedAt).length, [workspaces]);
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
@@ -139,7 +142,7 @@ function SidebarContents({
   }, [toggleCollapsed]);
 
   const filteredWorkspaces = useMemo(() => {
-    let list = workspaces;
+    let list = workspaces.filter((w) => Boolean(w.archivedAt) === showArchived);
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((w) => `${w.name ?? ''} ${w.branchName} ${w.description}`.toLowerCase().includes(q));
@@ -172,7 +175,7 @@ function SidebarContents({
           return 0;
       }
     });
-  }, [workspaces, search, sortBy, workspaceStatuses]);
+  }, [workspaces, search, sortBy, workspaceStatuses, showArchived]);
 
   const linkClass = (active: boolean) =>
     cn(
@@ -307,7 +310,7 @@ function SidebarContents({
               onUpdateWorktreeTitle={(wtId, title, intent) => {
                 updateTitle(wtId, title, intent);
               }}
-              onPrepareForEditing={(repoName) => setPreparingRepo(repoName)}
+              onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
             />
             <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
           </div>
@@ -333,17 +336,17 @@ function SidebarContents({
             <div className="pt-2 border-t border-border/60">
               <div className="flex items-center justify-between pb-1 px-1">
                 <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Workspaces
+                  {showArchived ? 'Archived workspaces' : 'Workspaces'}
                 </span>
                 <span className="text-[10px] font-mono text-muted-foreground">
-                  {workspaces.length}
+                  {showArchived ? archivedCount : workspaces.length - archivedCount}
                 </span>
               </div>
 
               {/* Filter Search & Sort */}
               <div className="flex items-center gap-1 mb-2">
                 <div className="relative flex-1">
-                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
                   <input
                     type="text"
                     value={search}
@@ -379,7 +382,7 @@ function SidebarContents({
                   </div>
                 ) : filteredWorkspaces.length === 0 ? (
                   <div className="px-2 py-3 text-center text-xs text-muted-foreground italic">
-                    No workspaces match
+                    {search.trim() ? 'No workspaces match' : showArchived ? 'No archived workspaces' : 'No active workspaces'}
                   </div>
                 ) : (
                   filteredWorkspaces.slice(0, visibleWorkspaceCount).map((w) => {
@@ -409,6 +412,7 @@ function SidebarContents({
                             {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
                             {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
                             <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                            {w.archivedAt && <span className="font-semibold">archived</span>}
                             {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
                         </Link>
@@ -422,15 +426,17 @@ function SidebarContents({
                               ))}
                             </div>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => openCli(w.branchName)}
-                            className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-                            title={`Resume CLI chat for ${w.branchName}`}
-                            aria-label={`Resume CLI chat for ${w.branchName}`}
-                          >
-                            <History size={12} aria-hidden="true" />
-                          </button>
+                          {!w.archivedAt && (
+                            <button
+                              type="button"
+                              onClick={() => openCli(w.branchName)}
+                              className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                              title={`Resume CLI chat for ${w.branchName}`}
+                              aria-label={`Resume CLI chat for ${w.branchName}`}
+                            >
+                              <History size={12} aria-hidden="true" />
+                            </button>
+                          )}
                           <span
                             className={cn(
                               'size-1.5 rounded-full shrink-0',
@@ -447,6 +453,16 @@ function SidebarContents({
                 <button type="button" className="mt-2 w-full rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => setVisibleWorkspaceCount((count) => count + 30)}>
                   Show more workspaces ({filteredWorkspaces.length - visibleWorkspaceCount} remaining)
+                </button>
+              )}
+              {(archivedCount > 0 || showArchived) && (
+                <button
+                  type="button"
+                  aria-pressed={showArchived}
+                  className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => { setShowArchived((shown) => !shown); setVisibleWorkspaceCount(30); }}
+                >
+                  {showArchived ? 'Back to active workspaces' : `Show archived (${archivedCount})`}
                 </button>
               )}
             </div>

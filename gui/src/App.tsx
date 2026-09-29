@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import {
   AlertTriangle,
   RefreshCw,
@@ -14,6 +14,7 @@ import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
 import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
+import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
@@ -151,6 +152,7 @@ function AppInner() {
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStep, setUpdateStep] = useState<'idle' | 'checking' | 'downloading' | 'downloaded' | 'error'>('idle');
   const [workspaceToDelete, setWorkspaceToDelete] = useState<string | null>(null);
+  const [workspaceToArchive, setWorkspaceToArchive] = useState<string | null>(null);
 
 
   // Workflow Strategy Management State
@@ -198,6 +200,8 @@ function AppInner() {
     }
   }, [onStatusRoute, hasNextPage, isFetchingStatuses, statusesError, fetchNextPage]);
   const workspaces: Feature[] = workspacesQuery.data ?? [];
+  // Archived workspaces are records: pages that start work only offer active ones.
+  const activeWorkspaces = useMemo(() => (workspacesQuery.data ?? []).filter((w) => !w.archivedAt), [workspacesQuery.data]);
   const workspacesLoading = workspacesQuery.isLoading;
   const workspaceStatuses: Record<string, WorkspaceStatus> = Object.assign({},
     ...(statusesQuery.data?.pages.map((page) => page.statuses) ?? []));
@@ -843,12 +847,8 @@ function AppInner() {
     }
   };
 
-  // Load tool statuses and LLM recommendations when settings view is open
-  useEffect(() => {
-    if (location.pathname.startsWith('/settings')) {
-      fetchToolsStatus();
-    }
-  }, [location.pathname]);
+  // Tool registry requests are explicit (Settings → Check Now), so opening
+  // the data guide does not initiate a toolchain update check.
 
   // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
   useEffect(() => {
@@ -940,6 +940,25 @@ Core Instructions:
     setWorkspaceToDelete(wsName);
   };
 
+  const handleArchiveWorkspace = (wsName: string) => {
+    setWorkspaceToArchive(wsName);
+  };
+
+  const handleArchived = async (wsName: string) => {
+    await fetchWorkspaces();
+    showToast(`Archived ${wsName}. Its record stays readable under Archived workspaces.`, 'success');
+  };
+
+  const handleUnarchiveWorkspace = async (wsName: string) => {
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(wsName)}/unarchive`, { method: 'POST' });
+      await fetchWorkspaces();
+      showToast(`Restored ${wsName}. Prepare a repository for editing to work in it again.`, 'success');
+    } catch (error) {
+      showToast(`Could not restore ${wsName}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
+  };
+
   const confirmDeleteWorkspace = async (wsName: string) => {
     setDeleteWsLoading(wsName);
     try {
@@ -1021,7 +1040,7 @@ Core Instructions:
         activeWsId={activeWsId}
         setActiveWsId={setActiveWsId}
         appVersion={appVersion}
-        workspaces={workspaces}
+        workspaces={activeWorkspaces}
         executeTerminal={executeTerminal}
       />
     );
@@ -1029,7 +1048,7 @@ Core Instructions:
 
   const dashboardPage = config ? (
     <DashboardPage
-      workspaces={workspaces}
+      workspaces={activeWorkspaces}
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
       checkedWorkspaceCount={checkedWorkspaceCount}
@@ -1065,6 +1084,8 @@ Core Instructions:
       onSelectTab={(id, tab) => navigate(`/workspaces/${encodeURIComponent(id)}/${tab}`)}
       handleCopyPrompt={handleCopyPrompt}
       handleDeleteWorkspace={handleDeleteWorkspace}
+      handleArchiveWorkspace={handleArchiveWorkspace}
+      handleUnarchiveWorkspace={handleUnarchiveWorkspace}
       deleteWsLoading={deleteWsLoading}
       repos={repos}
       addRepoLoading={addRepoLoading}
@@ -1104,10 +1125,11 @@ Core Instructions:
 
   const skillsPage = <SkillsPage showToast={showToast} />;
   const agentsPage = <AgentsPage showToast={showToast} />;
-  const workroomsPage = <WorkroomsPage workspaces={workspaces} showToast={showToast} />;
+  const workroomsPage = <WorkroomsPage workspaces={activeWorkspaces} showToast={showToast} />;
 
   const settingsPage = config ? (
     <SettingsPage
+      workspaces={workspaces}
       config={config} setConfig={setConfig} saveStatus={saveStatus} saveError={saveError} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
@@ -1316,10 +1338,19 @@ Core Instructions:
         open={workspaceToDelete !== null}
         onClose={() => setWorkspaceToDelete(null)}
         onConfirm={confirmDeleteWorkspace}
+        onArchiveInstead={handleArchiveWorkspace}
+        archived={Boolean(workspaces.find((w) => w.branchName === workspaceToDelete)?.archivedAt)}
         loading={deleteWsLoading !== null}
       />
 
-      <FloatingChatModal workspaces={workspaces} />
+      <ArchiveWorkspaceDialog
+        workspaceName={workspaceToArchive}
+        open={workspaceToArchive !== null}
+        onClose={() => setWorkspaceToArchive(null)}
+        onArchived={handleArchived}
+      />
+
+      <FloatingChatModal workspaces={activeWorkspaces} />
       <FloatingChatLauncher />
 
       <ToastStack

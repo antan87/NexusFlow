@@ -14,6 +14,10 @@ ContextSpace combines multiple Git repositories into a single feature workspace 
 
 > **New to ContextSpace?** Jump to the [Getting Started Guide](GETTING_STARTED.md) for a hands-on walkthrough.
 
+For storage, sharing, deletion and local support reports, see the
+[data and privacy guide](docs/data-and-privacy.md), Settings → Data and privacy,
+or `ctxspace data`.
+
 ## ✨ Features
 
 - **Multi-repo workspaces** — group any set of local Git repos in isolated worktrees or in-place source repositories
@@ -204,12 +208,14 @@ Open this folder in your editor → your AI assistant picks up the context and s
 |:---|:---|
 | `ctxspace create` | Interactive wizard to create a new worktree or in-place workspace |
 | `ctxspace quick` | Fast-track instant workspace creation tailored for quick bug fixes |
-| `ctxspace list` | List all existing workspaces, tagging in-place ones with `[in-place]` (alias: `ls`) |
+| `ctxspace list` | List workspaces, tagging in-place ones with `[in-place]`; archived ones are hidden unless you pass `--archived` or `--all` (alias: `ls`) |
 | `ctxspace open` | Re-open a workspace in your editor |
 | `ctxspace init` | Configure ContextSpace settings |
 | `ctxspace project` | Manage registered repo groups: `add`, `list`/`ls`, `show`, `remove`/`rm` (alias: `proj`) |
 | `ctxspace add-repo` | Add a repository to an existing workspace (alias: `add`) |
-| `ctxspace remove` | Delete a workspace and prune its git worktrees when present (alias: `rm`) |
+| `ctxspace archive` | Complete a workspace: remove its worktrees and merged branches it created, keep its record (`--park`, `--keep-branches`, `--delete-remote-branches`, `--dry-run`, `--json`) |
+| `ctxspace unarchive` | Restore an archived workspace as active; its repositories stay read-only references until prepared for editing |
+| `ctxspace remove` | Delete a workspace and its record, force-removing its git worktrees (alias: `rm`); `archive` keeps the record |
 | `ctxspace start` | Start all services in a workspace (auto-detected) |
 | `ctxspace stop` | Stop all running services |
 | `ctxspace status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
@@ -223,7 +229,7 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace diff` | View changes across all sub-repositories, including unpushed commits (`--repo` to filter) |
 | `ctxspace commit` | Commit and push changes across all modified repositories (`--repo`, `--no-push`, `--dry-run`) |
 | `ctxspace sync` | Rebase worktree-mode repositories and reconcile generated views; in-place workspaces skip repo mutation but still reconcile stale context |
-| `ctxspace finish` | Close out a feature: check verification evidence, commit & push editable repos, open PRs / print compare links, promote learnings, optionally remove the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--cleanup`, `--dry-run`, `--override-verification <reason>`) |
+| `ctxspace finish` | Close out a feature: check verification evidence, commit & push editable repos, open PRs / print compare links, promote learnings, then optionally archive or delete the workspace (`-m`, `--no-pr`, `--no-knowledge`, `--archive`, `--park`, `--cleanup`, `--dry-run`, `--override-verification <reason>`) |
 | `ctxspace isolate` | Prepare a read-only reference repository for editing in its own worktree and branch (`[repo] [branch]`, `--base`, `--dry-run`) |
 | `ctxspace strategy` | Manage teamwork strategy workflows (`list`, `create`, `edit`, `delete`, `show`) |
 | `ctxspace migrate` | Migrate legacy `.nexusflow` workspaces to `.contextspace` |
@@ -272,13 +278,18 @@ ContextSpace is built around a single loop:
    - Commits any remaining changes and pushes every editable branch; repos on the wrong branch or in a detached HEAD are skipped, and read-only reference repos are never touched.
    - Records each repo's outcome as it goes. Git effects are not atomic across repos: if a push fails, running `finish` again resumes — committed repos are pushed, not committed again.
    - Opens a PR per repo with the GitHub CLI when it's installed and authenticated; otherwise prints a ready-to-click **compare URL** for GitHub, GitLab, Azure DevOps, or Bitbucket.
-   - Offers to **promote** reusable learnings into each repo's persistent base knowledge (so they survive into the next feature).
-   - With `--cleanup`, removes the workspace once everything is confirmed pushed (never while you're `cd`'d inside it, and never touching source repositories for in-place workspaces).
+   - Offers to **promote** reusable learnings into each repo's persistent base knowledge. Base knowledge lives in your ContextSpace home under `base/<repository>/`, keyed by the repository's origin URL, so every workspace with that repository shares it and it survives deleting or archiving the workspace. Older per-workspace copies are merged in once and kept.
+   - With `--archive`, **archives** the workspace (see below). With `--cleanup`, deletes the workspace and its record once everything is confirmed pushed (never while you're `cd`'d inside it, and never touching source repositories for in-place workspaces).
 
    ```bash
    ctxspace finish --dry-run        # preview what would happen
-   ctxspace finish -m "Ship feature" --cleanup
+   ctxspace finish -m "Ship feature" --archive
    ```
+4. **`ctxspace archive`** — give back the worktrees, keep the record:
+   - Every editable repository must be clean and its branch merged into the default branch: an ancestor of the fetched default branch, or merged through a pull request whose head is exactly that commit (via `gh`). Pushed but unmerged work needs `--park`, which keeps its branch. Dirty, unpushed or never-pushed work blocks the archive and nothing is removed.
+   - Worktrees are removed without force. Merged branches the workspace created are deleted locally, only while they still point at the merged commit; branches it did not create, parked branches and branches checked out elsewhere are kept, and `--keep-branches` keeps them all. `--delete-remote-branches` also deletes them on `origin`, unless someone pushed to them since. Your own checkouts are never changed.
+   - Milestones and verification results, planning notes, knowledge, the assignment and source documents stay in the workspace folder, readable in the app and the CLI. Each repository's final commit is recorded. Starting sessions or services, committing, syncing, verifying and finishing are refused until you `ctxspace unarchive` it.
+   - Each run is journaled: if it stops part-way, running it again resumes. `--dry-run` shows every worktree, branch and file that would be removed or kept.
 
 ## 🌊 Dynamic Lifecycle Flows & Milestone Radar
 
@@ -363,6 +374,7 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `add_knowledge` | Record a titled decision, gotcha, assumption, or question with optional scope/evidence |
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
+| `preview_archive` | Show what archiving would remove and keep, and what blocks it (changes nothing; archive itself runs from the CLI or app) |
 | `get_service_logs` | Tail a running service's logs |
 | `get_work_context` | Read the assignment, document IDs, milestones, and edit revisions |
 | `update_milestone_plan` | Create, edit, reorder, or remove feature-specific milestones; an empty list disables them |
@@ -377,7 +389,7 @@ Planning writes are available to `interactive`, `developer`, and `full` roles.
 Read the current revision before editing; see [planning through MCP](docs/work-guidance.md#planning-through-mcp).
 After upgrading a running MCP server, reconnect it in the assistant to discover the new tools.
 
-Read-only tools are annotated as such; `finish_workspace` deliberately cannot delete worktrees (cleanup stays a human-confirmed CLI action). Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
+Read-only tools are annotated as such; `finish_workspace` and `preview_archive` deliberately cannot remove worktrees (archive and cleanup stay human-confirmed CLI or app actions). `list_workspaces` leaves archived workspaces out unless `includeArchived` is set. Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 
 ## 🕐 Session History & Resumption
 

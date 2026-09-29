@@ -17,6 +17,7 @@ import { generateContextFiles } from '../generators/index.js';
 import type { SyncStatus, WorkspaceContext } from '../types.js';
 import { checkGenerationLock } from './generation-lock.js';
 import { refreshWorkspace } from './refresh.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 /** Sync outcome for a single repo. */
 export interface RepoSyncReport {
@@ -72,6 +73,7 @@ export async function syncWorkspace(workspacePath: string): Promise<SyncReport> 
       `Failed to load workspace configuration. Ensure nexusflow.json exists at ${workspacePath}.`,
     );
   }
+  assertWorkspaceActive(feature, 'sync');
 
   // In-place workspaces work directly in the source repos on whatever branch
   // the user has checked out — rebasing those from under them would be a

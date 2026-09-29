@@ -1,6 +1,7 @@
 import { SessionActivity } from './SessionActivity.js';
 import { SessionKind, mainSessionFor } from './SessionKind.js';
 import React, { useRef, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -61,6 +62,8 @@ const getResumeCliCommand = (assistant: string, sessionId: string): string => {
       return `copilot --resume ${sessionId}`;
     case 'cursor':
       return `cursor-agent --resume ${sessionId}`;
+    case 'pi':
+      return `pi --session ${sessionId}`;
     default:
       return `agy --conversation ${sessionId}`;
   }
@@ -170,13 +173,13 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         workspaceId: ws.branchName,
         assistant,
       });
-      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'claude' ? 'claude' : assistant === 'codex' ? 'codex' : 'copilot';
+      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'cursor' ? 'cursor-agent' : assistant;
       setLaunchedInfo({
         assistant,
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Opened ${assistant} inside ContextSpace`, 'success');
+      showToast?.(`Opening ${assistant} in CLI chat…`, 'info');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to launch terminal';
       showToast?.(message, 'error');
@@ -202,7 +205,8 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         cmd,
         timestamp: new Date(),
       });
-      showToast?.(`Opened ${assistant} resume inside ContextSpace`, 'success');
+      // The CLI chat window performs the launch and reports its own failures.
+      showToast?.(`Opening ${assistant} in CLI chat…`, 'info');
     } catch {
       const fallbackCmd = getResumeCliCommand(assistant, sessionId);
       await safeCopyToClipboard(fallbackCmd);
@@ -374,11 +378,12 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">Discovery reads local assistant history. Resuming a session uses that assistant’s provider settings. <Link className="underline" to="/settings#data-and-privacy">Storage, sharing and deletion controls</Link>.</p>
       {/* Search, Filter & Sort Order Toolbar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-md border border-border/80">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="relative flex-1 min-w-0 max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground pointer-events-none z-10" />
             <input
               type="text"
               value={searchQuery}

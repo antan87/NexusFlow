@@ -30,6 +30,7 @@ import { refreshWorkspace } from '../core/refresh.js';
 import { runDoctor } from '../core/doctor.js';
 import { finishWorkspace } from '../core/finish.js';
 import { planRepoIsolation } from '../core/isolate.js';
+import { planArchive } from '../core/archive.js';
 import { getWorkContext, readWorkDocument } from '../core/work-guidance.js';
 import { verifyWorkspace } from '../core/verify.js';
 import { getAllSkills, saveSkill } from '../utils/skills-catalog.js';
@@ -592,12 +593,18 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'list_workspaces',
     description:
-      `List all active ${BRAND_NAME} workspaces with their branch names, paths, repositories, and mode. Read-only.`,
+      `List ${BRAND_NAME} workspaces with their branch names, paths, repositories, and mode. Archived workspaces are records, not places to work: they are left out unless includeArchived is true, and then carry archivedAt. Read-only.`,
     annotations: { readOnlyHint: true },
-    inputSchema: { type: 'object', properties: {} },
-    handler: async (_args, ctx) => {
+    inputSchema: {
+      type: 'object',
+      properties: {
+        includeArchived: { type: 'boolean', description: 'Also list archived workspaces. Default false.' },
+      },
+    },
+    handler: async (args, ctx) => {
       try {
-        const workspaces = await listWorkspaces(ctx.config.workspacesDir);
+        const workspaces = (await listWorkspaces(ctx.config.workspacesDir))
+          .filter((w) => args.includeArchived === true || !w.archivedAt);
         return json(
           workspaces.map((w) => ({
             id: w.id,
@@ -607,10 +614,41 @@ export const tools: NexusFlowTool[] = [
             reposCount: w.repos.length,
             workspacePath: w.workspacePath,
             createdAt: w.createdAt,
+            ...(w.archivedAt ? { archivedAt: w.archivedAt } : {}),
           })),
         );
       } catch (error: any) {
         return errorResult(`Error listing workspaces: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'preview_archive',
+    description:
+      `Preview archiving the workspace: which worktrees would be removed, which repos block it and why, and what stays (milestones, notes, knowledge, documents). Changes nothing and does not fetch; merges are judged against the last fetched state. Archive itself runs from the CLI (\`${CLI_NAME} archive\`) or the app, because it removes worktrees an agent is usually working inside.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        park: { type: 'boolean', description: 'Preview archiving pushed-but-unmerged work too (its branch is kept).' },
+        keepBranches: { type: 'boolean', description: 'Preview keeping every branch.' },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const report = await planArchive(ctx.workspacePath, { park: args.park === true, keepBranches: args.keepBranches === true, dryRun: true, fetch: false });
+        return json({
+          ...report,
+          note: report.alreadyArchived
+            ? 'Already archived.'
+            : report.ready
+              ? `Ready. Ask the user to run \`${CLI_NAME} archive ${report.workspaceId}\` from outside the workspace, or use Archive in the app.`
+              : 'Blocked; nothing would be removed. Resolve the blockers first.',
+        });
+      } catch (error: any) {
+        return errorResult(`Error previewing archive: ${error.message}`);
       }
     },
   },
@@ -1214,6 +1252,7 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'get_service_logs',
     'list_workspaces',
     'list_repos',
+    'preview_archive',
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',
@@ -1231,6 +1270,7 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'get_service_logs',
     'list_workspaces',
     'list_repos',
+    'preview_archive',
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',

@@ -286,6 +286,12 @@ export interface Feature {
    */
   isolatedRepos?: Record<string, IsolatedRepoInfo>;
 
+  /**
+   * Branches this workspace created (repo name → branch), as opposed to
+   * branches that already existed. Archive only ever deletes these.
+   */
+  createdBranches?: Record<string, string>;
+
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];
 
@@ -315,6 +321,75 @@ export interface Feature {
     /** Knowledge heading id, e.g. 2026-08-25-bff-error-encoding. */
     entry: string;
   }>;
+
+  /**
+   * Set while the workspace is archived: its worktrees were returned, its
+   * record is kept, and operations that change repositories or start
+   * processes refuse it. Cleared by unarchive.
+   */
+  archivedAt?: string;
+
+  /** What the latest archive removed and kept. Retained after unarchive as history. */
+  archive?: ArchiveRecord;
+
+  /** Earlier archive records, oldest first: archiving again never loses a delivery record. */
+  archiveHistory?: ArchiveRecord[];
+}
+
+/** How one repository stood when its workspace was archived. */
+export interface ArchivedRepoRecord {
+  name: string;
+  /** How the repository was attached before archive. */
+  access: 'reference' | 'isolated' | 'worktree';
+  /** The user's own checkout; archived workspaces read it as a reference. */
+  sourcePath: string;
+  /** The worktree archive removed, if any. */
+  worktreePath?: string;
+  /** Branch checked out in that worktree; `null` for a detached HEAD. */
+  branch?: string | null;
+  /** Final commit of the worktree, so the work can always be found again. */
+  headSha?: string | null;
+  /**
+   * `merged`: proven part of the default branch. `parked`: pushed but not
+   * merged, archived on explicit request. `reference`: never edited here.
+   */
+  branchState: 'merged' | 'parked' | 'reference';
+  /** Evidence that proved a merge. */
+  mergeEvidence?: 'ancestor' | 'pull-request';
+  prUrl?: string;
+  /** Archive deleted the local branch (its tip is {@link headSha}). */
+  branchDeleted?: boolean;
+  /** Archive deleted the branch on `origin`. */
+  remoteBranchDeleted?: boolean;
+}
+
+/** Manifest record of an archive. */
+export interface ArchiveRecord {
+  archivedAt: string;
+  /** Mode before archive; archived workspaces are always in-place references. */
+  previousMode: WorkspaceMode;
+  /** True when pushed-but-unmerged work was archived on explicit request. */
+  parked: boolean;
+  repos: ArchivedRepoRecord[];
+  /** Set when the workspace was restored as active. */
+  unarchivedAt?: string;
+}
+
+/** Per-repo journal entry of an archive run. */
+export interface ArchiveRunRepo extends ArchivedRepoRecord {
+  /** Whether this run has removed (or found removed) the worktree. */
+  removed: boolean;
+  error?: string;
+}
+
+/** Durable record of an archive run, so an interrupted run resumes. */
+export interface ArchiveRun {
+  startedAt: string;
+  completedAt?: string;
+  /** `running` means the process stopped mid-run; re-running resumes safely. */
+  status: 'running' | 'completed' | 'partial';
+  parked: boolean;
+  repos: ArchiveRunRepo[];
 }
 
 /** Runtime context for an active workspace — now includes analysis data. */
@@ -726,6 +801,8 @@ export interface WorkspaceState {
   verificationOverrides?: VerificationOverrideRecord[];
   /** Durable record of the latest finish run, so it can be resumed after a restart. */
   lastFinish?: FinishRecord;
+  /** Durable record of the latest archive run, so it can be resumed after a restart. */
+  lastArchive?: ArchiveRun;
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }

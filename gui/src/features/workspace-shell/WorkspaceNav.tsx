@@ -1,12 +1,14 @@
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/utils.js';
-import { SECTION_LABELS, WORKSPACE_DESTINATIONS, destinationOf, entrySection, type WorkspaceDestination, type WorkspaceSection } from './destinations.js';
+import { SECTION_LABELS, destinationOf, destinationsFor, entrySection, type WorkspaceDestination, type WorkspaceSection } from './destinations.js';
 
 interface WorkspaceNavProps {
   workspaceId: string;
   section: WorkspaceSection;
   lastVisited: Partial<Record<WorkspaceDestination['id'], WorkspaceSection>>;
   badges?: Partial<Record<WorkspaceDestination['id'] | WorkspaceSection, number>>;
+  /** Archived workspaces show only their record. */
+  archived?: boolean;
 }
 
 function Badge({ count }: { count?: number }) {
@@ -18,15 +20,16 @@ function Badge({ count }: { count?: number }) {
  * Workspace destinations are links, not tabs: each is a URL, so the browser's
  * back button, deep links and opening in a new window all keep working.
  */
-export function WorkspaceNav({ workspaceId, section, lastVisited, badges = {} }: WorkspaceNavProps) {
+export function WorkspaceNav({ workspaceId, section, lastVisited, badges = {}, archived = false }: WorkspaceNavProps) {
   const base = `/workspaces/${encodeURIComponent(workspaceId)}`;
-  const current = destinationOf(section);
+  const destinations = destinationsFor(archived);
+  const current = destinations.find((destination) => destination.id === destinationOf(section).id) ?? destinations[0]!;
 
   return (
     <div className="border-b border-border bg-card/60 px-4 sm:px-6">
       <nav aria-label="Workspace">
         <ul className="-mb-px flex gap-1 overflow-x-auto">
-          {WORKSPACE_DESTINATIONS.map((destination) => {
+          {destinations.map((destination) => {
             const active = destination.id === current.id;
             return (
               <li key={destination.id} className="shrink-0">
