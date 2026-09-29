@@ -376,7 +376,9 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `add_knowledge` | Record a titled decision, gotcha, assumption, or question with optional scope/evidence |
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
-| `preview_archive` | Show what archiving would remove and keep, and what blocks it (changes nothing; archive itself runs from the CLI or app) |
+| `preview_archive` | Show what archiving would remove and keep, and what blocks it (changes nothing) |
+| `archive_workspace` | Archive another workspace (never the one the server serves or runs inside); `park`, `keepBranches`, `dryRun`; never deletes remote branches |
+| `unarchive_workspace` | Restore an archived workspace as active; nothing is removed or checked out |
 | `get_service_logs` | Tail a running service's logs |
 | `get_work_context` | Read the assignment, document IDs, milestones, and edit revisions |
 | `update_milestone_plan` | Create, edit, reorder, or remove feature-specific milestones; an empty list disables them |
@@ -391,7 +393,7 @@ Planning writes are available to `interactive`, `developer`, and `full` roles.
 Read the current revision before editing; see [planning through MCP](docs/work-guidance.md#planning-through-mcp).
 After upgrading a running MCP server, reconnect it in the assistant to discover the new tools.
 
-Read-only tools are annotated as such; `finish_workspace` and `preview_archive` deliberately cannot remove worktrees (archive and cleanup stay human-confirmed CLI or app actions). `list_workspaces` leaves archived workspaces out unless `includeArchived` is set. Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
+Read-only tools are annotated as such. `finish_workspace` never removes worktrees, and `archive_workspace` refuses the workspace the server serves or runs inside, because an agent works in those worktrees; archive that one with the CLI or the app. Naming another workspace needs an `interactive` or `full` session. MCP servers route console output to stderr, so tools never write into the protocol stream. `list_workspaces` leaves archived workspaces out unless `includeArchived` is set. Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 
 ## 🕐 Session History & Resumption
 

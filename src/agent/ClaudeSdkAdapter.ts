@@ -35,6 +35,7 @@ const WORKSPACE_EDIT_MCP_TOOLS = new Set([
 const MUTATING_LIFECYCLE_TOOLS = new Set([
   'create_workspace', 'commit_workspace', 'finish_workspace',
   'isolate_repo', 'sync_workspace', 'post_workroom_handoff',
+  'archive_workspace', 'unarchive_workspace',
 ]);
 
 export class ClaudeSdkAdapter extends EventEmitter implements AgentHarness {
