@@ -556,7 +556,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
       {/* Search and Filter Ribbon */}
       <div className="px-6 py-3 border-b border-border/60 bg-muted/20 flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

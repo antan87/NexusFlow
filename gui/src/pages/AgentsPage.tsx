@@ -231,7 +231,7 @@ export function AgentsPage({ showToast }: AgentsPageProps) {
 
       <div className="border-b border-border/60 bg-muted/20 px-6 py-3">
         <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agents…" className="pl-9" />
         </div>
       </div>

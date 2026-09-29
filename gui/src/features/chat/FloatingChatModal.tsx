@@ -312,7 +312,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               <p className="border-t border-border px-2 pt-2 text-[10px] text-muted-foreground">Open existing</p>
               <div className="px-2 py-1 mb-1">
                 <div className="relative">
-                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
                   <input
                     type="text"
                     placeholder="Search workspaces..."

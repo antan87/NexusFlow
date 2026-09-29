@@ -383,7 +383,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-card/60 p-2 rounded-md border border-border/80">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="relative flex-1 min-w-0 max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground pointer-events-none z-10" />
             <input
               type="text"
               value={searchQuery}
