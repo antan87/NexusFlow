@@ -329,12 +329,21 @@ const PARSED_TRANSCRIPT_LIMIT = 4_000;
 let parsedTranscripts = new Map<string, ParsedTranscriptEntry>();
 
 async function parsedTranscript<T>(filePath: string, parse: (content: string) => T): Promise<T> {
-  // Stat before reading: a write after this point changes the mtime, so the
-  // next request re-parses instead of trusting this result.
-  const stat = await fs.stat(filePath);
-  const hit = parsedTranscripts.get(filePath);
-  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.value as T;
-  const value = parse(await fs.readFile(filePath, 'utf-8'));
+  // Stat and read through one handle, so both describe the same file. The
+  // stat comes first: a write after it changes the mtime, so the next request
+  // re-parses instead of trusting this result.
+  const handle = await fs.open(filePath, 'r');
+  let stat;
+  let content;
+  try {
+    stat = await handle.stat();
+    const hit = parsedTranscripts.get(filePath);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.value as T;
+    content = await handle.readFile({ encoding: 'utf-8' });
+  } finally {
+    await handle.close();
+  }
+  const value = parse(content);
   parsedTranscripts.delete(filePath);
   parsedTranscripts.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value });
   if (parsedTranscripts.size > PARSED_TRANSCRIPT_LIMIT) parsedTranscripts.delete(parsedTranscripts.keys().next().value!);

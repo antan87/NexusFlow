@@ -5,6 +5,17 @@ import * as path from 'node:path';
 
 import { generateFixture, removeFixture } from './generate.mjs';
 
+// Small enough to build twice well within the test timeout on Windows runners.
+const TINY = {
+  repos: [{ files: 60 }],
+  workspaces: 2,
+  reposPerWorkspace: 1,
+  dirtyWorktrees: 1,
+  untrackedInSource: 5,
+  codex: { rollouts: 4, totalMB: 0.2, maxMB: 0.1, matching: 2 },
+  claude: { transcripts: 2, totalMB: 0.1, maxMB: 0.06, workspaces: 1 },
+};
+
 describe('perf fixture generator', () => {
   const roots: string[] = [];
   const outDir = async () => {
@@ -23,25 +34,25 @@ describe('perf fixture generator', () => {
   it('reproduces the same tree and commits for the same tier and seed', async () => {
     // Same-length output paths keep embedded absolute paths the same size.
     const [a, b] = [await outDir(), await outDir()];
-    const first = await generateFixture({ tier: 'S', seed: 7, out: a });
-    const second = await generateFixture({ tier: 'S', seed: 7, out: b });
+    const first = await generateFixture({ tier: 'S', spec: TINY, seed: 7, out: a });
+    const second = await generateFixture({ tier: 'S', spec: TINY, seed: 7, out: b });
 
     expect(second.treeDigest).toBe(first.treeDigest);
     expect(second.repos).toEqual(first.repos);
-    expect(first.workspaces).toBe(3);
-    expect(first.codex.bytes).toBeGreaterThan(4 * 1024 * 1024);
+    expect(first.workspaces).toBe(2);
+    expect(first.codex.bytes).toBeGreaterThan(150 * 1024);
   });
 
   it('changes the data when the seed changes', async () => {
-    const first = await generateFixture({ tier: 'S', seed: 1, out: await outDir() });
-    const second = await generateFixture({ tier: 'S', seed: 2, out: await outDir() });
+    const first = await generateFixture({ tier: 'S', spec: TINY, seed: 1, out: await outDir() });
+    const second = await generateFixture({ tier: 'S', spec: TINY, seed: 2, out: await outDir() });
 
     expect(second.treeDigest).not.toBe(first.treeDigest);
   });
 
   it('writes a config that points the app at the fixture only', async () => {
     const out = await outDir();
-    const manifest = await generateFixture({ tier: 'S', out });
+    const manifest = await generateFixture({ tier: 'S', spec: TINY, out });
     const config = JSON.parse(await fs.readFile(path.join(manifest.home, '.contextspace', 'config.json'), 'utf8'));
 
     expect(config.workspacesDir.startsWith(manifest.home)).toBe(true);
@@ -57,13 +68,13 @@ describe('perf fixture generator', () => {
     await fs.mkdir(out, { recursive: true });
     await fs.writeFile(path.join(out, 'keep.txt'), 'user data');
 
-    await expect(generateFixture({ tier: 'S', out })).rejects.toThrow(/not empty/);
+    await expect(generateFixture({ tier: 'S', spec: TINY, out })).rejects.toThrow(/not empty/);
     expect(await fs.readFile(path.join(out, 'keep.txt'), 'utf8')).toBe('user data');
   });
 
   it('injects the missing-path fault and removes an unreadable fixture cleanly', async () => {
     const out = await outDir();
-    const manifest = await generateFixture({ tier: 'S', out, faults: true });
+    const manifest = await generateFixture({ tier: 'S', spec: TINY, out, faults: true });
 
     expect(manifest.faults).toContain('missing-repo');
     if (process.platform !== 'win32' && process.getuid?.() !== 0) {

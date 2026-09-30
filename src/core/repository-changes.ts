@@ -111,10 +111,13 @@ async function indexSignature(repoPath: string): Promise<string | null> {
   try {
     const dotGit = path.join(repoPath, '.git');
     let gitDir = dotGit;
-    if ((await fs.stat(dotGit)).isFile()) {
+    try {
+      // A linked worktree's .git is a file naming its git directory.
       const pointer = /^gitdir:\s*(.+)$/m.exec(await fs.readFile(dotGit, 'utf8'));
       if (!pointer) return null;
       gitDir = path.resolve(repoPath, pointer[1]!.trim());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
     }
     const index = await fs.stat(path.join(gitDir, 'index'));
     return `${index.size}:${index.mtimeMs}`;

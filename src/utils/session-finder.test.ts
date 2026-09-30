@@ -593,23 +593,22 @@ describe('JSON error boundaries and malformed lines resilience', () => {
       return file;
     }
 
-    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
-      'serves an unchanged transcript from the cache without reading it again',
-      async () => {
-        const file = await writeClaudeSession('11111111-1111-4111-8111-111111111111', 4);
-        const first = await findSessions(workspaceDir, [], 'claude');
-        expect(first).toHaveLength(1);
+    it('serves an unchanged transcript from the cache without reading it again', async () => {
+      const sessionId = '11111111-1111-4111-8111-111111111111';
+      const file = await writeClaudeSession(sessionId, 4);
+      // Whole seconds, so restoring the time below reproduces the exact mtime.
+      const pinned = new Date('2026-09-01T00:00:00Z');
+      await fs.utimes(file, pinned, pinned);
+      const first = await findSessions(workspaceDir, [], 'claude');
+      expect(first[0]?.title).toBe('turn 0');
 
-        // An unreadable file can only still be listed through the cache.
-        await fs.chmod(file, 0o000);
-        try {
-          const second = await findSessions(workspaceDir, [], 'claude');
-          expect(second).toEqual(first);
-        } finally {
-          await fs.chmod(file, 0o644);
-        }
-      },
-    );
+      // Same size and mtime, different bytes: only a cache hit still reports the old title.
+      const content = await fs.readFile(file, 'utf8');
+      await fs.writeFile(file, content.replace('turn 0', 'TURN 0'));
+      await fs.utimes(file, pinned, pinned);
+
+      expect(await findSessions(workspaceDir, [], 'claude')).toEqual(first);
+    });
 
     it('re-parses a transcript as soon as it grows', async () => {
       const sessionId = '22222222-2222-4222-8222-222222222222';

@@ -251,8 +251,9 @@ async function treeDigest(root, fixtureRoot) {
   return createHash('sha256').update(lines.sort().join('\n')).digest('hex');
 }
 
-export async function generateFixture({ tier = 'S', seed = 1, out, faults = tier !== 'S' }) {
-  const spec = TIERS[tier];
+export async function generateFixture({ tier = 'S', seed = 1, out, faults = tier !== 'S', spec: specOverride }) {
+  // `spec` replaces the tier's sizes (tests use a tiny one); `tier` still labels the manifest.
+  const spec = specOverride ?? TIERS[tier];
   if (!spec) throw new Error(`Unknown tier "${tier}". Use one of: ${Object.keys(TIERS).join(', ')}`);
   if (!out) throw new Error('An output directory is required.');
   const root = path.resolve(out);
