@@ -245,13 +245,24 @@ export const HARNESSES = {
     label: 'Grok',
     pickerLabel: 'Grok (xAI)',
     role: 'assistant',
-    // xAI ships an API, not a CLI: nothing to probe on PATH and nothing to
-    // launch a terminal session with, so this harness has no `terminal` spec
-    // and is reached through the embedded chat provider instead.
-    detection: { kind: 'api-key', env: ['XAI_API_KEY'], missingMessage: 'xAI API key is not configured (set XAI_API_KEY).' },
+    // `@xai-official/grok` is a full coding-agent CLI: it reads AGENTS.md,
+    // keeps resumable sessions under ~/.grok/sessions, and speaks ACP. Verified
+    // against 1.0.44 with `grok inspect` and `--help`, not assumed.
+    //
+    // Authentication is the CLI's own business: it signs in interactively on
+    // first launch and takes XAI_API_KEY for unattended use. Gating detection on
+    // the key would hide the harness from anyone who has not signed in yet, so
+    // presence of the binary is what "installed" means here. The embedded chat
+    // provider reports its own missing-credential status.
+    detection: { kind: 'binary', probe: 'grok', launchCommand: 'grok' },
     context: { kind: 'native-agents-md' },
     skills: [PORTABLE_SKILLS],
-    mcp: [ROOT_MCP],
+    // grok reads MCP from TOML, not from `.mcp.json`, and its project-level
+    // config is the documented place for repo-shared servers. Writing the JSON
+    // form here would be exactly the dead config the native MCP bridge was built
+    // to end.
+    mcp: [{ path: '.grok/config.toml', key: 'mcp_servers', format: 'toml' }],
+    terminal: { resumeArgs: (id: string) => ['--resume', id], continueArgs: ['--continue'], history: true },
     chatProviderIds: ['grok-native'],
   },
 } as const satisfies Record<string, HarnessManifest>;

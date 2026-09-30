@@ -108,23 +108,21 @@ describe('detectAIAssistants', () => {
   });
 });
 
-describe('credential-only harness detection', () => {
-  it('detects grok from XAI_API_KEY and offers no launch command', async () => {
+describe('grok detection', () => {
+  it('is detected from the CLI binary, not from a credential', async () => {
+    // The grok CLI signs in interactively on first launch, so gating detection on
+    // XAI_API_KEY would hide the harness from anyone not yet signed in.
     const { detectAIAssistants } = await import('./detect-ai.js');
     const saved = process.env.XAI_API_KEY;
     try {
       delete process.env.XAI_API_KEY;
-      expect((await detectAIAssistants()).find((a) => a.name === 'grok')).toEqual({
-        name: 'grok',
-        displayName: 'Grok (xAI)',
-        detected: false,
-      });
-
-      process.env.XAI_API_KEY = 'xai-test-key';
-      const grok = (await detectAIAssistants()).find((a) => a.name === 'grok');
-      expect(grok).toEqual({ name: 'grok', displayName: 'Grok (xAI)', detected: true });
-      // There is no Grok CLI, so a command would be a promise that cannot be kept.
-      expect(grok?.command).toBeUndefined();
+      // execa is mocked suite-wide, so presence has to be declared here.
+      vi.mocked(execa).mockImplementation((command: any) =>
+        Promise.resolve({ exitCode: command === 'grok' ? 0 : 1 } as any),
+      );
+      const found = (await detectAIAssistants()).find((entry) => entry.name === 'grok');
+      expect(found).toMatchObject({ name: 'grok', displayName: 'Grok (xAI)' });
+      expect(found?.detected).toBe(true);
     } finally {
       if (saved === undefined) delete process.env.XAI_API_KEY;
       else process.env.XAI_API_KEY = saved;

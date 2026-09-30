@@ -97,17 +97,30 @@ describe('Harness manifest invariants', () => {
     }
   });
 
-  it('keeps grok a full assistant that needs no local binary', () => {
+  it('keeps grok a full assistant with a real CLI behind it', () => {
+    // Credential-only was the wrong call: `@xai-official/grok` is a coding-agent
+    // CLI that reads AGENTS.md, keeps resumable sessions and speaks ACP. Being a
+    // binary harness is what puts it in CLI chat and the sessions tab, which is
+    // the surface actually used.
     const grok = getHarness('grok')!;
     expect(grok.role).toBe('assistant');
-    expect(grok.detection.kind).toBe('api-key');
+    expect(grok.detection.kind).toBe('binary');
+    if (grok.detection.kind === 'binary') {
+      expect(grok.detection.probe).toBe('grok');
+      expect(launchCommandFor(grok)).toBe('grok');
+    }
     expect(grok.skills.map((root) => root.root)).toContain('.agents/skills');
-    expect(grok.mcp?.map((target) => target.path)).toContain('.mcp.json');
+    // TOML, not `.mcp.json`: grok reads MCP from its own config format, and a
+    // generated JSON file would be dead config.
+    expect(grok.mcp?.map((target) => target.path)).toEqual(['.grok/config.toml']);
+    expect(grok.mcp?.[0]?.format).toBe('toml');
     expect(grok.chatProviderIds).toContain('grok-native');
-    // Nothing launchable, and nothing that claims to be.
-    expect(launchCommandFor(grok)).toBeUndefined();
-    expect(isCliHarnessId('grok')).toBe(false);
+    // Launchable and resumable, so it reaches the sessions tab.
+    expect(isCliHarnessId('grok')).toBe(true);
     expect(ASSISTANT_HARNESSES).toContain('grok');
+    expect(HARNESSES.grok.terminal?.history).toBe(true);
+    expect(HARNESSES.grok.terminal?.resumeArgs('id-1')).toEqual(['--resume', 'id-1']);
+    expect(HARNESSES.grok.terminal?.continueArgs).toEqual(['--continue']);
   });
 
   it('agrees with the session source list about which harnesses have history', () => {

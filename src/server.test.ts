@@ -128,11 +128,19 @@ describe('Server API Endpoints Unit Tests', () => {
       mcpConfigPaths: ['.mcp.json'],
       mcpViaExtension: 'pi-mcp-adapter',
     });
-    // grok is the reverse: a full assistant with no local binary at all.
+    // grok is a full assistant *and* a launchable one: the official CLI exists,
+    // so it reaches CLI chat and the sessions tab. Its MCP config is TOML, in
+    // its own project-level file, because grok does not read `.mcp.json`.
     expect(harnesses.find((harness) => harness.id === 'grok')).toMatchObject({
       isAssistant: true,
-      isLaunchable: false,
-      detection: { kind: 'api-key', env: ['XAI_API_KEY'] },
+      isLaunchable: true,
+      hasHistory: true,
+      launchCommand: 'grok',
+      resumeArgs: ['--resume', '{sessionId}'],
+      // continueArgs is deliberately absent: only the server builds a continue
+      // command, and a renderer has no use for it.
+      mcpConfigPaths: ['.grok/config.toml'],
+      detection: { kind: 'binary', probe: 'grok' },
     });
   });
 

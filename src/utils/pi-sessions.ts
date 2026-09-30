@@ -31,6 +31,7 @@ async function files(roots?: string[]): Promise<string[]> {
   const prefixes = roots?.map(cwd => `--${path.resolve(cwd).replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}`.toLowerCase());
   let folders: Dirent<string>[] | undefined;
   try { folders = await fs.readdir(root, { withFileTypes: true }); } catch { return []; }
+  if (!Array.isArray(folders)) return [];
   const groups = await Promise.all((folders ?? []).filter(folder => folder.isDirectory()
     && (!prefixes || prefixes.some(prefix => folder.name.toLowerCase() === `${prefix}--` || folder.name.toLowerCase().startsWith(`${prefix}-`)))).map(async folder => {
     const dir = path.join(root, folder.name);
