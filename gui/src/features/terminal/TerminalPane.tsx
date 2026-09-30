@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../components/ui/button.js';
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
+import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { Select, SelectTrigger, SelectPopup, SelectItem } from '../../components/ui/select.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff, MoreHorizontal } from 'lucide-react';
@@ -491,7 +491,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
             <div className="my-1 border-t border-border" />
           </>}
           <div className="px-1.5 py-1" onClick={event => event.stopPropagation()}>
-            <input aria-label="Search terminal output" placeholder="Search output" className="w-full rounded border border-border bg-background px-2 py-1 text-xs" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
+            <MenuSearchInput aria-label="Search terminal output" placeholder="Search output" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') search.current?.findNext(query); }} />
           </div>
           <MenuItem onClick={() => search.current?.findNext(query)} className="flex items-center gap-2 text-xs"><Search className="size-3" />Find next match</MenuItem>
           <MenuItem onClick={() => void copySelection()} className="flex items-center gap-2 text-xs"><Copy className="size-3" />Copy selection</MenuItem>

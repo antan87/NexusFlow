@@ -60,6 +60,44 @@ function MenuPopup({
   );
 }
 
+/**
+ * A text field for use inside a `MenuPopup`.
+ *
+ * Base UI's menu typeahead treats every single-character keydown on the popup
+ * as an item jump and calls `preventDefault()` on it, without checking whether
+ * the event target is an editable element. A bare `<input>` placed in a menu is
+ * therefore focused but silently untypeable: the character is cancelled and
+ * `onChange` never fires.
+ *
+ * Stopping propagation on the field's own keydown keeps those keys from
+ * reaching the popup's handler, so typeahead never runs, while leaving the
+ * browser's text insertion intact. Any `onKeyDown` the caller passes still
+ * runs, so shortcuts such as Enter-to-submit keep working.
+ *
+ * Only single-character keys are stopped. Every other key has to keep bubbling
+ * or the menu loses keyboard handling it owns: Base UI dismisses on Escape via
+ * a document-level native listener, and a stopped event never reaches the
+ * document, which leaves the menu stuck open.
+ */
+function MenuSearchInput({ className, onKeyDown, ...props }: React.ComponentProps<"input">) {
+  return (
+    <input
+      type="search"
+      {...props}
+      className={cn(
+        "w-full rounded-md border border-input bg-card px-2 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary",
+        className,
+      )}
+      onKeyDown={(event) => {
+        // React skips ancestor handlers once propagation is stopped, which is
+        // what keeps the popup's typeahead from cancelling this keystroke.
+        if (event.key.length === 1) event.stopPropagation();
+        onKeyDown?.(event);
+      }}
+    />
+  );
+}
+
 function MenuGroup(props: MenuPrimitive.Group.Props) {
   return <MenuPrimitive.Group data-slot="menu-group" {...props} />;
 }
@@ -287,6 +325,7 @@ export {
   MenuGroup as DropdownMenuGroup,
   MenuItem,
   MenuItem as DropdownMenuItem,
+  MenuSearchInput,
   MenuCheckboxItem,
   MenuCheckboxItem as DropdownMenuCheckboxItem,
   MenuRadioGroup,
