@@ -32,8 +32,6 @@ export type EvidenceState =
   /** The current repository state could not be read. */
   | 'unreadable';
 
-const READY_STATES: ReadonlySet<EvidenceState> = new Set(['passed', 'passed-dirty', 'no-tests']);
-
 /** Evidence for one repository. */
 export interface RepoEvidence {
   name: string;
