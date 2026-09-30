@@ -94,27 +94,39 @@ describe('Server API Endpoints Unit Tests', () => {
     const harnesses = (await response.json()) as Array<Record<string, unknown>>;
     // Every declared harness, including the session-only one the GUI used to
     // be unable to name.
-    expect(harnesses.map((harness) => harness.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'copilot', 'cursor', 'pi']);
+    expect(harnesses.map((harness) => harness.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'copilot', 'cursor', 'grok', 'pi']);
     for (const harness of harnesses) {
       expect(harness).toMatchObject({
         label: expect.any(String),
         pickerLabel: expect.any(String),
         role: expect.any(String),
         isAssistant: expect.any(Boolean),
+        isLaunchable: expect.any(Boolean),
         hasHistory: expect.any(Boolean),
-        launchCommand: expect.any(String),
-        probe: expect.any(String),
       });
-      // Resume args must carry the placeholder exactly once, or a renderer
-      // cannot build a resume command without guessing.
-      const resumeArgs = harness.resumeArgs as string[];
-      expect(resumeArgs.filter((arg) => arg.includes('{sessionId}'))).toHaveLength(1);
+      if (harness.isLaunchable) {
+        expect(harness.launchCommand).toEqual(expect.any(String));
+        // Resume args must carry the placeholder exactly once, or a renderer
+        // cannot build a resume command without guessing.
+        const resumeArgs = harness.resumeArgs as string[];
+        expect(resumeArgs.filter((arg) => arg.includes('{sessionId}'))).toHaveLength(1);
+      } else {
+        // Nothing to launch, so nothing to resume.
+        expect(harness.resumeArgs).toEqual([]);
+        expect(harness.launchCommand).toBeUndefined();
+      }
     }
     // Only the agent-capable harness declares an agents directory.
     expect(harnesses.filter((harness) => harness.agentsDir).map((harness) => harness.id)).toEqual(['codex']);
     // pi is launchable but not an assistant, which is the state the GUI cannot
     // express without this endpoint.
     expect(harnesses.find((harness) => harness.id === 'pi')).toMatchObject({ isAssistant: false, hasHistory: true });
+    // grok is the reverse: a full assistant with no local binary at all.
+    expect(harnesses.find((harness) => harness.id === 'grok')).toMatchObject({
+      isAssistant: true,
+      isLaunchable: false,
+      detection: { kind: 'api-key', env: ['XAI_API_KEY'] },
+    });
   });
 
   it('keeps diagnostic capture and export behind the local host/origin guards', async () => {

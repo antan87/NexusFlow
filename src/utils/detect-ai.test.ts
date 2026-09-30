@@ -25,6 +25,9 @@ describe('detectAIAssistants', () => {
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      // Credential-only: offered, but with no binary to launch and detected
+      // from its env var rather than from PATH.
+      { name: 'grok', displayName: 'Grok (xAI)', detected: false },
     ]);
   });
 
@@ -39,6 +42,9 @@ describe('detectAIAssistants', () => {
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      // Credential-only: offered, but with no binary to launch and detected
+      // from its env var rather than from PATH.
+      { name: 'grok', displayName: 'Grok (xAI)', detected: false },
     ]);
   });
 
@@ -80,5 +86,29 @@ describe('detectAIAssistants', () => {
 
     const cursor = result.find((r) => r.name === 'cursor');
     expect(cursor).toEqual({ name: 'cursor', displayName: 'Cursor', detected: true, command: 'cursor-agent' });
+  });
+});
+
+describe('credential-only harness detection', () => {
+  it('detects grok from XAI_API_KEY and offers no launch command', async () => {
+    const { detectAIAssistants } = await import('./detect-ai.js');
+    const saved = process.env.XAI_API_KEY;
+    try {
+      delete process.env.XAI_API_KEY;
+      expect((await detectAIAssistants()).find((a) => a.name === 'grok')).toEqual({
+        name: 'grok',
+        displayName: 'Grok (xAI)',
+        detected: false,
+      });
+
+      process.env.XAI_API_KEY = 'xai-test-key';
+      const grok = (await detectAIAssistants()).find((a) => a.name === 'grok');
+      expect(grok).toEqual({ name: 'grok', displayName: 'Grok (xAI)', detected: true });
+      // There is no Grok CLI, so a command would be a promise that cannot be kept.
+      expect(grok?.command).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.XAI_API_KEY;
+      else process.env.XAI_API_KEY = saved;
+    }
   });
 });

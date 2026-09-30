@@ -66,18 +66,36 @@ export type McpTargetSpec = {
   entryType?: 'stdio';
 };
 
-export type DetectionSpec = {
-  /** Binary whose `--version` decides whether the harness is offered. */
-  probe: string;
-  /**
-   * Binary that can host an interactive terminal session. Defaults to `probe`.
-   * Cursor is the case that needs both: `cursor` opens the GUI editor, while
-   * `cursor-agent` is the terminal session CLI.
-   */
-  launchCommand?: string;
-  /** Probe for the launch binary when it differs from `probe`. */
-  launchProbe?: string;
-};
+/**
+ * How a harness is found on the machine.
+ *
+ * The distinction is not cosmetic. A `binary` harness is installed by putting a
+ * command on PATH and can host a terminal session; an `api-key` harness is
+ * configured by a credential and has no local command at all, so it must not
+ * appear in terminal launch or saved-session discovery. xAI's Grok is the
+ * second kind: there is no Grok CLI, only an API.
+ */
+export type DetectionSpec =
+  | {
+      kind: 'binary';
+      /** Binary whose `--version` decides whether the harness is offered. */
+      probe: string;
+      /**
+       * Binary that can host an interactive terminal session. Defaults to
+       * `probe`. Cursor is the case that needs both: `cursor` opens the GUI
+       * editor, while `cursor-agent` is the terminal session CLI.
+       */
+      launchCommand?: string;
+      /** Probe for the launch binary when it differs from `probe`. */
+      launchProbe?: string;
+    }
+  | {
+      kind: 'api-key';
+      /** Environment variables that configure the harness, in preference order. */
+      env: string[];
+      /** Shown when none of them is set. */
+      missingMessage: string;
+    };
 
 export type TerminalSpec = {
   /** Args to resume one saved session. */
@@ -110,7 +128,11 @@ export interface HarnessManifest {
   skills: SkillRootSpec[];
   /** Omitted when the harness configures MCP at the user level instead. */
   mcp?: McpTargetSpec[];
-  terminal: TerminalSpec;
+  /**
+   * Saved-session and terminal-launch support. Omitted for a harness with no
+   * local binary, which can still be an assistant and a chat provider.
+   */
+  terminal?: TerminalSpec;
   /** Agent definition directory, when this harness supports agent files. */
   agents?: { dir: string };
   /** Set only when a normalized adapter exists in `src/harness/`. */
@@ -139,7 +161,7 @@ export const HARNESSES = {
     id: 'claude',
     label: 'Claude Code',
     role: 'assistant',
-    detection: { probe: 'claude', launchCommand: 'claude' },
+  detection: { kind: 'binary', probe: 'claude', launchCommand: 'claude' },
     context: { kind: 'import', path: 'CLAUDE.md' },
     skills: [CLAUDE_SKILLS],
     mcp: [ROOT_MCP],
@@ -152,7 +174,7 @@ export const HARNESSES = {
     label: 'Antigravity (agy)',
     pickerLabel: 'Antigravity',
     role: 'assistant',
-    detection: { probe: 'agy', launchCommand: 'agy' },
+    detection: { kind: 'binary', probe: 'agy', launchCommand: 'agy' },
     context: { kind: 'native-agents-md' },
     skills: [PORTABLE_SKILLS],
     // Antigravity reads a user-level MCP config. Writing its global config on
@@ -164,7 +186,7 @@ export const HARNESSES = {
     label: 'Codex',
     pickerLabel: 'OpenAI Codex',
     role: 'assistant',
-    detection: { probe: 'codex', launchCommand: 'codex' },
+    detection: { kind: 'binary', probe: 'codex', launchCommand: 'codex' },
     context: { kind: 'native-agents-md' },
     skills: [PORTABLE_SKILLS],
     mcp: [{ path: '.codex/config.toml', key: 'mcp_servers', format: 'toml' }],
@@ -178,7 +200,7 @@ export const HARNESSES = {
     id: 'copilot',
     label: 'GitHub Copilot',
     role: 'assistant',
-    detection: { probe: 'copilot', launchCommand: 'copilot' },
+    detection: { kind: 'binary', probe: 'copilot', launchCommand: 'copilot' },
     context: { kind: 'own-file', path: '.github/copilot-instructions.md' },
     skills: [PORTABLE_SKILLS],
     mcp: [ROOT_MCP, { path: '.vscode/mcp.json', key: 'servers', format: 'json', entryType: 'stdio' }],
@@ -190,7 +212,7 @@ export const HARNESSES = {
     pickerLabel: 'Cursor',
     role: 'assistant',
     // `cursor` opens the GUI editor; `cursor-agent` is the terminal session CLI.
-    detection: { probe: 'cursor', launchCommand: 'cursor-agent', launchProbe: 'cursor-agent' },
+    detection: { kind: 'binary', probe: 'cursor', launchCommand: 'cursor-agent', launchProbe: 'cursor-agent' },
     context: { kind: 'own-file', path: '.cursor/rules/contextspace.mdc' },
     skills: [PORTABLE_SKILLS],
     mcp: [{ path: '.cursor/mcp.json', key: 'mcpServers', format: 'json' }],
@@ -201,10 +223,24 @@ export const HARNESSES = {
     label: 'Pi',
     // Launchable and resumable, but generates no workspace resources yet.
     role: 'session-only',
-    detection: { probe: 'pi', launchCommand: 'pi' },
+    detection: { kind: 'binary', probe: 'pi', launchCommand: 'pi' },
     context: { kind: 'native-agents-md' },
     skills: [PORTABLE_SKILLS],
     terminal: { resumeArgs: (id: string) => ['--session', id], continueArgs: ['--continue'], history: true },
+  },
+  grok: {
+    id: 'grok',
+    label: 'Grok',
+    pickerLabel: 'Grok (xAI)',
+    role: 'assistant',
+    // xAI ships an API, not a CLI: nothing to probe on PATH and nothing to
+    // launch a terminal session with, so this harness has no `terminal` spec
+    // and is reached through the embedded chat provider instead.
+    detection: { kind: 'api-key', env: ['XAI_API_KEY'], missingMessage: 'xAI API key is not configured (set XAI_API_KEY).' },
+    context: { kind: 'native-agents-md' },
+    skills: [PORTABLE_SKILLS],
+    mcp: [ROOT_MCP],
+    chatProviderIds: ['grok-native'],
   },
 } as const satisfies Record<string, HarnessManifest>;
 
@@ -217,8 +253,7 @@ export type HarnessOfRole<R extends HarnessRole> = {
 /** All harnesses, in the order they are offered to users. */
 export const HARNESS_LIST: readonly HarnessManifest[] = Object.values(HARNESSES);
 
-/**
- * Ids whose `role` matches, in declaration order.
+/** Ids whose `role` matches, in declaration order.
  *
  * The narrowing cast is contained here on purpose: it is the one place the
  * compile-time role-to-id mapping meets runtime filtering.
@@ -232,9 +267,31 @@ function idsWithRole<R extends HarnessRole>(role: R): HarnessOfRole<R>[] {
 /** Harnesses that generate workspace resources when selected. */
 export const ASSISTANT_HARNESSES: readonly HarnessOfRole<'assistant'>[] = idsWithRole('assistant');
 
-/** Harnesses with discoverable saved sessions. */
-export const HISTORY_HARNESSES: readonly HarnessId[] = (Object.keys(HARNESSES) as HarnessId[])
-  .filter((id) => (HARNESSES[id] as HarnessManifest).terminal.history);
+/**
+ * Ids that declare a terminal spec, narrowed at the type level.
+ *
+ * Typed as the precise union rather than `HarnessId` on purpose: `CLI_HARNESSES`
+ * and `SessionSource` are built from this list, so a widened type would claim a
+ * credential-only harness is launchable and require a session reader for it.
+ */
+type LaunchableId = {
+  [K in HarnessId]: (typeof HARNESSES)[K] extends { terminal: TerminalSpec } ? K : never;
+}[HarnessId];
+
+/** Harnesses with a local binary, and so a terminal target and saved sessions. */
+export const LAUNCHABLE_HARNESSES: readonly LaunchableId[] = (Object.keys(HARNESSES) as HarnessId[])
+  .filter((id) => (HARNESSES[id] as HarnessManifest).terminal !== undefined) as LaunchableId[];
+
+/** The binary that hosts a terminal session, or undefined for a credential-only harness. */
+export function launchCommandFor(harness: HarnessManifest): string | undefined {
+  return harness.detection.kind === 'binary' ? harness.detection.launchCommand ?? harness.detection.probe : undefined;
+}
+
+/** Whether the harness is configured on this machine, per its detection kind. */
+export function isHarnessConfigured(harness: HarnessManifest, hasBinary: (command: string) => boolean | undefined): boolean {
+  if (harness.detection.kind === 'api-key') return harness.detection.env.some((name) => Boolean(process.env[name]));
+  return hasBinary(harness.detection.probe) === true;
+}
 
 export function isHarnessId(value: unknown): value is HarnessId {
   return typeof value === 'string' && Object.hasOwn(HARNESSES, value);
@@ -247,8 +304,6 @@ export function isAssistantHarnessId(value: unknown): value is HarnessOfRole<'as
 export function getHarness(id: string): HarnessManifest | undefined {
   return isHarnessId(id) ? HARNESSES[id] : undefined;
 }
-
-/** The wire shape of a harness, for renderers that must not restate its identity. */
 export interface HarnessDescription {
   id: HarnessId;
   /** Name for terminal launch, the session list and logs. */
@@ -258,14 +313,20 @@ export interface HarnessDescription {
   role: HarnessRole;
   /** Selectable as a workspace assistant. */
   isAssistant: boolean;
+  /** A local binary exists, so there is a terminal target. */
+  isLaunchable: boolean;
   /** Saved sessions are discoverable. */
   hasHistory: boolean;
-  /** Binary that hosts an interactive terminal session. */
-  launchCommand: string;
-  /** Binary whose presence means the harness is installed. */
-  probe: string;
+  /** Binary that hosts a terminal session; absent for a credential-only harness. */
+  launchCommand?: string;
+  /**
+   * How the harness is detected on this machine. Binary harnesses are probed on
+   * PATH; credential-only ones are configured by an environment variable.
+   */
+  detection: { kind: 'binary'; probe: string } | { kind: 'api-key'; env: string[]; missingMessage: string };
   /**
    * Args that resume a session, with {@link SESSION_ID_TOKEN} where the id goes.
+   * Empty for a harness with no saved sessions.
    *
    * Shipped because the GUI used to rebuild this string itself with a ternary
    * that sent every harness except claude and codex to `agy --conversation`.
@@ -291,10 +352,14 @@ export function describeHarnesses(): HarnessDescription[] {
     pickerLabel: harness.pickerLabel ?? harness.label,
     role: harness.role,
     isAssistant: harness.role === 'assistant',
-    hasHistory: harness.terminal.history,
-    launchCommand: harness.detection.launchCommand ?? harness.detection.probe,
-    probe: harness.detection.probe,
-    resumeArgs: harness.terminal.resumeArgs(SESSION_ID_TOKEN).map((arg) => `${arg}`),
+    isLaunchable: launchCommandFor(harness) !== undefined,
+    hasHistory: harness.terminal?.history ?? false,
+    ...(launchCommandFor(harness) ? { launchCommand: launchCommandFor(harness) } : {}),
+    detection:
+      harness.detection.kind === 'binary'
+        ? { kind: 'binary' as const, probe: harness.detection.probe }
+        : { kind: 'api-key' as const, env: [...harness.detection.env], missingMessage: harness.detection.missingMessage },
+    resumeArgs: harness.terminal ? harness.terminal.resumeArgs(SESSION_ID_TOKEN).map((arg) => `${arg}`) : [],
     ...(harness.context.kind === 'native-agents-md' ? {} : { contextPath: harness.context.path }),
     skillRoots: harness.skills.map((root) => root.root),
     mcpConfigPaths: (harness.mcp ?? []).map((target) => target.path),

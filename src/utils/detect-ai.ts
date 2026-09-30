@@ -6,7 +6,7 @@
 import { execa } from 'execa';
 
 import type { AIAssistant, DetectedAI } from '../types.js';
-import { ASSISTANT_HARNESSES, HARNESSES, type HarnessManifest } from '../harness/manifest.js';
+import { ASSISTANT_HARNESSES, getHarness } from '../harness/manifest.js';
 
 /**
  * Attempts to run `<command> --version` and returns `true` if the process
@@ -43,21 +43,31 @@ async function commandExists(command: string): Promise<boolean> {
  */
 export async function detectAIAssistants(): Promise<DetectedAI[]> {
   // Probe every distinct binary once, concurrently, however many harnesses use it.
-  const harnesses: HarnessManifest[] = ASSISTANT_HARNESSES.map((id) => HARNESSES[id]);
-  const commands = [...new Set(harnesses.flatMap((h) => [h.detection.probe, h.detection.launchProbe ?? h.detection.probe]))];
+  const harnesses = ASSISTANT_HARNESSES.map((id) => getHarness(id)!);
+  const binaries = harnesses.flatMap((harness) =>
+    harness.detection.kind === 'binary' ? [harness.detection.probe, harness.detection.launchProbe ?? harness.detection.probe] : [],
+  );
   const available = new Map<string, boolean>(
-    (await Promise.all(commands.map(async (command) => [command, await commandExists(command)] as const))).map(([k, v]) => [k, v]),
+    (await Promise.all([...new Set(binaries)].map(async (command) => [command, await commandExists(command)] as const))),
   );
 
   return harnesses.map((harness) => {
+    // A credential-only harness is available when it is configured, and has no
+    // command to launch, so it is offered without one.
+    if (harness.detection.kind === 'api-key') {
+      return {
+        name: harness.id as AIAssistant,
+        displayName: harness.pickerLabel ?? harness.label,
+        detected: harness.detection.env.some((variable) => Boolean(process.env[variable])),
+      };
+    }
     const { probe, launchCommand, launchProbe } = harness.detection;
     const launch = launchCommand ?? probe;
-    const launchable = available.get(launchProbe ?? launch) ?? false;
     return {
       name: harness.id as AIAssistant,
       displayName: harness.pickerLabel ?? harness.label,
       detected: available.get(probe) ?? false,
-      ...(launchable ? { command: launch } : {}),
+      ...((available.get(launchProbe ?? launch) ?? false) ? { command: launch } : {}),
     };
   });
 }

@@ -9,6 +9,7 @@ import {
 import { NativeClaudeAgent } from './NativeClaudeAgent.js';
 import { NativeAgent } from './NativeAgent.js';
 import { NativeGoogleAgent } from './NativeGoogleAgent.js';
+import { GrokAgent } from './GrokAgent.js';
 import { ClaudeCliAdapter } from './ClaudeCliAdapter.js';
 import { AntigravityCliAdapter } from './AntigravityCliAdapter.js';
 import { CodexCliAdapter } from './CodexCliAdapter.js';
@@ -106,6 +107,20 @@ const claudeCliStatus = cachedStatus(() => detectClaudeCliStatus());
 const antigravityCliStatus = cachedStatus(() => detectAntigravityCliStatus());
 const codexCliStatus = cachedStatus(() => detectCodexCliStatus());
 const copilotCliStatus = cachedStatus(() => detectCopilotCliStatus());
+
+ProviderRegistry.register({
+  id: 'grok-native',
+  name: 'Grok',
+  icon: 'Sparkles',
+  accessLabel: 'Read-only tools',
+  capabilities: { transport: 'native-api', sessionIdentity: 'none', workspaceAccess: 'read-only' },
+  get models() {
+    return getAvailableModels('grok-native');
+  },
+  isConfigured: () => !!process.env.XAI_API_KEY,
+  getStatusMessage: () => process.env.XAI_API_KEY ? undefined : 'xAI API key is not configured in XAI_API_KEY.',
+  createInstance: () => new GrokAgent()
+});
 
 ProviderRegistry.register({
   id: 'claude-cli',

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   ASSISTANT_HARNESSES,
+  getHarness,
+  isHarnessConfigured,
+  launchCommandFor,
   HARNESSES,
   HARNESS_LIST,
-  HISTORY_HARNESSES,
   isAssistantHarnessId,
   isHarnessId,
   mcpTargetsFor,
@@ -30,7 +32,7 @@ describe('Harness manifest invariants', () => {
 
   it('rejects unknown ids and accepts every declared one', () => {
     for (const harness of HARNESS_LIST) expect(isHarnessId(harness.id)).toBe(true);
-    expect(isHarnessId('grok')).toBe(false);
+    expect(isHarnessId('gemini-cli')).toBe(false);
     expect(isHarnessId('')).toBe(false);
     expect(isHarnessId(null)).toBe(false);
     expect(isHarnessId({})).toBe(false);
@@ -43,8 +45,15 @@ describe('Harness manifest invariants', () => {
     for (const id of others) expect(isAssistantHarnessId(id)).toBe(false);
   });
 
-  it('derives a terminal entry for every harness, with a working launch binary', () => {
+  it('gives every launchable harness a terminal entry, and no entry to a credential-only one', () => {
     for (const harness of HARNESS_LIST) {
+      if (!harness.terminal) {
+        // No local binary means no terminal target: offering one would produce a
+        // launcher that can never start.
+        expect(isCliHarnessId(harness.id)).toBe(false);
+        expect(CLI_HARNESSES).not.toHaveProperty(harness.id);
+        continue;
+      }
       const cli = CLI_HARNESSES[harness.id];
       expect(cli, `${harness.id} has no CLI_HARNESSES entry`).toBeDefined();
       expect(cli.name).toBe(harness.label);
@@ -53,25 +62,53 @@ describe('Harness manifest invariants', () => {
       expect(cli.history).toBe(harness.terminal.history);
       expect(cli.resumeArgs('session-id')).toEqual(harness.terminal.resumeArgs('session-id'));
     }
-    expect(Object.keys(CLI_HARNESSES).sort()).toEqual(HARNESS_LIST.map((h) => h.id).sort());
+    expect(Object.keys(CLI_HARNESSES).sort()).toEqual(HARNESS_LIST.filter((h) => h.terminal).map((h) => h.id).sort());
+  });
+
+  it('separates credential-only harnesses from installable ones', () => {
+    for (const harness of HARNESS_LIST) {
+      if (harness.detection.kind === 'binary') {
+        expect(harness.detection.probe, `${harness.id} has no probe`).toBeTruthy();
+        // A launch probe without a launch command would probe a binary nothing runs.
+        if (harness.detection.launchProbe) {
+          expect(harness.detection.launchCommand, `${harness.id} probes a launch binary it never runs`).toBeTruthy();
+        }
+        continue;
+      }
+      // A credential-only harness must not claim a binary, and must name the
+      // variable that configures it plus what to tell the user when it is unset.
+      expect(harness.detection.env.length, `${harness.id} names no credential`).toBeGreaterThan(0);
+      expect(harness.detection.missingMessage).toBeTruthy();
+      expect(harness.terminal, `${harness.id} is credential-only but declares sessions`).toBeUndefined();
+      expect(isHarnessConfigured(harness, () => true), `${harness.id} ignores its credential`).toBe(false);
+    }
+  });
+
+  it('keeps grok a full assistant that needs no local binary', () => {
+    const grok = getHarness('grok')!;
+    expect(grok.role).toBe('assistant');
+    expect(grok.detection.kind).toBe('api-key');
+    expect(grok.skills.map((root) => root.root)).toContain('.agents/skills');
+    expect(grok.mcp?.map((target) => target.path)).toContain('.mcp.json');
+    expect(grok.chatProviderIds).toContain('grok-native');
+    // Nothing launchable, and nothing that claims to be.
+    expect(launchCommandFor(grok)).toBeUndefined();
+    expect(isCliHarnessId('grok')).toBe(false);
+    expect(ASSISTANT_HARNESSES).toContain('grok');
   });
 
   it('agrees with the session source list about which harnesses have history', () => {
-    for (const id of HISTORY_HARNESSES) expect(SESSION_SOURCES).toContain(id);
+    const history = HARNESS_LIST.filter((harness) => harness.terminal?.history).map((harness) => harness.id);
+    for (const id of history) expect(SESSION_SOURCES).toContain(id);
     for (const source of SESSION_SOURCES) {
       if (source === 'workspace') continue;
-      expect(HISTORY_HARNESSES).toContain(source);
+      expect(history).toContain(source);
       expect(isCliHarnessId(source)).toBe(true);
     }
   });
 
-  it('gives every harness a detection probe and a context strategy', () => {
+  it('gives every harness a context strategy', () => {
     for (const harness of HARNESS_LIST) {
-      expect(harness.detection.probe, `${harness.id} has no probe`).toBeTruthy();
-      // A launch probe without a launch command would probe a binary nothing runs.
-      if (harness.detection.launchProbe) {
-        expect(harness.detection.launchCommand, `${harness.id} probes a launch binary it never runs`).toBeTruthy();
-      }
       expect(['native-agents-md', 'import', 'own-file']).toContain(harness.context.kind);
       if (harness.context.kind !== 'native-agents-md') expect(harness.context.path).toBeTruthy();
     }

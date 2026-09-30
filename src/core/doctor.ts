@@ -16,7 +16,7 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
-import { HARNESS_LIST } from '../harness/manifest.js';
+import { getHarness, launchCommandFor, type HarnessManifest } from '../harness/manifest.js';
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
 
@@ -349,15 +349,23 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   }
 
   // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
-  // Binary per harness comes from the manifest's launch command, so this check
-  // probes the CLI it would actually start rather than a second hand-kept map.
-  const astMap = Object.fromEntries(
-    HARNESS_LIST.map((harness) => [harness.id, harness.detection.launchCommand ?? harness.detection.probe]),
-  );
-
+  // What "available" means comes from the manifest: a binary harness is
+  // available when its command is on PATH, a credential-only harness when its
+  // env var is set. Probing a CLI for the second kind would always warn.
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
-      const bin = astMap[a.toLowerCase()] ?? a.toLowerCase();
+      const harness = getHarness(a);
+      if (harness?.detection.kind === 'api-key') {
+        const set = harness.detection.env.filter((name) => process.env[name]);
+        if (set.length > 0) {
+          checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `configured via ${set[0]}` });
+        } else {
+          warnings.push(`Workspace assistant "${a}" is not configured. ${harness.detection.missingMessage}`);
+          checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: harness.detection.missingMessage });
+        }
+        continue;
+      }
+      const bin = launchCommandFor(harness as HarnessManifest) ?? a.toLowerCase();
       const resolved = findExecutable(bin);
       if (!resolved) {
         warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
