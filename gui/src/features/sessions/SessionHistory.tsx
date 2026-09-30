@@ -17,6 +17,7 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
+import { HarnessIcon } from '../../components/icons/HarnessIcon.js';
 
 import type { AISession, Feature, TranscriptMessage } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
@@ -24,7 +25,7 @@ import { Card } from '../../components/ui/card.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
-import { useWorkspaceLaunchTargets, useLaunchTerminal, useAiDetect } from '../../lib/api/queries.js';
+import { useWorkspaceLaunchTargets, useLaunchTerminal, useAiDetect, useHarnesses } from '../../lib/api/queries.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { cn } from '../../lib/utils.js';
@@ -116,6 +117,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
   const aiDetect = useAiDetect();
+  const harnesses = useHarnesses();
 
   const isAgyDetected = aiDetect.data?.find((a) => a.name === 'antigravity')?.detected ?? true;
   const isClaudeDetected = Boolean(aiDetect.data?.find((a) => a.name === 'claude')?.detected);
@@ -173,7 +175,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         workspaceId: ws.branchName,
         assistant,
       });
-      const cmd = assistant === 'antigravity' ? 'agy' : assistant === 'cursor' ? 'cursor-agent' : assistant;
+      const cmd = harnesses.data?.find((harness) => harness.id === assistant)?.launchCommand ?? assistant;
       setLaunchedInfo({
         assistant,
         cmd,
@@ -273,96 +275,92 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     return sortSessions(list, sortBy);
   }, [sessions, selectedAssistantFilter, searchQuery, sortBy]);
 
-  // Group sessions by assistant with sorting applied
-  const agySessions = useMemo(
-    () => sortSessions(sessions.filter((s) => s.assistant === 'antigravity'), sortBy),
-    [sessions, sortBy]
-  );
-  const claudeSessions = useMemo(
-    () => sortSessions(sessions.filter((s) => s.assistant === 'claude'), sortBy),
-    [sessions, sortBy]
-  );
-  const codexSessions = useMemo(
-    () => sortSessions(sessions.filter((s) => s.assistant === 'codex'), sortBy),
-    [sessions, sortBy]
-  );
-  const copilotSessions = useMemo(
-    () => sortSessions(sessions.filter((s) => s.assistant === 'copilot'), sortBy),
-    [sessions, sortBy]
-  );
+  // Group sessions by assistant, with sorting applied.
+  //
+  // This was four hand-written `filter(s => s.assistant === 'x')` memos, so a
+  // harness the backend discovered was fetched and then dropped on the floor.
+  // Bucketing from the manifest means a new harness shows up with its history
+  // the first time it has any.
+  const sessionsByAssistant = useMemo(() => {
+    const grouped = new Map<string, typeof sessions>();
+    for (const session of sessions) {
+      const bucket = grouped.get(session.assistant);
+      if (bucket) bucket.push(session);
+      else grouped.set(session.assistant, [session]);
+    }
+    return grouped;
+  }, [sessions]);
 
   const isAssistantConfigured = useCallback((id: string) => ws.assistants?.includes(id) ?? false, [ws.assistants]);
 
-  const allHarnesses = useMemo(() => [
-    {
-      id: 'antigravity',
-      name: 'Google Antigravity',
-      cliCommand: 'agy',
-      isDetected: isAgyDetected,
-      isConfigured: isAssistantConfigured('antigravity'),
+  /**
+   * Presentation only: a logo and, for two harnesses, a desktop or IDE app to
+   * open alongside the CLI. Identity, display name and CLI binary come from the
+   * manifest, because this list used to hardcode all three — which is why `pi`,
+   * whose sessions the backend discovers, had no card to render them in and no
+   * button to start one from.
+   */
+  const harnessPresentation: Record<string, { icon: React.ReactNode; hasApp?: boolean; appName?: string; appTargetId?: string }> = {
+    antigravity: {
       hasApp: hasAgyIde,
       appName: 'IDE',
       appTargetId: 'antigravity',
-      sessions: agySessions,
       icon: (
         <span className="grid size-6 place-items-center rounded-md bg-card border border-border/80 shadow-2xs p-0.5">
           <AntigravityIcon className="size-4" />
         </span>
       ),
     },
-    {
-      id: 'claude',
-      name: 'Claude Code',
-      cliCommand: 'claude',
-      isDetected: isClaudeDetected,
-      isConfigured: isAssistantConfigured('claude'),
-      hasApp: false,
-      appName: 'App',
+    claude: {
       appTargetId: 'claude',
-      sessions: claudeSessions,
       icon: (
         <span className="grid size-6 place-items-center rounded-md bg-[#D97757] text-white font-bold text-[10px] shadow-2xs">
           <SiClaude className="size-3" />
         </span>
       ),
     },
-    {
-      id: 'codex',
-      name: 'OpenAI Codex',
-      cliCommand: 'codex',
-      isDetected: isCodexDetected,
-      isConfigured: isAssistantConfigured('codex'),
+    codex: {
       hasApp: hasCodexDesktop,
       appName: 'Desktop',
       appTargetId: 'codex-desktop',
-      sessions: codexSessions,
       icon: (
         <span className="grid size-6 place-items-center rounded-md bg-foreground text-background font-bold text-[10px] shadow-2xs">
           <BsOpenai className="size-3" />
         </span>
       ),
     },
-    {
-      id: 'copilot',
-      name: 'GitHub Copilot',
-      cliCommand: 'copilot',
-      isDetected: isCopilotDetected,
-      isConfigured: isAssistantConfigured('copilot'),
-      hasApp: false,
-      appName: 'App',
+    copilot: {
       appTargetId: 'copilot',
-      sessions: copilotSessions,
       icon: (
         <span className="grid size-6 place-items-center rounded-md bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white font-bold text-[10px] shadow-2xs">
           <SiGithubcopilot className="size-3" />
         </span>
       ),
     },
-  ], [
-    isAgyDetected, isClaudeDetected, isCodexDetected, isCopilotDetected,
-    hasAgyIde, hasCodexDesktop, isAssistantConfigured,
-    agySessions, claudeSessions, codexSessions, copilotSessions,
-  ]);
+  };
+
+  const allHarnesses = useMemo(() =>
+    (harnesses.data ?? [])
+      // A terminal session needs a local binary. A credential-only harness such
+      // as Grok has none, so offering a "New Session" button would launch
+      // nothing.
+      .filter((harness) => harness.isLaunchable)
+      .map((harness) => {
+        const extra = harnessPresentation[harness.id] ?? {};
+        return {
+          id: harness.id,
+          name: harness.label,
+          cliCommand: harness.launchCommand ?? harness.id,
+          isDetected: Boolean(aiDetect.data?.find((entry) => entry.name === harness.id)?.detected),
+          isConfigured: isAssistantConfigured(harness.id),
+          hasApp: extra.hasApp ?? false,
+          appName: extra.appName,
+          appTargetId: extra.appTargetId,
+          sessions: sortSessions(sessionsByAssistant.get(harness.id) ?? [], sortBy),
+          icon: extra.icon ?? <HarnessIcon harness={harness.id} className="size-4" />,
+        };
+      }),
+  [harnesses.data, aiDetect.data, isAssistantConfigured, sessionsByAssistant, sortBy, hasAgyIde, hasCodexDesktop]);
 
   const installedHarnesses = useMemo(() => {
     return allHarnesses.filter((h) => h.isDetected || h.sessions.length > 0);
