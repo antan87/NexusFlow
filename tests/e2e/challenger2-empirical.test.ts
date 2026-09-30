@@ -22,7 +22,6 @@ import type { AIAssistant, SkillItem } from '../../src/types.js';
 import { getAllSkills, saveSkill, saveWorkspaceSkillsConfig } from '../../src/utils/skills-catalog.js';
 import {
   reconcileWorkspaceResources,
-  ResourceConflictError,
   isWorkspaceLocalSkill,
   resolveResourceLockPath,
 } from '../../src/resources/materializer.js';
