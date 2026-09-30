@@ -9,7 +9,7 @@ import type { DocumentKind, DocumentPreviewData } from '../work-guidance/Documen
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { usePaneHotkey } from './usePaneHotkey.js';
 
-const DocumentPreview = lazy(() => import('../work-guidance/DocumentPreview.js').then(module => ({ default: module.DocumentPreview })));
+const DocumentViewer = lazy(() => import('../work-guidance/DocumentViewer.js').then(module => ({ default: module.DocumentViewer })));
 type RootDocument = { name: string; kind: DocumentKind; modifiedAt: string };
 type SourceDocument = WorkDocument & { workspaceId?: string };
 
@@ -113,17 +113,21 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
     </div>
     <div className="min-h-0 flex-1 overflow-auto p-3">
       {!selected && <p className="text-xs text-muted-foreground">Select a file or source to read beside the CLI session.</p>}
-      {selected && <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="break-all text-xs font-semibold">{selected.type === 'file' ? selected.id : sources.find(source => source.id === selected.id)?.title}</h3>
-        <div className="flex gap-2 text-xs">
-          {(sourcePreview?.content !== undefined || (preview && (preview.kind === 'html' || preview.kind === 'markdown'))) && <Button size="xs" variant="outline" onClick={() => setRaw(value => !value)}>{raw ? 'Rendered' : 'Raw'}</Button>}
-          {selected.type === 'file' && <a className="text-primary underline" href={`${fileUrl}&download=1`} download={selected.id}>Download</a>}
-        </div>
-      </div>}
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {preview && <Suspense fallback={<p role="status" className="text-xs">Opening viewer…</p>}><DocumentPreview preview={preview} fileUrl={fileUrl} raw={raw} /></Suspense>}
-      {sourcePreview?.content !== undefined && <Suspense fallback={<p role="status" className="text-xs">Opening viewer…</p>}><DocumentPreview preview={{ name: selected?.id ?? 'Source document', kind: 'markdown', content: sourcePreview.content }} fileUrl="" raw={raw} /></Suspense>}
-      {sourcePreview?.content === undefined && sourcePreview?.location && <a className="text-xs text-primary underline" href={sourcePreview.location} target="_blank" rel="noopener noreferrer">Open source document</a>}
+      {selected && <Suspense fallback={<p role="status" className="text-xs">Opening viewer…</p>}>
+        <DocumentViewer
+          compact
+          title={selected.type === 'file' ? selected.id : sources.find(source => source.id === selected.id)?.title ?? 'Source document'}
+          preview={selected.type === 'file' ? preview : { name: selected.id, kind: 'markdown', content: sourcePreview?.content ?? '' }}
+          raw={raw}
+          rawLabels={['Raw', 'Rendered']}
+          onToggleRaw={selected.type === 'file' ? (preview && (preview.kind === 'html' || preview.kind === 'markdown') ? () => setRaw(value => !value) : undefined) : (sourcePreview?.content !== undefined ? () => setRaw(value => !value) : undefined)}
+          fileUrl={fileUrl}
+          downloadHref={selected.type === 'file' ? `${fileUrl}&download=1` : undefined}
+          status={sourcePreview?.content === undefined && sourcePreview?.location
+            ? <a className="text-primary underline" href={sourcePreview.location} target="_blank" rel="noopener noreferrer">Open source document</a>
+            : error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        />
+      </Suspense>}
     </div>
   </section>;
 }

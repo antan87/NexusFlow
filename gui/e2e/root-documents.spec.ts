@@ -59,6 +59,164 @@ test('opens agent-created Markdown, HTML, PDF and Office documents from the root
   await page.screenshot({ path: 'test-results/root-documents.png', fullPage: true });
 });
 
+test('maximizes a document inside the app borders and restores focus on Escape', async ({ page }) => {
+  const documents = [{ name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'page.html', kind: 'html', content: '<h1>Rendered HTML</h1><style>h1{color:rgb(1,2,3)}</style>' },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /page.html/ }).click();
+
+  const inlineFrame = page.getByTitle('Preview of page.html');
+  await expect(inlineFrame).toBeVisible();
+  const inlineBox = await inlineFrame.boundingBox();
+
+  // Stable aria-label plus aria-pressed keeps the control assertable in both states.
+  const expand = page.getByRole('button', { name: 'Expand document' });
+  await expect(expand).toHaveAttribute('aria-pressed', 'false');
+  await expand.click();
+
+  const overlay = page.getByTestId('document-viewer-expanded');
+  await expect(overlay).toBeVisible();
+  const expandedToggle = overlay.getByRole('button', { name: 'Expand document' });
+  await expect(expandedToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(expandedToggle).toBeFocused();
+
+  // The frame is no longer the 65vh letterbox.
+  const expandedBox = await overlay.getByTitle('Preview of page.html').boundingBox();
+  expect(expandedBox!.height).toBeGreaterThan(inlineBox!.height);
+
+  // Download and the raw toggle stay reachable while expanded.
+  await expect(overlay.getByRole('link', { name: 'Download', exact: true })).toBeVisible();
+  await expect(overlay.getByRole('button', { name: 'Raw text', exact: true })).toBeVisible();
+
+  // Never the browser Fullscreen API: the overlay is bounded by the app viewport.
+  const viewport = page.viewportSize()!;
+  const overlayBox = await overlay.boundingBox();
+  expect(overlayBox!.width).toBeLessThanOrEqual(viewport.width);
+  expect(overlayBox!.height).toBeLessThanOrEqual(viewport.height);
+  expect(await overlay.evaluate((node: HTMLElement) => node.ownerDocument.fullscreenElement)).toBeNull();
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Expand document' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Expand document' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTitle('Preview of page.html')).toBeVisible();
+});
+
+/**
+ * Deliberately a full document with a real <head>, because that is what an AI writes. DOMPurify
+ * returns only the <body>, so head assets are hoisted by the viewer rather than sanitized in place;
+ * a body-only fixture silently fails to cover that.
+ */
+const STYLED_PAGE = [
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Report</title>',
+  '<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">',
+  '<link rel="preload" as="script" href="https://cdn.example.com/app.js">',
+  '<script src="https://cdn.tailwindcss.com"></script>',
+  '</head><body>',
+  '<h1>Styled report</h1>',
+  '<style>h1 { color: rebeccapurple; }</style>',
+  '<svg width="16" height="16"><circle cx="8" cy="8" r="7" /></svg>',
+  '<script>window.unsafe = true</script>',
+  '<img src="https://cdn.example.com/hero.png" onerror="window.unsafe = true" onclick="window.unsafe = true">',
+  '<a href="javascript:window.unsafe=true">bad link</a>',
+  '<iframe src="https://evil.example.com"></iframe>',
+  '<button onclick="window.unsafe=true">handler</button>',
+  '</body></html>',
+].join('');
+
+async function openStyledPage(page: import('@playwright/test').Page) {
+  const documents = [{ name: 'report.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'report.html', kind: 'html', content: STYLED_PAGE },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /report.html/ }).click();
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+  const srcdoc = () => page.getByTitle('Preview of report.html').evaluate((frame: HTMLIFrameElement) => frame.srcdoc);
+  return { frame: page.getByTitle('Preview of report.html'), srcdoc };
+}
+
+test('keeps presentational markup and strips active content from agent HTML by default', async ({ page }) => {
+  const { frame, srcdoc } = await openStyledPage(page);
+  const html = await srcdoc();
+
+  // Styling survives, hoisted from the source <head> into the head the viewer builds.
+  expect(html).toContain('<link rel="stylesheet" href="https://cdn.example.com/bootstrap.min.css">');
+  expect(html.indexOf('<link rel="stylesheet"')).toBeLessThan(html.indexOf('<body>'));
+  expect(html).toContain('color: rebeccapurple');
+  expect(html).toContain('<svg');
+  expect(html).toContain('<circle');
+
+  // Everything that can execute or embed is gone.
+  expect(html).not.toContain('<script');
+  expect(html).not.toContain('cdn.tailwindcss.com');
+  expect(html).not.toContain('<iframe');
+  expect(html).not.toContain('evil.example.com');
+  expect(html).not.toContain('onclick');
+  expect(html).not.toContain('onerror');
+  expect(html).not.toContain('javascript:');
+  expect(html).not.toContain('rel="preload"');
+  expect(html).not.toContain('app.js');
+
+  // Locked by default, and declares a charset now that the document cannot carry its own.
+  expect(await frame.getAttribute('sandbox')).toBe('');
+  expect(html).toContain('<meta charset="utf-8">');
+  expect(html).toContain("default-src 'none'");
+  expect(html).toContain('style-src \'unsafe-inline\' https: http:');
+  expect(html).not.toContain('script-src');
+
+  // A page whose styling needs a script explains itself rather than looking broken.
+  await expect(page.getByText('This page loads styling from an external script, which is blocked.', { exact: false })).toBeVisible();
+});
+
+test('runs a trusted document in an opaque-origin frame', async ({ page }) => {
+  const { frame, srcdoc } = await openStyledPage(page);
+
+  await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
+  const trusted = await srcdoc();
+  // The URL is normalised through `new URL`, hence the trailing slash on a bare origin.
+  expect(trusted).toMatch(/<script src="https:\/\/cdn\.tailwindcss\.com\/"><\/script>/);
+  expect(trusted).toContain('script-src');
+  // Scripts are allowed but the frame is never given the app's origin, and other escapes stay shut.
+  expect(await frame.getAttribute('sandbox')).toBe('allow-scripts');
+  expect(trusted).not.toContain('<iframe');
+  expect(trusted).not.toContain('onclick');
+  expect(trusted).not.toContain('javascript:');
+  // Trusting a document readmits remote scripts, never inline ones.
+  expect(trusted).not.toContain('window.unsafe = true');
+  expect(trusted).toContain("default-src 'none'");
+  await expect(page.getByText('remote code is running in a sandboxed frame', { exact: false })).toBeVisible();
+});
+
+test('rejects a second document that tries to inherit trust', async ({ page }) => {
+  const documents = [
+    { name: 'report.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'other.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    return route.fulfill({ json: { name, kind: 'html', content: STYLED_PAGE } });
+  });
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /report.html/ }).click();
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+  await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: /other.html/ }).click();
+  await expect(page.getByTitle('Preview of other.html')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Trust this document', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toHaveCount(0);
+  expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).not.toContain('script-src');
+  // The stylesheet is still hoisted, because that is Q1 and not gated on trust.
+  expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).toContain('bootstrap.min.css');
+});
+
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {
   let listFails = true;
   let previewFails = true;
