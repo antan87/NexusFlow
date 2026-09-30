@@ -94,6 +94,7 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
             raw={raw}
             onToggleRaw={preview?.kind === 'markdown' || preview?.kind === 'html' ? () => setRaw((value) => !value) : undefined}
             downloadHref={`${fileUrl}&download=1`}
+            browserHref={preview?.kind === 'html' ? `${fileUrl}&open=1` : undefined}
             onClose={() => choose(null)}
             fileUrl={`${fileUrl}&revision=${revision}`}
             links={links}

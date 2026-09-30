@@ -217,6 +217,35 @@ test('rejects a second document that tries to inherit trust', async ({ page }) =
   expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).toContain('bootstrap.min.css');
 });
 
+test('offers opening an HTML document in the real browser, and only for HTML', async ({ page }) => {
+  const documents = [
+    { name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'notes.md', kind: 'markdown', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    return route.fulfill({ json: { name, kind: name?.endsWith('.html') ? 'html' : 'markdown', content: 'body' } });
+  });
+  await page.goto('/#/workspaces/demo/documents');
+
+  await page.getByRole('button', { name: /page.html/ }).click();
+  await expect(page.getByTitle('Preview of page.html')).toBeVisible();
+  const open = page.getByRole('link', { name: 'Open in browser', exact: true });
+  await expect(open).toBeVisible();
+  await expect(open).toHaveAttribute('href', /name=page.html&open=1/);
+  // Renders in a new tab, and never hands the opener a handle on it.
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', /noopener/);
+  await expect(open).toHaveAttribute('rel', /noreferrer/);
+
+  // Markdown already renders in-app, so it does not get the escape hatch.
+  await page.getByRole('button', { name: /notes.md/ }).click();
+  // Markdown renders through ChatMarkdown rather than a titled frame, so assert on its content.
+  await expect(page.getByText('body', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open in browser', exact: true })).toHaveCount(0);
+});
+
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {
   let listFails = true;
   let previewFails = true;
