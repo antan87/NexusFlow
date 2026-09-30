@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Download, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react';
+import { Download, ExternalLink, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 import { cn } from '../../lib/utils';
@@ -16,6 +16,12 @@ export interface DocumentViewerProps {
   status?: ReactNode;
   fileUrl?: string;
   downloadHref?: string;
+  /**
+   * Link that hands the document to the real browser, where it renders as authored. Separate from
+   * `downloadHref` on purpose: downloading and rendering are different trust decisions, and a user
+   * who saved the file should not have also granted it browser-level script execution.
+   */
+  browserHref?: string;
   /** Forwarded to the renderer so markdown documents can follow links to sibling files. */
   links?: MarkdownDocumentLinks;
   raw: boolean;
@@ -47,7 +53,7 @@ function TrustControl({ trusted, onToggle, compact }: { trusted: boolean; onTogg
  * the app's own borders — `fixed inset-0` within the app shell, never the browser Fullscreen API —
  * so Download, the raw toggle and the trust control all stay reachable.
  */
-export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
+export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, browserHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
   const [expanded, setExpanded] = useState(false);
   const [trusted, setTrusted] = useState(false);
   const inlineToggle = useRef<HTMLButtonElement>(null);
@@ -109,6 +115,13 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
           {onToggleRaw && <Button size={buttonSize} variant="outline" onClick={onToggleRaw}>{raw ? rawLabels[1] : rawLabels[0]}</Button>}
           {trustControl}
           {downloadHref && <a className="text-primary underline" href={downloadHref} download={preview?.name.split('/').pop() ?? title.split('/').pop()}><Download size={compact ? 12 : 14} className="mr-1 inline" />Download</a>}
+          {browserHref && <a
+            className="text-primary underline"
+            href={browserHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open in your browser, where the document runs as authored"
+          ><ExternalLink size={compact ? 12 : 14} className="mr-1 inline" />Open in browser</a>}
           <Button
             ref={toggleRef}
             size={buttonSize}

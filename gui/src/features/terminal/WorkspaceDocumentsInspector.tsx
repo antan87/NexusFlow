@@ -123,6 +123,7 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
           onToggleRaw={selected.type === 'file' ? (preview && (preview.kind === 'html' || preview.kind === 'markdown') ? () => setRaw(value => !value) : undefined) : (sourcePreview?.content !== undefined ? () => setRaw(value => !value) : undefined)}
           fileUrl={fileUrl}
           downloadHref={selected.type === 'file' ? `${fileUrl}&download=1` : undefined}
+          browserHref={selected.type === 'file' && preview?.kind === 'html' ? `${fileUrl}&open=1` : undefined}
           status={sourcePreview?.content === undefined && sourcePreview?.location
             ? <a className="text-primary underline" href={sourcePreview.location} target="_blank" rel="noopener noreferrer">Open source document</a>
             : error && <p role="alert" className="text-xs text-destructive">{error}</p>}

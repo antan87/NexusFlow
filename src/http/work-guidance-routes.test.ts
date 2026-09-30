@@ -76,3 +76,35 @@ it('lists and previews root documents without registering sources, and serves sa
   expect((await app.request('/api/workspace/test/documents/preview?name=..%2Fescape.md')).status).toBe(400);
   expect((await app.request('/api/workspace/missing/documents')).status).toBe(404);
 });
+
+it('keeps HTML locked down unless it is explicitly opened in a browser', async () => {
+  await fs.writeFile(path.join(root, 'page.html'), '<h1>Report</h1>');
+
+  // Default delivery: never renders in a browser, never executes.
+  const defaultHtml = await app.request('/api/workspace/test/documents/file?name=page.html');
+  expect(defaultHtml.headers.get('content-disposition')).toContain('attachment;');
+  expect(defaultHtml.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+
+  // The open variant renders, and the sandbox directive is what keeps it away from this app.
+  const opened = await app.request('/api/workspace/test/documents/file?name=page.html&open=1');
+  const openedCsp = opened.headers.get('content-security-policy') ?? '';
+  expect(opened.headers.get('content-disposition')).toContain('inline;');
+  expect(opened.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  expect(opened.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(await opened.text()).toBe('<h1>Report</h1>');
+  // Scripts and remote subresources work, which is the entire point of opening it.
+  expect(openedCsp).toContain('allow-scripts');
+  expect(openedCsp).toMatch(/default-src \* /);
+  // Opaque origin, so it cannot read this app's cookies or storage.
+  expect(openedCsp).toContain('sandbox');
+  expect(openedCsp).not.toContain('allow-same-origin');
+  // A new tab must not escape the sandbox entirely.
+  expect(openedCsp).not.toContain('allow-popups-to-escape-sandbox');
+
+  // Opening one does not loosen delivery of anything else.
+  const other = await app.request('/api/workspace/test/documents/file?name=page.html&download=1');
+  expect(other.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+  expect(other.headers.get('content-disposition')).toContain('attachment;');
+  const afterOpen = await app.request('/api/workspace/test/documents/file?name=page.html');
+  expect(afterOpen.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+});
