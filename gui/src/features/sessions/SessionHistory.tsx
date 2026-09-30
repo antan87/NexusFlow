@@ -119,10 +119,9 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const aiDetect = useAiDetect();
   const harnesses = useHarnesses();
 
-  const isAgyDetected = aiDetect.data?.find((a) => a.name === 'antigravity')?.detected ?? true;
-  const isClaudeDetected = Boolean(aiDetect.data?.find((a) => a.name === 'claude')?.detected);
-  const isCodexDetected = Boolean(aiDetect.data?.find((a) => a.name === 'codex')?.detected);
-  const isCopilotDetected = Boolean(aiDetect.data?.find((a) => a.name === 'copilot')?.command);
+  // Detection is read per harness inside the derived card list below, so a
+  // harness that did not exist when these four flags were written still shows
+  // up detected rather than silently absent.
 
   const hasAgyIde = Boolean(launchTargets.data?.some((t) => t.id === 'antigravity' && t.available));
   const hasCodexDesktop = Boolean(launchTargets.data?.some((t) => t.id === 'codex-desktop' && t.available));
@@ -687,7 +686,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                         CLI: {harness.cliCommand}
                       </StatusBadge>
 
-                      {harness.hasApp && (
+                      {harness.hasApp && harness.appTargetId && (
                         <StatusBadge tone="running">
                           {harness.appName}
                         </StatusBadge>
@@ -720,7 +719,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                       <Button
                         size="xs"
                         variant="outline"
-                        onClick={() => void openAppTarget(harness.appTargetId)}
+                        onClick={() => void openAppTarget(harness.appTargetId ?? harness.id)}
                         title={`Open in ${harness.appName}`}
                       >
                         <ExternalLink size={12} />

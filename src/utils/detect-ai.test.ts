@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { execa } from 'execa';
 import { detectAIAssistants } from './detect-ai.js';
 
@@ -9,8 +9,17 @@ vi.mock('execa');
 const byName = (entries: Array<{ name: string }>) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
 
 describe('detectAIAssistants', () => {
+  // grok is detected from XAI_API_KEY, so these expectations describe a machine
+  // with no credential. Export one and the suite fails for the wrong reason.
+  let savedXaiKey: string | undefined;
   beforeEach(() => {
     vi.clearAllMocks();
+    savedXaiKey = process.env.XAI_API_KEY;
+    delete process.env.XAI_API_KEY;
+  });
+  afterEach(() => {
+    if (savedXaiKey === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = savedXaiKey;
   });
 
   it('should detect claude and antigravity when commands exit with 0', async () => {

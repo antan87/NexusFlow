@@ -110,6 +110,17 @@ describe('GrokAgent', () => {
     expect(created).toHaveLength(0);
   });
 
+  it('uses the model chosen in chat settings over the environment default', async () => {
+    process.env.XAI_MODEL = 'grok-4-fast';
+    const { GrokAgent: Fresh } = await import('./GrokAgent.js');
+    const agent = new Fresh();
+    agent.on('data', () => {});
+    // start() carries the session; the model is chosen there, not at construction.
+    await agent.start('/tmp/ws', { id: 's1', provider: 'grok-native', model: 'grok-code-fast-1' } as never);
+    await agent.send('hi');
+    expect((created[0]!.body as { model: string }).model).toBe('grok-code-fast-1');
+  });
+
   it('instructs the model to read the generated AGENTS.md', async () => {
     const { GrokAgent: Fresh } = await import('./GrokAgent.js');
     const agent = new Fresh();

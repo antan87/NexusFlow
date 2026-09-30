@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import type { AgentSession } from './session.js';
+import { openWorkspaceMcp, type McpTool } from './nativeMcp.js';
 
 /**
  * Shared lifecycle for the SDK-backed native agents. Owns the processing guard,
@@ -28,9 +30,37 @@ export abstract class NativeAgentBase extends EventEmitter {
     return null;
   }
 
-  public async start(cwd: string): Promise<void> {
+  /** Session for this turn, when the caller supplied one. */
+  protected session?: AgentSession;
+
+  public async start(cwd: string, session?: AgentSession): Promise<void> {
     this.cwd = cwd;
+    this.session = session;
     this.resetHistory();
+  }
+
+  /**
+   * The model to call, in the order a user expects: the model chosen in chat
+   * settings, then the provider's environment override, then its baseline.
+   *
+   * This existed only as the second and third steps, so choosing a model in the
+   * UI had no effect on any native provider — the selection was silently dropped
+   * and the baseline was sent instead.
+   */
+  protected resolveModel(baseline: string, envVar: string): string {
+    return this.session?.model ?? process.env[envVar] ?? baseline;
+  }
+
+
+  /**
+   * MCP tools for this turn, or none.
+   *
+   * A workspace generated for a native provider carries an `.mcp.json` that
+   * nothing read, so the tools the workspace advertises simply were not there.
+   * The bridge connects per turn and fails soft: no config, no tools, no error.
+   */
+  protected async mcpTools(): Promise<McpTool[]> {
+    return openWorkspaceMcp({ cwd: this.cwd });
   }
 
   public async send(data: string): Promise<void> {

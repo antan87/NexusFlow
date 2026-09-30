@@ -83,6 +83,44 @@ it('records the process runtime verbatim for an npm install', () => {
   expect(currentCliRuntime().electron).toBe(Boolean(process.versions.electron));
 });
 
+it('recovers to the newest *complete* extraction, not merely the newest', async () => {
+  // Another AppImage on the machine leaves an incomplete extraction directory
+  // behind. Selecting it by mtime alone abandons a perfectly good older runtime
+  // and reports the desktop as unavailable.
+  const build = async (dir: string, complete: boolean) => {
+    await fs.mkdir(path.join(dir, 'resources', 'backend', 'dist'), { recursive: true });
+    if (complete) {
+      await fs.writeFile(path.join(dir, 'contextspace-desktop'), '#!/bin/sh\necho "runtime $1"\n');
+      await fs.chmod(path.join(dir, 'contextspace-desktop'), 0o755);
+      await fs.writeFile(path.join(dir, 'resources', 'backend', 'dist', 'index.js'), '// backend\n');
+    }
+  };
+  const valid = path.join(root, 'appimage_extracted_valid');
+  const incomplete = path.join(root, 'appimage_extracted_incomplete');
+  await build(valid, true);
+  await build(incomplete, false);
+  await fs.utimes(valid, new Date('2000-01-01'), new Date('2000-01-01'));
+  await fs.utimes(incomplete, new Date(), new Date());
+
+  await generateWorkspaceTools(root, ['claude'], {
+    command: path.join(root, 'gone', 'contextspace-desktop'),
+    entry: path.join(root, 'gone', 'resources', 'backend', 'dist', 'index.js'),
+    electron: true,
+  });
+
+  const saved = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = root;
+    const launcher = path.join(root, CLI_LAUNCHER);
+    // The incomplete directory is newer and must be skipped.
+    expect((await execa(launcher, [])).stdout).toContain(
+      `runtime ${path.join(valid, 'resources', 'backend', 'dist', 'index.js')}`,
+    );
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+  }
+});
+
 it('refuses to reuse a launcher the user replaced', async () => {
   await fs.mkdir(path.dirname(path.join(root, CLI_LAUNCHER)), { recursive: true });
   await fs.writeFile(path.join(root, CLI_LAUNCHER), '#!/bin/sh\nexec my-own-cli "$@"\n');

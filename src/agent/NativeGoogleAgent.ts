@@ -16,8 +16,9 @@ export class NativeGoogleAgent extends NativeAgentBase {
 
   constructor() {
     super();
-    // Allow users to override the model via env var, fallback to gemini-2.0-flash
-    this.modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    // Resolved per turn in runLoop: the model can be chosen in chat settings,
+    // which start() only learns after construction.
+    this.modelName = this.resolveModel('gemini-2.0-flash', 'GEMINI_MODEL');
   }
 
   private client(): GoogleGenAI {
@@ -33,6 +34,8 @@ export class NativeGoogleAgent extends NativeAgentBase {
   }
 
   protected async runLoop(userInput: string, signal: AbortSignal) {
+    // The session is supplied by start(), after construction.
+    this.modelName = this.resolveModel('gemini-2.0-flash', 'GEMINI_MODEL');
     this.history.push({ role: 'user', parts: [{ text: userInput }] });
 
     const config: any = {

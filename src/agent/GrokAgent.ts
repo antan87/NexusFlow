@@ -7,6 +7,7 @@ import {
   buildSystemPrompt,
   executeNativeTool,
 } from './nativeTools.js';
+import { mcpToolSchema } from './nativeMcp.js';
 
 /**
  * xAI's Grok over its OpenAI-compatible API.
@@ -26,7 +27,9 @@ export class GrokAgent extends NativeAgentBase {
 
   constructor() {
     super();
-    this.modelName = process.env.XAI_MODEL || 'grok-4';
+    // Resolved per turn in runLoop: the model can be chosen in chat settings,
+    // which start() only learns after construction.
+    this.modelName = this.resolveModel('grok-4', 'XAI_MODEL');
   }
 
   private client(): OpenAI {
@@ -46,20 +49,29 @@ export class GrokAgent extends NativeAgentBase {
   }
 
   protected async runLoop(userInput: string, signal: AbortSignal) {
+    // The session is supplied by start(), after construction.
+    this.modelName = this.resolveModel('grok-4', 'XAI_MODEL');
     this.messages.push({ role: 'user', content: userInput });
 
-    const tools = NATIVE_TOOLS.map((tool) => ({
-      type: 'function',
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: {
-          type: 'object',
-          properties: { [tool.argName]: { type: 'string', description: tool.argDescription } },
-          required: [tool.argName],
+    const mcp = await this.mcpTools();
+    if (mcp.length > 0) {
+      this.emit('data', `\n\n*Connected to the workspace MCP server (${mcp.length} tool${mcp.length === 1 ? '' : 's'})*\n`);
+    }
+    const tools = [
+      ...NATIVE_TOOLS.map((tool) => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: {
+            type: 'object',
+            properties: { [tool.argName]: { type: 'string', description: tool.argDescription } },
+            required: [tool.argName],
+          },
         },
-      },
-    }));
+      })),
+      ...mcp.map(mcpToolSchema),
+    ];
 
     let completed = false;
 
@@ -110,15 +122,18 @@ export class GrokAgent extends NativeAgentBase {
         break;
       }
 
+      const byName = new Map(mcp.map((tool) => [tool.name, tool]));
       for (const call of toolCalls) {
+        const name = call.function?.name;
+        const remote = byName.get(name);
         let result: string;
         try {
-          const args = JSON.parse(call.function.arguments || '{}');
-          result = await executeNativeTool(this.cwd, call.function.name, args);
+          const args = JSON.parse(call.function?.arguments || '{}');
+          result = remote ? await remote.call(args) : await executeNativeTool(this.cwd, name, args);
         } catch (error: any) {
-          result = `Error: ${error.message}`;
+          result = `Error: ${error?.message}`;
         }
-        this.messages.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: result });
+        this.messages.push({ role: 'tool', tool_call_id: call.id, name, content: result });
       }
     }
 

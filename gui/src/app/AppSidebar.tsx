@@ -75,7 +75,6 @@ export interface AppSidebarProps {
 }
 
 function SidebarContents({
-  const harnessName = useHarnessName();
   appVersion,
   workspaces = [],
   workspaceStatuses = {},
@@ -87,6 +86,8 @@ function SidebarContents({
   const navigate = useNavigate();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { openCli } = useFloatingChat();
+  // Harness display names come from the server manifest, not a local id map.
+  const harnessName = useHarnessName();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);

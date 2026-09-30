@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ASSISTANT_HARNESSES,
   getHarness,
@@ -21,6 +21,19 @@ import { CLI_HARNESSES, SESSION_SOURCES, isCliHarnessId } from '../utils/cli-har
  * not a TODO. This is the test pi would have failed.
  */
 describe('Harness manifest invariants', () => {
+  // Credential-only harnesses are detected from the ambient environment, so a
+  // developer machine with XAI_API_KEY exported would otherwise fail an
+  // assertion about an unset credential. Stub it rather than inherit it.
+  let savedXaiKey: string | undefined;
+  beforeEach(() => {
+    savedXaiKey = process.env.XAI_API_KEY;
+    delete process.env.XAI_API_KEY;
+  });
+  afterEach(() => {
+    if (savedXaiKey === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = savedXaiKey;
+  });
+
   it('declares unique ids that match their keys', () => {
     const ids = HARNESS_LIST.map((harness) => harness.id);
     expect(new Set(ids).size).toBe(ids.length);
