@@ -14,7 +14,7 @@ import {
   MessageSquare,
   Columns2,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../../components/icons/HarnessIcon.js';
 import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
@@ -26,6 +26,7 @@ interface FloatingChatModalProps {
 }
 
 export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
+  const harnessName = useHarnessName();
   const navigate = useNavigate();
   const {
     isOpen,

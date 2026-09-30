@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { History, RefreshCw, ArrowRight } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../../components/icons/HarnessIcon.js';
 import { SessionActivity } from '../sessions/SessionActivity.js';
 import { SessionKind, mainSessionFor } from '../sessions/SessionKind.js';
 import { SessionUsageDetails } from './SessionUsage.js';
@@ -10,6 +10,7 @@ import type { TerminalStatus } from './client.js';
 import { useWorkspaceSessionSources } from './useWorkspaceSessionSources.js';
 
 export function ResumeSessions({ workspace, active, busy, status, fill, onStartNew, onResume }: { workspace: string; active: boolean; busy: boolean; status: TerminalStatus | null; fill: boolean; onStartNew: () => void; onResume: (session: AISession) => void }) {
+  const harnessName = useHarnessName();
   const [search, setSearch] = useState('');
   const [includeChildren, setIncludeChildren] = useState(false);
   // Each source resolves independently so slow CLI history cannot hold up the rest.

@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../components/ui/button.js';
 import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { Select, SelectTrigger, SelectPopup, SelectItem } from '../../components/ui/select.js';
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../../components/icons/HarnessIcon.js';
 import { Plus, History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff, MoreHorizontal } from 'lucide-react';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { ResumeSessions } from './ResumeSessions.js';
@@ -67,6 +67,7 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
 
 interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void }
 export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput }: Props) {
+  const harnessName = useHarnessName();
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);

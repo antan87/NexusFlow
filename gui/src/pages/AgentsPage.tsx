@@ -32,6 +32,7 @@ import {
   useAgents,
   useAssignWorkspaceSkills,
   useDeleteAgent,
+  useHarnesses,
   useImportAgent,
   useSaveAgent,
   useWorkspaces,
@@ -82,7 +83,13 @@ export function AgentsPage({ showToast }: AgentsPageProps) {
 
   const isWorkspaceView = selectedWorkspace !== 'global';
   const selectedWorkspaceItem = workspaces.find((workspace) => workspace.id === selectedWorkspace);
-  const codexAvailable = !isWorkspaceView || selectedWorkspaceItem?.assistants?.includes('codex');
+  // The agent catalog materializes toml agent files, which only harnesses that
+  // declare an agents directory can read. Derived from the manifest rather than
+  // hardcoding codex, so a second harness gaining agent support appears here.
+  const harnesses = useHarnesses();
+  const agentHarnesses = (harnesses.data ?? []).filter((harness) => harness.agentsDir).map((harness) => harness.id);
+  const codexAvailable =
+    !isWorkspaceView || agentHarnesses.length === 0 || agentHarnesses.some((id) => selectedWorkspaceItem?.assistants?.includes(id));
   const assignmentReady =
     isWorkspaceView &&
     codexAvailable &&

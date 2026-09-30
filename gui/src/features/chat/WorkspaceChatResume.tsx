@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, History, LoaderCircle } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../../components/icons/HarnessIcon.js';
 import { useFloatingChat } from './floatingChatStore.js';
 import { useWorkspaceSessionSources } from '../terminal/useWorkspaceSessionSources.js';
 
 export function WorkspaceChatResume({ workspace }: { workspace: string }) {
+  const harnessName = useHarnessName();
   const container = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
   const { openCli, openTerminal } = useFloatingChat();

@@ -167,7 +167,7 @@ import {
 } from './resources/service.js';
 
 import type { AIAssistant, Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus, OrganizationConventions, DomainPack } from './types.js';
-import { isAssistantHarnessId } from './harness/manifest.js';
+import { isAssistantHarnessId, describeHarnesses } from './harness/manifest.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 import {
   WorkroomAuthorizationError,
@@ -1267,6 +1267,17 @@ app.get('/api/ai-detect', async (c) => {
     return errorResponse(c, error);
   }
 });
+
+/**
+ * The harness manifest, for renderers that must not hardcode harness identity.
+ *
+ * The GUI used to keep its own `AIAssistant` union and its own id-to-name map,
+ * hand-copied from the backend with nothing checking they agreed, which is how a
+ * harness could be launchable on the server and unknown to the UI. Identity now
+ * comes from here. Presentation cannot: an icon component and a Tailwind class
+ * are not data, so those stay a renderer-side registry keyed by `icon`.
+ */
+app.get('/api/harnesses', (c) => c.json(describeHarnesses()));
 
 // 6. Detect available editors
 app.get('/api/editor-detect', async (c) => {

@@ -21,7 +21,7 @@ import {
   ArrowLeft,
   type LucideIcon,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -75,6 +75,7 @@ export interface AppSidebarProps {
 }
 
 function SidebarContents({
+  const harnessName = useHarnessName();
   appVersion,
   workspaces = [],
   workspaceStatuses = {},

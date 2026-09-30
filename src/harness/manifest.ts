@@ -111,6 +111,8 @@ export interface HarnessManifest {
   /** Omitted when the harness configures MCP at the user level instead. */
   mcp?: McpTargetSpec[];
   terminal: TerminalSpec;
+  /** Agent definition directory, when this harness supports agent files. */
+  agents?: { dir: string };
   /** Set only when a normalized adapter exists in `src/harness/`. */
   vendor?: Vendor;
   /** References into `ProviderRegistry`, never inlined. */
@@ -167,6 +169,8 @@ export const HARNESSES = {
     skills: [PORTABLE_SKILLS],
     mcp: [{ path: '.codex/config.toml', key: 'mcp_servers', format: 'toml' }],
     terminal: { resumeArgs: (id: string) => ['resume', id], continueArgs: ['resume'], history: true },
+    // Codex is the only harness whose agent catalog materializes toml files.
+    agents: { dir: '.codex/agents' },
     vendor: 'codex',
     chatProviderIds: ['codex-cli', 'codex-sdk'],
   },
@@ -242,6 +246,60 @@ export function isAssistantHarnessId(value: unknown): value is HarnessOfRole<'as
 
 export function getHarness(id: string): HarnessManifest | undefined {
   return isHarnessId(id) ? HARNESSES[id] : undefined;
+}
+
+/** The wire shape of a harness, for renderers that must not restate its identity. */
+export interface HarnessDescription {
+  id: HarnessId;
+  /** Name for terminal launch, the session list and logs. */
+  label: string;
+  /** Name for the workspace-creation picker, when it differs from `label`. */
+  pickerLabel: string;
+  role: HarnessRole;
+  /** Selectable as a workspace assistant. */
+  isAssistant: boolean;
+  /** Saved sessions are discoverable. */
+  hasHistory: boolean;
+  /** Binary that hosts an interactive terminal session. */
+  launchCommand: string;
+  /** Binary whose presence means the harness is installed. */
+  probe: string;
+  /**
+   * Args that resume a session, with {@link SESSION_ID_TOKEN} where the id goes.
+   *
+   * Shipped because the GUI used to rebuild this string itself with a ternary
+   * that sent every harness except claude and codex to `agy --conversation`.
+   */
+  resumeArgs: string[];
+  /** Workspace context file this harness reads, when it owns one. */
+  contextPath?: string;
+  /** Skill directories it discovers, relative to the workspace root. */
+  skillRoots: string[];
+  /** MCP configs it reads, relative to the workspace root. */
+  mcpConfigPaths: string[];
+  /** Agent definition directory, when the harness supports agent files. */
+  agentsDir?: string;
+}
+
+/** Placeholder marking where a session id belongs in {@link HarnessDescription.resumeArgs}. */
+export const SESSION_ID_TOKEN = '{sessionId}';
+
+export function describeHarnesses(): HarnessDescription[] {
+  return HARNESS_LIST.map((harness) => ({
+    id: harness.id as HarnessId,
+    label: harness.label,
+    pickerLabel: harness.pickerLabel ?? harness.label,
+    role: harness.role,
+    isAssistant: harness.role === 'assistant',
+    hasHistory: harness.terminal.history,
+    launchCommand: harness.detection.launchCommand ?? harness.detection.probe,
+    probe: harness.detection.probe,
+    resumeArgs: harness.terminal.resumeArgs(SESSION_ID_TOKEN).map((arg) => `${arg}`),
+    ...(harness.context.kind === 'native-agents-md' ? {} : { contextPath: harness.context.path }),
+    skillRoots: harness.skills.map((root) => root.root),
+    mcpConfigPaths: (harness.mcp ?? []).map((target) => target.path),
+    ...(harness.agents ? { agentsDir: harness.agents.dir } : {}),
+  }));
 }
 
 /** The declared skill roots for a selection, portable roots deduplicated. */

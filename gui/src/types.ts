@@ -64,8 +64,32 @@ export interface WorkspaceLaunchTarget {
   unavailableReason?: string;
 }
 
-export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
-export type SessionAssistant = AIAssistant | 'pi';
+/**
+ * Harness identity comes from `/api/harnesses`, not from a union copied here.
+ *
+ * This type used to be `'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor'`
+ * with `pi` bolted on for sessions, hand-mirrored from `src/types.ts` with
+ * nothing checking the two agreed. It is now the identity the server reports:
+ * `string`, narrowed where it matters by the data. See `HarnessDescription`.
+ */
+export type AIAssistant = string;
+export type SessionAssistant = string;
+
+/** The manifest as the server reports it. Mirrors `HarnessDescription`. */
+export interface HarnessDescription {
+  id: string;
+  label: string;
+  pickerLabel: string;
+  role: 'assistant' | 'session-only';
+  isAssistant: boolean;
+  hasHistory: boolean;
+  launchCommand: string;
+  probe: string;
+  contextPath?: string;
+  skillRoots: string[];
+  mcpConfigPaths: string[];
+  agentsDir?: string;
+}
 
 export interface QuotaWindow {
   unit: 'tokens' | 'requests' | 'percent';

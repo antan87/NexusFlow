@@ -12,6 +12,7 @@ import type {
   AISession,
   DetectedAI,
   DetectedEditor,
+  HarnessDescription,
   Feature,
   ContextSpaceConfig,
   DomainPack,
@@ -300,6 +301,22 @@ export function useAiDetect() {
     queryKey: ['ai-detect'],
     queryFn: () => apiFetch<DetectedAI[]>('/api/ai-detect'),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Harness identity, from the server's manifest.
+ *
+ * The GUI used to hardcode the id-to-name map and the assistant list, so a
+ * harness added on the backend was invisible here until someone remembered to
+ * edit these files. It is static configuration, not state, so the long stale
+ * time is deliberate: one fetch per session.
+ */
+export function useHarnesses() {
+  return useQuery({
+    queryKey: ['harnesses'],
+    queryFn: () => apiFetch<HarnessDescription[]>('/api/harnesses'),
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 
