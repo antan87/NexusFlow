@@ -8,6 +8,28 @@ import {
   executeNativeTool,
 } from './nativeTools.js';
 
+/**
+ * JSON Schema from an MCP server, in the shape Gemini's function declarations
+ * expect: the same type vocabulary in upper case, applied recursively because a
+ * nested object property is as valid in a workspace tool as a top-level one.
+ */
+function toGeminiSchema(schema: Record<string, unknown> | undefined): Record<string, unknown> {
+  const convert = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(convert);
+    if (!node || typeof node !== 'object') return node;
+    const source = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(source)) {
+      if (key === 'type' && typeof value === 'string') out[key] = value.toUpperCase();
+      else if (key === 'properties' && value && typeof value === 'object') {
+        out[key] = Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([name, child]) => [name, convert(child)]));
+      } else out[key] = convert(value);
+    }
+    return out;
+  };
+  return (convert(schema ?? { type: 'object', properties: {} }) ?? {}) as Record<string, unknown>;
+}
+
 export class NativeGoogleAgent extends NativeAgentBase {
   protected readonly label = 'NativeGoogleAgent';
   private ai: GoogleGenAI | null = null;
@@ -38,20 +60,33 @@ export class NativeGoogleAgent extends NativeAgentBase {
     this.modelName = this.resolveModel('gemini-2.0-flash', 'GEMINI_MODEL');
     this.history.push({ role: 'user', parts: [{ text: userInput }] });
 
+    // Same gap as the other native agents: a generated .mcp.json was never read,
+    // because a native provider brings no MCP client of its own.
+    const mcp = await this.mcpTools();
+    if (mcp.length > 0) {
+      this.emit('data', `\n\n*Connected to the workspace MCP server (${mcp.length} tools)*\n`);
+    }
     const config: any = {
       systemInstruction: buildSystemPrompt(this.cwd),
       // Cancels an in-flight request when stop() aborts the controller.
       abortSignal: signal,
       tools: [{
-        functionDeclarations: NATIVE_TOOLS.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: {
-            type: 'OBJECT',
-            properties: { [t.argName]: { type: 'STRING', description: t.argDescription } },
-            required: [t.argName],
-          },
-        })),
+        functionDeclarations: [
+          ...NATIVE_TOOLS.map((t) => ({
+            name: t.name,
+            description: t.description,
+            parameters: {
+              type: 'OBJECT',
+              properties: { [t.argName]: { type: 'STRING', description: t.argDescription } },
+              required: [t.argName],
+            },
+          })),
+          ...mcp.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: toGeminiSchema(tool.inputSchema),
+          })),
+        ],
       }],
     };
 
@@ -90,13 +125,15 @@ export class NativeGoogleAgent extends NativeAgentBase {
       }
 
       const functionResponses: any[] = [];
+      const byName = new Map(mcp.map((tool) => [tool.name, tool]));
       for (const call of functionCalls) {
         this.emit('data', `\n\n*Running tool: ${call.name}*\n`);
+        const remote = byName.get(call.name);
         let result: string;
         try {
-          result = await executeNativeTool(this.cwd, call.name, call.args || {});
+          result = remote ? await remote.call((call.args ?? {}) as Record<string, unknown>) : await executeNativeTool(this.cwd, call.name, call.args || {});
         } catch (e: any) {
-          result = `Error: ${e.message}`;
+          result = `Error: ${e?.message}`;
         }
         functionResponses.push({ functionResponse: { name: call.name, response: { result } } });
       }
