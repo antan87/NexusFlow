@@ -121,6 +121,20 @@ describe('GrokAgent', () => {
     expect((created[0]!.body as { model: string }).model).toBe('grok-code-fast-1');
   });
 
+  it('opens the workspace MCP server once per session, not once per turn', async () => {
+    const { GrokAgent: Fresh } = await import('./GrokAgent.js');
+    const agent = new Fresh();
+    agent.on('data', () => {});
+    agent.on('error', () => {});
+    const tools = (agent as unknown as { mcpTools(): Promise<unknown[]> }).mcpTools.bind(agent);
+    // No config in a temp cwd, so each call short-circuits; the point is that
+    // the base caches the connection rather than reconnecting.
+    const first = await tools();
+    const second = await tools();
+    expect(first).toEqual([]);
+    expect(second).toBe(first);
+  });
+
   it('instructs the model to read the generated AGENTS.md', async () => {
     const { GrokAgent: Fresh } = await import('./GrokAgent.js');
     const agent = new Fresh();

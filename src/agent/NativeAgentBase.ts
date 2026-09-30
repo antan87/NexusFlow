@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { AgentSession } from './session.js';
-import { openWorkspaceMcp, type McpTool } from './nativeMcp.js';
+import { openWorkspaceMcp, type McpConnection, type McpTool } from './nativeMcp.js';
 
 /**
  * Shared lifecycle for the SDK-backed native agents. Owns the processing guard,
@@ -37,6 +37,15 @@ export abstract class NativeAgentBase extends EventEmitter {
     this.cwd = cwd;
     this.session = session;
     this.resetHistory();
+    // Connect once per session; a reconnect after stop() opens a fresh one.
+    this.mcp = undefined;
+  }
+
+  /** Terminates the MCP server process this session spawned, if any. */
+  protected async closeMcp(): Promise<void> {
+    const connection = this.mcp;
+    this.mcp = undefined;
+    await connection?.close();
   }
 
   /**
@@ -52,15 +61,20 @@ export abstract class NativeAgentBase extends EventEmitter {
   }
 
 
+  /** The session's MCP connection, opened once in start() and closed in stop(). */
+  private mcp?: McpConnection;
+
   /**
    * MCP tools for this turn, or none.
    *
    * A workspace generated for a native provider carries an `.mcp.json` that
    * nothing read, so the tools the workspace advertises simply were not there.
-   * The bridge connects per turn and fails soft: no config, no tools, no error.
+   * The connection is per *session*, not per turn: it owns a spawned server
+   * process, and connecting per turn leaked one process per turn.
    */
   protected async mcpTools(): Promise<McpTool[]> {
-    return openWorkspaceMcp({ cwd: this.cwd });
+    if (!this.mcp) this.mcp = await openWorkspaceMcp({ cwd: this.cwd });
+    return this.mcp.tools;
   }
 
   public async send(data: string): Promise<void> {
@@ -95,6 +109,10 @@ export abstract class NativeAgentBase extends EventEmitter {
   public stop(): void {
     this.abortController?.abort();
     this.abortController = null;
+    // Fire and forget: stop() is synchronous by contract, and a close failure
+    // has nothing to report to a caller that has already moved on. The
+    // connection is dropped either way, so it cannot be reused.
+    void this.closeMcp();
     this.emit('close', 0);
   }
 }

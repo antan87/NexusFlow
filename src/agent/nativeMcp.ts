@@ -10,8 +10,12 @@
  *
  * The bridge is deliberately small and fail-soft. A missing config, an
  * unlaunchable server, or a server that dies mid-session degrades to "no MCP
- * tools this turn" rather than failing the conversation, because the native
- * agents' whole purpose is to work without a working MCP server.
+ * tools" rather than failing the conversation, because the native agents' whole
+ * purpose is to work without a working MCP server.
+ *
+ * A connection owns a spawned server process, so it must be closed. Connecting
+ * per turn leaks one process per turn; callers hold one connection for the
+ * session and close it when the session ends.
  */
 
 import fs from 'node:fs';
@@ -43,6 +47,12 @@ export interface McpBridgeOptions {
    * to stand in for a server process without spawning one.
    */
   createClient?: () => McpClient;
+}
+
+/** A live MCP connection. `close` is required: the client owns a child process. */
+export interface McpConnection {
+  tools: McpTool[];
+  close(): Promise<void>;
 }
 
 /** The slice of the MCP client this bridge uses. */
@@ -82,12 +92,13 @@ async function readServerConfig(cwd: string, harness?: HarnessManifest): Promise
 /**
  * Connect to the workspace MCP server and describe its tools.
  *
- * Returns an empty list when there is nothing to connect to. The client is not
- * closed on return: the tools hold it, and it lives as long as the session.
+ * Returns an empty connection when there is nothing to reach. The caller owns
+ * the connection and must close it: closing is what terminates the spawned
+ * server, so a caller that opens per turn leaks a process per turn.
  */
-export async function openWorkspaceMcp(options: McpBridgeOptions): Promise<McpTool[]> {
+export async function openWorkspaceMcp(options: McpBridgeOptions): Promise<McpConnection> {
   const server = await readServerConfig(options.cwd, options.harness);
-  if (!server) return [];
+  if (!server) return { tools: [], close: async () => {} };
 
   const client = options.createClient?.() ??
     (new Client({ name: 'nexusflow-native', version: '1' }, { capabilities: {} }) as unknown as McpClient);
@@ -100,7 +111,7 @@ export async function openWorkspaceMcp(options: McpBridgeOptions): Promise<McpTo
       }));
     await client.connect(createTransport({ command: server.command, args: server.args ?? [], env: server.env }));
     const listed = await client.listTools();
-    return (listed.tools ?? []).map((tool) => ({
+    const tools = (listed.tools ?? []).map((tool) => ({
       name: tool.name,
       description: tool.description ?? tool.name,
       ...(tool.inputSchema ? { inputSchema: tool.inputSchema as Record<string, unknown> } : {}),
@@ -118,6 +129,16 @@ export async function openWorkspaceMcp(options: McpBridgeOptions): Promise<McpTo
         }
       },
     }));
+    return {
+      tools,
+      close: async () => {
+        try {
+          await client.close();
+        } catch {
+          // A server that already died has nothing left to tear down.
+        }
+      },
+    };
   } catch (error) {
     options.onProblem?.(`MCP server unavailable: ${error instanceof Error ? error.message : String(error)}`);
     try {
@@ -125,7 +146,7 @@ export async function openWorkspaceMcp(options: McpBridgeOptions): Promise<McpTo
     } catch {
       // Nothing useful to do if closing a failed connection throws.
     }
-    return [];
+    return { tools: [], close: async () => {} };
   }
 }
 

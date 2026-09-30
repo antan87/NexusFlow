@@ -121,6 +121,31 @@ it('recovers to the newest *complete* extraction, not merely the newest', async 
   }
 });
 
+it('recovers a runtime under a TMPDIR containing a space', async () => {
+  // Unquoted command substitution word-splits, so the previous `for dir in $(...)`
+  // form found no candidate at all here and reported a valid runtime as missing.
+  const spacey = path.join(root, 'has space');
+  const valid = path.join(spacey, 'appimage_extracted_ok');
+  await fs.mkdir(path.join(valid, 'resources', 'backend', 'dist'), { recursive: true });
+  await fs.writeFile(path.join(valid, 'contextspace-desktop'), '#!/bin/sh\necho "spacey runtime $1"\n');
+  await fs.chmod(path.join(valid, 'contextspace-desktop'), 0o755);
+  await fs.writeFile(path.join(valid, 'resources', 'backend', 'dist', 'index.js'), '// backend\n');
+
+  await generateWorkspaceTools(root, ['claude'], {
+    command: path.join(root, 'gone', 'contextspace-desktop'),
+    entry: path.join(root, 'gone', 'resources', 'backend', 'dist', 'index.js'),
+    electron: true,
+  });
+
+  const saved = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = spacey;
+    expect((await execa(path.join(root, CLI_LAUNCHER), [])).stdout).toContain('spacey runtime');
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+  }
+});
+
 it('refuses to reuse a launcher the user replaced', async () => {
   await fs.mkdir(path.dirname(path.join(root, CLI_LAUNCHER)), { recursive: true });
   await fs.writeFile(path.join(root, CLI_LAUNCHER), '#!/bin/sh\nexec my-own-cli "$@"\n');

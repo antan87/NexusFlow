@@ -16,8 +16,22 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
-import { getHarness, launchCommandFor, type HarnessManifest } from '../harness/manifest.js';
+import { getHarness, launchCommandFor } from '../harness/manifest.js';
 import { BRAND_NAME } from './constants.js';
+import { CLI_LAUNCHER } from './workspace-tools.js';
+import * as fsSync from 'node:fs';
+import { accessSync, constants as fsConstants } from 'node:fs';
+
+/** Whether a path is executable by this process. Mode bits are not readable on Windows. */
+const isExecutable = (target: string): boolean => {
+  if (process.platform === 'win32') return true;
+  try {
+    accessSync(target, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
 
@@ -353,6 +367,24 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   // What "available" means comes from the manifest: a binary harness is
   // available when its command is on PATH, a credential-only harness when its
   // env var is set. Probing a CLI for the second kind would always warn.
+  // ── 6b. Workspace CLI launcher ──────────────────────────────────────────
+  // Every generated MCP config invokes this launcher, so a launcher that lost
+  // its executable bit (an archive export, a checkout that does not preserve
+  // modes) breaks MCP for every client at once, with the client's error rather
+  // than ours. It is a committed file, so this is worth saying out loud.
+  {
+    const launcher = path.join(workspacePath, CLI_LAUNCHER);
+    if (fsSync.existsSync(launcher)) {
+      const executable = isExecutable(launcher);
+      if (!executable) {
+        warnings.push(`Workspace CLI launcher ${CLI_LAUNCHER} is not executable: run \`${BRAND_NAME} refresh\` in this workspace to restore it, or every MCP client will fail to start it.`);
+        checks.push({ category: 'Core Artifacts', name: CLI_LAUNCHER, status: 'warn', message: 'not executable' });
+      } else {
+        checks.push({ category: 'Core Artifacts', name: CLI_LAUNCHER, status: 'pass', message: 'executable' });
+      }
+    }
+  }
+
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
       const harness = getHarness(a);
@@ -380,7 +412,15 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
         }
         continue;
       }
-      const bin = launchCommandFor(harness as HarnessManifest) ?? a.toLowerCase();
+      // An assistant id this build does not know is reported, not fatal: a
+      // workspace outlives the harness it was created with, and a health check
+      // that throws on unrecognised input is worse than useless.
+      if (!harness) {
+        warnings.push(`Workspace assistant "${a}" is not a known harness in this version of ${BRAND_NAME}.`);
+        checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: 'unknown harness for this version' });
+        continue;
+      }
+      const bin = launchCommandFor(harness) ?? a.toLowerCase();
       const resolved = findExecutable(bin);
       if (!resolved) {
         warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);
