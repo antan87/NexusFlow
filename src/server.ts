@@ -18,15 +18,18 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import { createNodeWebSocket } from '@hono/node-ws';
 import * as fs from 'node:fs/promises';
+import { z } from 'zod';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa } from 'execa';
 import * as os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
-import { loadConfig, saveConfig, getConfigDir } from './core/config.js';
+import { loadConfig, saveConfig, getConfigDir, getDefaultConfig } from './core/config.js';
+import { checkConfigPaths, expandHome } from './core/config-paths.js';
 import { saveChatThread, loadChatThread, clearChatThread } from './storage/db.js';
+import { dataRoutes } from './diagnostics/routes.js';
 import {
   PRIMARY_LOGS_DIR,
   LEGACY_LOGS_DIR,
@@ -38,6 +41,7 @@ import {
   LEGACY_ENGINE_NPM_PACKAGE,
   resolveWorkspaceChatLedger,
   readWorkspaceChatMessages,
+  BRAND_NAME,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
 import { listStorageProviders } from './core/adapters/registry.js';
@@ -76,7 +80,7 @@ import {
   launchTargetIdForEditorCommand,
   launchWorkspaceTarget,
 } from './utils/workspace-launch.js';
-import { isBinaryOnPath, launchWorkspaceTerminal, SUPPORTED_ASSISTANTS } from './utils/terminal-launch.js';
+import { buildHarnessCliCommand, buildHarnessContinueCommand, isBinaryOnPath, launchWorkspaceTerminal, SUPPORTED_ASSISTANTS } from './utils/terminal-launch.js';
 import { openInEditor } from './utils/open-editor.js';
 import {
   canOpenCodexSessionInWorkspace,
@@ -84,13 +88,21 @@ import {
   findActiveAssistants,
   findSessions,
   getSessionTranscript,
+  SESSION_SOURCES,
 } from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/adapters.js';
 import { isValidSessionId, isValidSessionUuid, type AgentSession } from './agent/session.js';
 import { defaultTurnSessionManager, AgentTurnGate, dispatchAgentInput } from './agent/TurnSessionManager.js';
 import { getRepoStatus } from './utils/multi-git.js';
 import { syncWorkspace } from './core/sync.js';
-import { commitWorkspace } from './core/commit.js';
+import { commitWorkspace, pushWorkspace } from './core/commit.js';
+import { finishWorkspace } from './core/finish.js';
+import { IsolationConflictError, planRepoIsolation } from './core/isolate.js';
+import { ReferenceRepoError, describeEditBoundaries, referenceRepoMessage } from './core/edit-policy.js';
+import { ArchivedWorkspaceError, assertWorkspaceActive } from './core/archive-guard.js';
+import { archiveWorkspace, unarchiveWorkspace } from './core/archive.js';
+import { evaluateProgression } from './core/progression-policy.js';
+import { getWorkspaceStatusReport } from './core/status.js';
 import { refreshWorkspace } from './core/refresh.js';
 import { checkGenerationLock } from './core/generation-lock.js';
 import { writeWorkspaceFile } from './core/storage.js';
@@ -149,11 +161,12 @@ import {
 import { ResourceConflictError } from './resources/materializer.js';
 import {
   ResourceSelectionError,
+  previewResourceSelections,
   validateResourceSelections,
   withResourceAdministrationLock,
 } from './resources/service.js';
 
-import type { Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus, OrganizationConventions, DomainPack } from './types.js';
+import type { AIAssistant, Feature, RepoInfo, RepoSelection, WorkspaceContext, SyncStatus, RepoSyncState, WorkspaceStatus, OrganizationConventions, DomainPack } from './types.js';
 import { suggestWorkflow } from './utils/workflow-advisor.js';
 import {
   WorkroomAuthorizationError,
@@ -491,6 +504,15 @@ function errorResponse(c: any, error: unknown) {
   if (error instanceof WorkroomValidationError) {
     return c.json({ error: error.message }, 400);
   }
+  if (error instanceof ReferenceRepoError) {
+    return c.json({ error: error.message, code: error.code, repos: error.repos }, 409);
+  }
+  if (error instanceof ArchivedWorkspaceError) {
+    return c.json({ error: error.message, code: error.code }, 409);
+  }
+  if (error instanceof IsolationConflictError) {
+    return c.json({ error: error.message, code: error.code, plan: error.plan }, 409);
+  }
   const msg = error instanceof Error ? error.message : String(error);
   return c.json({ error: msg }, 500);
 }
@@ -589,6 +611,60 @@ app.use('/api/*', async (c, next) => {
   }
   await next();
 });
+
+// Archived workspaces keep a readable record. Routes that change repositories
+// or start processes refuse them here, before any handler runs; the core
+// operations refuse them too, so CLI and MCP callers get the same answer.
+const ARCHIVE_REFUSED_ACTIONS = new Set([
+  'launch', 'terminal', 'stream', 'resume', 'sync', 'commit', 'push', 'finish', 'isolate', 'repo',
+  'verify', 'migrate', 'update-spec', 'domain-packs', 'services', 'orchestrators', 'changes',
+]);
+
+/** The workspace action a mutating request targets, when archive must refuse it. */
+export function archiveRefusedAction(method: string, requestPath: string): { id: string; action: string } | null {
+  if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) return null;
+  const segments = requestPath.split('/');
+  // ['', 'api', 'workspace', ':id', ':action', ...rest]
+  if (segments[1] !== 'api' || segments[2] !== 'workspace' || segments.length < 5) return null;
+  const action = segments[4] ?? '';
+  if (!ARCHIVE_REFUSED_ACTIONS.has(action)) return null;
+  // Stopping is how an archived workspace's leftovers are cleaned up.
+  if ((action === 'services' || action === 'orchestrators') && segments.slice(5).includes('stop')) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(segments[3] ?? '');
+  } catch {
+    return null;
+  }
+  return id ? { id, action } : null;
+}
+
+app.use('/api/workspace/*', async (c, next) => {
+  const target = archiveRefusedAction(c.req.method, c.req.path);
+  if (target) {
+    try {
+      const config = await loadConfig();
+      const feature = await loadFeatureConfig(resolveWorkspacePath(config.workspacesDir, target.id));
+      assertWorkspaceActive(feature, operationLabel(target.action));
+    } catch (error) {
+      if (error instanceof ArchivedWorkspaceError) return errorResponse(c, error);
+      // Anything else (unknown workspace, bad path) is the handler's to report.
+    }
+  }
+  await next();
+});
+
+function operationLabel(action: string): string {
+  switch (action) {
+    case 'launch': case 'terminal': case 'stream': case 'resume': return 'start assistant sessions';
+    case 'services': case 'orchestrators': return 'start services';
+    case 'isolate': return 'prepare repositories for editing';
+    case 'repo': return 'add repositories';
+    case 'changes': return 'change files';
+    case 'verify': return 'run verification';
+    default: return action.replace(/-/g, ' ');
+  }
+}
 
 // ─── API Endpoints ────────────────────────────────────────────────────────
 
@@ -729,6 +805,13 @@ app.delete('/api/chat/thread/:workspaceId', async (c) => {
   }
 });
 
+app.route('/api', dataRoutes(async (id) => {
+  const config = await loadConfig();
+  const workspacePath = await resolveExactWorkspaceById(config.workspacesDir, id);
+  if (!workspacePath) throw new Error('Workspace unavailable.');
+  return workspacePath;
+}));
+
 // 1. Get current configuration
 app.get('/api/config', async (c) => {
   try {
@@ -740,10 +823,28 @@ app.get('/api/config', async (c) => {
     } catch {}
 
     const config = await loadConfig();
-    return c.json({ config, exists });
+    const defaults = getDefaultConfig();
+    // Setup shows examples and suggestions for the machine the server runs on,
+    // not the browser's platform.
+    return c.json({
+      config,
+      exists,
+      platform: process.platform,
+      suggested: { devDir: defaults.devDir, workspacesDir: defaults.workspacesDir },
+    });
   } catch (error) {
     return errorResponse(c, error);
   }
+});
+
+const configPathsInput = z.object({ devDir: z.string().max(4096).optional(), workspacesDir: z.string().max(4096).optional() });
+const countRepos = async (devDir: string) => (await scanForRepos(devDir, (await loadConfig({ quiet: true })).scanDepth)).length;
+
+// Check setup folders before saving so the GUI can explain a bad path inline.
+app.post('/api/config/validate', async (c) => {
+  const parsed = configPathsInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'Invalid folder payload' }, 400);
+  return c.json(await checkConfigPaths(parsed.data, { countRepos }));
 });
 
 // Get all registered storage adapters
@@ -762,12 +863,37 @@ app.get('/api/adapters', async (c) => {
 app.post('/api/config', async (c) => {
   try {
     const body = await c.req.json().catch(() => null);
-    const parsed = configPatchSchema.safeParse(body);
+    // `createWorkspacesDir` is a one-off instruction, never a stored setting.
+    const { createWorkspacesDir, ...patch } = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    for (const key of ['devDir', 'workspacesDir'] as const) {
+      if (typeof patch[key] === 'string') patch[key] = expandHome(patch[key]);
+    }
+    const parsed = configPatchSchema.safeParse(body === null ? null : patch);
     if (!parsed.success) {
       return c.json({ error: 'Invalid config payload', issues: parsed.error.flatten() }, 400);
     }
     const current = await loadConfig();
     const next = { ...current, ...parsed.data };
+    // Check a folder only when it changes: saving another setting must not fail
+    // because a previously saved folder has since gone away.
+    const changed = {
+      ...(parsed.data.devDir !== undefined && parsed.data.devDir !== current.devDir ? { devDir: next.devDir } : {}),
+      ...(parsed.data.workspacesDir !== undefined && parsed.data.workspacesDir !== current.workspacesDir ? { workspacesDir: next.workspacesDir } : {}),
+    };
+    if (Object.keys(changed).length) {
+      const pair = { devDir: next.devDir, workspacesDir: 'workspacesDir' in changed ? next.workspacesDir : undefined };
+      let report = await checkConfigPaths(pair);
+      if (createWorkspacesDir === true && report.workspacesDir?.status === 'missing' && report.workspacesDir.canCreate) {
+        await fs.mkdir(report.workspacesDir.path, { recursive: true });
+        report = await checkConfigPaths(pair);
+      }
+      const failed = (['devDir', 'workspacesDir'] as const).filter((key) => key in changed && report[key] && report[key]!.status !== 'ok');
+      if (failed.length) {
+        return c.json({ error: 'Check the highlighted folders.', fields: report }, 422);
+      }
+      if (report.devDir) next.devDir = report.devDir.path;
+      if (report.workspacesDir) next.workspacesDir = report.workspacesDir.path;
+    }
     await saveConfig(next);
     return c.json({ success: true, config: next });
   } catch (error) {
@@ -1004,19 +1130,67 @@ function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
   return worst;
 }
 
+// A paged status scan keeps one stable catalog and PM2 snapshot across requests.
+// The small bounded cache avoids rescanning every manifest for each page.
+const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+const statusSnapshots = new Map<string, {
+  workspacesDir: string;
+  workspaces: Feature[];
+  pm2List: Promise<any[]>;
+  expiresAt: number;
+}>();
+
 // 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
-// Cheap on purpose: git status + cached running/sync state only — never fetch/rebase.
+// Git status is read-only; never fetch/rebase here.
 app.get('/api/workspaces/status', async (c) => {
   try {
     const config = await loadConfig();
-    const workspaces = await listWorkspaces(config.workspacesDir);
+    const offsetParam = c.req.query('offset');
+    const limitParam = c.req.query('limit');
+    const snapshotParam = c.req.query('snapshot');
+    const paged = offsetParam !== undefined || limitParam !== undefined || snapshotParam !== undefined;
+    if (paged && (!/^(0|[1-9]\d*)$/.test(offsetParam ?? '') || !/^[1-9]\d*$/.test(limitParam ?? ''))) {
+      return c.json({ error: 'offset and limit must be non-negative and positive integers' }, 400);
+    }
+    const offset = Number(offsetParam ?? 0);
+    const limit = Number(limitParam ?? 0);
+    if (paged && (!Number.isSafeInteger(offset) || !Number.isSafeInteger(limit) || limit > 24)) {
+      return c.json({ error: 'limit must be at most 24' }, 400);
+    }
+    if (paged && offset > 0 && !snapshotParam) {
+      return c.json({ error: 'snapshot is required after the first page' }, 400);
+    }
+    const now = Date.now();
+    for (const [key, snapshot] of statusSnapshots) {
+      if (snapshot.expiresAt < now) statusSnapshots.delete(key);
+    }
+    let snapshotId = snapshotParam;
+    let snapshot = snapshotParam ? statusSnapshots.get(snapshotParam) : undefined;
+    if (snapshotParam && (!snapshot || snapshot.workspacesDir !== config.workspacesDir)) {
+      return c.json({ error: 'Status snapshot expired; restart from the first page' }, 410);
+    }
+    if (paged && !snapshot) {
+      const workspaces = await listWorkspaces(config.workspacesDir);
+      workspaces.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      snapshot = {
+        workspacesDir: config.workspacesDir,
+        workspaces,
+        pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
+      };
+      snapshotId = randomUUID();
+      statusSnapshots.set(snapshotId, snapshot);
+      while (statusSnapshots.size > 16) statusSnapshots.delete(statusSnapshots.keys().next().value!);
+    }
+    const workspaces = snapshot?.workspaces ?? await listWorkspaces(config.workspacesDir);
+    const selected = paged ? workspaces.slice(offset, offset + limit) : workspaces;
 
     // Fetch the PM2 process list once for the whole overview instead of
     // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
-    const pm2List = await getPm2List();
+    const pm2List = selected.length ? await (snapshot?.pm2List ?? getPm2List()) : [];
 
     const entries = await Promise.all(
-      workspaces.map(async (ws) => {
+      selected.map(async (ws) => {
         const workspacePath =
           ws.workspacePath || path.join(config.workspacesDir, ws.branchName);
         const status: WorkspaceStatus = {
@@ -1029,6 +1203,10 @@ app.get('/api/workspaces/status', async (c) => {
           pendingValidation: false,
           activeAssistants: [],
         };
+
+        // An archived workspace has no worktrees of its own; its references'
+        // changes belong to the user's checkouts, not to this workspace.
+        if (ws.archivedAt) return status;
 
         try {
           // Uncommitted changes across the workspace's repos: worktrees inside
@@ -1068,7 +1246,12 @@ app.get('/api/workspaces/status', async (c) => {
     // Keyed by branchName to match how the GUI looks up a workspace.
     const byWorkspace: Record<string, (typeof entries)[number]> = {};
     for (const entry of entries) byWorkspace[entry.branchName] = entry;
-    return c.json(byWorkspace);
+    return c.json(paged ? {
+      statuses: byWorkspace,
+      total: workspaces.length,
+      nextOffset: offset + selected.length < workspaces.length ? offset + selected.length : null,
+      snapshot: snapshotId,
+    } : byWorkspace);
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -1206,6 +1389,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       flowType: body.flowType,
       workType: body.workType,
       projectId: body.projectId,
+      name: body.name?.trim() || undefined,
       // In-place features never create a branch; keeping branchName populated
       // (= id) avoids breaking every consumer of the non-optional field.
       branchName: inPlace ? workspaceId : body.branchName,
@@ -1233,7 +1417,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
     // dir). One stable step id for both modes — only the wording differs.
     updateJobStep(jobId, 'workspace', 'running', inPlace ? 'Registering workspace...' : 'Creating git worktrees...');
     await createWorkspace(feature, body.repos, undefined, {
-      autoUpdateBase: body.autoUpdateBase !== false,
+      autoUpdateBase: body.autoUpdateBase === true,
     });
 
     if (Array.isArray(body.enabledSkills) || Array.isArray(body.enabledAgents) || Array.isArray(body.enabledCategories)) {
@@ -1291,7 +1475,7 @@ app.post('/api/workspace', async (c) => {
     const body = await c.req.json() as {
       mode?: 'worktree' | 'in-place';
       projectId?: string;
-      /** Workspace name — required for in-place mode (there is no branch). */
+      /** Human-readable workspace name; required for in-place mode. */
       name?: string;
       branchName?: string;
       description: string;
@@ -1478,6 +1662,43 @@ app.delete('/api/workspace/:id', async (c) => {
   }
 });
 
+// 7.6a. Archive a workspace: return its worktrees, keep its record.
+app.post('/api/workspace/:id/archive', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const body = await c.req.json().catch(() => ({})) as { park?: unknown; dryRun?: unknown; keepBranches?: unknown; deleteRemoteBranches?: unknown; fetch?: unknown };
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
+    const report = await archiveWorkspace(workspacePath, {
+      park: body.park === true,
+      dryRun: body.dryRun === true,
+      keepBranches: body.keepBranches === true,
+      deleteRemoteBranches: body.deleteRemoteBranches === true,
+      // A preview may skip fetching when the caller fetched moments ago; archive itself always fetches.
+      fetch: body.dryRun === true && body.fetch === false ? false : undefined,
+    });
+    if (!report.dryRun && !report.alreadyArchived && !report.ready) return c.json({ ...report, error: report.blockers.join(' ') }, 409);
+    if (report.errors.length > 0) return c.json({ ...report, error: report.errors.join(' ') }, 500);
+    return c.json(report);
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 7.6b. Restore an archived workspace as active (repositories stay references).
+app.post('/api/workspace/:id/unarchive', async (c) => {
+  try {
+    const id = decodeURIComponent(c.req.param('id'));
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    if (!(await loadFeatureConfig(workspacePath))) return c.json({ error: `Workspace "${id}" not found.` }, 404);
+    return c.json(await unarchiveWorkspace(workspacePath));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 7.7. Add repo to workspace
 app.post('/api/workspace/:id/repo', async (c) => {
   try {
@@ -1503,6 +1724,7 @@ app.post('/api/workspace/:id/isolate', async (c) => {
       repo?: unknown;
       branchName?: unknown;
       baseBranch?: unknown;
+      dryRun?: unknown;
     };
     const repo = typeof body.repo === 'string' ? body.repo.trim() : '';
     if (!repo) {
@@ -1513,6 +1735,10 @@ app.post('/api/workspace/:id/isolate', async (c) => {
 
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    // A preview shows path, branch, base and conflicts before anything is created.
+    if (body.dryRun === true) {
+      return c.json(await planRepoIsolation(workspacePath, repo, { branchName, baseBranch }));
+    }
     const result = await isolateWorkspaceRepo(workspacePath, repo, {
       branchName,
       baseBranch,
@@ -2243,6 +2469,10 @@ app.post('/api/workspace/:id/changes/revert', async (c) => {
       if (matches.length > 1) {
         return c.json({ error: `Ambiguous repository '${repoName}' in this workspace. Multiple repositories match this name.` }, 400);
       }
+      const boundary = describeEditBoundaries(feature, workspacePath).find((b) => b.name === path.basename(matches[0]!));
+      if (boundary && !boundary.editable) {
+        return c.json({ error: referenceRepoMessage(boundary.name), code: 'REFERENCE_REPO' }, 409);
+      }
       worktreePath = resolveFeatureRepoPath(feature, workspacePath, matches[0]!);
     } else {
       worktreePath = repoName ? resolveRepoPath(workspacePath, repoName) : workspacePath;
@@ -2800,20 +3030,137 @@ app.post('/api/workspace/:id/sync', async (c) => {
 app.post('/api/workspace/:id/commit', async (c) => {
   try {
     const id = c.req.param('id');
-    const { message } = await c.req.json() as { message: string };
+    const body = await c.req.json().catch(() => null) as { message?: unknown; noPush?: unknown; files?: unknown } | null;
+    const message = typeof body?.message === 'string' ? body.message.trim() : '';
+    if (!message) return c.json({ error: 'A commit message is required.' }, 400);
+    let files: Record<string, string[]> | undefined;
+    if (body?.files !== undefined) {
+      if (!body.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
+        return c.json({ error: '"files" must map repository names to file lists.' }, 400);
+      }
+      files = {};
+      for (const [repo, list] of Object.entries(body.files as Record<string, unknown>)) {
+        if (!Array.isArray(list) || list.some((file) => typeof file !== 'string' || !file)) {
+          return c.json({ error: `"files.${repo}" must be a list of file paths.` }, 400);
+        }
+        files[repo] = list as string[];
+      }
+      if (Object.values(files).every((list) => list.length === 0)) {
+        return c.json({ error: 'Select at least one file to commit.' }, 400);
+      }
+    }
     const config = await loadConfig();
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
 
-    const report = await commitWorkspace(workspacePath, message);
+    const report = await commitWorkspace(workspacePath, message, { noPush: body?.noPush === true, files });
     const results = report.repos.map((repo) => ({
       repoName: repo.name,
       success: repo.success,
+      committed: repo.committed,
+      pushed: repo.pushed,
+      pushError: repo.pushError,
+      branch: repo.branch,
       commitHash: repo.commitHash,
       filesChanged: repo.filesChanged,
       message: repo.message,
     }));
 
-    return c.json({ results });
+    return c.json({ results, skipped: report.skipped, conventionWarning: report.conventionWarning });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13e-2. Push already-committed work (the retry after a failed push).
+app.post('/api/workspace/:id/push', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null) as { repos?: unknown } | null;
+    const repos = Array.isArray(body?.repos) ? body.repos.filter((r): r is string => typeof r === 'string' && r.length > 0) : [];
+    if (repos.length === 0) return c.json({ error: 'Name at least one repository to push.' }, 400);
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    return c.json({ results: await pushWorkspace(workspacePath, repos) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13f. Live per-repository state: edit boundary, branch, HEAD and changes.
+app.get('/api/workspace/:id/repositories', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) return c.json({ error: 'Workspace not found.' }, 404);
+    const boundaries = new Map(describeEditBoundaries(feature, workspacePath).map((b) => [b.name, b]));
+    const status = await getWorkspaceStatusReport(workspacePath);
+    return c.json({
+      repositories: status.repos.map((repo) => ({
+        name: repo.name,
+        access: repo.access,
+        editable: repo.editable,
+        path: repo.path,
+        sourcePath: repo.sourcePath,
+        branch: repo.branch,
+        expectedBranch: repo.editable ? repo.expectedBranch : null,
+        onExpectedBranch: repo.onExpectedBranch,
+        baseBranch: boundaries.get(repo.name)?.baseBranch ?? repo.defaultBranch,
+        headSha: repo.headSha ?? null,
+        dirty: repo.dirty,
+        changedFiles: repo.changedFiles,
+        ahead: repo.ahead,
+        behind: repo.behind,
+        remoteUrl: repo.remoteUrl,
+      })),
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13g. The shared finish policy decision for the current content.
+app.get('/api/workspace/:id/progression', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    return c.json(await evaluateProgression(workspacePath));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13h. Finish: policy check, commit, push and PR links; dry run previews effects.
+app.post('/api/workspace/:id/finish', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null) as {
+      message?: unknown; skipPush?: unknown; createPrs?: unknown; overrideReason?: unknown; dryRun?: unknown;
+    } | null;
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const overrideReason = typeof body?.overrideReason === 'string' ? body.overrideReason : undefined;
+    const report = await finishWorkspace(workspacePath, {
+      message: typeof body?.message === 'string' ? body.message : undefined,
+      skipPush: body?.skipPush === true,
+      createPrs: body?.createPrs === true,
+      override: overrideReason !== undefined ? { reason: overrideReason } : undefined,
+      dryRun: body?.dryRun === true,
+    });
+    return c.json(report, report.blocked ? 409 : 200);
+  } catch (error) {
+    if (error instanceof Error && /override needs a reason/.test(error.message)) {
+      return c.json({ error: error.message }, 400);
+    }
+    return errorResponse(c, error);
+  }
+});
+
+// 13i. The durable record of the latest finish run, for resuming after a restart.
+app.get('/api/workspace/:id/finish/last', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const state = await loadWorkspaceState(workspacePath);
+    return c.json({ lastFinish: state.lastFinish ?? null });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2867,28 +3214,9 @@ app.post('/api/workspace/:id/resume', async (c) => {
     }
 
     if (selectedSessionId) {
-      if (selectedAssistant === 'antigravity') {
-        resumeCommand = `agy --conversation ${selectedSessionId}`;
-      } else if (selectedAssistant === 'claude') {
-        resumeCommand = `claude --resume ${selectedSessionId}`;
-      } else if (selectedAssistant === 'codex') {
-        resumeCommand = `codex resume ${selectedSessionId}`;
-      } else if (selectedAssistant === 'copilot') {
-        resumeCommand = `copilot --resume ${selectedSessionId}`;
-      }
+      if (SUPPORTED_ASSISTANTS.has(selectedAssistant)) resumeCommand = buildHarnessCliCommand(selectedAssistant, selectedSessionId);
     } else {
-      // Fallback to start command (since there's no existing session for this workspace)
-      if (selectedAssistant === 'antigravity') {
-        resumeCommand = 'agy --continue';
-      } else if (selectedAssistant === 'claude') {
-        resumeCommand = 'claude --resume';
-      } else if (selectedAssistant === 'codex') {
-        resumeCommand = 'codex resume';
-      } else if (selectedAssistant === 'copilot') {
-        resumeCommand = 'copilot --resume';
-      } else {
-        resumeCommand = 'agy --continue';
-      }
+      resumeCommand = buildHarnessContinueCommand(SUPPORTED_ASSISTANTS.has(selectedAssistant) ? selectedAssistant : 'antigravity');
     }
 
     // Open in editor if command is provided
@@ -2911,12 +3239,23 @@ app.post('/api/workspace/:id/resume', async (c) => {
   }
 });
 
+// The GUI asks the backend which history readers exist, then loads each one independently.
+app.get('/api/session-sources', c => c.json({ sources: SESSION_SOURCES }));
+
 // 15. List past AI sessions for a workspace
 app.get('/api/workspace/:id/sessions', async (c) => {
   try {
     const id = decodeURIComponent(c.req.param('id'));
     const limitParam = c.req.query('limit');
     const desktopHandoffOnly = c.req.query('desktopHandoffOnly') === 'true';
+    const sourceParam = c.req.query('source');
+    const source = SESSION_SOURCES.find((candidate) => candidate === sourceParam);
+    if (sourceParam && !source) {
+      return c.json({ error: 'Choose a valid session source.' }, 400);
+    }
+    if (source && desktopHandoffOnly) {
+      return c.json({ error: 'Session source cannot be combined with desktop handoff.' }, 400);
+    }
     let limit: number | undefined;
     if (limitParam !== undefined) {
       limit = Number(limitParam);
@@ -2947,7 +3286,7 @@ app.get('/api/workspace/:id/sessions', async (c) => {
       return c.json({ error: 'Workspace configuration not found.' }, 404);
     }
 
-    const discoveredSessions = await findSessions(workspacePath, feature.repos);
+    const discoveredSessions = await findSessions(workspacePath, feature.repos, source);
     if (!desktopHandoffOnly) {
       return c.json({ sessions: limit === undefined ? discoveredSessions : discoveredSessions.slice(0, limit) });
     }
@@ -3231,6 +3570,27 @@ app.delete('/api/skills/categories/:id', async (c) => {
 });
 
 // Include authored workspace packages; generated global copies still resolve to their catalog source.
+const resourcePreviewInput = z.object({
+  skills: z.array(z.string().max(200)).max(200).default([]),
+  agents: z.array(z.string().max(200)).max(200).default([]),
+  assistants: z.array(z.string().max(40)).max(20).default([]),
+});
+const RESOURCE_ASSISTANTS = new Set(['claude', 'antigravity', 'codex', 'copilot', 'cursor']);
+
+// What a new workspace would receive for the chosen skills and agents.
+app.post('/api/resources/preview', async (c) => {
+  const parsed = resourcePreviewInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'Invalid resource selection' }, 400);
+  try {
+    // Assistants without resource support (e.g. a CLI-only tool) simply get no files.
+    const assistants = parsed.data.assistants.filter((name) => RESOURCE_ASSISTANTS.has(name)) as AIAssistant[];
+    return c.json({ resources: await previewResourceSelections(parsed.data.skills, parsed.data.agents, assistants) });
+  } catch (error) {
+    if (error instanceof ResourceSelectionError) return c.json({ error: error.message }, 400);
+    return errorResponse(c, error);
+  }
+});
+
 app.get('/api/skills', async (c) => {
   try {
     const config = await loadConfig();
@@ -4248,6 +4608,17 @@ app.get('/', async (c) => {
 // the server's cwd — a cwd on another drive made the old cwd-relative path
 // resolve wrong and serve a blank GUI, e.g. under `ui --daemon`.
 app.use('/*', serveStatic({ root: guiPath }));
+
+// A link that leaves the app (for example a local file path clicked in a
+// rendered document) must not strand the user on a bare 404 with no way back:
+// page loads that match no route or asset get a page that returns to the app.
+// API and asset requests keep the plain 404.
+app.get('*', (c) => {
+  if (c.req.path.startsWith('/api/') || !(c.req.header('accept') ?? '').includes('text/html')) return c.notFound();
+  return c.html(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found · ${BRAND_NAME}</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#1f2937;background:#fff}@media (prefers-color-scheme:dark){body{color:#e5e7eb;background:#111827}a{color:#93c5fd}}</style></head>
+<body><h1>This page isn't part of ${BRAND_NAME}</h1><p>The link you followed points to a file or page the app can't show here.</p><p><a href="/">Back to ${BRAND_NAME}</a></p></body></html>`, 404);
+});
 
 export function startServer(
   port = 3000,

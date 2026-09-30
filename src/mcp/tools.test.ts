@@ -49,6 +49,8 @@ describe('MCP tools', () => {
     expect(readonlyNames).toContain('get_workspace_diff');
     expect(readonlyNames).toContain('list_workspaces');
     expect(readonlyNames).toContain('list_repos');
+    expect(readonlyNames).toContain('preview_archive');
+    expect(readonlyNames).not.toContain('archive_workspace');
     expect(readonlyNames).not.toContain('create_workspace');
     expect(readonlyNames).not.toContain('commit_workspace');
     expect(readonlyNames).not.toContain('finish_workspace');

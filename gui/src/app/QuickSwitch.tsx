@@ -11,12 +11,12 @@ export function QuickSwitch({ workspaces }: { workspaces: Feature[] }) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const actions = [
-    { title: 'Start work', detail: 'Create a workspace', route: '/new' },
+    { title: 'New workspace', detail: 'Start a task with your repos', route: '/new' },
     { title: 'Overview', detail: 'Your workspace home', route: '/overview' },
-    ...workspaces.map((w) => ({ title: w.branchName, detail: `${w.repos.length} repositories · ${w.description || 'Open workspace'}`, route: `/workspaces/${encodeURIComponent(w.branchName)}` })),
+    ...workspaces.map((w) => ({ title: w.name || w.branchName, detail: `${w.repos.length} repositories · ${w.name ? w.branchName : w.description || 'Open workspace'}`, route: `/workspaces/${encodeURIComponent(w.branchName)}` })),
     { title: 'Projects', detail: 'Manage repositories', route: '/projects' },
     { title: 'Workrooms', detail: 'Collaborate with your team', route: '/workrooms' },
-    { title: 'Resource Library', detail: 'Skills and agents', route: '/skills' },
+    { title: 'Skills & agents', detail: 'Assistant instructions', route: '/skills' },
     { title: 'Settings', detail: 'Make this space yours', route: '/settings' },
   ].filter((a) => `${a.title} ${a.detail}`.toLowerCase().includes(query.trim().toLowerCase()));
   const current = Math.min(active, Math.max(actions.length - 1, 0));

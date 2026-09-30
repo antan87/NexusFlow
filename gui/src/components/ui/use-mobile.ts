@@ -27,3 +27,16 @@ function useIsMobile(): boolean {
 }
 
 export { useIsMobile };
+
+/** Tracks a CSS media query, e.g. to adapt chrome to narrow desktop windows. */
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = React.useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = () => setMatches(mediaQuery.matches);
+    handleChange();
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, [query]);
+  return matches;
+}

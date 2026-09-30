@@ -86,8 +86,8 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.goto('/#/workspaces/feature-x');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
-    // Navigate to sessions tab
-    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    // Sessions are the first section of Run
+    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
@@ -133,7 +133,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     });
 
     await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('tab', { name: /Sessions|AI & Sessions/i }).click();
+    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
@@ -153,7 +153,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-    await expect(chat.getByText('CLI', { exact: true })).toBeVisible();
+    await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
     await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
     await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toBeVisible();
   });

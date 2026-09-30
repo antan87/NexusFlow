@@ -17,6 +17,10 @@ vi.mock('../utils/multi-git.js');
 describe('core/verify', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The content-tree hash works in a throwaway index directory.
+    vi.mocked(fs.mkdtemp).mockResolvedValue('/tmp/contextspace-tree-test');
+    vi.mocked(fs.copyFile).mockResolvedValue(undefined);
+    vi.mocked(fs.rm).mockResolvedValue(undefined);
   });
 
   describe('detectTestCommand', () => {
@@ -243,7 +247,7 @@ describe('core/verify', () => {
       vi.mocked(multiGit.getRepoStatus).mockResolvedValue({ hasChanges: false, files: [] } as any);
       let headReads = 0;
       vi.mocked(execa).mockImplementation(async (cmd: any, args: any) => cmd === 'git'
-        ? { stdout: args[0] === 'rev-parse' ? (++headReads === 1 ? 'old-head' : 'new-head') : '' } as any
+        ? { stdout: args[0] === 'rev-parse' && args[1] === 'HEAD' ? (++headReads === 1 ? 'old-head' : 'new-head') : args[0] === 'write-tree' ? 'tree' : '' } as any
         : { exitCode: 0 } as any);
       const report = await verifyRepo('/repo', 'repo', { command: 'node tests.mjs' });
       expect(report).toMatchObject({ status: 'fail', headSha: 'old-head' });

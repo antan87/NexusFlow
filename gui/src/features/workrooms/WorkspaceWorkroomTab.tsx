@@ -57,7 +57,7 @@ function HarnessAvatar({ harness, author }: { harness?: string; author?: string 
   }
   if (norm.includes('codex') || norm.includes('openai')) {
     return (
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 shadow-2xs">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-success-foreground shadow-2xs">
         <BsOpenai size={14} />
       </span>
     );
@@ -96,7 +96,7 @@ function HarnessBadge({ harness, author }: { harness?: string; author?: string }
     return <Badge variant="outline" className="border-[#D97757]/50 text-[#D97757] bg-[#D97757]/10 font-mono text-[10px]">Claude Code</Badge>;
   }
   if (norm.includes('codex') || norm.includes('openai')) {
-    return <Badge variant="outline" className="border-emerald-500/50 text-emerald-400 bg-emerald-500/10 font-mono text-[10px]">OpenAI Codex</Badge>;
+    return <Badge variant="outline" className="border-emerald-500/50 text-success-foreground bg-emerald-500/10 font-mono text-[10px]">OpenAI Codex</Badge>;
   }
   if (norm.includes('copilot')) {
     return <Badge variant="outline" className="border-blue-500/50 text-blue-400 bg-blue-500/10 font-mono text-[10px]">GitHub Copilot</Badge>;
@@ -243,21 +243,21 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                     key={m.stepId}
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-mono ${
                       isCompleted
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-success-foreground'
                         : isFailed
                         ? 'border-destructive/40 bg-destructive/10 text-destructive'
                         : isProposed
-                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                        ? 'border-amber-500/30 bg-amber-500/10 text-warning-foreground'
                         : 'border-blue-500/30 bg-blue-500/10 text-blue-400'
                     }`}
                     title={`${m.stepId} · ${m.status}: ${m.lastMessage}`}
                   >
                     {isCompleted ? (
-                      <CheckCircle2 size={12} className="text-emerald-400" />
+                      <CheckCircle2 size={12} className="text-success-foreground" />
                     ) : isFailed ? (
                       <AlertTriangle size={12} className="text-destructive" />
                     ) : isProposed ? (
-                      <Clock size={12} className="text-amber-400" />
+                      <Clock size={12} className="text-warning-foreground" />
                     ) : (
                       <Radio size={12} className="text-blue-400" />
                     )}
@@ -328,10 +328,10 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                         {entry.stepId && (
                           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono text-[10px] ${
                             stepStatus === 'completed'
-                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-success-foreground'
                               : stepStatus === 'failed'
                               ? 'border-destructive/40 bg-destructive/10 text-destructive'
-                              : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                              : 'border-amber-500/30 bg-amber-500/10 text-warning-foreground'
                           }`}>
                             <Milestone size={10} />
                             {entry.stepId} ({stepStatus === 'completed' ? 'completed' : stepStatus === 'failed' ? 'failed' : 'proposal'})
@@ -361,21 +361,21 @@ export function WorkspaceWorkroomTab({ ws, showToast }: WorkspaceWorkroomTabProp
                           </div>
                         ) : stepStatus === 'completed' ? (
                           <div className="mt-2.5 p-2.5 rounded-md border border-emerald-500/30 bg-emerald-500/5">
-                            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-success-foreground mb-1">
                               <ShieldCheck size={13} />
                               <span>Verified Evidence (Confirmed)</span>
                             </div>
-                            <pre className="font-mono text-[11px] text-emerald-300/90 whitespace-pre-wrap break-all">
+                            <pre className="font-mono text-[11px] text-success-foreground/90 whitespace-pre-wrap break-all">
                               {displayEvidence}
                             </pre>
                           </div>
                         ) : (
                           <div className="mt-2.5 p-2.5 rounded-md border border-amber-500/30 bg-amber-500/5">
-                            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 mb-1">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-warning-foreground mb-1">
                               <Clock size={13} />
                               <span>Proposal Evidence (Review Requested)</span>
                             </div>
-                            <pre className="font-mono text-[11px] text-amber-300/90 whitespace-pre-wrap break-all">
+                            <pre className="font-mono text-[11px] text-warning-foreground/90 whitespace-pre-wrap break-all">
                               {displayEvidence}
                             </pre>
                           </div>

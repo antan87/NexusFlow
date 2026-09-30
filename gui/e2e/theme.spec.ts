@@ -19,23 +19,23 @@ test.describe('Theme toggle', () => {
 
   test('starts light, switches to dark, and persists the choice', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     const html = page.locator('html');
     await expect(html).not.toHaveClass(/dark/);
 
-    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.getByRole('button', { name: 'Dark mode' }).click();
     await expect(html).toHaveClass(/dark/);
 
     // The choice survives a reload (applied pre-paint by the boot script).
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).toHaveClass(/dark/);
   });
 
   test('switches between Sunset and Aurora palettes and updates favicon and data-color-theme', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     const html = page.locator('html');
     const favicon = page.locator('link[rel="icon"]');
@@ -51,7 +51,7 @@ test.describe('Theme toggle', () => {
 
     // Choice survives reload
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
     await expect(favicon).toHaveAttribute('href', '/favicon-aurora.svg');
 
@@ -63,12 +63,12 @@ test.describe('Theme toggle', () => {
 
   test('persists appearance mode and color palette independently across reloads', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     const html = page.locator('html');
 
     // Switch to dark mode + Aurora palette
-    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.getByRole('button', { name: 'Dark mode' }).click();
     await page.getByRole('button', { name: 'Switch to Aurora palette' }).click();
 
     await expect(html).toHaveClass(/dark/);
@@ -76,24 +76,24 @@ test.describe('Theme toggle', () => {
 
     // Reload and verify both dark mode and aurora are active
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
 
     // Switch back to light mode while keeping Aurora
-    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.getByRole('button', { name: 'Light mode' }).click();
     await expect(html).not.toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
 
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).not.toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'aurora');
   });
 
   test('switches across all extended palettes (Forest, Nebula, Glacier) and validates attributes and favicons', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     const html = page.locator('html');
     const favicon = page.locator('link[rel="icon"]');
@@ -115,7 +115,7 @@ test.describe('Theme toggle', () => {
 
     // Reload with Glacier active
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).toHaveAttribute('data-color-theme', 'glacier');
     await expect(favicon).toHaveAttribute('href', '/favicon-glacier.svg');
 
@@ -127,7 +127,7 @@ test.describe('Theme toggle', () => {
 
   test('displays descriptive tooltips and WCAG AA primary color for extended palettes', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     // Verify rich description tooltips on all palette buttons
     await expect(page.getByRole('button', { name: 'Switch to Sunset palette' })).toHaveAttribute(
@@ -171,12 +171,12 @@ test.describe('Theme toggle', () => {
 
   test('persists newly added palettes across dark mode toggles and reloads', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
 
     const html = page.locator('html');
 
     // Switch to dark mode + Forest palette
-    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.getByRole('button', { name: 'Dark mode' }).click();
     await page.getByRole('button', { name: 'Switch to Forest palette' }).click();
 
     await expect(html).toHaveClass(/dark/);
@@ -184,7 +184,7 @@ test.describe('Theme toggle', () => {
 
     // Reload and verify dark mode and forest persist
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'forest');
 
@@ -194,12 +194,12 @@ test.describe('Theme toggle', () => {
     await expect(html).toHaveAttribute('data-color-theme', 'nebula');
 
     // Switch back to light mode while keeping Nebula
-    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.getByRole('button', { name: 'Light mode' }).click();
     await expect(html).not.toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'nebula');
 
     await page.reload();
-    await page.getByRole('button', { name: 'Tools & Library' }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(html).not.toHaveClass(/dark/);
     await expect(html).toHaveAttribute('data-color-theme', 'nebula');
   });

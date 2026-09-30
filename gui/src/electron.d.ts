@@ -12,6 +12,8 @@ declare global {
 
   interface ContextSpaceDesktopBridge {
     getServerPort: () => Promise<number>;
+    /** Opens the OS folder chooser; resolves to null when cancelled. Absent in older desktop builds. */
+    pickDirectory?: (defaultPath?: string) => Promise<string | null>;
     updates?: {
       getStatus: () => Promise<ContextSpaceDesktopUpdateState>;
       check: () => Promise<ContextSpaceDesktopUpdateState>;

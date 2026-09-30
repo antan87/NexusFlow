@@ -19,6 +19,8 @@ interface KnowledgeBaseProps {
   setIsEditingKnowledge: (val: boolean) => void;
   handleSaveKnowledge: (wsId: string) => Promise<void>;
   handleRetryKnowledge: (wsId: string) => Promise<void>;
+  /** Archived: read the knowledge, change nothing. */
+  readOnly?: boolean;
 }
 
 export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
@@ -34,6 +36,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   setIsEditingKnowledge,
   handleSaveKnowledge,
   handleRetryKnowledge,
+  readOnly = false,
 }) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
@@ -64,7 +67,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
               </Button>
             </div>
           )}
-          {isEditingKnowledge ? (
+          {readOnly ? null : isEditingKnowledge ? (
             <>
               <Button
                 variant="outline"

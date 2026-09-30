@@ -190,7 +190,7 @@ export function ProjectsPage() {
                     {project.repos.map((repo) => (
                       <li key={repo.path} className="truncate font-mono text-xs text-muted-foreground">
                         {repo.path}
-                        <span className="ml-2 text-muted-foreground/60">[{repo.defaultBranch}]</span>
+                        <span className="ml-2 text-muted-foreground">[{repo.defaultBranch}]</span>
                       </li>
                     ))}
                   </ul>

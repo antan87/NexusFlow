@@ -1,6 +1,7 @@
 import { HarnessIcon } from '../components/icons/HarnessIcon.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ResourcePreview } from '../features/workspace-launch/ResourcePreview.js';
 import { Check, ChevronDown, CircleAlert, FolderGit2, GitBranch, Sparkles, Zap, Boxes, Bot, RefreshCw, Tag } from 'lucide-react';
 
 import { Badge } from '../components/ui/badge.js';
@@ -56,24 +57,23 @@ const AD_HOC = '__ad-hoc__';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 
-const FLOW_OPTIONS = [
-  { value: 'quick', title: 'Small task', body: 'Make and verify a focused change.' },
-  { value: 'feature', title: 'Standard change', body: 'Plan, implement, verify, and review a feature.' },
-  { value: 'epic', title: 'Epic', body: 'Track a larger change through dependent milestones.' },
-] as const;
+function suggestedBranchName(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug ? `feature/${slug}` : '';
+}
 
 const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }> = [
   {
     value: 'in-place',
     icon: Zap,
-    title: 'In-place',
-    body: 'Work directly in the source repos. No branches or worktrees — fastest start.',
+    title: 'Reference checkouts',
+    body: 'Read your checkouts as they are; nothing changes them. Prepare a repository for editing to give it its own branch and worktree in this workspace.',
   },
   {
     value: 'worktree',
     icon: GitBranch,
-    title: 'Isolated worktrees',
-    body: 'A feature branch and worktree per repo. Your source checkouts stay untouched.',
+    title: 'New worktrees',
+    body: 'Create a branch and editable worktree for each repository now.',
   },
 ];
 
@@ -171,13 +171,14 @@ export function StartWorkPage() {
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');
-  const [flowType, setFlowType] = useState<'quick' | 'feature' | 'epic'>('feature');
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
   const [branchName, setBranchName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [adHocPaths, setAdHocPaths] = useState<string[]>([]);
+  // Setup hands over the repositories picked for the first task as ?repo=…
+  const [adHocPaths, setAdHocPaths] = useState<string[]>(() => searchParams.getAll('repo'));
+  const [setupOpen, setSetupOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
@@ -300,7 +301,8 @@ export function StartWorkPage() {
     return (repos.data ?? []).filter((r) => adHocPaths.includes(r.path));
   }, [selectedProject, repos.data, adHocPaths]);
 
-  const [autoUpdateBase, setAutoUpdateBase] = useState(true);
+  // The quick path uses source checkouts, so updating repositories requires an explicit opt-in.
+  const [autoUpdateBase, setAutoUpdateBase] = useState(false);
   const [pullWarning, setPullWarning] = useState<string | null>(null);
   const pullRepos = usePullRepos();
 
@@ -356,7 +358,8 @@ export function StartWorkPage() {
   };
 
   const inPlace = mode === 'in-place';
-  const identityValid = inPlace ? workspaceName.trim().length > 0 : branchName.trim().length > 0;
+  const worktreeBranch = branchName.trim() || suggestedBranchName(workspaceName);
+  const identityValid = workspaceName.trim().length > 0 && (inPlace || worktreeBranch.length > 0);
   const formValid = identityValid && selectedRepos.length > 0 && description.trim().length > 0;
 
   const applyStrategy = (id: string) => {
@@ -400,11 +403,11 @@ export function StartWorkPage() {
     submittingRef.current = true;
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
-      flowType,
       workType,
       mode,
       projectId: selectedProject?.id,
-      ...(inPlace ? { name: workspaceName.trim() } : { branchName: branchName.trim() }),
+      name: workspaceName.trim(),
+      ...(!inPlace ? { branchName: worktreeBranch } : {}),
       description: description.trim(),
       repos: selectedRepos.map((repo) => ({
         ...repo,
@@ -534,32 +537,45 @@ export function StartWorkPage() {
   // ── The form ─────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-xl animate-fade-in">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold">Start work</h1>
+      <header className="mb-5">
+        <h1 className="text-xl font-semibold">New workspace</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pick where the work happens and how isolated it should be.
+          Pick repositories, describe the work, and name this workspace.
         </p>
+        <a
+          href="#advanced-setup"
+          onClick={(event) => {
+            event.preventDefault();
+            setSetupOpen(true);
+            document.getElementById('advanced-setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+          className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
+        >
+          Advanced setup ↓
+        </a>
       </header>
 
-      <div className="flex flex-col gap-6">
-        {/* 1. Project */}
+      <div className="flex flex-col gap-5">
+        {/* 1. Repositories */}
         <section>
-          <span className="mb-1.5 block text-sm font-medium">Project</span>
-          <Select value={projectId} onValueChange={(v) => typeof v === 'string' && setProjectId(v)}>
-            <SelectTrigger className="w-full" aria-label="Project">
-              <SelectValue>
-                {selectedProject ? selectedProject.name : 'Ad-hoc — pick repositories manually'}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup alignItemWithTrigger={false}>
-              {(projects.data ?? []).map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-              <SelectItem value={AD_HOC}>Ad-hoc — pick repositories manually</SelectItem>
-            </SelectPopup>
-          </Select>
+          <span className="mb-1.5 block text-sm font-medium">Repositories</span>
+          {(projects.data ?? []).length > 0 && (
+            <Select value={projectId} onValueChange={(v) => typeof v === 'string' && setProjectId(v)}>
+              <SelectTrigger className="w-full" aria-label="Saved project">
+                <SelectValue>
+                  {selectedProject ? selectedProject.name : 'Choose repositories manually'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup alignItemWithTrigger={false}>
+                {(projects.data ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value={AD_HOC}>Choose repositories manually</SelectItem>
+              </SelectPopup>
+            </Select>
+          )}
           {selectedProject ? (
             <ul className="mt-2 flex flex-col gap-0.5">
               {selectedProject.repos.map((r) => (
@@ -584,6 +600,227 @@ export function StartWorkPage() {
               <ScaffoldRepoInline onCreated={(repo) => setAdHocPaths((prev) => [...prev, repo.path])} />
             </div>
           )}
+
+        </section>
+
+        {/* Task and name are the only required inputs after repositories. */}
+        <section>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">What do you want to do?</span>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Simplify workspace setup and clarify the navigation."
+              rows={3}
+            />
+          </label>
+          <label className="mt-4 block">
+            <span className="mb-1 block text-sm font-medium">Workspace name</span>
+            <Input
+              value={workspaceName}
+              onChange={(e) => setWorkspaceName(e.target.value)}
+              placeholder="e.g. Simpler workspace setup"
+            />
+            <span className="mt-1 block text-xs text-muted-foreground">Shown in the workspace list; separate from a Git branch.</span>
+          </label>
+          {suggestedMatches.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+              <span className="text-primary font-medium flex items-center gap-1 text-[11px]">
+                <Sparkles className="size-3" /> Suggested for this task:
+              </span>
+              {suggestedMatches.map((item) => (
+                <button
+                  key={`${item.type}-${item.id}`}
+                  type="button"
+                  onClick={() => {
+                    if (item.type === 'tag') {
+                      setSelectedTags((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+                    } else {
+                      setEnabledSkills((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-card border border-primary/30 text-[11px] font-mono hover:bg-primary/10 transition-colors text-foreground"
+                >
+                  <span>+{item.title}</span>
+                  <Badge variant="outline" className="text-[8px] px-0.5 py-0 uppercase">
+                    {item.type}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section aria-label="Skills">
+          {/* Skills Selection */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <Boxes className="size-4 text-primary" />
+                Skills
+                <span className="text-xs font-normal text-muted-foreground">optional</span>
+                {enabledSkills.length > 0 && (
+                  <span className="text-xs text-muted-foreground font-normal">
+                    ({enabledSkills.length} selected)
+                  </span>
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                {(skillsQuery.data ?? []).length > 0 && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      const all = (skillsQuery.data ?? []).map((s) => s.id);
+                      setEnabledSkills(enabledSkills.length === all.length ? [] : all);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground h-6 px-2"
+                  >
+                    {enabledSkills.length === (skillsQuery.data ?? []).length && (skillsQuery.data ?? []).length > 0
+                      ? 'Deselect All'
+                      : 'Select All'}
+                  </Button>
+                )}
+                <Link
+                  to="/skills"
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  Skill Library →
+                </Link>
+              </div>
+            </div>
+
+            {skillsQuery.isLoading ? (
+              <div className="flex items-center justify-center p-3 gap-2 text-xs text-muted-foreground rounded-lg border border-border">
+                <Spinner className="size-3" />
+                Loading skills...
+              </div>
+            ) : (skillsQuery.data ?? []).length === 0 ? (
+              <div className="p-3 border border-dashed border-border rounded-lg bg-card/20 text-center">
+                <p className="text-xs text-muted-foreground">
+                  No skills yet. Add them in the{' '}
+                  <Link to="/skills" className="text-primary underline">
+                    Skill Library
+                  </Link>.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(skillsQuery.data ?? []).map((skill) => {
+                  const isChecked = enabledSkills.includes(skill.id);
+                  return (
+                    <label
+                      key={skill.id}
+                      className={cn(
+                        'flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors select-none text-left',
+                        isChecked
+                          ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40 text-foreground'
+                          : 'border-border bg-card hover:border-foreground/20 text-muted-foreground',
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() =>
+                            setEnabledSkills((prev) =>
+                              prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
+                            )
+                          }
+                          aria-label={`Select ${skill.title || skill.name}`}
+                          className="accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs font-medium truncate text-foreground">
+                            {skill.title || skill.name}
+                          </p>
+                          {skill.description && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-1">
+                              {skill.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {skill.category && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 capitalize">
+                          {skill.category}
+                        </Badge>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section id="advanced-setup" className="rounded-xl border border-border">
+          <button
+            type="button"
+            onClick={() => setSetupOpen((open) => !open)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-accent"
+            aria-expanded={setupOpen}
+            aria-controls="advanced-workspace-setup"
+          >
+            <span>
+              <span className="block text-sm font-medium">Advanced setup</span>
+              <span className="block text-xs text-muted-foreground">Branches, worktrees, and more</span>
+            </span>
+            <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', setupOpen && 'rotate-180')} />
+          </button>
+          {setupOpen && <div id="advanced-workspace-setup" className="flex flex-col gap-6 border-t border-border p-4">
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium">Code location</legend>
+              <div role="radiogroup" aria-label="Work mode" className="grid gap-3 sm:grid-cols-2" onKeyDown={(e) => {
+                if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
+                  e.preventDefault();
+                  const next = mode === 'in-place' ? 'worktree' : 'in-place';
+                  setMode(next);
+                  document.getElementById(`mode-${next}`)?.focus();
+                }
+              }}>
+                {MODE_OPTIONS.map((option) => (
+                  <button key={option.value} id={`mode-${option.value}`} type="button" role="radio"
+                    aria-checked={mode === option.value} tabIndex={mode === option.value ? 0 : -1}
+                    onClick={() => setMode(option.value)}
+                    className={cn('cursor-pointer rounded-xl border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                      mode === option.value ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border bg-card hover:border-foreground/20')}>
+                    <option.icon className={cn('size-4', mode === option.value ? 'text-primary' : 'text-muted-foreground')} />
+                    <p className="mt-2 text-sm font-semibold">{option.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{option.body}</p>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            {!inPlace && <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">Feature branch</span>
+                <Input value={branchName} onChange={(e) => setBranchName(e.target.value)}
+                  placeholder={suggestedBranchName(workspaceName) || 'feature/my-work'} className="font-mono" />
+                <span className="mt-1 block text-xs text-muted-foreground">Leave blank to use {suggestedBranchName(workspaceName) || 'a branch based on the workspace name'}.</span>
+              </label>
+              {selectedRepos.length > 0 && <details className="rounded-lg border border-border px-3 py-2"
+                onToggle={(e) => setOverridesOpen((e.target as HTMLDetailsElement).open)}>
+                <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Create worktrees from existing branches</summary>
+                <div className="mt-2 flex flex-col gap-2">{selectedRepos.map((repo) => (
+                  <BranchOverrideRow key={repo.path} repo={repo} enabled={overridesOpen}
+                    value={branchOverrides[repo.path] ?? ''}
+                    onChange={(value) => setBranchOverrides((prev) => ({ ...prev, [repo.path]: value }))} />
+                ))}</div>
+              </details>}
+            </div>}
+            <label className="block text-sm">Work type
+              <select aria-label="Work type" className="mt-1 block w-full rounded-md border border-border bg-background p-2"
+                value={workType} onChange={(event) => setWorkType(event.target.value as WorkGuidance['workType'])}>
+                <option value="bug">Bug fix</option><option value="feature">Feature</option><option value="performance">Performance</option><option value="refactor">Refactor</option><option value="rewrite">Rewrite</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Checkbox checked={autoUpdateBase} onCheckedChange={(checked) => setAutoUpdateBase(Boolean(checked))}
+                aria-label="Fast-forward clean repository branches before creating workspace" />
+              Fast-forward your clean {inPlace ? 'checkouts' : 'base branches'} from their remotes before creating the workspace (this changes your own checkouts)
+            </label>
 
           {selectedRepos.length > 0 && (
             <div className="mt-3 rounded-lg border border-border bg-card p-3">
@@ -652,7 +889,7 @@ export function StartWorkPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-5 px-1.5 text-[11px] text-amber-500 hover:text-amber-600"
+                            className="h-5 px-1.5 text-[11px] text-warning-foreground hover:text-amber-600"
                             onClick={() =>
                               handlePullSingle(
                                 repo.path,
@@ -670,183 +907,10 @@ export function StartWorkPage() {
                 })}
               </ul>
               {pullWarning && (
-                <p className="mt-2 text-xs text-amber-500">{pullWarning}</p>
+                <p className="mt-2 text-xs text-warning-foreground">{pullWarning}</p>
               )}
             </div>
           )}
-
-          {(projects.data ?? []).length === 0 && !projects.isLoading && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Tip: <Link to="/projects" className="text-primary hover:underline">register a project</Link> to skip
-              repo picking next time.
-            </p>
-          )}
-        </section>
-
-        <fieldset>
-          <legend className="mb-1.5 text-sm font-medium">What kind of work is this?</legend>
-          <label className="mb-3 block text-sm">Work type
-            <select aria-label="Work type" className="mt-1 block w-full rounded-md border border-border bg-background p-2" value={workType} onChange={(event) => setWorkType(event.target.value as WorkGuidance['workType'])}>
-              <option value="bug">Bug fix</option><option value="feature">Feature</option><option value="performance">Performance</option><option value="refactor">Refactor</option><option value="rewrite">Rewrite</option>
-            </select>
-          </label>
-          <p className="mb-3 text-xs text-muted-foreground">Choose a starting size and milestone preset. You can edit milestones in Plan.</p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {FLOW_OPTIONS.map((option) => (
-              <label key={option.value} className={cn(
-                'cursor-pointer rounded-xl border p-4 focus-within:ring-2 focus-within:ring-ring',
-                flowType === option.value ? 'border-primary bg-primary/5' : 'border-border bg-card',
-              )}>
-                <span className="flex items-center gap-2 text-sm font-semibold">
-                  <input type="radio" name="flowType" value={option.value} checked={flowType === option.value}
-                    onChange={() => setFlowType(option.value)} aria-label={option.title} aria-describedby={`flow-${option.value}-description`}
-                    className="accent-primary" />
-                  {option.title}
-                </span>
-                <p id={`flow-${option.value}-description`} className="mt-2 text-xs text-muted-foreground">{option.body}</p>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        {/* 2. Mode */}
-        <section>
-          <span className="mb-1.5 block text-sm font-medium">How do you want to work?</span>
-          {/* Hand-rolled radio cards: Base UI's Radio is a bare circular
-              control that cannot wrap card content, so semantics are provided
-              directly (role, aria-checked, arrow-key roving focus). */}
-          <div
-            role="radiogroup"
-            aria-label="Work mode"
-            className="grid gap-3 sm:grid-cols-2"
-            onKeyDown={(e) => {
-              if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) {
-                e.preventDefault();
-                const next = mode === 'in-place' ? 'worktree' : 'in-place';
-                setMode(next);
-                document.getElementById(`mode-${next}`)?.focus();
-              }
-            }}
-          >
-            {MODE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                id={`mode-${option.value}`}
-                type="button"
-                role="radio"
-                aria-checked={mode === option.value}
-                tabIndex={mode === option.value ? 0 : -1}
-                onClick={() => setMode(option.value)}
-                className={cn(
-                  'cursor-pointer rounded-xl border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                  mode === option.value
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                    : 'border-border bg-card hover:border-foreground/20',
-                )}
-              >
-                <option.icon
-                  className={cn('size-4', mode === option.value ? 'text-primary' : 'text-muted-foreground')}
-                />
-                <p className="mt-2 text-sm font-semibold">{option.title}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{option.body}</p>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* 3. Identity */}
-        <section>
-          {inPlace ? (
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium">Workspace name</span>
-              <Input
-                value={workspaceName}
-                onChange={(e) => setWorkspaceName(e.target.value)}
-                placeholder="e.g. Fix invoice rounding"
-              />
-            </label>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">Feature branch</span>
-                <Input
-                  value={branchName}
-                  onChange={(e) => setBranchName(e.target.value)}
-                  placeholder="e.g. feature/invoice-rounding"
-                  className="font-mono"
-                />
-              </label>
-              {selectedRepos.length > 0 && (
-                <details
-                  className="rounded-lg border border-border px-3 py-2"
-                  onToggle={(e) => setOverridesOpen((e.target as HTMLDetailsElement).open)}
-                >
-                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                    Use an existing branch for specific repos (optional)
-                  </summary>
-                  <div className="mt-2 flex flex-col gap-2">
-                    {selectedRepos.map((repo) => (
-                      <BranchOverrideRow
-                        key={repo.path}
-                        repo={repo}
-                        enabled={overridesOpen}
-                        value={branchOverrides[repo.path] ?? ''}
-                        onChange={(v) => setBranchOverrides((prev) => ({ ...prev, [repo.path]: v }))}
-                      />
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
-          )}
-          <label className="mt-3 flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
-            <Checkbox
-              checked={autoUpdateBase}
-              onCheckedChange={(c) => setAutoUpdateBase(Boolean(c))}
-              aria-label="Fast-forward clean base branches before creating workspace"
-            />
-            <span>Fast-forward clean base branches to latest remote commits</span>
-          </label>
-        </section>
-
-        {/* 4. Description */}
-        <section>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">What are you building?</span>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="A short description — your AI assistant reads this to plan the work."
-              rows={3}
-            />
-          </label>
-          {suggestedMatches.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
-              <span className="text-primary font-medium flex items-center gap-1 text-[11px]">
-                <Sparkles className="size-3" /> Suggested for this task:
-              </span>
-              {suggestedMatches.map((item) => (
-                <button
-                  key={`${item.type}-${item.id}`}
-                  type="button"
-                  onClick={() => {
-                    if (item.type === 'tag') {
-                      setSelectedTags((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
-                    } else {
-                      setEnabledSkills((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
-                    }
-                  }}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-card border border-primary/30 text-[11px] font-mono hover:bg-primary/10 transition-colors text-foreground"
-                >
-                  <span>+{item.title}</span>
-                  <Badge variant="outline" className="text-[8px] px-0.5 py-0 uppercase">
-                    {item.type}
-                  </Badge>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
 
         {/* 5. Category & Domain Tags (Skill Bundles) */}
         <section>
@@ -967,110 +1031,7 @@ export function StartWorkPage() {
             )}
           </div>
 
-          {/* Direct Agent Skills Selection */}
-          <div className="mt-4 pt-4 border-t border-border/60">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <Boxes className="size-4 text-primary" />
-                Direct Agent Skills
-                {enabledSkills.length > 0 && (
-                  <span className="text-xs text-muted-foreground font-normal">
-                    ({enabledSkills.length} selected)
-                  </span>
-                )}
-              </span>
-              <div className="flex items-center gap-2">
-                {(skillsQuery.data ?? []).length > 0 && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => {
-                      const all = (skillsQuery.data ?? []).map((s) => s.id);
-                      setEnabledSkills(enabledSkills.length === all.length ? [] : all);
-                    }}
-                    className="text-xs text-muted-foreground hover:text-foreground h-6 px-2"
-                  >
-                    {enabledSkills.length === (skillsQuery.data ?? []).length && (skillsQuery.data ?? []).length > 0
-                      ? 'Deselect All'
-                      : 'Select All'}
-                  </Button>
-                )}
-                <Link
-                  to="/skills"
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                >
-                  Skill Library →
-                </Link>
-              </div>
-            </div>
 
-            {skillsQuery.isLoading ? (
-              <div className="flex items-center justify-center p-3 gap-2 text-xs text-muted-foreground rounded-lg border border-border">
-                <Spinner className="size-3" />
-                Loading skills...
-              </div>
-            ) : (skillsQuery.data ?? []).length === 0 ? (
-              <div className="p-3 border border-dashed border-border rounded-lg bg-card/20 text-center">
-                <p className="text-xs text-muted-foreground">
-                  No skills in your catalog yet. You can create skills in the{' '}
-                  <Link to="/skills" className="text-primary underline">
-                    Skill Library
-                  </Link>{' '}
-                  or let AI agents create them during development.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(skillsQuery.data ?? []).map((skill) => {
-                  const isChecked = enabledSkills.includes(skill.id);
-                  return (
-                    <div
-                      key={skill.id}
-                      onClick={() =>
-                        setEnabledSkills((prev) =>
-                          prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
-                        )
-                      }
-                      className={cn(
-                        'flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors select-none text-left',
-                        isChecked
-                          ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40 text-foreground'
-                          : 'border-border bg-card hover:border-foreground/20 text-muted-foreground',
-                      )}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Checkbox
-                          checked={isChecked}
-                          onCheckedChange={() =>
-                            setEnabledSkills((prev) =>
-                              prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
-                            )
-                          }
-                          aria-label={`Select ${skill.title || skill.name}`}
-                        />
-                        <div className="min-w-0">
-                          <p className="font-mono text-xs font-medium truncate text-foreground">
-                            {skill.title || skill.name}
-                          </p>
-                          {skill.description && (
-                            <p className="text-[11px] text-muted-foreground line-clamp-1">
-                              {skill.description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {skill.category && (
-                        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 capitalize">
-                          {skill.category}
-                        </Badge>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </section>
 
         {/* 6. Explicit harness choices */}
@@ -1112,7 +1073,7 @@ export function StartWorkPage() {
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent"
             aria-expanded={advancedOpen}
           >
-            Advanced
+            Agent collaboration
             <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', advancedOpen && 'rotate-180')} />
           </button>
           {advancedOpen && (
@@ -1194,8 +1155,12 @@ export function StartWorkPage() {
             </div>
           )}
         </section>
+          </div>}
+        </section>
 
-        {submitError && <p className="text-sm text-destructive-foreground">{submitError}</p>}
+        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={assistants} tagCount={selectedTags.length} />
+
+        {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
 
         <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1204,7 +1169,7 @@ export function StartWorkPage() {
           </p>
           <Button onClick={submit} disabled={!formValid || createWorkspace.isPending}>
             {createWorkspace.isPending ? <Spinner /> : null}
-            {inPlace ? 'Start working' : 'Create workspace'}
+            Create workspace
           </Button>
         </div>
       </div>

@@ -9,8 +9,9 @@ import { z } from 'zod';
 import { checkGenerationLock } from '../core/generation-lock.js';
 import { loadWorkspaceManifest } from '../core/workspace.js';
 import { canOpenCodexSessionInWorkspace, canTransferClaudeSessionInWorkspace, findSessions } from '../utils/session-finder.js';
-import { TerminalManager, nativePtyAvailable, type TerminalClient } from './manager.js';
+import { TerminalManager, TerminalNotFoundError, nativePtyAvailable, type TerminalClient } from './manager.js';
 import { listTerminalTargets, resolveLaunch, withWorkspaceCli } from './targets.js';
+import { isCliHarnessId } from '../utils/cli-harnesses.js';
 
 const COOKIE = 'contextspace_terminal_owner';
 const HEADER = 'x-contextspace-terminal';
@@ -18,7 +19,7 @@ const TOKEN_TTL = 5 * 60_000;
 const OWNER_TTL = 24 * 60 * 60_000;
 const uuid = z.string().uuid();
 const workspaceId = z.string().min(1).max(200);
-const createSchema = z.object({ launchId: uuid, target: z.enum(['shell', 'antigravity', 'codex', 'claude', 'copilot', 'cursor', 'pi']), cwd: z.string().max(4096).optional(), sessionId: uuid.optional() }).strict();
+const createSchema = z.object({ launchId: uuid, target: z.string().refine(id => id === 'shell' || isCliHarnessId(id)), cwd: z.string().max(4096).optional(), sessionId: uuid.optional() }).strict();
 
 export function trustedTerminalOrigin(origin: string | undefined, requestUrl: string, developmentOrigin = process.env.CONTEXTSPACE_DASHBOARD_ORIGIN): boolean {
   if (!origin) return false;
@@ -107,10 +108,17 @@ export function registerTerminalRoutes(app: Hono, upgrade: UpgradeWebSocket<any,
         const repos = (await Promise.all((manifest?.repos ?? []).map(repo => containedTerminalCwd(root, path.basename(repo)).catch(() => null)))).filter((repo): repo is string => !!repo);
         const checker = input.target === 'codex' ? canOpenCodexSessionInWorkspace : input.target === 'claude' ? canTransferClaudeSessionInWorkspace : null;
         if (checker && !await checker(root, repos, input.sessionId)) throw new Error('Saved session ownership could not be verified for this workspace and harness.');
-        const found = (await findSessions(root, repos)).find(s => s.assistant === input.target && s.id === input.sessionId);
+        const sessions = await findSessions(root, repos);
+        const found = sessions.find(s => s.assistant === input.target && s.id === input.sessionId);
         if (!found?.recordedCwd) throw new Error('Saved session ownership could not be verified. Open the harness and use its own session picker.');
         if (found.threadKind === 'subagent') throw new Error('This is a subagent session. Resume its main conversation instead.');
         cwd = await containedTerminalCwd(root, found.recordedCwd);
+        // A conversation started in a fresh terminal here attaches to that terminal.
+        // Other main conversations of this tool make the match ambiguous; see claimSession.
+        const others = await Promise.all(sessions
+          .filter(s => s.assistant === input.target && s.id !== input.sessionId && s.threadKind !== 'subagent' && s.recordedCwd)
+          .map(async s => ({ cwd: await containedTerminalCwd(root, s.recordedCwd!).catch(() => ''), createdAt: s.createdAt })));
+        manager.claimSession({ owner: getCookie(c, COOKIE)!, workspace: id, target: input.target, cwd, sessionId: input.sessionId, createdAt: found.createdAt, others: others.filter(other => other.cwd) });
       }
       const terminal = await manager.create({ owner: getCookie(c, COOKIE)!, workspace: id, cwd, target: input.target, sessionId: input.sessionId, launchId: input.launchId, launch: withWorkspaceCli(resolveLaunch(input.target, input.sessionId), root) });
       return c.json({ terminal });
@@ -151,7 +159,7 @@ export function registerTerminalRoutes(app: Hono, upgrade: UpgradeWebSocket<any,
             manager.attach(owner, workspace, id, client!); attached = true; clearTimeout(deadline);
           } else manager.control(owner, workspace, id, client!, message);
         } catch (error) {
-          ws.send(JSON.stringify({ type: 'error', message: error instanceof z.ZodError ? 'Invalid terminal attachment.' : (error as Error).message }));
+          ws.send(JSON.stringify({ type: 'error', message: error instanceof z.ZodError ? 'Invalid terminal attachment.' : (error as Error).message, ...(error instanceof TerminalNotFoundError ? { code: error.code } : {}) }));
           ws.close(1008);
         }
       },

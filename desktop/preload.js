@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const bridgeApi = {
   getServerPort: () => ipcRenderer.invoke('get-server-port'),
+  pickDirectory: (defaultPath) => ipcRenderer.invoke('dialog:pick-directory', typeof defaultPath === 'string' ? defaultPath : undefined),
   updates: {
     getStatus: () => ipcRenderer.invoke('update:get-status'),
     check: () => ipcRenderer.invoke('update:check'),

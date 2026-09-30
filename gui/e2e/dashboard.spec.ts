@@ -22,14 +22,25 @@ test.describe('Redesigned ContextSpace shell', () => {
     },
   });
 
-  test('shows the dashboard overview with environment stats', async ({ page }) => {
+  test('puts active workspaces and their status first', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Multi-Worktree Process & Review Station' })).toBeVisible();
-    // Stat tiles + workspace row driven by the mocked status endpoint.
-    await expect(page.getByText('Review Queue', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+    const totals = page.getByRole('region', { name: 'Overview totals' });
+    await expect(totals.getByRole('group', { name: 'Workspaces' })).toContainText('1');
+    await expect(totals.getByRole('group', { name: 'Review queue' })).toContainText('3');
+    await expect(totals.getByRole('group', { name: 'Tracked repos' })).toContainText('1');
+    await expect(page.getByRole('heading', { name: /Active workspaces/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Test feature workspace' })).toBeVisible();
-    await expect(page.getByText('3 modified files').first()).toBeVisible();
+    await expect(page.getByRole('article')).toHaveCount(1);
+    await expect(page.getByRole('article').getByRole('button', { name: /Open workspace/ })).toBeVisible();
+    await expect(page.getByRole('article').getByText('3 modified files')).toBeVisible();
+    await expect(page.getByRole('article').getByRole('button', { name: 'Review diffs' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Search workspaces' })).toHaveCount(0);
+    await expect(page.getByText('External Coding Harnesses')).not.toBeVisible();
+    await page.screenshot({ path: 'test-results/overview-cards.png', fullPage: true });
+    await page.getByText('Assistant launchers').click();
+    await expect(page.getByText('External Coding Harnesses')).toBeVisible();
   });
 
   test('navigates to the workspaces master-detail and opens a workspace via deep link', async ({ page }) => {
@@ -42,8 +53,83 @@ test.describe('Redesigned ContextSpace shell', () => {
     // Deep link selects a workspace and shows the detail tabs.
     await page.goto('/#/workspaces/feature-x');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Test feature workspace', { exact: true }).first()).toBeVisible();
+  });
+});
+
+test.describe('Overview diffs', () => {
+  test.use({
+    workspacesData: [[feature, {
+      ...feature,
+      id: 'feature-clean', branchName: 'feature-clean', description: 'Clean workspace',
+      repos: ['C:/dev/website'], workspacePath: 'C:/ws/feature-clean',
+    }], { scope: 'test' }],
+    workspacesStatusData: {
+      'feature-x': { id: 'feature-x', branchName: 'feature-x', changedFiles: 3, dirtyRepos: 1, runningServices: 0, syncStatus: 'up-to-date', pendingValidation: false },
+      'feature-clean': { id: 'feature-clean', branchName: 'feature-clean', changedFiles: 0, dirtyRepos: 0, runningServices: 0, syncStatus: 'up-to-date', pendingValidation: false },
+    },
+  });
+
+  test('shows the total and opens the workspaces with diffs', async ({ page }) => {
+    await page.goto('/');
+    const reviewQueue = page.getByRole('region', { name: 'Overview totals' }).getByRole('group', { name: 'Review queue' });
+    await expect(reviewQueue).toContainText('3');
+    await expect(reviewQueue).toContainText('1 workspace with diffs');
+    await expect(page.getByRole('article')).toHaveCount(2);
+
+    await reviewQueue.getByRole('button', { name: 'Show workspaces with diffs' }).click();
+    await expect(page.getByRole('heading', { name: /Workspaces with diffs/ })).toBeVisible();
+    await expect(page.getByRole('article')).toHaveCount(1);
+    await expect(page.getByRole('article').getByRole('heading', { name: 'Clean workspace' })).toHaveCount(0);
+    await page.getByRole('article').getByRole('button', { name: 'Review diffs' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/feature-x\/changes/);
+  });
+});
+
+test.describe('Many workspaces', () => {
+  const workspaces = Array.from({ length: 33 }, (_, index) => ({
+    ...feature,
+    id: `feature-${index}`,
+    branchName: `feature-${index}`,
+    description: `Workspace ${index}`,
+    workspacePath: `C:/ws/feature-${index}`,
+    createdAt: new Date(Date.UTC(2026, 5, 33 - index)).toISOString(),
+  }));
+  test.use({
+    workspacesData: [workspaces, { scope: 'test' }],
+    workspacesStatusData: Object.fromEntries(workspaces.map((ws, index) => [ws.branchName, {
+      id: ws.id, branchName: ws.branchName, changedFiles: index === 32 ? 7 : 0,
+      dirtyRepos: index === 32 ? 1 : 0, runningServices: 0,
+      syncStatus: 'up-to-date', pendingValidation: false,
+    }])),
+  });
+
+  test('loads status in pages, then reveals cards and sidebar rows on demand', async ({ page }) => {
+    const offsets: number[] = [];
+    let releaseSecondPage = () => {};
+    const secondPageHeld = new Promise<void>((resolve) => { releaseSecondPage = resolve; });
+    await page.route('**/api/workspaces/status?*', async (route) => {
+      if (new URL(route.request().url()).searchParams.get('offset') === '24') await secondPageHeld;
+      await route.fallback();
+    });
+    page.on('request', (request) => {
+      if (request.url().includes('/api/workspaces/status?')) {
+        offsets.push(Number(new URL(request.url()).searchParams.get('offset')));
+      }
+    });
+    await page.goto('/');
+    const totals = page.getByRole('region', { name: 'Overview totals' });
+    await expect(page.getByRole('article')).toHaveCount(12);
+    await expect(totals.getByRole('group', { name: 'Review queue' })).toContainText('Checking 24 of 33 workspaces');
+    releaseSecondPage();
+    await expect(totals.getByRole('group', { name: 'Review queue' })).toContainText('7');
+    expect(offsets).toContain(0);
+    expect(offsets).toContain(24);
+    await page.getByRole('button', { name: /Show more workspaces \(21 remaining\)/ }).click();
+    await expect(page.getByRole('article')).toHaveCount(24);
+    await page.getByRole('button', { name: /Show more workspaces \(3 remaining\)/ }).click();
+    await expect(page.getByRole('link', { name: /feature-32/ })).toBeVisible();
   });
 });
 
@@ -52,6 +138,8 @@ test.describe('Narrow-screen navigation', () => {
 
   test('opens, restores keyboard focus, and closes after selecting a workspace', async ({ page }) => {
     await page.goto('/');
+    await expect(page.getByRole('heading', { name: /Active workspaces/ })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const trigger = page.getByRole('button', { name: 'Open navigation', exact: true });
     await trigger.click();
     const navigation = page.getByRole('dialog', { name: 'Navigation', exact: true });
@@ -67,10 +155,14 @@ test.describe('Narrow-screen navigation', () => {
     const main = await page.getByRole('main').boundingBox();
     expect(main?.width).toBe(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    // All detail tabs remain reachable by keyboard without growing the page.
-    const skills = page.getByRole('tab', { name: 'Skills', exact: true });
+    // Every destination and section stays reachable by keyboard without growing the page.
+    const context = page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan & Context' });
+    await context.focus();
+    await page.keyboard.press('Enter');
+    const skills = page.getByRole('navigation', { name: 'Plan & Context sections' }).getByRole('link', { name: 'Skills' });
     await skills.focus();
     await page.keyboard.press('Enter');
-    await expect(skills).toHaveAttribute('aria-selected', 'true');
+    await expect(skills).toHaveAttribute('aria-current', 'page');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });

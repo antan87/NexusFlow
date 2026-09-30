@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 import { execa } from 'execa';
 
 import { readWorkspaceKnowledge } from '../core/knowledge.js';
+import { readWorkspaceFile } from '../core/storage.js';
+import { PRIMARY_PLAN_FILE, PRIMARY_HANDOFF_FILE } from '../core/constants.js';
 import { loadFeatureConfig, resolveRepoInfos } from '../core/workspace.js';
 import type { Feature } from '../types.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
@@ -68,9 +68,9 @@ export function escapeMarkdownTableCell(value: string): string {
     .replace(/[\r\n]+/g, ' ');
 }
 
-async function readOptionalText(filePath: string): Promise<string> {
+async function readOptionalText(workspacePath: string, featureId: string, filename: string): Promise<string> {
   try {
-    const value = await fs.readFile(filePath, 'utf8');
+    const value = await readWorkspaceFile(workspacePath, featureId, filename);
     return limitPortableDocument(value);
   } catch {
     return '';
@@ -167,9 +167,9 @@ export async function buildPortableWorkroomPreview(workspacePath: string): Promi
   });
 
   const [plan, decisions, handoff] = await Promise.all([
-    readOptionalText(path.join(workspacePath, 'nexusflow-plan.md')),
+    readOptionalText(workspacePath, feature.id, PRIMARY_PLAN_FILE),
     readWorkspaceKnowledge(workspacePath).then((value) => limitPortableDocument(value ?? '')).catch(() => ''),
-    readOptionalText(path.join(workspacePath, 'nexusflow-handoff.md')),
+    readOptionalText(workspacePath, feature.id, PRIMARY_HANDOFF_FILE),
   ]);
   return {
     workspaceId: feature.id,

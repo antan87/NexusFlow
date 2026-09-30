@@ -366,6 +366,27 @@ describe('JSON error boundaries and malformed lines resilience', () => {
     expect(transcript[1].content).toBe('Valid response');
   });
 
+  it('loads only the requested history source while preserving the combined listing', async () => {
+    const claudeId = '0199a213-81c0-7800-8aa1-bbab2a035a91';
+    const workspaceId = '0199a213-81c0-7800-8aa1-bbab2a035a92';
+    const claudeProjDir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', getClaudeProjectFolderName(workspaceDir));
+    await fs.mkdir(claudeProjDir, { recursive: true });
+    await fs.writeFile(path.join(claudeProjDir, `${claudeId}.jsonl`), JSON.stringify({
+      type: 'user', sessionId: claudeId, cwd: workspaceDir, timestamp: '2026-08-19T08:00:00.000Z',
+      message: { content: 'Claude prompt' },
+    }));
+    const workspaceSessionsDir = path.join(workspaceDir, '.sessions');
+    await fs.mkdir(workspaceSessionsDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceSessionsDir, `${workspaceId}.jsonl`), JSON.stringify({
+      sessionId: workspaceId, provider: 'codex', userPrompt: 'Workspace prompt', timestamp: '2026-08-19T09:00:00.000Z',
+    }));
+
+    expect((await findSessions(workspaceDir, [], 'claude')).map(session => session.id)).toEqual([claudeId]);
+    expect((await findSessions(workspaceDir, [], 'workspace')).map(session => session.id)).toEqual([workspaceId]);
+    expect((await findSessions(workspaceDir, [], 'codex')).map(session => session.id)).toEqual([]);
+    expect((await findSessions(workspaceDir)).map(session => session.id)).toEqual([workspaceId, claudeId]);
+  });
+
   it('continues parsing Antigravity transcript despite malformed JSON lines', async () => {
     const convId = '0199a213-81c0-7800-8aa1-bbab2a035a98';
     const brainLogDir = path.join(process.env.ANTIGRAVITY_CLI_HOME!, 'brain', convId, '.system_generated', 'logs');
@@ -481,6 +502,69 @@ describe('JSON error boundaries and malformed lines resilience', () => {
       expect(third).toHaveLength(2);
       expect(third).toContain('antigravity');
       expect(third).toContain('claude');
+    });
+
+    const codexRollout = (cwd: string) => [
+      JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a53', cwd } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: 'hello' } }),
+    ].join('\n') + '\n';
+
+    it('detects a Codex session started in a new date folder after the cache is warm', async () => {
+      const codexSessionsDir = path.join(process.env.CODEX_HOME!, 'sessions');
+      const earlierDay = path.join(codexSessionsDir, '2026', '09', '01');
+      await fs.mkdir(earlierDay, { recursive: true });
+      await fs.writeFile(path.join(earlierDay, 'rollout-2026-09-01T10-00-00-a.jsonl'), codexRollout('/some/unrelated/project'));
+      // Whole seconds, so restoring the time below reproduces the exact mtime.
+      const rootTime = new Date('2026-09-01T00:00:00Z');
+      await fs.utimes(codexSessionsDir, rootTime, rootTime);
+
+      expect(await findActiveAssistants(workspaceDir)).not.toContain('codex');
+
+      // Codex only touches the day folder; the sessions root keeps its mtime.
+      const newDay = path.join(codexSessionsDir, '2026', '09', '02');
+      await fs.mkdir(newDay, { recursive: true });
+      await fs.writeFile(path.join(newDay, 'rollout-2026-09-02T10-00-00-b.jsonl'), codexRollout(workspaceDir));
+      await fs.utimes(codexSessionsDir, rootTime, rootTime);
+
+      expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+    });
+
+    it('rechecks a Codex rollout whose session header was not written yet', async () => {
+      const rollout = path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-03T10-00-00-c.jsonl');
+      await fs.writeFile(rollout, '');
+
+      expect(await findActiveAssistants(workspaceDir)).not.toContain('codex');
+
+      await fs.appendFile(rollout, codexRollout(workspaceDir));
+
+      expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+    });
+
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+      'serves unchanged Codex rollouts from the cache without rereading them',
+      async () => {
+        const rollout = path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-04T10-00-00-d.jsonl');
+        await fs.writeFile(rollout, codexRollout(workspaceDir));
+        expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+
+        // An unreadable file can only still be detected through the cache.
+        await fs.chmod(rollout, 0o000);
+        try {
+          expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+        } finally {
+          await fs.chmod(rollout, 0o644);
+        }
+      },
+    );
+
+    it('forgets a Codex rollout once it is deleted', async () => {
+      const rollout = path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-05T10-00-00-e.jsonl');
+      await fs.writeFile(rollout, codexRollout(workspaceDir));
+      expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+
+      await fs.rm(rollout);
+
+      expect(await findActiveAssistants(workspaceDir)).not.toContain('codex');
     });
   });
 });

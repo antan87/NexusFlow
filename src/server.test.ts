@@ -4,9 +4,11 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { execa } from 'execa';
-import { AgentTurnGate, app, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
+import { AgentTurnGate, app, archiveRefusedAction, canOfferClaudeDesktopTransfer, dispatchAgentInput } from './server.js';
+import * as archive from './core/archive.js';
 import * as workspace from './core/workspace.js';
 import * as config from './core/config.js';
+import * as configPaths from './core/config-paths.js';
 import * as analyzers from './analyzers/index.js';
 import * as generators from './generators/index.js';
 import * as workflows from './utils/workflows.js';
@@ -27,7 +29,12 @@ import { workroomManager } from './workrooms/manager.js';
 vi.mock('node:fs/promises');
 vi.mock('execa');
 vi.mock('./core/workspace.js');
+vi.mock('./core/archive.js');
 vi.mock('./core/config.js');
+vi.mock('./core/config-paths.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./core/config-paths.js')>()),
+  checkConfigPaths: vi.fn(),
+}));
 vi.mock('./core/domain-packs.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./core/domain-packs.js')>();
   return {
@@ -79,6 +86,17 @@ vi.mock('./orchestration/index.js');
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('keeps diagnostic capture and export behind the local host/origin guards', async () => {
+    for (const route of ['preview', 'review', 'export']) {
+      const response = await app.request(`/api/diagnostics/${route}`, {
+        method: 'POST', headers: { Origin: 'https://outside.example', 'Content-Type': 'application/json' }, body: '{}',
+      });
+      expect(response.status).toBe(403);
+    }
+    const response = await app.request('/api/data-guide', { headers: { Host: 'outside.example' } });
+    expect(response.status).toBe(403);
   });
 
   it('rejects an invalid transcript session id at the HTTP boundary', async () => {
@@ -871,6 +889,32 @@ describe('Server API Endpoints Unit Tests', () => {
       await expect(response.json()).resolves.toEqual({ error: 'Session limit must be an integer from 1 to 20.' });
     });
 
+    it('validates a source and scans only that source for progressive history requests', async () => {
+      const sourceList = await app.request('/api/session-sources');
+      expect(sourceList.status).toBe(200);
+      expect((await sourceList.json() as { sources: string[] }).sources).toContain('pi');
+      const invalid = await app.request('/api/workspace/safe-workspace/sessions?source=unknown');
+      expect(invalid.status).toBe(400);
+      const combined = await app.request('/api/workspace/safe-workspace/sessions?source=codex&desktopHandoffOnly=true');
+      expect(combined.status).toBe(400);
+
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir } as any);
+      vi.mocked(workspace.loadFeatureConfig).mockResolvedValue({
+        id: 'safe-workspace', repos: [path.join(workspacePath, 'repo')], workspacePath,
+      } as any);
+      const find = vi.spyOn(sessionFinder, 'findSessions').mockResolvedValue([]);
+      try {
+        const response = await app.request('/api/workspace/safe-workspace/sessions?source=codex');
+        expect(response.status).toBe(200);
+        expect(find).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], 'codex');
+        const piResponse = await app.request('/api/workspace/safe-workspace/sessions?source=pi');
+        expect(piResponse.status).toBe(200);
+        expect(find).toHaveBeenCalledWith(workspacePath, [path.join(workspacePath, 'repo')], 'pi');
+      } finally {
+        find.mockRestore();
+      }
+    });
+
     it('gates Claude Desktop transfer to supported subscription CLI environments', () => {
       const configured = () => true;
 
@@ -893,6 +937,17 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('POST /api/workspace/:id/resume', () => {
+    it('uses the Pi resume command from the CLI catalog', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'test-ws', repos: [], assistants: [] } as any);
+      const response = await app.request('/api/workspace/test-ws/resume', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assistant: 'pi', sessionId: '01a0df53-f0a9-7290-bdd1-5c094ab07027' }),
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json() as { resumeCommand: string }).resumeCommand).toBe('pi --session 01a0df53-f0a9-7290-bdd1-5c094ab07027');
+    });
+
     it('rejects cross-origin requests to resume', async () => {
       const response = await app.request('/api/workspace/test-ws/resume', {
         method: 'POST',
@@ -990,6 +1045,68 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('archived workspaces', () => {
+    const archived = { id: 'old-ws', repos: [], assistants: [], archivedAt: '2026-09-28T10:00:00.000Z' };
+
+    it('matches only actions that change repositories or start processes', () => {
+      expect(archiveRefusedAction('POST', '/api/workspace/feat%2Fx/commit')).toEqual({ id: 'feat/x', action: 'commit' });
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/services/api/start')).toEqual({ id: 'ws', action: 'services' });
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/services/stop')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/archive')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/unarchive')).toBeNull();
+      expect(archiveRefusedAction('POST', '/api/workspace/ws/knowledge/entry')).toBeNull();
+      expect(archiveRefusedAction('DELETE', '/api/workspace/ws')).toBeNull();
+      expect(archiveRefusedAction('GET', '/api/workspace/ws/commit')).toBeNull();
+    });
+
+    it('refuses to resume a session in an archived workspace with a conflict', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(archived as any);
+
+      const response = await app.request('/api/workspace/old-ws/resume', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assistant: 'pi' }),
+      });
+
+      expect(response.status).toBe(409);
+      const data = await response.json() as { code: string; error: string };
+      expect(data.code).toBe('WORKSPACE_ARCHIVED');
+      expect(data.error).toMatch(/cannot start assistant sessions/);
+      expect(execa).not.toHaveBeenCalled();
+    });
+
+    it('archives with a report, and answers a blocked archive with 409 and its blockers', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue({ id: 'ws', repos: [], assistants: [] } as any);
+      const base = {
+        workspacePath: '/mock/workspaces/ws', workspaceId: 'ws', dryRun: false, alreadyArchived: false,
+        repos: [], kept: [], notes: [], errors: [], archived: false, branches: [],
+      };
+      vi.mocked(archive.archiveWorkspace)
+        .mockResolvedValueOnce({ ...base, ready: false, blockers: ['api: 2 uncommitted file(s).'] })
+        .mockResolvedValueOnce({ ...base, ready: true, blockers: [], archived: true, archivedAt: 'now' });
+      const post = (body: object) => app.request('/api/workspace/ws/archive', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+
+      const blocked = await post({});
+      expect(blocked.status).toBe(409);
+      expect((await blocked.json() as { error: string }).error).toBe('api: 2 uncommitted file(s).');
+
+      const done = await post({ park: true });
+      expect(done.status).toBe(200);
+      expect(archive.archiveWorkspace).toHaveBeenLastCalledWith(path.resolve('/mock/workspaces', 'ws'), { park: true, dryRun: false, keepBranches: false, deleteRemoteBranches: false, fetch: undefined });
+    });
+
+    it('returns 404 for an unknown workspace instead of archiving', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ workspacesDir: '/mock/workspaces' } as any);
+      vi.spyOn(workspace, 'loadFeatureConfig').mockResolvedValue(null);
+      const response = await app.request('/api/workspace/missing/unarchive', { method: 'POST' });
+      expect(response.status).toBe(404);
+      expect(archive.unarchiveWorkspace).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET /api/config', () => {
     it('should load configuration successfully', async () => {
       vi.spyOn(config, 'getConfigDir').mockReturnValue('/mock/config-dir');
@@ -997,6 +1114,7 @@ describe('Server API Endpoints Unit Tests', () => {
         devDir: '/mock/dev',
         scanDepth: 2
       } as any);
+      vi.spyOn(config, 'getDefaultConfig').mockReturnValue({ devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } as any);
       vi.spyOn(fs, 'access').mockResolvedValue();
 
       const response = await app.request('/api/config');
@@ -1004,6 +1122,59 @@ describe('Server API Endpoints Unit Tests', () => {
       const data = await response.json();
       expect(data.config.devDir).toBe('/mock/dev');
       expect(data.exists).toBe(true);
+    });
+
+    it('reports the server platform and suggested folders for setup', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ devDir: '', scanDepth: 2 } as any);
+      vi.spyOn(config, 'getDefaultConfig').mockReturnValue({ devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } as any);
+      vi.spyOn(fs, 'access').mockRejectedValueOnce(new Error('ENOENT'));
+      const data = await (await app.request('/api/config')).json();
+      expect(data).toMatchObject({ exists: false, platform: process.platform, suggested: { devDir: '/home/me/dev', workspacesDir: '/home/me/dev/workspaces' } });
+    });
+  });
+
+  describe('POST /api/config folders', () => {
+    const ok = (p: string) => ({ path: p, status: 'ok' as const, message: '' });
+    const post = (body: unknown) => app.request('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    beforeEach(() => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ devDir: '/old/dev', workspacesDir: '/old/ws', scanDepth: 2 } as any);
+      vi.spyOn(config, 'saveConfig').mockResolvedValue();
+    });
+
+    it('refuses unusable folders with field messages and saves nothing', async () => {
+      vi.mocked(configPaths.checkConfigPaths).mockResolvedValue({
+        ok: false,
+        devDir: { path: '/new/dev', status: 'missing', message: "This folder doesn't exist.", canCreate: true },
+        workspacesDir: ok('/new/ws'),
+      });
+      const response = await post({ devDir: '/new/dev', workspacesDir: '/new/ws' });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ fields: { devDir: { status: 'missing', message: "This folder doesn't exist." } } });
+      expect(config.saveConfig).not.toHaveBeenCalled();
+    });
+
+    it('creates a missing workspaces folder only when asked, and never stores the request flag', async () => {
+      vi.mocked(configPaths.checkConfigPaths)
+        .mockResolvedValueOnce({ ok: false, devDir: ok('/new/dev'), workspacesDir: { path: '/new/ws', status: 'missing', message: '', canCreate: true } })
+        .mockResolvedValueOnce({ ok: true, devDir: ok('/new/dev'), workspacesDir: ok('/new/ws') });
+      const response = await post({ devDir: '/new/dev', workspacesDir: '/new/ws', createWorkspacesDir: true });
+      expect(response.status).toBe(200);
+      expect(fs.mkdir).toHaveBeenCalledWith('/new/ws', { recursive: true });
+      const saved = vi.mocked(config.saveConfig).mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(saved).toMatchObject({ devDir: '/new/dev', workspacesDir: '/new/ws' });
+      expect(saved).not.toHaveProperty('createWorkspacesDir');
+    });
+
+    it('does not re-check folders that did not change', async () => {
+      const response = await post({ devDir: '/old/dev', workspacesDir: '/old/ws', scanDepth: 3 });
+      expect(response.status).toBe(200);
+      expect(configPaths.checkConfigPaths).not.toHaveBeenCalled();
+      expect(config.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ scanDepth: 3 }));
     });
   });
 
@@ -1365,6 +1536,7 @@ describe('Server API Endpoints Unit Tests', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchName: 'test-ws-creation-no-pack',
+          name: 'Readable workspace title',
           flowType: 'epic',
           description: 'A test workspace',
           repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
@@ -1381,6 +1553,7 @@ describe('Server API Endpoints Unit Tests', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].flowType).toBe('epic');
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].name).toBe('Readable workspace title');
       expect(analyzers.analyzeAllRepos).toHaveBeenCalled();
       expect(generators.generateContextFiles).toHaveBeenCalled();
 
@@ -1523,6 +1696,7 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(feature.mode).toBe('in-place');
       expect(feature.id).toBe('my-quick-fix');
       expect(feature.projectId).toBe('billing');
+      expect(feature.name).toBe('My Quick Fix');
       // Repos stay at their source paths — no join(workspacePath, name) remap.
       expect(feature.repos).toEqual(['/mock/repo-1']);
       // Analysis also runs against the source repos.
@@ -2715,6 +2889,44 @@ describe('Server API Endpoints Unit Tests', () => {
   });
 
   describe('GET /api/workspaces/status', () => {
+    it('checks only the requested page and rejects invalid page sizes', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue(Array.from({ length: 30 }, (_, index) => ({
+        id: `ws-${index}`,
+        branchName: `feature-${index}`,
+        workspacePath: `/workspaces/feature-${index}`,
+        repos: [],
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      })) as any);
+      const findActive = vi.spyOn(sessionFinder, 'findActiveAssistants').mockResolvedValue([]);
+      try {
+        const first = await app.request('/api/workspaces/status?offset=0&limit=24');
+        expect(first.status).toBe(200);
+        const firstPage = await first.json();
+        expect(firstPage.total).toBe(30);
+        expect(firstPage.snapshot).toEqual(expect.any(String));
+        expect(firstPage.nextOffset).toBe(24);
+        expect(Object.keys(firstPage.statuses)).toHaveLength(24);
+        expect(firstPage.statuses['feature-29']).toBeDefined();
+        expect(firstPage.statuses['feature-0']).toBeUndefined();
+        expect(findActive).toHaveBeenCalledTimes(24);
+
+        const second = await app.request(`/api/workspaces/status?offset=24&limit=24&snapshot=${firstPage.snapshot}`);
+        expect(second.status).toBe(200);
+        const secondPage = await second.json();
+        expect(secondPage.nextOffset).toBeNull();
+        expect(Object.keys(secondPage.statuses)).toHaveLength(6);
+        expect(findActive).toHaveBeenCalledTimes(30);
+        expect(workspace.listWorkspaces).toHaveBeenCalledTimes(1);
+        expect((await app.request('/api/workspaces/status?offset=0&limit=100')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=-1&limit=24')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=24&limit=24')).status).toBe(400);
+        expect((await app.request('/api/workspaces/status?offset=24&limit=24&snapshot=missing')).status).toBe(410);
+      } finally {
+        findActive.mockRestore();
+      }
+    });
+
     it('returns workspace statuses including active AI assistants', async () => {
       vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
       vi.mocked(workspace.listWorkspaces).mockResolvedValue([
@@ -3256,5 +3468,26 @@ describe('Server API Endpoints Unit Tests', () => {
       const emptyBody = await getAfterDel.json();
       expect(emptyBody.thread).toBeNull();
     });
+  });
+});
+
+describe('pages outside the app', () => {
+  it('lead back to the app instead of a bare 404 when a document link leaves it', async () => {
+    const page = await app.request('/home/me/workspaces/audit/assessment/screenshots/01.jpeg', { headers: { accept: 'text/html,application/xhtml+xml' } });
+    expect(page.status).toBe(404);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const html = await page.text();
+    expect(html).toContain('href="/"');
+    // The requested path is never reflected into the page.
+    expect(html).not.toContain('01.jpeg');
+  });
+
+  it('keeps plain 404s for API and asset requests', async () => {
+    const api = await app.request('/api/not-a-route', { headers: { accept: 'text/html' } });
+    expect(api.status).toBe(404);
+    expect(await api.text()).not.toContain('href="/"');
+    const asset = await app.request('/assets/missing.js', { headers: { accept: '*/*' } });
+    expect(asset.status).toBe(404);
+    expect(asset.headers.get('content-type') ?? '').not.toContain('text/html');
   });
 });

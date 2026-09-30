@@ -11,7 +11,7 @@ import * as fs from 'node:fs/promises';
 
 import { loadConfig } from '../core/config.js';
 import { listWorkspaces, deleteWorkspace } from '../core/workspace.js';
-import { BRAND_NAME } from '../core/constants.js';
+import { BRAND_NAME, CLI_NAME } from '../core/constants.js';
 
 /**
  * Executes the remove command.
@@ -63,7 +63,7 @@ export async function removeCommand(workspaceArg?: string): Promise<void> {
             ws.workspacePath.toLowerCase().includes(query)
         );
         return filtered.map((ws) => ({
-          name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos)`)}`,
+          name: `${ws.branchName} ${chalk.dim(`(${ws.repos.length} repos${ws.archivedAt ? ', archived' : ''})`)}`,
           value: ws,
         }));
       },
@@ -76,7 +76,7 @@ export async function removeCommand(workspaceArg?: string): Promise<void> {
   if (!workspacePath) return;
 
   const confirmDelete = await confirm({
-    message: `Are you absolutely sure you want to delete the workspace "${workspaceName}"?\n  This will FORCE remove all associated git worktrees and delete the folder from disk.`,
+    message: `Are you absolutely sure you want to delete the workspace "${workspaceName}"?\n  This FORCE-removes its git worktrees, including uncommitted changes, and deletes its record: milestones, verification history, planning notes, knowledge and documents.\n  To keep the record and only return the worktrees, run \`${CLI_NAME} archive ${workspaceName}\` instead.`,
     default: false,
   });
 

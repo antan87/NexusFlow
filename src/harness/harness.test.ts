@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { getAdapter } from './index.js';
 import { Pushable } from './pushable.js';
 import { UnsupportedOperationError, AuthRequiredError } from './interface.js';
@@ -203,22 +206,31 @@ describe('Harness Abstraction Layer', () => {
     });
 
     it('throws AuthRequiredError on start() if unauthenticated', async () => {
-      const origKey = process.env.ANTHROPIC_API_KEY;
-      const origToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-
+      // Hermetic: blank every credential source the adapter reads, and point
+      // PATH at an empty folder so a logged-in `claude` CLI on the developer's
+      // machine cannot count as authentication.
+      const emptyPath = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-no-claude-'));
       try {
         const adapter = getAdapter('claude-code');
         await expect(
           adapter.start({
             prompt: 'test',
             workspace: { workspaceId: 'test-ws', rootPath: 'C:/test' },
+            env: {
+              PATH: emptyPath,
+              ANTHROPIC_API_KEY: '',
+              ANTHROPIC_AUTH_TOKEN: '',
+              CLAUDE_CODE_OAUTH_TOKEN: '',
+              CLAUDE_CODE_USE_BEDROCK: '',
+              CLAUDE_CODE_USE_VERTEX: '',
+              CLAUDE_CODE_USE_FOUNDRY: '',
+              AWS_ACCESS_KEY_ID: '',
+              GOOGLE_APPLICATION_CREDENTIALS: '',
+            },
           }),
         ).rejects.toThrow(AuthRequiredError);
       } finally {
-        if (origKey) process.env.ANTHROPIC_API_KEY = origKey;
-        if (origToken) process.env.CLAUDE_CODE_OAUTH_TOKEN = origToken;
+        await fs.rm(emptyPath, { recursive: true, force: true });
       }
     });
   });

@@ -271,6 +271,18 @@ async function buildDesiredFiles(
   return [...desired.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * The files a new workspace would receive for these resources, computed by
+ * the same planner that writes them, so a preview cannot drift from the result.
+ */
+export async function previewResourceFiles(
+  assistants: AIAssistant[],
+  skills: SkillItem[],
+  agents: CodexAgentItem[],
+): Promise<Array<{ kind: DesiredFile['kind']; resourceId: string; path: string }>> {
+  return (await buildDesiredFiles(assistants, skills, agents)).map(({ kind, resourceId, path: filePath }) => ({ kind, resourceId, path: filePath }));
+}
+
 async function loadLock(workspacePath: string): Promise<ResourceLock> {
   const lockPath = await resolveResourceLockPath(workspacePath);
   if (!(await fse.pathExists(lockPath))) return { schemaVersion: 1, outputs: [] };

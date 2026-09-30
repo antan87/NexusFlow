@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PlanningNotesPanel } from './PlanningNotesPanel.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
@@ -21,7 +22,7 @@ const emptyDocument = (): DocumentDraft => ({ title: '', role: 'requirements', s
 const selectClass = 'mt-1 w-full rounded-md border border-border bg-background p-2 text-sm';
 const stages = ['investigate', 'design', 'implement', 'verify', 'review', 'release'] as const;
 
-export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId: string; onPlanChanged: () => void }) {
+export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = false }: { workspaceId: string; onPlanChanged: () => void; /** Archived: show the record, change nothing. */ readOnly?: boolean }) {
   const [context, setContext] = useState<WorkContext | null>(null);
   const [draft, setDraft] = useState<WorkGuidance | null>(null);
   const [steps, setSteps] = useState<LifecycleStep[]>([]);
@@ -37,6 +38,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<{ title: string; content?: string; location: string } | null>(null);
   const base = `/api/workspace/${encodeURIComponent(workspaceId)}`;
+  const queryClient = useQueryClient();
   const load = useCallback(async () => {
     setError('');
     try {
@@ -48,7 +50,12 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
 
   const perform = async (operation: () => Promise<void>) => {
     setBusy(true); setError(''); setMessage('');
-    try { await operation(); }
+    try {
+      await operation();
+      // The workspace header shows the stage and next milestone; keep it current.
+      void queryClient.invalidateQueries({ queryKey: ['workspace-work', workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ['workspace-lifecycle', workspaceId] });
+    }
     catch (error) { setError(error instanceof Error ? error.message : 'The operation failed.'); }
     finally { setBusy(false); }
   };
@@ -120,10 +127,11 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
     {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
     {!context || !draft ? <p className="text-sm">{error ? 'Work brief unavailable.' : 'Loading work brief…'}</p> : <>
       <div className="flex flex-wrap gap-2" aria-label="Brief sections">
-        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? (context.lifecycle?.steps.length ? 'Edit milestones' : 'Add milestones') : 'Delivery notes & questions'}</Button>)}
+        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? (readOnly ? 'Milestones' : context.lifecycle?.steps.length ? 'Edit milestones' : 'Add milestones') : 'Delivery notes & questions'}</Button>)}
       </div>
-      {notesOpened && <div hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} /></div>}
+      {notesOpened && <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0" hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} /></fieldset>}
       {panel === 'assignment' && <div className="space-y-4">
+        <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0 space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="text-sm">Work type<select aria-label="Work type" className={selectClass} value={draft.workType} onChange={(event) => setDraft({ ...draft, workType: event.target.value as WorkGuidance['workType'] })}>
             {(['bug', 'feature', 'performance', 'refactor', 'rewrite'] as const).map((value) => <option key={value} value={value}>{value === 'bug' ? 'Bug fix' : value[0].toUpperCase() + value.slice(1)}</option>)}
@@ -142,15 +150,16 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
         <label className="block text-sm">Current objective<Textarea className="mt-1" value={draft.assignment.objective} onChange={(event) => patchAssignment({ objective: event.target.value })} placeholder="Investigate why invoice totals differ from line items." /></label>
         <label className="block text-sm">Expected output<Textarea className="mt-1" value={draft.assignment.expectedOutput} onChange={(event) => patchAssignment({ expectedOutput: event.target.value })} placeholder="A reproduction, likely cause, and proposed test plan." /></label>
         <label className="block text-sm">Stop when<Textarea className="mt-1" value={draft.assignment.stopCondition} onChange={(event) => patchAssignment({ stopCondition: event.target.value })} placeholder="The proposal is ready for review. Stop before implementation." /></label>
+        </fieldset>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => void saveAssignment()}>Save AI assignment</Button>
+          {!readOnly && <Button disabled={busy} onClick={() => void saveAssignment()}>Save AI assignment</Button>}
           <Button variant="outline" disabled={busy || Boolean(assignmentDirty)} onClick={() => void perform(async () => {
             if (!await safeCopyToClipboard(context.assignment)) throw new Error('Could not copy the AI assignment. Check browser clipboard permissions.');
             setMessage('AI assignment copied.');
           })}>Copy AI assignment</Button>
         </div>
         {assignmentDirty && <p className="text-xs text-muted-foreground">Save your changes before copying the assignment.</p>}
-        {!steps.length && <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+        {!steps.length && !readOnly && <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
           <h4 className="text-sm font-semibold">No milestones saved yet</h4>
           <p className="text-xs text-muted-foreground">Turn the current assignment into a first reviewable outcome. The draft stays on this page until you save it; saving creates a pending milestone and does not start work.</p>
           <Button size="sm" variant="outline" disabled={busy || !context.lifecycle || Boolean(assignmentDirty)} onClick={draftFirstMilestone}>Draft first milestone</Button>
@@ -166,7 +175,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
             <div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => void perform(async () => {
               const result = await apiFetch<{ document: WorkDocument; content?: string; location: string }>(`${base}/work/documents/${doc.id}`);
               setPreview({ title: result.document.title, content: result.content, location: result.location });
-            })}>Read {doc.title}</Button><Button variant="ghost" size="sm" onClick={() => { setDocument(doc); setEditingDocumentId(doc.id); }}>Edit {doc.title}</Button></div>
+            })}>Read {doc.title}</Button>{!readOnly && <Button variant="ghost" size="sm" onClick={() => { setDocument(doc); setEditingDocumentId(doc.id); }}>Edit {doc.title}</Button>}</div>
           </div>
         </li>)}</ul>
         {Boolean(context.sharedDocuments?.length) && <div className="space-y-2">
@@ -183,7 +192,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
         {preview && <div className="rounded-lg border border-border p-3 space-y-2"><div className="flex justify-between gap-2"><h4 className="text-sm font-semibold">{preview.title}</h4><Button size="sm" variant="ghost" onClick={() => setPreview(null)}>Close document</Button></div>
           {preview.content !== undefined ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{preview.content}</pre> : <a className="text-sm text-primary underline" href={preview.location} target="_blank" rel="noopener noreferrer">Open source document</a>}
         </div>}
-        <div className="border-t border-border pt-4 space-y-3">
+        {!readOnly && <div className="border-t border-border pt-4 space-y-3">
           <h4 className="font-medium text-sm">{editingDocumentId ? 'Edit document labels' : 'Add source document'}</h4>
           <label className="block text-sm">Document title<Input value={document.title} onChange={(event) => setDocument({ ...document, title: event.target.value })} /></label>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -216,9 +225,9 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           <div className="flex gap-2"><Button disabled={busy || !document.title.trim() || (!editingDocumentId && !(sourceType === 'link' ? url.trim() : content.trim()))} onClick={() => void saveDocument()}>{editingDocumentId ? 'Save document labels' : 'Add document'}</Button>
             {editingDocumentId && <Button variant="ghost" onClick={() => { setEditingDocumentId(null); setDocument(emptyDocument()); }}>Cancel document edit</Button>}
           </div>
-        </div>
+        </div>}
       </div>}
-      {panel === 'milestones' && <div className="space-y-4">
+      {panel === 'milestones' && <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0 space-y-4">
         <p className="text-sm text-muted-foreground">Milestones are optional and unique to this feature. Name the outcomes you need, or remove all milestones to hide the flow.</p>
         {!context.lifecycle?.steps.length && steps.length > 0 && <p className="text-xs text-muted-foreground">This milestone is an unsaved draft. Review its title and outcome; Save milestones creates it as pending and does not start work.</p>}
         {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
@@ -239,9 +248,13 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged }: { workspaceId
           </fieldset>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(step.requiresVerification || step.verificationCommand)} disabled={step.status === 'completed'} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, requiresVerification: event.target.checked, ...(!event.target.checked ? { verificationCommand: '' } : {}) } : item))} />Verify before completing milestone {index + 1}</label>
           {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification command (optional)<Input value={step.verificationCommand ?? ''} disabled={step.status === 'completed'} placeholder="Uses the workspace test command unless overridden" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationCommand: event.target.value } : item))} /></label>}
+          {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification time limit in minutes (optional)<Input type="number" min={1} max={120} step={1} value={step.verificationTimeoutSeconds ? Math.round(step.verificationTimeoutSeconds / 60) : ''} placeholder="30" onChange={(event) => {
+            const minutes = Number.parseInt(event.target.value, 10);
+            setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationTimeoutSeconds: Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 120) * 60 : undefined } : item));
+          }} /></label>}
         </fieldset>)}
-        <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>
-      </div>}
+        {!readOnly && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>}
+      </fieldset>}
     </>}
   </section>;
 }

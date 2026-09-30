@@ -26,8 +26,9 @@ export interface CreateWorktreeOptions {
    */
   mustExist?: boolean;
   /**
-   * Whether to attempt fast-forwarding the base branch to remote tracking before branching.
-   * Defaults to true.
+   * Fast-forward the source repository's local base branch before branching.
+   * Off unless explicitly `true`: it changes the user's own checkout, and the
+   * new branch already starts from the fetched remote base.
    */
   autoUpdateBase?: boolean;
 }
@@ -36,7 +37,7 @@ export interface CreateWorktreeOptions {
  * Creates a git worktree for a branch, materializing the branch as needed:
  *
  * 1. Resolves remote tracking branch (origin, upstream, etc.) and fetches remote refs.
- * 2. Safely fast-forwards the local base branch if clean and autoUpdateBase is not false.
+ * 2. Fast-forwards the local base branch only when autoUpdateBase is explicitly true.
  * 3. If `branchName` exists locally, check it out into the worktree.
  * 4. Else if `<remote>/<branchName>` exists, create a tracking local branch
  *    from it in the worktree.
@@ -65,18 +66,28 @@ export async function createWorktree(
   }
 
   // Resolve tracking branch for baseBranch (checks origin, upstream, etc.)
-  const { trackingBranch, remoteName, hasRemote } = await resolveTrackingBranch(
+  const { trackingBranch, hasRemote, remoteName } = await resolveTrackingBranch(
     repoPath,
     baseBranch,
   );
 
-  // If remote exists and autoUpdateBase is enabled, safely fast-forward clean repos
-  if (hasRemote && options.autoUpdateBase !== false) {
+  // Only an explicit opt-in may fast-forward the source checkout's base branch.
+  if (hasRemote && options.autoUpdateBase === true) {
     try {
       await fastForwardBranch(repoPath, baseBranch);
     } catch {
       // Best-effort fast-forward; uncommitted work is preserved on dirty trees
     }
+  } else if (hasRemote && remoteName) {
+    // Fetching only moves remote-tracking refs, never the user's checkout, so
+    // the new branch still starts from the current remote base.
+    await execa('git', ['fetch', remoteName], {
+      cwd: repoPath,
+      timeout: 60_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    }).catch(() => {
+      // Offline: fall back to the last fetched remote base.
+    });
   }
 
   // Determine starting point: remote tracking ref if verified, else local baseBranch

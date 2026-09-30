@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Download, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
+import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 import { cn } from '../../lib/utils';
 import { DocumentPreview, type DocumentPreviewData } from './DocumentPreview.js';
 import { dependsOnExternalScript } from './previewPolicy.js';
@@ -15,6 +16,8 @@ export interface DocumentViewerProps {
   status?: ReactNode;
   fileUrl?: string;
   downloadHref?: string;
+  /** Forwarded to the renderer so markdown documents can follow links to sibling files. */
+  links?: MarkdownDocumentLinks;
   raw: boolean;
   /** Omit to hide the raw/rendered toggle, which is what a non-markdown/non-HTML document wants. */
   onToggleRaw?: () => void;
@@ -44,7 +47,7 @@ function TrustControl({ trusted, onToggle, compact }: { trusted: boolean; onTogg
  * the app's own borders — `fixed inset-0` within the app shell, never the browser Fullscreen API —
  * so Download, the raw toggle and the trust control all stay reachable.
  */
-export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
+export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
   const [expanded, setExpanded] = useState(false);
   const [trusted, setTrusted] = useState(false);
   const inlineToggle = useRef<HTMLButtonElement>(null);
@@ -95,7 +98,7 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
     </p>}
   </>;
   const body = (expandedNow: boolean) => preview
-    ? <DocumentPreview preview={preview} fileUrl={fileUrl} raw={raw} expanded={expandedNow} trusted={trusted} />
+    ? <DocumentPreview preview={preview} fileUrl={fileUrl} raw={raw} expanded={expandedNow} trusted={trusted} links={links} />
     : <>{status}</>;
 
   const chrome = (expandedNow: boolean, toggleRef: React.RefObject<HTMLButtonElement | null>) => (
@@ -105,7 +108,7 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
         <div className={cn('flex items-center gap-2', compact ? 'text-xs' : 'text-sm')}>
           {onToggleRaw && <Button size={buttonSize} variant="outline" onClick={onToggleRaw}>{raw ? rawLabels[1] : rawLabels[0]}</Button>}
           {trustControl}
-          {downloadHref && <a className="text-primary underline" href={downloadHref} download={preview?.name}><Download size={compact ? 12 : 14} className="mr-1 inline" />Download</a>}
+          {downloadHref && <a className="text-primary underline" href={downloadHref} download={preview?.name.split('/').pop() ?? title.split('/').pop()}><Download size={compact ? 12 : 14} className="mr-1 inline" />Download</a>}
           <Button
             ref={toggleRef}
             size={buttonSize}

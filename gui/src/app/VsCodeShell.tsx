@@ -119,7 +119,7 @@ export function VsCodeShell({
                 Background Services ({runningCount}/{services.length})
               </div>
               {services.length === 0 ? (
-                <div className="text-muted-foreground/50 italic px-1 text-[10px]">No services detected in workspace.</div>
+                <div className="text-muted-foreground italic px-1 text-[10px]">No services detected in workspace.</div>
               ) : (
                 <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto pr-1">
                   {services.map((service) => {
@@ -201,7 +201,7 @@ export function VsCodeShell({
               {logs.trim() ? (
                 logs
               ) : (
-                <span className="text-muted-foreground/50 italic font-mono">(no logs recorded yet)</span>
+                <span className="text-muted-foreground italic font-mono">(no logs recorded yet)</span>
               )}
               <div ref={logsEndRef} />
             </div>

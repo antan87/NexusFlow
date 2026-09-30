@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { getConfigDir, getDefaultConfig, ensureConfigDir, loadConfig, saveConfig } from './config.js';
 
 vi.mock('node:fs/promises');
@@ -116,6 +117,27 @@ describe('config core module', () => {
         expect.stringContaining('/custom/saved/dev'),
         'utf-8'
       );
+    });
+
+    it('ignores a config value that tries to become the write path', async () => {
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      // Network-derived config reaches saveConfig via POST /api/config, so a payload must never be
+      // able to redirect where the config file lands. Guards the codeql[js/http-to-file-access]
+      // suppression on the write below.
+      const config = getDefaultConfig();
+      config.storageProvider = '../../../../etc/passwd';
+      config.adapterConfig = { '../../../../etc/passwd': { path: '/tmp/pwned' } };
+      config.devDir = '/etc';
+
+      await saveConfig(config);
+
+      const [target] = vi.mocked(fs.writeFile).mock.calls[0] as [string, string, string];
+      expect(target).not.toContain('..');
+      expect(target).not.toContain('passwd');
+      expect(target).not.toContain('pwned');
+      expect(path.basename(target)).toBe('config.json');
     });
   });
 });

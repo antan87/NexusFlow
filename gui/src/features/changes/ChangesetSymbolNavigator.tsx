@@ -90,17 +90,17 @@ export const getKindBadgeClass = (s: ChangesetSymbol) => {
   const eff = getEffectiveKind(s);
   switch (eff) {
     case 'constructor':
-      return 'border-orange-500/40 bg-orange-500/15 text-orange-400';
+      return 'border-orange-500/40 bg-orange-500/15 text-warning-foreground';
     case 'method':
       return 'border-cyan-500/40 bg-cyan-500/15 text-cyan-400';
     case 'function':
-      return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400';
+      return 'border-emerald-500/40 bg-emerald-500/15 text-success-foreground';
     case 'class':
       return 'border-purple-500/40 bg-purple-500/15 text-purple-400';
     case 'interface':
-      return 'border-sky-500/40 bg-sky-500/15 text-sky-400';
+      return 'border-sky-500/40 bg-sky-500/15 text-info-foreground';
     case 'type':
-      return 'border-amber-500/40 bg-amber-500/15 text-amber-400';
+      return 'border-amber-500/40 bg-amber-500/15 text-warning-foreground';
     case 'enum':
       return 'border-pink-500/40 bg-pink-500/15 text-pink-400';
     case 'property':
@@ -255,14 +255,14 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
         {symbols.length === 0 ? (
           <div className="py-8 px-4 text-center text-muted-foreground">
             <p className="font-mono text-xs font-semibold text-foreground">No code symbols detected in this changeset</p>
-            <p className="text-[11px] mt-1.5 max-w-sm mx-auto text-muted-foreground/80 leading-relaxed">
+            <p className="text-[11px] mt-1.5 max-w-sm mx-auto text-muted-foreground leading-relaxed">
               Symbols (functions, classes, interfaces, types, enums, variables) are automatically extracted from modified code files in supported languages (TypeScript, JavaScript, Python, Go, Rust).
             </p>
           </div>
         ) : filteredSymbols.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
             <p className="font-mono text-xs">No symbols match "{searchQuery || activeCategory}"</p>
-            <p className="text-[10px] mt-1 text-muted-foreground/70">
+            <p className="text-[10px] mt-1 text-muted-foreground">
               Try searching by name or selecting "All"
             </p>
           </div>
@@ -304,8 +304,8 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
                       className={cn(
                         'px-1 py-0.2 rounded font-mono text-[9px] font-bold border shrink-0',
                         s.changeType === 'added'
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                          : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-success-foreground'
+                          : 'border-amber-500/30 bg-amber-500/10 text-warning-foreground'
                       )}
                       title={s.changeType === 'added' ? 'Added in this changeset' : 'Modified in this changeset'}
                     >
@@ -316,7 +316,7 @@ export const ChangesetSymbolNavigator: React.FC<ChangesetSymbolNavigatorProps> =
 
                 {/* Right Side: File, Line, Hunk, and External VS Code Link */}
                 <div className="flex items-center gap-2 shrink-0 font-mono text-[10px] text-muted-foreground">
-                  <span className="truncate max-w-[150px] text-muted-foreground/80" title={s.filePath}>
+                  <span className="truncate max-w-[150px] text-muted-foreground" title={s.filePath}>
                     {s.filePath.split('/').pop()}
                   </span>
                   <span className="text-foreground/70">:{s.lineNumber}</span>

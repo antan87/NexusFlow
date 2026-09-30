@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import DOMPurify from 'dompurify';
-import { ChatMarkdown } from '../../components/ChatMarkdown.js';
+import { ChatMarkdown, type MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 import {
   buildPreviewDocument,
   CARRIED_ATTRIBUTES,
@@ -62,7 +62,7 @@ function collectHeadAssets(html: string, trusted: boolean): HeadAssets {
  * has an intrinsic height has to opt out of its capped height there, otherwise maximizing only
  * rescales a letterboxed frame.
  */
-export function DocumentPreview({ preview, fileUrl, raw, expanded = false, trusted = false }: { preview: DocumentPreviewData; fileUrl: string; raw: boolean; expanded?: boolean; trusted?: boolean }) {
+export function DocumentPreview({ preview, fileUrl, raw, expanded = false, trusted = false, links }: { preview: DocumentPreviewData; fileUrl: string; raw: boolean; expanded?: boolean; trusted?: boolean; links?: MarkdownDocumentLinks }) {
   const htmlDocument = useMemo(() => {
     if (preview.kind !== 'html' || raw) return '';
     const source = preview.content ?? '';
@@ -77,7 +77,7 @@ export function DocumentPreview({ preview, fileUrl, raw, expanded = false, trust
   // Only the trusted path may run script, and it must never be sandboxed into the app's origin.
   const sandbox = trusted ? 'allow-scripts' : '';
 
-  if (preview.kind === 'markdown' && !raw) return <ChatMarkdown content={preview.content ?? ''} />;
+  if (preview.kind === 'markdown' && !raw) return <ChatMarkdown content={preview.content ?? ''} links={links} />;
   if (preview.kind === 'html' && !raw) return <iframe title={`Preview of ${preview.name}`} sandbox={sandbox} referrerPolicy="no-referrer" srcDoc={htmlDocument} className={`${height} w-full rounded border border-border bg-white`} />;
   if (preview.content !== undefined) return <pre className="whitespace-pre-wrap break-words text-sm">{preview.content}</pre>;
   if (preview.kind === 'pdf') return <iframe title={`Preview of ${preview.name}`} src={fileUrl} className={`${height} w-full rounded border border-border`} />;

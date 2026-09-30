@@ -11,24 +11,26 @@ test.use({ workspacesData: [feature], workspacesStatusData: {
   review: { id: 'review', branchName: 'review', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 },
 } });
 
-test('reviews the actual worktree, shares diff mode, and copies refinement feedback for CLI chat', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+test('reviews the actual worktree, switches diff mode, and copies refinement feedback for CLI chat', async ({ page, context, baseURL }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseURL!).origin });
   const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/workspace/review/lifecycle', route => route.fulfill(json({ lifecycle: { steps: [] }, report: null })));
   await page.route('**/api/workspace/review/changes', route => route.fulfill(json({ changes: [{ repoName: 'app', repoPath: feature.repos[0], files: [{ file: 'demo.ts', type: 'modified', additions: 1, deletions: 1 }] }] })));
   await page.route('**/api/workspace/review/changes/symbols', route => route.fulfill(json({ symbols: [] })));
   await page.route('**/api/workspace/review/changes/diff?*', route => route.fulfill(json({ diff, fileContent: 'export const answer = 2;\n', originalContent: 'export const answer = 1;\n', symbols: [] })));
   await page.goto('/#/workspaces/review/changes');
-  await expect(page.getByTitle('Click to copy branch')).toHaveText('review');
-  await expect(page.getByTitle('View uncommitted modified files')).toContainText('1 dirty');
+  await expect(page.getByRole('heading', { level: 1, name: 'review' })).toBeVisible();
+  // The one workspace header reports the changes and links to where they are reviewed.
+  await expect(page.getByRole('group', { name: 'Task status' }).getByRole('link', { name: /Changes/ })).toContainText('1 file');
+  await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /Changes/ })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('button', { name: 'Expand All', exact: true }).click();
   await page.getByText('demo.ts', { exact: true }).first().click();
   const fileMode = page.getByTitle('Toggle between Side-by-Side and Unified Diff view');
   await expect(fileMode).toHaveText('Split');
-  await page.getByTitle('Toggle Diff Mode (Split / Unified)').click();
+  await fileMode.click();
   await expect(fileMode).toHaveText('Unified');
   await fileMode.click();
-  await expect(page.getByTitle('Toggle Diff Mode (Split / Unified)')).toHaveText('Split');
+  await expect(fileMode).toHaveText('Split');
   await expect(page.getByRole('button', { name: 'Accept (a)', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refine', exact: true }).click();
   await page.getByPlaceholder('e.g. Ensure null safety when calculating vacation debt...').fill('Use answer 3 instead.');

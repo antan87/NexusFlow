@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import {
   AlertTriangle,
   RefreshCw,
@@ -8,11 +8,13 @@ import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'r
 import { AppSidebar } from './app/AppSidebar.js';
 import { ToastStack, type Toast } from './app/ToastStack.js';
 import { VsCodeShell } from './app/VsCodeShell.js';
-import { OnboardingScreen } from './features/onboarding/OnboardingScreen.js';
+import { SetupPage } from './features/setup/SetupPage.js';
+import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
 import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
+import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
@@ -56,6 +58,7 @@ import type {
   StorageAdapterMeta,
   TranscriptMessage,
   WorkspaceStatus,
+  CommitRepoResult,
 } from './types.js';
 import {
   BRAND_NAME,
@@ -100,12 +103,14 @@ function AppInner() {
   const [configLoading, setConfigLoading] = useState(true);
   const [configExists, setConfigExists] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [saveError, setSaveError] = useState<{ message: string; fields: ConfigPathsReport | null } | null>(null);
   const [adapters, setAdapters] = useState<StorageAdapterMeta[]>([]);
 
   // Update Check State
   const [updateStatus, setUpdateStatus] = useState<UiUpdateStatus | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const [defaultPaths, setDefaultPaths] = useState<{ devDir: string; workspacesDir: string } | null>(null);
+  const [serverPlatform, setServerPlatform] = useState<string | undefined>(undefined);
   const [updateDeferred, setUpdateDeferred] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
 
@@ -124,6 +129,7 @@ function AppInner() {
   const [updatingApp, setUpdatingApp] = useState(false);
   const [updateStep, setUpdateStep] = useState<'idle' | 'checking' | 'downloading' | 'downloaded' | 'error'>('idle');
   const [workspaceToDelete, setWorkspaceToDelete] = useState<string | null>(null);
+  const [workspaceToArchive, setWorkspaceToArchive] = useState<string | null>(null);
 
 
   // Workflow Strategy Management State
@@ -154,18 +160,30 @@ function AppInner() {
   // Workspaces list + at-a-glance statuses live in the shared react-query
   // cache — the same one the StartWorkPage/ProjectsPage mutations invalidate,
   // so a created or deleted workspace shows up here without manual syncing.
-  // Status polling is expensive server-side (git status across every repo of
-  // every workspace), so it only runs on the routes that display statuses.
+  // Status checks are expensive server-side, so fetch bounded pages only on
+  // routes that display them. The overview shows progress until totals settle.
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
   const statusesQuery = useWorkspacesStatus({
-    enabled: configExists && !configLoading,
-    intervalMs: onStatusRoute ? 15_000 : false,
+    enabled: configExists && !configLoading && onStatusRoute,
+    intervalMs: onStatusRoute && (workspacesQuery.data?.length ?? 0) <= 24 ? 15_000 : false,
   });
+  const { hasNextPage, isFetching: isFetchingStatuses, isError: statusesError, fetchNextPage } = statusesQuery;
+  useEffect(() => {
+    if (onStatusRoute && hasNextPage && !isFetchingStatuses && !statusesError) {
+      void fetchNextPage();
+    }
+  }, [onStatusRoute, hasNextPage, isFetchingStatuses, statusesError, fetchNextPage]);
   const workspaces: Feature[] = workspacesQuery.data ?? [];
+  // Archived workspaces are records: pages that start work only offer active ones.
+  const activeWorkspaces = useMemo(() => (workspacesQuery.data ?? []).filter((w) => !w.archivedAt), [workspacesQuery.data]);
   const workspacesLoading = workspacesQuery.isLoading;
-  const workspaceStatuses: Record<string, WorkspaceStatus> = statusesQuery.data ?? {};
+  const workspaceStatuses: Record<string, WorkspaceStatus> = Object.assign({},
+    ...(statusesQuery.data?.pages.map((page) => page.statuses) ?? []));
+  const lastStatusPage = statusesQuery.data?.pages.at(-1);
+  const checkedWorkspaceCount = lastStatusPage?.nextOffset ?? lastStatusPage?.total ?? 0;
+  const statusesComplete = !statusesQuery.isLoading && !statusesQuery.hasNextPage && !statusesQuery.isError;
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
@@ -196,8 +214,7 @@ function AppInner() {
   const [syncResults, setSyncResults] = useState<any[] | null>(null);
   const [commitMessage, setCommitMessage] = useState<string>('');
   const [showCommitModal, setShowCommitModal] = useState<boolean>(false);
-  const [commitLoading, setCommitLoading] = useState<boolean>(false);
-  const [commitResults, setCommitResults] = useState<any[] | null>(null);
+  const [commitResults, setCommitResults] = useState<CommitRepoResult[] | null>(null);
   const [deleteWsLoading, setDeleteWsLoading] = useState<string | null>(null);
   const [addRepoLoading, setAddRepoLoading] = useState<boolean>(false);
 
@@ -357,11 +374,12 @@ function AppInner() {
       const data = await res.json();
       setConfig(data.config);
       setConfigExists(data.exists);
+      setServerPlatform(typeof data.platform === 'string' ? data.platform : undefined);
 
       if (!(data.exists && data.config.devDir)) {
         setDefaultPaths({
-          devDir: data.config.devDir || '',
-          workspacesDir: data.config.workspacesDir || '',
+          devDir: data.suggested?.devDir || data.config.devDir || '',
+          workspacesDir: data.suggested?.workspacesDir || data.config.workspacesDir || '',
         });
         setConfig({
           version: '1.0.0',
@@ -379,25 +397,20 @@ function AppInner() {
   };
 
   const saveAppConfig = async (newConfig: ContextSpaceConfig) => {
+    setSaveError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig),
-      });
-      if (res.ok) {
-        setSaveStatus('success');
-        setConfig(newConfig);
-        setConfigExists(true);
-        queryClient.invalidateQueries({ queryKey: ['repos'] });
-        fetchWorkspaces();
-      } else {
-        setSaveStatus('error');
-      }
-    } catch {
+      const result = await postConfig(newConfig);
+      setSaveStatus('success');
+      setConfig({ ...newConfig, ...result.config });
+      setConfigExists(true);
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      fetchWorkspaces();
+      setTimeout(() => setSaveStatus((status) => status === 'success' ? null : status), 3000);
+    } catch (error) {
+      // Keep the error until the next save: the user needs it to fix the entry.
       setSaveStatus('error');
+      setSaveError({ message: error instanceof Error ? error.message : 'Could not save settings.', fields: folderErrors(error) });
     }
-    setTimeout(() => setSaveStatus(null), 3000);
   };
 
   // Kept as the single "refresh workspaces" entry point for the handlers and
@@ -660,30 +673,6 @@ function AppInner() {
     }
   };
 
-  const handleCommitAll = async (wsId: string) => {
-    if (!commitMessage.trim()) return;
-    setCommitLoading(true);
-    setCommitResults(null);
-    try {
-      const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commitMessage }),
-      });
-      const data = await res.json();
-      setCommitResults(data.results || []);
-      setCommitMessage('');
-      setShowCommitModal(false);
-      fetchGitChanges(wsId);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setCommitLoading(false);
-    }
-  };
-
-
   // ─── Actions ────────────────────────────────────────────────────────────
 
   const handleOpenDesktopSession = async (
@@ -815,12 +804,8 @@ function AppInner() {
     }
   };
 
-  // Load tool statuses and LLM recommendations when settings view is open
-  useEffect(() => {
-    if (location.pathname.startsWith('/settings')) {
-      fetchToolsStatus();
-    }
-  }, [location.pathname]);
+  // Tool registry requests are explicit (Settings → Check Now), so opening
+  // the data guide does not initiate a toolchain update check.
 
   // Reset workspace-scoped state whenever the active workspace changes to prevent stale data leaks
   useEffect(() => {
@@ -902,6 +887,25 @@ Core Instructions:
     setWorkspaceToDelete(wsName);
   };
 
+  const handleArchiveWorkspace = (wsName: string) => {
+    setWorkspaceToArchive(wsName);
+  };
+
+  const handleArchived = async (wsName: string) => {
+    await fetchWorkspaces();
+    showToast(`Archived ${wsName}. Its record stays readable under Archived workspaces.`, 'success');
+  };
+
+  const handleUnarchiveWorkspace = async (wsName: string) => {
+    try {
+      await apiFetch(`/api/workspace/${encodeURIComponent(wsName)}/unarchive`, { method: 'POST' });
+      await fetchWorkspaces();
+      showToast(`Restored ${wsName}. Prepare a repository for editing to work in it again.`, 'success');
+    } catch (error) {
+      showToast(`Could not restore ${wsName}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
+  };
+
   const confirmDeleteWorkspace = async (wsName: string) => {
     setDeleteWsLoading(wsName);
     try {
@@ -963,12 +967,16 @@ Core Instructions:
 
   if (!configExists && config) {
     return (
-      <OnboardingScreen
-        config={config}
-        setConfig={setConfig}
-        defaultPaths={defaultPaths}
+      <SetupPage
+        initialConfig={config}
+        suggested={defaultPaths}
+        platform={serverPlatform}
         adapters={adapters}
-        saveAppConfig={saveAppConfig}
+        onComplete={(saved) => {
+          setConfig(saved);
+          setConfigExists(true);
+          void fetchWorkspaces();
+        }}
       />
     );
   }
@@ -979,7 +987,7 @@ Core Instructions:
         activeWsId={activeWsId}
         setActiveWsId={setActiveWsId}
         appVersion={appVersion}
-        workspaces={workspaces}
+        workspaces={activeWorkspaces}
         executeTerminal={executeTerminal}
       />
     );
@@ -987,9 +995,13 @@ Core Instructions:
 
   const dashboardPage = config ? (
     <DashboardPage
-      workspaces={workspaces}
+      workspaces={activeWorkspaces}
       workspaceStatuses={workspaceStatuses}
       workspacesLoading={workspacesLoading}
+      checkedWorkspaceCount={checkedWorkspaceCount}
+      statusesComplete={statusesComplete}
+      statusesError={statusesQuery.isError}
+      onRetryStatuses={() => { void statusesQuery.refetch(); }}
       onOpenWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
       onNewWorkspace={() => navigate('/new')}
       showToast={showToast}
@@ -1019,12 +1031,14 @@ Core Instructions:
       onSelectTab={(id, tab) => navigate(`/workspaces/${encodeURIComponent(id)}/${tab}`)}
       handleCopyPrompt={handleCopyPrompt}
       handleDeleteWorkspace={handleDeleteWorkspace}
+      handleArchiveWorkspace={handleArchiveWorkspace}
+      handleUnarchiveWorkspace={handleUnarchiveWorkspace}
       deleteWsLoading={deleteWsLoading}
       repos={repos}
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
-      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitLoading, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll, handleCommitAll }}
+      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
       knowledgeProps={{
         knowledgeContent,
         knowledgeLoading,
@@ -1058,11 +1072,12 @@ Core Instructions:
 
   const skillsPage = <SkillsPage showToast={showToast} />;
   const agentsPage = <AgentsPage showToast={showToast} />;
-  const workroomsPage = <WorkroomsPage workspaces={workspaces} showToast={showToast} />;
+  const workroomsPage = <WorkroomsPage workspaces={activeWorkspaces} showToast={showToast} />;
 
   const settingsPage = config ? (
     <SettingsPage
-      config={config} setConfig={setConfig} saveStatus={saveStatus} editors={editors} adapters={adapters}
+      workspaces={workspaces}
+      config={config} setConfig={setConfig} saveStatus={saveStatus} saveError={saveError} editors={editors} adapters={adapters}
       saveAppConfig={saveAppConfig} isSettingsFormValid={isSettingsFormValid}
       toolsStatus={toolsStatus} toolsLoading={toolsLoading} updatingToolId={updatingToolId}
       fetchToolsStatus={fetchToolsStatus} handleUpdateTool={handleUpdateTool}
@@ -1096,7 +1111,7 @@ Core Instructions:
               <div className="min-w-0">
                 <span className="font-semibold text-foreground">Desktop updates</span>
                 {updateCheckError ? (
-                  <p className="mt-0.5 truncate text-red-300" role="alert">{updateCheckError}</p>
+                  <p className="mt-0.5 truncate text-destructive-foreground" role="alert">{updateCheckError}</p>
                 ) : (
                   <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
                 )}
@@ -1115,15 +1130,15 @@ Core Instructions:
             {updateStatus && updateStatus.updateAvailable && !updateDeferred && (
               <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-600/10 border border-amber-500/30 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-warning-foreground shrink-0">
                     {updatingApp ? (
-                      <RefreshCw size={20} className="animate-spin text-amber-400" />
+                      <RefreshCw size={20} className="animate-spin text-warning-foreground" />
                     ) : (
                       <Sparkles size={20} />
                     )}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-amber-300">
+                    <h4 className="text-sm font-bold text-warning-foreground">
                       {updateStep === 'error' ? `${BRAND_NAME} update needs attention` : updateStep === 'downloaded' ? 'Update ready to install' : updateStep === 'downloading' ? 'Downloading update…' : `A new version of ${BRAND_NAME} is available!`}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -1189,7 +1204,7 @@ Core Instructions:
             {!config && (
               <div className="flex flex-col items-center justify-center py-40 gap-6">
                 <div className="bg-red-500/10 p-6 rounded-full">
-                  <AlertTriangle className="text-red-400" size={48} />
+                  <AlertTriangle className="text-destructive-foreground" size={48} />
                 </div>
                 <div className="text-center max-w-md">
                   <h2 className="text-2xl font-bold text-white mb-2">Backend Unreachable</h2>
@@ -1270,10 +1285,19 @@ Core Instructions:
         open={workspaceToDelete !== null}
         onClose={() => setWorkspaceToDelete(null)}
         onConfirm={confirmDeleteWorkspace}
+        onArchiveInstead={handleArchiveWorkspace}
+        archived={Boolean(workspaces.find((w) => w.branchName === workspaceToDelete)?.archivedAt)}
         loading={deleteWsLoading !== null}
       />
 
-      <FloatingChatModal workspaces={workspaces} />
+      <ArchiveWorkspaceDialog
+        workspaceName={workspaceToArchive}
+        open={workspaceToArchive !== null}
+        onClose={() => setWorkspaceToArchive(null)}
+        onArchived={handleArchived}
+      />
+
+      <FloatingChatModal workspaces={activeWorkspaces} />
       <FloatingChatLauncher />
 
       <ToastStack

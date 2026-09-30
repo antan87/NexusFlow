@@ -2,6 +2,37 @@ import type { TerminalLaunch } from '../terminal/client.js';
 import { useSyncExternalStore } from 'react';
 import { FLOATING_CHAT_STORAGE_KEY, LEGACY_FLOATING_CHAT_STORAGE_KEY } from '../../brand';
 
+export type FloatingChatSize = { width: number; height: number };
+
+/**
+ * Single source of truth for the floating chat window geometry.
+ *
+ * These values used to be duplicated across the persisted-state loader, the
+ * size setter and the modal's own drag/resize handlers, which let the clamps
+ * drift apart. `compactBreakpointPx` and `defaultWidth` are deliberately close
+ * together: the previous 720px breakpoint sat above the 560px default width,
+ * so the inspector split could never render without manual resizing.
+ */
+export const CHAT_GEOMETRY = {
+  minWidth: 380,
+  minHeight: 420,
+  defaultWidth: 760,
+  defaultHeight: 680,
+  compactBreakpointPx: 520,
+  splitBreakpointPx: 900,
+  /** Pane width at which a second docked workspace becomes usable. */
+  splitMinRatio: 25,
+  splitMaxRatio: 75,
+} as const;
+
+export const clampChatSize = (size: FloatingChatSize): FloatingChatSize => ({
+  width: Math.max(CHAT_GEOMETRY.minWidth, Math.min(size.width, window.innerWidth || 1200)),
+  height: Math.max(CHAT_GEOMETRY.minHeight, Math.min(size.height, window.innerHeight || 900)),
+});
+
+export const clampSplitRatio = (ratio: number): number =>
+  Math.max(CHAT_GEOMETRY.splitMinRatio, Math.min(CHAT_GEOMETRY.splitMaxRatio, ratio));
+
 export interface FloatingChatState {
   isOpen: boolean;
   isMinimized: boolean;
@@ -11,7 +42,7 @@ export interface FloatingChatState {
   splitTab: string | null;
   splitRatio: number;
   position: { x: number; y: number } | null;
-  size: { width: number; height: number };
+  size: FloatingChatSize;
   modes: Record<string, 'cli' | 'chat'>;
   harnesses: Record<string, string>;
   terminalLaunches: Record<string, TerminalLaunch>;
@@ -27,7 +58,7 @@ const DEFAULT_STATE: FloatingChatState = {
   splitTab: null,
   splitRatio: 50,
   position: null,
-  size: { width: 560, height: 680 },
+  size: { width: CHAT_GEOMETRY.defaultWidth, height: CHAT_GEOMETRY.defaultHeight },
   drafts: {},
   modes: {},
   harnesses: {},
@@ -51,15 +82,12 @@ function loadState(): FloatingChatState {
       activeTab: typeof parsed.activeTab === 'string' ? parsed.activeTab : null,
       splitTab: typeof parsed.splitTab === 'string' && parsed.splitTab !== parsed.activeTab ? parsed.splitTab : null,
       splitRatio: typeof parsed.splitRatio === 'number' && Number.isFinite(parsed.splitRatio)
-        ? Math.max(25, Math.min(75, parsed.splitRatio)) : 50,
+        ? clampSplitRatio(parsed.splitRatio) : 50,
       position: parsed.position && typeof parsed.position.x === 'number' && typeof parsed.position.y === 'number'
         ? { x: parsed.position.x, y: parsed.position.y }
         : null,
       size: parsed.size && typeof parsed.size.width === 'number' && typeof parsed.size.height === 'number'
-        ? {
-            width: Math.max(380, Math.min(parsed.size.width, window.innerWidth || 1200)),
-            height: Math.max(420, Math.min(parsed.size.height, window.innerHeight || 900)),
-          }
+        ? clampChatSize({ width: parsed.size.width, height: parsed.size.height })
         : DEFAULT_STATE.size,
     };
   } catch {
@@ -94,6 +122,11 @@ export const floatingChatStore = {
   },
 
   openTerminal: (branchName: string, target = 'shell', sessionId?: string, cwd?: string) => {
+    const pending = currentState.terminalLaunches[branchName];
+    if (sessionId && pending?.target === target && pending.sessionId === sessionId) {
+      floatingChatStore.openCli(branchName);
+      return;
+    }
     floatingChatStore.open(branchName);
     floatingChatStore.setHarness(branchName, target);
     updateState(prev => ({ ...prev, modes: { ...prev.modes, [branchName]: 'cli' }, terminalLaunches: { ...prev.terminalLaunches, [branchName]: { id: crypto.randomUUID(), target, sessionId, cwd } } }));
@@ -235,7 +268,7 @@ export const floatingChatStore = {
     });
   },
 
-  setSplitRatio: (ratio: number) => updateState(prev => ({ ...prev, splitRatio: Math.max(25, Math.min(75, ratio)) })),
+  setSplitRatio: (ratio: number) => updateState(prev => ({ ...prev, splitRatio: clampSplitRatio(ratio) })),
 
   setPosition: (position: { x: number; y: number } | null) => {
     updateState((prev) => ({
@@ -244,13 +277,10 @@ export const floatingChatStore = {
     }));
   },
 
-  setSize: (size: { width: number; height: number }) => {
+  setSize: (size: FloatingChatSize) => {
     updateState((prev) => ({
       ...prev,
-      size: {
-        width: Math.max(380, Math.min(size.width, window.innerWidth || 1200)),
-        height: Math.max(420, Math.min(size.height, window.innerHeight || 900)),
-      },
+      size: clampChatSize(size),
     }));
   },
 };

@@ -109,7 +109,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
 
       {!servicesQuery.isLoading && !servicesQuery.isError && services.length === 0 && orchTools.length === 0 && (
         <div className="rounded-md border border-border/80 bg-card p-6 text-center surface-card">
-          <Terminal size={24} className="mx-auto mb-2 text-muted-foreground/60" />
+          <Terminal size={24} className="mx-auto mb-2 text-muted-foreground" />
           <h4 className="text-xs font-bold text-foreground">No Services Detected</h4>
           <p className="mt-1 text-[11px] text-muted-foreground">
             ContextSpace scans for runnable background services in <code className="font-mono text-[10px]">package.json</code> scripts (such as <code className="font-mono text-[10px]">start</code>, <code className="font-mono text-[10px]">dev</code>), <code className="font-mono text-[10px]">docker-compose.yml</code>, or <code className="font-mono text-[10px]">Procfile</code>.

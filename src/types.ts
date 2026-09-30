@@ -19,6 +19,8 @@ export type {
 
 /** Supported AI assistant identifiers. */
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+/** CLI histories may come from tools that do not generate workspace resources. */
+export type SessionAssistant = AIAssistant | 'pi';
 
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */
 export interface NexusFlowConfig {
@@ -144,7 +146,7 @@ export interface RepoSelection extends RepoInfo {
 /** Metadata about a past AI session. */
 export interface AISession {
   id: string;
-  assistant: AIAssistant;
+  assistant: SessionAssistant;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -260,6 +262,9 @@ export interface Feature {
   /** Git branch name created for this feature. */
   branchName: string;
 
+  /** Human-readable workspace name, independent of its directory and Git branch. */
+  name?: string;
+
   /** Short human-readable description of the feature. */
   description: string;
 
@@ -280,6 +285,12 @@ export interface Feature {
    * dedicated worktrees on-demand (keyed by repo directory name).
    */
   isolatedRepos?: Record<string, IsolatedRepoInfo>;
+
+  /**
+   * Branches this workspace created (repo name → branch), as opposed to
+   * branches that already existed. Archive only ever deletes these.
+   */
+  createdBranches?: Record<string, string>;
 
   /** AI assistants enabled for this feature workspace. */
   assistants: AIAssistant[];
@@ -310,6 +321,75 @@ export interface Feature {
     /** Knowledge heading id, e.g. 2026-08-25-bff-error-encoding. */
     entry: string;
   }>;
+
+  /**
+   * Set while the workspace is archived: its worktrees were returned, its
+   * record is kept, and operations that change repositories or start
+   * processes refuse it. Cleared by unarchive.
+   */
+  archivedAt?: string;
+
+  /** What the latest archive removed and kept. Retained after unarchive as history. */
+  archive?: ArchiveRecord;
+
+  /** Earlier archive records, oldest first: archiving again never loses a delivery record. */
+  archiveHistory?: ArchiveRecord[];
+}
+
+/** How one repository stood when its workspace was archived. */
+export interface ArchivedRepoRecord {
+  name: string;
+  /** How the repository was attached before archive. */
+  access: 'reference' | 'isolated' | 'worktree';
+  /** The user's own checkout; archived workspaces read it as a reference. */
+  sourcePath: string;
+  /** The worktree archive removed, if any. */
+  worktreePath?: string;
+  /** Branch checked out in that worktree; `null` for a detached HEAD. */
+  branch?: string | null;
+  /** Final commit of the worktree, so the work can always be found again. */
+  headSha?: string | null;
+  /**
+   * `merged`: proven part of the default branch. `parked`: pushed but not
+   * merged, archived on explicit request. `reference`: never edited here.
+   */
+  branchState: 'merged' | 'parked' | 'reference';
+  /** Evidence that proved a merge. */
+  mergeEvidence?: 'ancestor' | 'pull-request';
+  prUrl?: string;
+  /** Archive deleted the local branch (its tip is {@link headSha}). */
+  branchDeleted?: boolean;
+  /** Archive deleted the branch on `origin`. */
+  remoteBranchDeleted?: boolean;
+}
+
+/** Manifest record of an archive. */
+export interface ArchiveRecord {
+  archivedAt: string;
+  /** Mode before archive; archived workspaces are always in-place references. */
+  previousMode: WorkspaceMode;
+  /** True when pushed-but-unmerged work was archived on explicit request. */
+  parked: boolean;
+  repos: ArchivedRepoRecord[];
+  /** Set when the workspace was restored as active. */
+  unarchivedAt?: string;
+}
+
+/** Per-repo journal entry of an archive run. */
+export interface ArchiveRunRepo extends ArchivedRepoRecord {
+  /** Whether this run has removed (or found removed) the worktree. */
+  removed: boolean;
+  error?: string;
+}
+
+/** Durable record of an archive run, so an interrupted run resumes. */
+export interface ArchiveRun {
+  startedAt: string;
+  completedAt?: string;
+  /** `running` means the process stopped mid-run; re-running resumes safely. */
+  status: 'running' | 'completed' | 'partial';
+  parked: boolean;
+  repos: ArchiveRunRepo[];
 }
 
 /** Runtime context for an active workspace — now includes analysis data. */
@@ -589,7 +669,7 @@ export interface WorkspaceStatus {
   /** True when any repo pulled in new commits and awaits re-validation. */
   pendingValidation: boolean;
   /** AI assistants that have active/recorded sessions in this workspace. */
-  activeAssistants?: AIAssistant[];
+  activeAssistants?: SessionAssistant[];
 }
 
 /** Persisted sync/validation state for a single repo in a workspace. */
@@ -611,6 +691,13 @@ export interface RepoVerificationReport {
   headSha: string;
   clean: boolean;
   dirtyFiles?: string[];
+  /**
+   * Hash of the tested content (HEAD diff plus untracked files). A later
+   * snapshot with a different fingerprint means the evidence is stale.
+   */
+  fingerprint?: string;
+  /** Git tree hash of the tested working tree; equal after committing it unchanged. */
+  contentTree?: string;
   durationMs: number;
   stdout?: string;
   stderr?: string;
@@ -668,6 +755,12 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
   dependsOn?: string[];
   verificationCommand?: string;
+  /**
+   * Time limit for this milestone's gate, in seconds. Gates default to
+   * 30 minutes (DEFAULT_GATE_TIMEOUT_SECONDS); a gate that runs a full suite,
+   * a build and browser tests may need more.
+   */
+  verificationTimeoutSeconds?: number;
   requiresVerification?: boolean;
   lastVerificationSha?: string;
   lastVerificationStatus?: VerificationStatus;
@@ -710,8 +803,46 @@ export interface WorkspaceState {
   lastVerification?: WorkspaceVerificationReport;
   /** Active structured lifecycle state machine. */
   lifecycle?: WorkspaceLifecycle;
+  /** Recent explicit verification overrides, newest last (bounded). */
+  verificationOverrides?: VerificationOverrideRecord[];
+  /** Durable record of the latest finish run, so it can be resumed after a restart. */
+  lastFinish?: FinishRecord;
+  /** Durable record of the latest archive run, so it can be resumed after a restart. */
+  lastArchive?: ArchiveRun;
   /** Timestamp when the state was last updated. */
   updatedAt: string;
+}
+
+/** An explicit, reasoned decision to finish without fresh passing verification. */
+export interface VerificationOverrideRecord {
+  at: string;
+  operation: 'finish';
+  reason: string;
+  /** What the policy would have blocked on, as shown to the caller. */
+  blockers: string[];
+}
+
+/** Per-repo outcome of a finish run, as persisted. */
+export interface FinishRepoRecord {
+  name: string;
+  committed: boolean;
+  commitHash?: string;
+  pushed: boolean;
+  prUrl?: string;
+  compareUrl?: string;
+  skipped?: string;
+  error?: string;
+}
+
+/** Durable record of a finish run. Git effects are not atomic across repos. */
+export interface FinishRecord {
+  startedAt: string;
+  completedAt?: string;
+  /** `running` means the process stopped mid-run; re-running resumes safely. */
+  status: 'running' | 'completed' | 'partial' | 'blocked';
+  repos: FinishRepoRecord[];
+  override?: VerificationOverrideRecord;
+  safeToCleanup: boolean;
 }
 
 // ─── Phase 3: Dependency Graph Types ──────────────────────────────────────

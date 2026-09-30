@@ -17,23 +17,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import fse from 'fs-extra';
 
-import {
-  getAllSkills,
-  saveSkill,
-  deleteSkill,
-  parseSkillMarkdown,
-  serializeSkillMarkdown,
-  getSkillCategories,
-  DEFAULT_SKILLS,
-  DEFAULT_CATEGORIES,
-} from '../../src/utils/skills-catalog.js';
+import { getAllSkills, saveSkill, deleteSkill, parseSkillMarkdown } from '../../src/utils/skills-catalog.js';
 
 import {
   reconcileWorkspaceResources,
   isWorkspaceLocalSkill,
 } from '../../src/resources/materializer.js';
-
-import { resourceIdSchema, skillFrontmatterSchema } from '../../src/resources/contracts.js';
 
 describe('M1 Adversarial Challenge & Stress Tests', () => {
   let tempHome: string;

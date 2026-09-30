@@ -28,15 +28,18 @@ describe('feature manifest persistence (A1.6)', () => {
     vi.clearAllMocks();
   });
 
-  it('writes the manifest directly to the workspace root, not via an adapter', async () => {
+  it('writes the manifest directly to the workspace root, not via an adapter, atomically', async () => {
     vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
     vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+    vi.mocked(fs.rename).mockResolvedValue(undefined);
 
     await saveFeatureConfig(workspacePath, feature);
 
     expect(fs.writeFile).toHaveBeenCalledTimes(1);
     const [writtenPath, contents] = vi.mocked(fs.writeFile).mock.calls[0]!;
-    expect(writtenPath).toBe(manifestPath);
+    // Written beside the manifest, then renamed over it: never a torn file.
+    expect(String(writtenPath).startsWith(`${manifestPath}.tmp-`)).toBe(true);
+    expect(fs.rename).toHaveBeenCalledWith(writtenPath, manifestPath);
     // Plain JSON — no YAML frontmatter that would break JSON.parse.
     expect(String(contents).trimStart().startsWith('{')).toBe(true);
     expect(JSON.parse(String(contents)).id).toBe('feat');

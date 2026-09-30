@@ -29,6 +29,8 @@ import { commitWorkspace } from '../core/commit.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { runDoctor } from '../core/doctor.js';
 import { finishWorkspace } from '../core/finish.js';
+import { planRepoIsolation } from '../core/isolate.js';
+import { archiveWorkspace, planArchive, unarchiveWorkspace } from '../core/archive.js';
 import { getWorkContext, readWorkDocument } from '../core/work-guidance.js';
 import { verifyWorkspace } from '../core/verify.js';
 import { getAllSkills, saveSkill } from '../utils/skills-catalog.js';
@@ -53,6 +55,8 @@ import {
 export interface ToolContext {
   config: NexusFlowConfig;
   workspacePath: string;
+  /** The workspace this server was started for (`mcp run <path>`), if any. */
+  boundWorkspacePath?: string;
 }
 
 /** MCP tool call result. */
@@ -97,9 +101,43 @@ function errorResult(message: string): ToolResult {
 const workspaceIdProp = {
   workspaceId: {
     type: 'string',
-    description: 'Optional ID/branchName of the workspace. If omitted, uses the currently active workspace.',
+    description: 'Optional ID/branchName of the workspace. Defaults to the workspace this server is bound to (or the current directory). Interactive and full sessions may name another workspace; other roles get an error for a different workspace.',
   },
 } as const;
+
+/**
+ * Validates a `{ repo: [files] }` selection from tool input.
+ * @throws When the shape is wrong.
+ */
+function parseFileSelection(value: unknown): Record<string, string[]> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('`files` must map repo names to file path arrays.');
+  const selection: Record<string, string[]> = {};
+  for (const [repo, files] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(files) || files.some((file) => typeof file !== 'string' || !file.trim())) {
+      throw new Error(`\`files.${repo}\` must be an array of file paths.`);
+    }
+    selection[repo] = files as string[];
+  }
+  return selection;
+}
+
+/**
+ * Why archive_workspace must not act on this target, or null. An agent works
+ * inside the worktrees of the workspace it serves, and archive removes them.
+ */
+async function archiveTargetRefusal(ctx: ToolContext): Promise<string | null> {
+  const real = (target: string) => fs.realpath(target).catch(() => path.resolve(target));
+  const target = await real(ctx.workspacePath);
+  if (ctx.boundWorkspacePath && target === await real(ctx.boundWorkspacePath)) {
+    return `This server serves "${path.basename(target)}", so it will not archive it: its worktrees are where the agent works. Run \`${CLI_NAME} archive ${path.basename(target)}\` from outside the workspace, or use the app.`;
+  }
+  const rel = path.relative(target, await real(process.cwd()));
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+    return `This server runs inside "${path.basename(target)}", so it will not archive it. Run \`${CLI_NAME} archive ${path.basename(target)}\` from outside the workspace, or use the app.`;
+  }
+  return null;
+}
 
 async function requireWorkspace(ctx: ToolContext): Promise<void> {
   const feature = await loadFeatureConfig(ctx.workspacePath);
@@ -230,7 +268,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'commit_workspace',
     description:
-      'Stage, commit, and (unless noPush) push all repos that have changes, using one commit message. Returns a per-repo report. This writes to git history and pushes to the remote.',
+      'Stage, commit, and (unless noPush) push the editable repos that have changes, using one commit message. Read-only reference repos are never committed (they appear in `skipped`); prepare one with isolate_repo first. Pass `files` to commit only reviewed files per repo — other changes, including already-staged ones, stay as they are. Returns a per-repo report with commit and push outcomes separately. This writes to git history and pushes to the remote.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -238,6 +276,11 @@ export const tools: NexusFlowTool[] = [
         message: { type: 'string', description: 'Commit message applied to every changed repo.' },
         noPush: { type: 'boolean', description: 'Commit but do not push. Default false.' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Optional list of repo names to restrict the commit to.' },
+        files: {
+          type: 'object',
+          additionalProperties: { type: 'array', items: { type: 'string' } },
+          description: 'Optional reviewed selection: repo name → changed file paths to commit. Only these repos and files are committed.',
+        },
         ...workspaceIdProp,
       },
       required: ['message'],
@@ -248,7 +291,8 @@ export const tools: NexusFlowTool[] = [
         const message = String(args.message ?? '').trim();
         if (!message) return errorResult('A commit message is required.');
         const repos = Array.isArray(args.repos) ? (args.repos as string[]) : undefined;
-        return json(await commitWorkspace(ctx.workspacePath, message, { noPush: Boolean(args.noPush), repos }));
+        const files = parseFileSelection(args.files);
+        return json(await commitWorkspace(ctx.workspacePath, message, { noPush: Boolean(args.noPush), repos, files }));
       } catch (error: any) {
         return errorResult(`Error committing workspace: ${error.message}`);
       }
@@ -431,31 +475,43 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'finish_workspace',
     description:
-      `Finish the feature: commit any remaining changes (with the given message), push every repo, and return per-repo PR/compare links. Does NOT delete anything — to remove the workspace, the user runs \`${CLI_NAME} finish --cleanup\` from outside it.`,
+      `Finish the feature: check verification evidence, commit any remaining changes (with the given message), push every editable repo, and return per-repo PR/compare links. Refuses (blocked: true, nothing changed) when verification is missing, failed, timed out or stale for the current content, unless overrideReason explains why finishing anyway is acceptable; the override is recorded. Read-only reference repos are never touched. Re-running after a partial failure resumes without repeating commits. Use dryRun to preview remote effects. Does NOT delete anything — to remove the workspace, the user runs \`${CLI_NAME} finish --cleanup\` from outside it.`,
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         message: { type: 'string', description: 'Commit message for any remaining changes.' },
         skipPush: { type: 'boolean', description: 'Commit but do not push. Default false.' },
+        overrideReason: {
+          type: 'string',
+          description: 'Finish although verification is missing, failed or stale. Only with the user\'s explicit agreement; the reason is recorded and returned.',
+        },
+        dryRun: { type: 'boolean', description: 'Preview commits, pushes and PR targets without changing anything.' },
         ...workspaceIdProp,
       },
     },
     handler: async (args, ctx) => {
       try {
         await requireWorkspace(ctx);
+        const overrideReason = typeof args.overrideReason === 'string' ? args.overrideReason : undefined;
         const report = await finishWorkspace(ctx.workspacePath, {
           message: args.message ? String(args.message) : undefined,
           skipPush: Boolean(args.skipPush),
-          createPrs: true,
+          createPrs: !args.dryRun,
+          override: overrideReason !== undefined ? { reason: overrideReason } : undefined,
+          dryRun: Boolean(args.dryRun),
         });
         // MCP never deletes worktrees (an agent's CWD is usually inside the
         // workspace). Point the user at the CLI for cleanup instead.
         return json({
           ...report,
-          note: report.safeToCleanup
-            ? `Workspace is fully pushed. To remove it, run \`${CLI_NAME} finish --cleanup\` from outside the workspace.`
-            : 'Some repos are still dirty or unpushed — see the per-repo report.',
+          note: report.blocked
+            ? `Finish refused, nothing changed: ${report.policy.blockers.join(' ')} Run verify_workspace, or ask the user whether to finish anyway with overrideReason.`
+            : report.dryRun
+              ? 'Dry run: nothing was changed.'
+              : report.safeToCleanup
+                ? `Workspace is fully pushed. To remove it, run \`${CLI_NAME} finish --cleanup\` from outside the workspace.`
+                : 'Some repos are still dirty or unpushed — see the per-repo report. Re-run to resume.',
         });
       } catch (error: any) {
         return errorResult(`Error finishing workspace: ${error.message}`);
@@ -504,7 +560,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'isolate_repo',
     description:
-      'Dynamically isolate a repository in an in-place workspace into a dedicated worktree before writing code. This creates a dedicated feature branch and worktree directory so the repository default/main branch remains clean and untouched.',
+      'Prepare a read-only reference repository for editing: creates a dedicated worktree and feature branch inside the workspace. Required before changing files in any reference repo. The user\'s own checkout (its branch, files and base branch) is not changed. Fails without changing anything on a path or branch collision. Pass dryRun to see the path, branch, base and conflicts first.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -524,6 +580,7 @@ export const tools: NexusFlowTool[] = [
           minLength: 1,
           description: 'Optional base branch to branch off. Defaults to repository default branch.',
         },
+        dryRun: { type: 'boolean', description: 'Return the plan (path, branch, base, conflicts) without creating anything.' },
         ...workspaceIdProp,
       },
       required: ['repo'],
@@ -533,6 +590,12 @@ export const tools: NexusFlowTool[] = [
         await requireWorkspace(ctx);
         const repoName = String(args.repo || '').trim();
         if (!repoName) return errorResult('Repository name is required.');
+        if (args.dryRun) {
+          return json(await planRepoIsolation(ctx.workspacePath, repoName, {
+            branchName: args.branchName ? String(args.branchName) : undefined,
+            baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
+          }));
+        }
         const result = await isolateWorkspaceRepo(ctx.workspacePath, repoName, {
           branchName: args.branchName ? String(args.branchName) : undefined,
           baseBranch: args.baseBranch ? String(args.baseBranch) : undefined,
@@ -549,12 +612,18 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'list_workspaces',
     description:
-      `List all active ${BRAND_NAME} workspaces with their branch names, paths, repositories, and mode. Read-only.`,
+      `List ${BRAND_NAME} workspaces with their branch names, paths, repositories, and mode. Archived workspaces are records, not places to work: they are left out unless includeArchived is true, and then carry archivedAt. Read-only.`,
     annotations: { readOnlyHint: true },
-    inputSchema: { type: 'object', properties: {} },
-    handler: async (_args, ctx) => {
+    inputSchema: {
+      type: 'object',
+      properties: {
+        includeArchived: { type: 'boolean', description: 'Also list archived workspaces. Default false.' },
+      },
+    },
+    handler: async (args, ctx) => {
       try {
-        const workspaces = await listWorkspaces(ctx.config.workspacesDir);
+        const workspaces = (await listWorkspaces(ctx.config.workspacesDir))
+          .filter((w) => args.includeArchived === true || !w.archivedAt);
         return json(
           workspaces.map((w) => ({
             id: w.id,
@@ -564,10 +633,102 @@ export const tools: NexusFlowTool[] = [
             reposCount: w.repos.length,
             workspacePath: w.workspacePath,
             createdAt: w.createdAt,
+            ...(w.archivedAt ? { archivedAt: w.archivedAt } : {}),
           })),
         );
       } catch (error: any) {
         return errorResult(`Error listing workspaces: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'preview_archive',
+    description:
+      `Preview archiving the workspace: which worktrees would be removed, which repos block it and why, and what stays (milestones, notes, knowledge, documents). Changes nothing and does not fetch; merges are judged against the last fetched state. To archive, use archive_workspace for another workspace; the workspace this server serves is archived with \`${CLI_NAME} archive\` or the app, because the agent works inside its worktrees.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        park: { type: 'boolean', description: 'Preview archiving pushed-but-unmerged work too (its branch is kept).' },
+        keepBranches: { type: 'boolean', description: 'Preview keeping every branch.' },
+        ...workspaceIdProp,
+      },
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const report = await planArchive(ctx.workspacePath, { park: args.park === true, keepBranches: args.keepBranches === true, dryRun: true, fetch: false });
+        return json({
+          ...report,
+          note: report.alreadyArchived
+            ? 'Already archived.'
+            : report.ready
+              ? `Ready. Archive it with archive_workspace from another workspace's session, or ask the user to run \`${CLI_NAME} archive ${report.workspaceId}\` from outside it or use Archive in the app.`
+              : 'Blocked; nothing would be removed. Resolve the blockers first.',
+        });
+      } catch (error: any) {
+        return errorResult(`Error previewing archive: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'archive_workspace',
+    description:
+      `Archive ANOTHER workspace: remove its worktrees once their work is merged (or pushed and parked), delete the merged branches it created, and keep its record (milestones, notes, knowledge, documents). Refuses the workspace this server serves and any workspace this process runs inside, because an agent usually works inside those worktrees; archive those with \`${CLI_NAME} archive\` or the app. Nothing is removed while any repository would lose work. Remote branches are never deleted here. Use dryRun to preview. Requires an interactive or full session to name another workspace.`,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspaceId: { type: 'string', description: 'ID/branchName of the workspace to archive. Required; never the one this server serves.' },
+        park: { type: 'boolean', description: 'Also archive pushed-but-unmerged work; its branch is kept. Only with the user\'s agreement.' },
+        keepBranches: { type: 'boolean', description: 'Keep every branch, even merged ones the workspace created.' },
+        dryRun: { type: 'boolean', description: 'Report what would be removed and kept without changing anything.' },
+      },
+      required: ['workspaceId'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        if (typeof args.workspaceId !== 'string' || !args.workspaceId) {
+          return errorResult('Name the workspace to archive with workspaceId.');
+        }
+        await requireWorkspace(ctx);
+        const refusal = await archiveTargetRefusal(ctx);
+        if (refusal) return errorResult(refusal);
+        const report = await archiveWorkspace(ctx.workspacePath, {
+          park: args.park === true,
+          keepBranches: args.keepBranches === true,
+          dryRun: args.dryRun === true,
+        });
+        return json({
+          ...report,
+          note: report.alreadyArchived
+            ? 'Already archived; nothing changed.'
+            : !report.ready
+              ? 'Blocked; nothing was removed. Resolve the blockers first.'
+              : report.dryRun
+                ? 'Dry run: nothing was changed.'
+                : report.errors.length > 0
+                  ? 'Stopped part-way; nothing is lost. Run archive_workspace again to resume.'
+                  : `Archived. The record stays readable; unarchive_workspace restores it.`,
+        });
+      } catch (error: any) {
+        return errorResult(`Error archiving workspace: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'unarchive_workspace',
+    description:
+      'Restore an archived workspace as active. Nothing is removed or checked out: its repositories stay read-only references until prepared for editing with isolate_repo.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: { type: 'object', properties: { ...workspaceIdProp } },
+    handler: async (_args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const report = await unarchiveWorkspace(ctx.workspacePath);
+        return json({ ...report, note: report.restored ? 'Restored. Prepare a repository for editing with isolate_repo to work in it again.' : 'The workspace was not archived; nothing changed.' });
+      } catch (error: any) {
+        return errorResult(`Error restoring workspace: ${error.message}`);
       }
     },
   },
@@ -1171,6 +1332,7 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'get_service_logs',
     'list_workspaces',
     'list_repos',
+    'preview_archive',
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',
@@ -1188,6 +1350,7 @@ export const ROLE_TOOL_PERMISSIONS: Record<AgentRole, string[]> = {
     'get_service_logs',
     'list_workspaces',
     'list_repos',
+    'preview_archive',
     'read_workroom',
     'search_knowledge',
     'read_workroom_stream',

@@ -65,6 +65,7 @@ export interface WorkspaceLaunchTarget {
 }
 
 export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+export type SessionAssistant = AIAssistant | 'pi';
 
 export interface QuotaWindow {
   unit: 'tokens' | 'requests' | 'percent';
@@ -109,7 +110,7 @@ export type NormalizedUsage = {
 /** Metadata about a local AI session (mirrors src/types.ts). */
 export interface AISession {
   id: string;
-  assistant: AIAssistant;
+  assistant: SessionAssistant;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -205,6 +206,7 @@ export interface Feature {
   /** Id of the project this feature was created from, if any. */
   projectId?: string;
   branchName: string;
+  name?: string;
   description: string;
   repos: string[];
   assistants: string[];
@@ -217,6 +219,28 @@ export interface Feature {
   isolatedRepos?: Record<string, { worktreePath: string; branchName: string; baseBranch?: string; isolatedAt: string }>;
   originalRepos?: string[];
   repoBranches?: Record<string, string>;
+  /** Set while archived: worktrees returned, record kept, read-only (mirrors src/types.ts). */
+  archivedAt?: string;
+  archiveHistory?: NonNullable<Feature['archive']>[];
+  archive?: {
+    archivedAt: string;
+    previousMode: WorkspaceMode;
+    parked: boolean;
+    unarchivedAt?: string;
+    repos: Array<{
+      name: string;
+      access: 'reference' | 'isolated' | 'worktree';
+      sourcePath: string;
+      worktreePath?: string;
+      branch?: string | null;
+      headSha?: string | null;
+      branchState: 'merged' | 'parked' | 'reference';
+      mergeEvidence?: 'ancestor' | 'pull-request';
+      prUrl?: string;
+      branchDeleted?: boolean;
+      remoteBranchDeleted?: boolean;
+    }>;
+  };
 }
 
 export interface OrganizationConventions {
@@ -290,7 +314,7 @@ export interface WorkspaceStatus {
   /** True when any repo pulled in new commits and awaits re-validation. */
   pendingValidation: boolean;
   /** AI assistants that have active/recorded sessions in this workspace. */
-  activeAssistants?: AIAssistant[];
+  activeAssistants?: SessionAssistant[];
 }
 
 export interface ServiceConfig {
@@ -558,6 +582,8 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
   dependsOn?: string[];
   verificationCommand?: string;
+  /** Gate time limit in seconds; gates default to 30 minutes. */
+  verificationTimeoutSeconds?: number;
   lastVerificationSha?: string;
   lastVerificationStatus?: string;
   completedAt?: string;
@@ -630,4 +656,121 @@ export interface WorkGuidance {
     milestoneId?: string;
   };
   documents: WorkDocument[];
+}
+
+// ─── Repository safety & delivery ──────────────────────────────────────────
+
+/** How a repository is attached: a read-only reference or an editable worktree. */
+export type RepoAccess = 'reference' | 'isolated' | 'worktree';
+
+/** Live state of one workspace repository (GET /api/workspace/:id/repositories). */
+export interface WorkspaceRepository {
+  name: string;
+  access: RepoAccess;
+  editable: boolean;
+  /** Where the workspace reads the repo and, when editable, edits it. */
+  path: string;
+  /** The user's own checkout. */
+  sourcePath: string;
+  /** Current branch, or null when detached. */
+  branch: string | null;
+  /** Branch edits land on; null for references. */
+  expectedBranch: string | null;
+  onExpectedBranch: boolean;
+  baseBranch: string;
+  headSha: string | null;
+  dirty: boolean;
+  changedFiles: Array<{ code: string; path: string }>;
+  ahead: number | null;
+  behind: number | null;
+  remoteUrl: string | null;
+}
+
+export type EvidenceState =
+  | 'passed' | 'passed-dirty' | 'no-tests' | 'missing' | 'failed' | 'timed-out' | 'stale' | 'unreadable';
+
+export interface RepoEvidence {
+  name: string;
+  state: EvidenceState;
+  ready: boolean;
+  detail: string;
+  verifiedAt?: string;
+  command?: string;
+}
+
+/** The shared finish policy decision (GET /api/workspace/:id/progression). */
+export interface ProgressionDecision {
+  ready: boolean;
+  repos: RepoEvidence[];
+  blockers: string[];
+}
+
+export interface CommitRepoResult {
+  repoName: string;
+  success: boolean;
+  committed: boolean;
+  pushed: boolean;
+  pushError?: string;
+  branch: string;
+  commitHash: string;
+  filesChanged: number;
+  message: string;
+}
+
+export interface CommitResponse {
+  results: CommitRepoResult[];
+  skipped: Array<{ name: string; reason: string }>;
+  conventionWarning?: string;
+}
+
+export interface IsolationPlan {
+  repoName: string;
+  sourcePath: string;
+  worktreePath: string;
+  branchName: string;
+  baseBranch: string;
+  alreadyIsolated: boolean;
+  conflicts: string[];
+}
+
+export interface FinishRepoReport {
+  name: string;
+  committed: boolean;
+  commitHash?: string;
+  pushed: boolean;
+  branch: string;
+  remoteUrl: string | null;
+  prUrl?: string;
+  compareUrl?: string;
+  skipped?: string;
+  error?: string;
+  wouldCommit?: boolean;
+  wouldPush?: boolean;
+}
+
+export interface VerificationOverrideRecord {
+  at: string;
+  operation: 'finish';
+  reason: string;
+  blockers: string[];
+}
+
+export interface FinishReport {
+  policy: ProgressionDecision;
+  blocked: boolean;
+  dryRun: boolean;
+  override?: VerificationOverrideRecord;
+  resumedFrom?: 'running' | 'partial';
+  repos: FinishRepoReport[];
+  safeToCleanup: boolean;
+}
+
+/** Durable record of the latest finish run (GET /api/workspace/:id/finish/last). */
+export interface FinishRecord {
+  startedAt: string;
+  completedAt?: string;
+  status: 'running' | 'completed' | 'partial' | 'blocked';
+  repos: Array<Pick<FinishRepoReport, 'name' | 'committed' | 'commitHash' | 'pushed' | 'prUrl' | 'compareUrl' | 'skipped' | 'error'>>;
+  override?: VerificationOverrideRecord;
+  safeToCleanup: boolean;
 }

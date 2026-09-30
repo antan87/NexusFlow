@@ -17,8 +17,10 @@ import { detectDefaultBranch } from '../utils/git.js';
 import { fastForwardRepos } from '../utils/repo-freshness.js';
 import { analyzeAllRepos } from '../analyzers/index.js';
 import { generateContextFiles } from '../generators/index.js';
-import { deleteWorkspaceFiles } from './storage.js';
-import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, BRAND_CONFIG } from './constants.js';
+import { baseFileExists, deleteWorkspaceFiles } from './storage.js';
+import { PRIMARY_MANIFEST_FILE, LEGACY_MANIFEST_FILE, PRIMARY_KNOWLEDGE_FILE, BRAND_CONFIG } from './constants.js';
+import { atomicWriteFile } from '../resources/fs-safety.js';
+import { assertWorkspaceActive } from './archive-guard.js';
 
 /** Name of the per-workspace manifest file. */
 const MANIFEST_FILE = PRIMARY_MANIFEST_FILE;
@@ -200,8 +202,9 @@ async function scaffoldWorkspaceDir(
 /** Options for {@link createWorkspace}. */
 export interface CreateWorkspaceOptions {
   /**
-   * Whether to fast-forward clean base repository branches to remote tracking commits before branching.
-   * Defaults to true.
+   * Fast-forward the source repositories' clean base branches to their remote
+   * tracking commits. Off unless explicitly `true`, because it changes the
+   * user's own checkouts.
    */
   autoUpdateBase?: boolean;
 }
@@ -237,6 +240,7 @@ async function materializeWorktrees(
       },
     );
     rollbackActions.push({ repoPath: repo.path, worktreePath: worktreeTarget, branchName, createdBranch });
+    if (createdBranch) feature.createdBranches = { ...feature.createdBranches, [repo.name]: branchName };
   }
 }
 
@@ -282,8 +286,9 @@ export async function createWorkspace(
 ): Promise<string> {
   const workspacePath = feature.workspacePath;
 
-  // In-place mode operates directly in source repos; fast-forward them if requested
-  if (isInPlace(feature) && options?.autoUpdateBase !== false) {
+  // In-place repos are the user's own checkouts: fast-forward them only on an
+  // explicit request, never as a side effect of creating a workspace.
+  if (isInPlace(feature) && options?.autoUpdateBase === true) {
     try {
       await fastForwardRepos(
         repos.map((r) => ({
@@ -376,8 +381,8 @@ export async function saveFeatureConfig(
   // (where listWorkspaces scans and the git-worktree container lives),
   // independent of the storage adapter. Routing it through an adapter would
   // send it to a vault, invisible to the scan.
-  await fs.mkdir(workspacePath, { recursive: true });
-  await fs.writeFile(path.join(workspacePath, MANIFEST_FILE), data, 'utf-8');
+  // Atomic: an interrupted write (archive, isolate) must not leave a torn manifest.
+  await atomicWriteFile(path.join(workspacePath, MANIFEST_FILE), data);
 }
 
 /**
@@ -537,6 +542,16 @@ export async function deleteWorkspace(
     }
   }
   if (feature) {
+    // Merge this workspace's base knowledge into the shared store first, so a
+    // workspace nobody opened since the store existed does not take it along.
+    // Best-effort: failing to merge never blocks the delete the user asked for.
+    for (const repo of feature.repos) {
+      try {
+        await baseFileExists(workspacePath, path.basename(repo), PRIMARY_KNOWLEDGE_FILE);
+      } catch {
+        // Keep deleting.
+      }
+    }
     try {
       await deleteWorkspaceFiles(workspacePath, feature.id);
     } catch (error) {
@@ -630,6 +645,7 @@ export async function addRepoToWorkspace(
   if (!feature) {
     throw new Error(`Workspace manifest not found at ${workspacePath}`);
   }
+  assertWorkspaceActive(feature, 'add repositories');
 
   const newRepoInfo = await resolveRepoInfo(repoPath);
   const inPlace = isInPlace(feature);
@@ -665,6 +681,9 @@ export async function addRepoToWorkspace(
     }
 
     // 2. Update manifest
+    if (rollbackAction?.createdBranch) {
+      feature.createdBranches = { ...feature.createdBranches, [newRepoInfo.name]: feature.branchName };
+    }
     feature.repos.push(repoEntry);
     if (!feature.originalRepos) {
       feature.originalRepos = [];

@@ -67,12 +67,27 @@ Keep authored rationale in `contextspace-milestones.md`, not in generated views 
 a competing milestone tracker. Read it directly or through MCP `get_planning_notes`. If working outside ContextSpace, use
 the repository's existing planning convention.
 
+With local storage, knowledge promoted to a repo's base file is kept in the
+ContextSpace home, keyed by the repository, so every workspace with that repository
+reads it and it survives removing the workspace. Close finished workspaces with
+`ctxspace archive`, which keeps milestones, notes, knowledge and documents; delete
+only what no one needs. Put guidance that should travel beyond one machine into
+versioned skill sources or shared project sources.
+
 ## Execute only the current stage
 
 Read [stage outcomes](references/stage-outcomes.md) for the selected stage. Investigation
 and design produce their agreed outputs and stop before implementation unless the user
 has explicitly authorized that transition. Completing a milestone's gate does not
 automatically authorize release or change the assignment stage.
+
+`ctxspace flow --step <id> --action verify` and `--action complete` may each run the
+milestone's verification command. Wait for one transition to finish before starting
+another, then check `ctxspace flow --json` for the recorded gate status and tested
+revision. A successful transition command can still record a failed verification;
+investigate the gate result before retrying or treating the milestone as complete.
+A gate that records `timeout` hit its time limit (30 minutes unless the milestone sets
+`verificationTimeoutSeconds`); raise the limit rather than weakening the command.
 
 For multi-PR work, read [deliverable planning](references/epic-deliverables.md). Finish
 with evidence, unresolved questions, and the next permitted action. Keep handoffs in

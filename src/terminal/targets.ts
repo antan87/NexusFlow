@@ -1,16 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { findExecutable, getAugmentedPath } from '../utils/user-paths.js';
+import { CLI_HARNESSES, isCliHarnessId, type CliHarnessId } from '../utils/cli-harnesses.js';
 
-const harnesses = {
-  antigravity: { name: 'Antigravity (agy)', binary: 'agy' },
-  codex: { name: 'Codex', binary: 'codex' },
-  claude: { name: 'Claude Code', binary: 'claude' },
-  copilot: { name: 'GitHub Copilot', binary: 'copilot' },
-  cursor: { name: 'Cursor Agent', binary: 'cursor-agent' },
-  pi: { name: 'Pi', binary: 'pi' },
-} as const;
-export type TerminalTarget = 'shell' | keyof typeof harnesses;
+export type TerminalTarget = 'shell' | CliHarnessId;
 export interface LaunchSpec { file: string; args: string[]; env: NodeJS.ProcessEnv; label: string }
 
 export function terminalEnvironment(): NodeJS.ProcessEnv {
@@ -58,21 +51,18 @@ export function resolveLaunch(target: string, sessionId?: string, env = terminal
     const file = resolveShell(env, platform);
     return { file, args: platform === 'win32' ? ['-NoLogo'] : ['-l'], env, label: path.basename(file) };
   }
-  if (!Object.hasOwn(harnesses, target)) throw new Error('This harness does not have an embedded terminal target.');
-  const harness = harnesses[target as keyof typeof harnesses];
-  const file = target === 'cursor'
-    ? findExecutable('agent', env, platform) ?? findExecutable(harness.binary, env, platform)
-    : findExecutable(harness.binary, env, platform);
+  if (!isCliHarnessId(target)) throw new Error('This harness does not have an embedded terminal target.');
+  const harness = CLI_HARNESSES[target];
+  let file: string | null | undefined;
+  for (const binary of ('terminalBinaries' in harness ? harness.terminalBinaries : [harness.binary])) {
+    file = findExecutable(binary, env, platform);
+    if (file) break;
+  }
   if (!file) throw new Error(`${harness.name} is not installed or is not on PATH. Install it, then refresh the terminal list.`);
   let args: string[] = [];
   if (sessionId) {
     if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error('Invalid saved session ID.');
-    if (target === 'codex') args = ['resume', sessionId];
-    else if (target === 'claude') args = ['--resume', sessionId];
-    else if (target === 'antigravity') args = ['--conversation', sessionId];
-    else if (target === 'copilot' || target === 'cursor') args = ['--resume', sessionId];
-    else if (target === 'pi') args = ['--session', sessionId];
-    else throw new Error('Direct resume is not verified for this harness. Start it and use its own session picker.');
+    args = harness.resumeArgs(sessionId);
   }
   if (platform === 'win32' && !/\.exe$/i.test(file)) {
     // npm shims cannot be passed directly to CreateProcess. PowerShell's call
@@ -85,8 +75,8 @@ export function resolveLaunch(target: string, sessionId?: string, env = terminal
 }
 
 export function listTerminalTargets() {
-  return ['shell', ...Object.keys(harnesses)].map(id => {
+  return ['shell', ...Object.keys(CLI_HARNESSES)].map(id => {
     try { const spec = resolveLaunch(id); return { id, name: spec.label, available: true, reason: null }; }
-    catch (error) { return { id, name: id === 'shell' ? 'Shell' : harnesses[id as keyof typeof harnesses].name, available: false, reason: (error as Error).message }; }
+    catch (error) { return { id, name: id === 'shell' ? 'Shell' : CLI_HARNESSES[id as CliHarnessId].name, available: false, reason: (error as Error).message }; }
   });
 }

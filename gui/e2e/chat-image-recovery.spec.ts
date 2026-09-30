@@ -39,8 +39,8 @@ test('keeps an image and text when first-turn upload fails, then sends both on r
   await expect(chat.getByPlaceholder(/Message the agent/)).toHaveValue('');
 });
 
-test('pastes text normally when the clipboard also advertises an image', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:4173' });
+test('pastes text normally when the clipboard also advertises an image', async ({ page, context, baseURL }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(baseURL!).origin });
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });

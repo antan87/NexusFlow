@@ -8,8 +8,11 @@ name: Release
 #     -f event_type=release -F client_payload[version]=X.Y.Z
 #
 # The repository_dispatch event always loads this workflow from the default
-# branch. The guard validates the requested version and creates the tag at that
-# protected source SHA before any publish job starts.
+# branch; workflow_dispatch is rejected unless it targets the default branch. The
+# guard validates the requested version, requires every check in
+# .github/release-required-checks.json to have succeeded on this exact source SHA
+# (fail closed), and only then creates the tag. Jobs that hold publish credentials
+# run in the protected `release` environment. See RELEASING.md "Publish gate".
 #
 # Prerelease versions (e.g. 1.2.0-rc.1) publish npm under the "next" dist-tag, mark
 # the GitHub Release as a prerelease, and skip the Marketplace (which does not
@@ -37,8 +40,10 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
       tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
     permissions:
-      contents: write
+      contents: write   # creates the immutable release tag
+      checks: read      # reads required check results for the exact source SHA
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,6 +54,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # workflow_dispatch loads this file from whichever ref was selected; only the
+      # default branch may release. The `release` environment's branch policy is
+      # the enforcing control for credentials; this makes a wrong ref fail early.
+      - name: Require dispatch from the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/release-guard.mjs ref --ref "$GITHUB_REF" --default-branch "$DEFAULT_BRANCH"
 
       - name: Require dispatched source on protected default branch
         shell: bash
@@ -76,12 +89,18 @@ jobs:
           fi
           node scripts/sync-version.mjs --check
           echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "tag=v$PKG" >> "$GITHUB_OUTPUT"
           if [[ "$PKG" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Require successful checks for the exact source SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-guard.mjs checks --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"
 
       - name: Create immutable release tag
         env:
@@ -103,11 +122,16 @@ jobs:
   npm:
     needs: guard
     runs-on: ubuntu-latest
+    environment: release
+    outputs:
+      status: ${{ steps.npm-publish.outputs.status }}
     permissions:
       id-token: write   # npm trusted publishing and provenance
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -123,12 +147,14 @@ jobs:
       - run: npm run build
 
       - name: Publish to npm
+        id: npm-publish
         env:
           VERSION: ${{ needs.guard.outputs.version }}
           PRERELEASE: ${{ needs.guard.outputs.prerelease }}
         run: |
           if npm info "@mrpatronz/nexusflow@$VERSION" version >/dev/null 2>&1; then
             echo "npm already has $VERSION — skipping (idempotent re-run)."
+            echo "status=already published" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$PRERELEASE" = "true" ]; then
@@ -136,20 +162,28 @@ jobs:
           else
             npm publish
           fi
+          echo "status=published" >> "$GITHUB_OUTPUT"
 
   # ── VS Code Marketplace ───────────────────────────────────────────────────────
   # Stable releases always include a VSIX. Marketplace publishing alone is gated
   # behind a repo variable until Azure OIDC is configured.
   # To re-enable: set the repo/environment variable VSCODE_PUBLISHING_ENABLED=true.
+  # A Marketplace failure does not block the other channels; it is recorded as a
+  # failed channel and turns the release run red after the GitHub Release exists.
   vscode:
     needs: guard
     if: needs.guard.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
+    environment: release
+    outputs:
+      marketplace: ${{ steps.marketplace-status.outputs.status }}
     permissions:
       id-token: write   # Azure OIDC
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -178,13 +212,10 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - name: Skip VS Code Marketplace publish when Azure OIDC is unavailable
-        if: vars.VSCODE_PUBLISHING_ENABLED == 'true' && steps.azure-login.outcome != 'success'
-        run: |
-          echo "::warning::Azure OIDC login failed or is not configured; skipping VS Code Marketplace publish for this release."
-
       - name: Publish to VS Code Marketplace
+        id: marketplace-publish
         if: steps.azure-login.outcome == 'success'
+        continue-on-error: true
         working-directory: extension
         env:
           VERSION: ${{ needs.guard.outputs.version }}
@@ -197,9 +228,33 @@ jobs:
               " && echo "true" || echo "false")
           if [ "$PUBLISHED" = "true" ]; then
             echo "Marketplace already has $VERSION — skipping (idempotent re-run)."
+            echo "status=already published" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           npx vsce publish --no-dependencies --azure-credential
+          echo "status=published" >> "$GITHUB_OUTPUT"
+
+      - name: Record Marketplace channel status
+        id: marketplace-status
+        if: always()
+        env:
+          ENABLED: ${{ vars.VSCODE_PUBLISHING_ENABLED }}
+          LOGIN: ${{ steps.azure-login.outcome }}
+          PUBLISH: ${{ steps.marketplace-publish.outcome }}
+          RESULT: ${{ steps.marketplace-publish.outputs.status }}
+        run: |
+          if [ "$ENABLED" != "true" ]; then
+            status="disabled"
+          elif [ "$LOGIN" != "success" ]; then
+            status="failed"
+            echo "::error::Azure OIDC login failed or is not configured; the VS Code Marketplace was not updated."
+          elif [ "$PUBLISH" != "success" ]; then
+            status="failed"
+            echo "::error::VS Code Marketplace publish failed; the other channels continue."
+          else
+            status="${RESULT:-published}"
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
 
   # ── Desktop installers (Windows NSIS + Linux AppImage) ────────────────────────
   desktop:
@@ -217,6 +272,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -288,8 +345,9 @@ jobs:
   github-release:
     needs: [guard, npm, vscode, desktop]
     # Run even if the Marketplace job was skipped (prereleases) but not if it failed.
-    if: always() && needs.npm.result == 'success' && needs.desktop.result == 'success' && (needs.vscode.result == 'success' || needs.vscode.result == 'skipped')
+    if: always() && needs.guard.result == 'success' && needs.npm.result == 'success' && needs.desktop.result == 'success' && (needs.vscode.result == 'success' || needs.vscode.result == 'skipped')
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
@@ -316,3 +374,36 @@ jobs:
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
           files: |
             dist/*
+
+      # Every channel is listed so a skipped or failed one cannot go unnoticed.
+      # A failed Marketplace publish turns the run red after the other channels
+      # shipped; re-running the whole workflow is idempotent for them.
+      - name: Report channel status
+        id: channel-status
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+          SHA: ${{ needs.guard.outputs.sha }}
+          NPM: ${{ needs.npm.outputs.status }}
+          VSCODE_JOB: ${{ needs.vscode.result }}
+          MARKETPLACE: ${{ needs.vscode.outputs.marketplace }}
+        run: |
+          if [ "$VSCODE_JOB" = "skipped" ]; then
+            vsix="not built (prerelease)"; marketplace="skipped (prerelease)"
+          else
+            vsix="attached"; marketplace="${MARKETPLACE:-unknown}"
+          fi
+          {
+            echo "### Release $TAG from \`$SHA\`"
+            echo ""
+            echo "| Channel | Status |"
+            echo "| --- | --- |"
+            echo "| npm | ${NPM:-unknown} |"
+            echo "| Desktop installers | attached |"
+            echo "| VSIX | $vsix |"
+            echo "| VS Code Marketplace | $marketplace |"
+            echo "| GitHub Release | published |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$marketplace" = "failed" ] || [ "$marketplace" = "unknown" ]; then
+            echo "::error::VS Code Marketplace channel status is $marketplace for $TAG. Other channels shipped; re-run the workflow after fixing Marketplace credentials."
+            exit 1
+          fi

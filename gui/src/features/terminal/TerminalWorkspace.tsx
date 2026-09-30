@@ -2,10 +2,17 @@ import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'r
 import { FileText, ListTree, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
+import { CHAT_GEOMETRY } from '../chat/floatingChatStore.js';
+import { hasModifier, modifierLabel, usePaneHotkey } from './usePaneHotkey.js';
 import { WorkspaceCodePanel } from '../changes/WorkspaceCodePanel.js';
 import { TerminalPane } from './TerminalPane.js';
 import { WorkspaceDocumentsInspector } from './WorkspaceDocumentsInspector.js';
 import { WorkspaceContextPeek } from './WorkspaceContextPeek.js';
+
+/** The inspector may never squeeze the terminal below this share of the pane. */
+const INSPECTOR_MIN_PERCENT = 28;
+const INSPECTOR_MAX_PERCENT = 80;
+const clampPercent = (value: number) => Math.max(INSPECTOR_MIN_PERCENT, Math.min(INSPECTOR_MAX_PERCENT, value));
 
 export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<typeof TerminalPane> & { workspacePath: string }) {
   const [inspector, setInspector] = useState<'code' | 'documents' | null>(null);
@@ -21,10 +28,40 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 720));
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < CHAT_GEOMETRY.compactBreakpointPx));
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  // Panel switching is bound to modified keys so it still works while the PTY
+  // owns the keyboard, and Escape closes whichever inspector is open.
+  //
+  // Gated on `active`: the window keeps every open tab mounted, so an ungated
+  // listener would toggle the inspector on all of them at once.
+  //
+  // Code answers to Ctrl/Cmd+Shift+E. Shift+C is accepted as an alias, but the
+  // terminal claims that combination for copy-selection and stops propagation,
+  // so the alias only resolves when focus is outside the PTY. E is not used by
+  // the terminal and therefore always works.
+  usePaneHotkey((event) => {
+    if (hasModifier(event, { shift: true })) {
+      const key = event.key.toLowerCase();
+      if (key === 'e' || key === 'c') {
+        event.preventDefault();
+        setInspector(current => (current === 'code' ? null : 'code'));
+        return;
+      }
+      if (key === 'd') {
+        event.preventDefault();
+        setInspector(current => (current === 'documents' ? null : 'documents'));
+        return;
+      }
+    }
+    if (event.key === 'Escape' && inspector) {
+      event.preventDefault();
+      setInspector(null);
+    }
+  }, { enabled: props.active });
 
   const handleSplitDrag = useCallback((event: React.PointerEvent) => {
     if (event.button !== 0) return;
@@ -38,7 +75,7 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
       const bounds = container.getBoundingClientRect();
       if (bounds.width <= 0) return;
       const inspectorPercent = ((bounds.right - move.clientX) / bounds.width) * 100;
-      setSplitPercent(Math.round(Math.max(20, Math.min(85, inspectorPercent))));
+      setSplitPercent(Math.round(clampPercent(inspectorPercent)));
       setIsExpanded(false);
     };
     const onPointerUp = (up: PointerEvent) => {
@@ -74,31 +111,51 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
     setInspector('code');
   };
 
+  const codePanel = <WorkspaceCodePanel workspace={props.workspace} active={props.active} openReference={openReference} onClose={() => setInspector(null)} />;
+  const documentsPanel = <WorkspaceDocumentsInspector workspace={props.workspace} active={props.active} openDocument={openDocument} />;
+  const mod = modifierLabel();
+  const codeShortcut = `${mod}+Shift+E`;
+  const docsShortcut = `${mod}+Shift+D`;
+
+  // The inspector controls live in the pane toolbar rather than in a bar of
+  // their own, so the chat window shows one toolbar instead of two stacked
+  // rows that each held a fragment of the same job.
+  // Code and Docs stay inline in the toolbar rather than behind the overflow.
+  // They are used constantly, so burying them behind a menu to save 60px was
+  // the wrong trade. The full-width toggle only exists while an inspector is
+  // open, so it appears next to them at that point.
+  const inspectorControls = [
+    <Button key="code" size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} aria-keyshortcuts="Control+Shift+E Meta+Shift+E" title={`Toggle the code panel (${codeShortcut})`} onClick={() => setInspector(value => value === 'code' ? null : 'code')}>
+      <ListTree className="size-3" />Code
+    </Button>,
+    <Button key="documents" size="xs" variant={inspector === 'documents' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'documents'} aria-keyshortcuts="Control+Shift+D Meta+Shift+D" title={`Toggle the documents panel (${docsShortcut})`} onClick={() => setInspector(value => value === 'documents' ? null : 'documents')}>
+      <FileText className="size-3" />Docs
+    </Button>,
+  ];
+  const inspectorExpandControl = inspector && !compact
+    ? <Button size="xs" variant={isExpanded ? 'secondary' : 'ghost'}
+        onClick={() => setIsExpanded(value => !value)}
+        aria-label={isExpanded ? 'Show terminal and inspector side by side' : 'Give the inspector the full width'}
+        title={isExpanded ? 'Show terminal and inspector side by side' : 'Give the inspector the full width'}>
+        {isExpanded ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
+      </Button>
+    : null;
+
   return <div className="flex h-full min-h-0 flex-col">
-    <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/10 px-2 py-1">
-      <span className="text-[11px] font-semibold text-foreground">CLI chat</span>
-      <div className="flex items-center gap-1">
-        {inspector && !compact && <Button size="xs" variant={isExpanded ? 'secondary' : 'ghost'}
-          onClick={() => setIsExpanded(value => !value)}
-          aria-label={isExpanded ? 'Split view' : `Expand ${inspector} panel`}
-          title={isExpanded ? 'Restore split view' : `Expand ${inspector} panel`}>
-          {isExpanded ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
-          {isExpanded ? 'Split view' : 'Expand'}
-        </Button>}
-        <Button size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} onClick={() => setInspector(value => value === 'code' ? null : 'code')}><ListTree className="size-3" />{inspector === 'code' ? compact ? 'Back to CLI' : 'Hide code' : 'Show code'}</Button>
-        <Button size="xs" variant={inspector === 'documents' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'documents'} onClick={() => setInspector(value => value === 'documents' ? null : 'documents')}><FileText className="size-3" />{inspector === 'documents' && compact ? 'Back to CLI' : 'Documents'}</Button>
-      </div>
-    </div>
     <WorkspaceContextPeek workspace={props.workspace} active={props.active} />
     <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-row">
-      <div className={`min-h-0 min-w-0 flex-1 ${compact && inspector ? 'hidden' : ''}`}><TerminalPane {...props} active={props.active && !(compact && inspector)} codeVisible={inspector !== null} onOpenFileReference={reference => { void openFile(reference); }} /></div>
+      {/* The terminal stays mounted at every width. Below the compact
+          breakpoint the inspector becomes a sheet over it, so opening Code or
+          Docs no longer renames the control to "Back to CLI" and no longer
+          costs the user their prompt. */}
+      <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} active={props.active} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
-        {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? 85 : splitPercent}
-          aria-valuemin={20} aria-valuemax={85} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}
+        {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? INSPECTOR_MAX_PERCENT : splitPercent}
+          aria-valuemin={INSPECTOR_MIN_PERCENT} aria-valuemax={INSPECTOR_MAX_PERCENT} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}
           onKeyDown={event => {
             if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
               event.preventDefault();
-              setSplitPercent(percent => Math.max(20, Math.min(85, percent + (event.key === 'ArrowLeft' ? 5 : -5))));
+              setSplitPercent(percent => clampPercent(percent + (event.key === 'ArrowLeft' ? 5 : -5)));
               setIsExpanded(false);
             }
           }}
@@ -106,10 +163,11 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
           title="Drag or use Left/Right arrow keys to resize the inspector">
           <div className="h-6 w-0.5 rounded bg-muted-foreground/30 group-hover:bg-primary" />
         </div>}
-        <div style={{ width: compact ? '100%' : isExpanded ? '85%' : `${splitPercent}%` }} className={`h-full min-h-0 min-w-0 ${compact ? '' : 'border-l'} border-border ${isDragging ? '' : 'transition-[width] duration-150'}`}>
-          {inspector === 'code' ? <WorkspaceCodePanel workspace={props.workspace} active={props.active} openReference={openReference} onClose={() => setInspector(null)} />
-            : <WorkspaceDocumentsInspector workspace={props.workspace} openDocument={openDocument} />}
-        </div>
+        {compact
+          ? <div className="absolute inset-0 z-30 flex min-h-0 flex-col border-t border-border bg-card shadow-2xl">{inspector === 'code' ? codePanel : documentsPanel}</div>
+          : <div style={{ width: isExpanded ? `${INSPECTOR_MAX_PERCENT}%` : `${splitPercent}%` }} className={`h-full min-h-0 min-w-0 border-l border-border ${isDragging ? '' : 'transition-[width] duration-150'}`}>
+              {inspector === 'code' ? codePanel : documentsPanel}
+            </div>}
       </>}
     </div>
   </div>;

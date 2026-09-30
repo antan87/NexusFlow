@@ -20,7 +20,8 @@ export interface WorktreePickerProps {
   repoGroups: RepoWorktreeGroup[];
   activeWorktreeId: string | null;
   onSelectWorktree: (wt: WorktreeDescriptor) => void;
-  onNewWorktree?: (repoName: string) => void;
+  /** Offered for read-only reference repos: create an editable worktree. */
+  onPrepareForEditing?: (repoName: string) => void;
   onUpdateWorktreeTitle?: (worktreeId: string, title: string, intent?: string) => void;
   customTitles?: Record<string, { title: string; intent?: string }>;
 }
@@ -29,7 +30,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
   repoGroups,
   activeWorktreeId,
   onSelectWorktree,
-  onNewWorktree,
+  onPrepareForEditing,
   onUpdateWorktreeTitle,
   customTitles = {},
 }) => {
@@ -99,7 +100,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
       <div className="relative w-full">
         <Search
           size={12}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
         />
         <input
           type="text"
@@ -143,25 +144,29 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
                   <span className="font-semibold text-foreground truncate">{group.repoName}</span>
 
                   {group.isHostRepo && (
-                    <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground/80 border border-border/40 uppercase">
+                    <span
+                      className="font-mono text-[9px] px-1 py-0.2 rounded bg-muted text-muted-foreground border border-border/40 uppercase"
+                      title="Read-only reference: prepare it for editing to change it here"
+                    >
                       ro
                     </span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className="font-mono text-[10px] text-muted-foreground/70">
+                  <span className="font-mono text-[10px] text-muted-foreground">
                     {group.worktrees.length} wt
                   </span>
 
-                  {onNewWorktree && (
+                  {onPrepareForEditing && group.isHostRepo && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNewWorktree(group.repoName);
+                        onPrepareForEditing(group.repoName);
                       }}
-                      title={`Isolate new worktree in ${group.repoName}`}
+                      title={`Prepare ${group.repoName} for editing`}
+                      aria-label={`Prepare ${group.repoName} for editing`}
                       className="p-0.5 hover:text-foreground text-muted-foreground hover:bg-accent rounded transition-colors"
                     >
                       <Plus size={12} />

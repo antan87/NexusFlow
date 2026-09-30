@@ -556,7 +556,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
       {/* Search and Filter Ribbon */}
       <div className="px-6 py-3 border-b border-border/60 bg-muted/20 flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -603,7 +603,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
         ) : filteredSkills.length === 0 && searchQuery ? (
           <Empty className="py-12 border border-dashed rounded-xl">
             <EmptyMedia>
-              <Search className="h-8 w-8 text-muted-foreground/60" />
+              <Search className="h-8 w-8 text-muted-foreground" />
             </EmptyMedia>
             <EmptyHeader>
               <EmptyTitle>No matching skills found</EmptyTitle>
@@ -803,7 +803,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                           className={cn(
                                             'text-[9px] font-mono px-1 py-0.2 uppercase',
                                             skill.scope === 'workspace'
-                                              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                              ? 'border-amber-500/40 text-warning-foreground bg-amber-500/10'
                                               : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
                                           )}
                                         >
@@ -834,7 +834,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                                           className={cn(
                                             'text-[9px] font-mono px-1 py-0.2 uppercase',
                                             skill.scope === 'workspace'
-                                              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                              ? 'border-amber-500/40 text-warning-foreground bg-amber-500/10'
                                               : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
                                           )}
                                         >
@@ -946,7 +946,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                               className={cn(
                                 'text-[9px] font-mono px-1 py-0.2 uppercase',
                                 skill.scope === 'workspace'
-                                  ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+                                  ? 'border-amber-500/40 text-warning-foreground bg-amber-500/10'
                                   : 'border-blue-500/40 text-blue-300 bg-blue-500/10',
                               )}
                             >
@@ -1239,7 +1239,7 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
                     className={cn(
                       'flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-medium transition-all cursor-pointer',
                       editingSkillScope === 'workspace'
-                        ? 'border-amber-500/50 bg-amber-500/15 text-amber-300 font-semibold shadow-xs'
+                        ? 'border-amber-500/50 bg-amber-500/15 text-warning-foreground font-semibold shadow-xs'
                         : 'border-border/60 bg-card/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                     )}
                   >

@@ -8,7 +8,9 @@
 | Authentication, data migration, public contract, or hard-to-reverse change | Any size, deeper verification | Failure analysis, compatibility and recovery evidence appropriate to the impact |
 | Performance investigation | Investigate stage, any size | Representative workload, baseline, measurement method; no speculative rewrite |
 
-Choose isolation separately. `ctxspace quick` creates an in-place workspace;
+Choose isolation separately. `ctxspace quick` creates an in-place workspace, whose
+repositories are read-only references until one is prepared for editing with
+`ctxspace isolate <repo>` (MCP `isolate_repo`);
 `ctxspace create` creates a standard workspace and supports mode selection.
 `ctxspace create --flow epic` selects an epic preset. Check the installed CLI's
 `--help` for its available flags; presets do not create a stack of PRs automatically.

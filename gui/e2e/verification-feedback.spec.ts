@@ -33,3 +33,31 @@ for (const status of ['no-tests', 'timeout', 'fail'] as const) {
     await expect(page.getByText('Verification Gate FAILED with exit code non-zero. Check test errors.')).toHaveCount(0);
   });
 }
+
+test('a verification run updates the shared header gate in the same interaction', async ({ page }) => {
+  let report: any = null;
+  await page.route('**/api/workspace/demo/plan', (route) => route.fulfill({ json: { content: '# Plan' } }));
+  await page.route('**/api/workspace/demo/lifecycle', (route) => route.fulfill({ json: {
+    lifecycle: { workspaceId: 'demo', flowType: 'feature', steps: [], fleet: [], updatedAt: '' }, report,
+  } }));
+  await page.route('**/api/workspace/demo/verify', (route) => {
+    report = { overallStatus: 'pass', canProgress: true, durationMs: 2400, repos: [{ repoName: 'api', status: 'pass', command: 'npm test', exitCode: 0 }] };
+    return route.fulfill({ json: { report } });
+  });
+  await page.goto('/#/workspaces/demo/plan');
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Not verified yet')).toBeVisible();
+  await page.getByRole('button', { name: 'Run verification', exact: true }).click();
+  // No navigation or re-entry: the header reads the same, now refreshed, evidence.
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Verified (2.4s)')).toBeVisible();
+});
+
+test('a pass without a recorded duration shows no invented one', async ({ page }) => {
+  await page.route('**/api/workspace/demo/plan', (route) => route.fulfill({ json: { content: '# Plan' } }));
+  await page.route('**/api/workspace/demo/lifecycle', (route) => route.fulfill({ json: {
+    lifecycle: { workspaceId: 'demo', flowType: 'feature', steps: [], fleet: [], updatedAt: '' },
+    report: { overallStatus: 'pass', canProgress: true, repos: [] },
+  } }));
+  await page.goto('/#/workspaces/demo/plan');
+  await expect(page.getByRole('group', { name: 'Task status' }).getByText('Verified', { exact: true })).toBeVisible();
+  await expect(page.getByText(/120ms/)).toHaveCount(0);
+});

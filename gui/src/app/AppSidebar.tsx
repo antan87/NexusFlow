@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Menu as MenuIcon,
   FolderGit2,
@@ -15,28 +15,28 @@ import {
   Check,
   Activity,
   Users,
-  Terminal,
+  History,
   PanelLeftClose,
   PanelLeftOpen,
   ArrowLeft,
   type LucideIcon,
 } from 'lucide-react';
-import { BsOpenai } from 'react-icons/bs';
-import { SiClaude, SiGithubcopilot, SiCursor } from 'react-icons/si';
-import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { BRAND_NAME } from '../brand.js';
 import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
-import { useIsMobile } from '../components/ui/use-mobile.js';
+import { useIsMobile, useMediaQuery } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { WorktreePicker } from '../features/worktrees/WorktreePicker.js';
 import { normalizeWorktreeGroups } from '../features/worktrees/normalizeWorktrees.js';
+import { PrepareRepoDialog } from '../features/worktrees/PrepareRepoDialog.js';
+import { useWorkspaceRepositories } from '../lib/api/queries.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
 import { useCockpitStore } from '../features/cockpit/cockpitStore.js';
 
@@ -49,17 +49,20 @@ export type WorkspaceSortOption =
 
 interface NavItem {
   label: string;
+  description: string;
   to: string;
   icon: LucideIcon;
   match: (p: string) => boolean;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { label: 'Projects', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
-  { label: 'Workrooms', to: '/workrooms', icon: Users, match: (p) => p.startsWith('/workrooms') },
-  { label: 'Resource Library', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') || p.startsWith('/agents') },
-  { label: 'Strategies', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
-  { label: 'Settings', to: '/settings', icon: SettingsIcon, match: (p) => p.startsWith('/settings') },
+const SETUP_ITEMS: NavItem[] = [
+  { label: 'Projects', description: 'Saved repository groups', to: '/projects', icon: FolderGit2, match: (p) => p.startsWith('/projects') },
+  { label: 'Skills & agents', description: 'Assistant instructions', to: '/skills', icon: Boxes, match: (p) => p.startsWith('/skills') || p.startsWith('/agents') },
+];
+
+const ADVANCED_ITEMS: NavItem[] = [
+  { label: 'Workrooms', description: 'Coordinate related work', to: '/workrooms', icon: Users, match: (p) => p.startsWith('/workrooms') },
+  { label: 'Strategies', description: 'Reusable workflows', to: '/workflows', icon: Workflow, match: (p) => p.startsWith('/workflows') || p.startsWith('/strategies') },
 ];
 
 export interface AppSidebarProps {
@@ -85,10 +88,24 @@ function SidebarContents({
   const { openCli } = useFloatingChat();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
-  const [toolsExpanded, setToolsExpanded] = useState<boolean>(false);
+  const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
+  // Archived workspaces are records, listed separately so they stay out of the way.
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = useMemo(() => workspaces.filter((w) => w.archivedAt).length, [workspaces]);
+  const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
-  const { isCollapsed, toggleCollapsed, customTitles, updateTitle } = useWorktreeNavigationState();
+  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved, customTitles, updateTitle } = useWorktreeNavigationState();
+  // In a narrow window (split screen, 200% zoom) the rail is the default so the
+  // task keeps the room; expanding it there is temporary and leaves the saved choice alone.
+  const narrow = useMediaQuery('(min-width: 768px) and (max-width: 999px)');
+  const [narrowExpanded, setNarrowExpanded] = useState(false);
+  const isCollapsed = narrow ? !narrowExpanded : savedCollapsed;
+  const toggleCollapsed = useCallback(() => {
+    if (narrow) setNarrowExpanded((expanded) => !expanded);
+    else toggleSaved();
+  }, [narrow, toggleSaved]);
+  useEffect(() => { setNarrowExpanded(false); }, [pathname]);
   const cockpit = useCockpitStore();
 
   // Detect if on a workspace route
@@ -101,10 +118,12 @@ function SidebarContents({
     return workspaces.find((w) => w.branchName === currentWsId || w.id === currentWsId) || null;
   }, [workspaces, currentWsId]);
 
+  const liveRepositories = useWorkspaceRepositories(activeWorkspace?.branchName ?? null);
+  const [preparingRepo, setPreparingRepo] = useState<string | null>(null);
   const repoGroups = useMemo(() => {
     if (!activeWorkspace) return [];
-    return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName]);
-  }, [activeWorkspace, workspaceStatuses]);
+    return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName], liveRepositories.data);
+  }, [activeWorkspace, workspaceStatuses, liveRepositories.data]);
 
   // Keyboard shortcut for toggling rail (Z or [)
   useEffect(() => {
@@ -123,10 +142,10 @@ function SidebarContents({
   }, [toggleCollapsed]);
 
   const filteredWorkspaces = useMemo(() => {
-    let list = workspaces;
+    let list = workspaces.filter((w) => Boolean(w.archivedAt) === showArchived);
     const q = search.trim().toLowerCase();
     if (q) {
-      list = list.filter((w) => `${w.branchName} ${w.description}`.toLowerCase().includes(q));
+      list = list.filter((w) => `${w.name ?? ''} ${w.branchName} ${w.description}`.toLowerCase().includes(q));
     }
 
     return [...list].sort((a, b) => {
@@ -150,13 +169,13 @@ function SidebarContents({
           return (b.repos?.length || 0) - (a.repos?.length || 0);
         }
         case 'name-asc': {
-          return a.branchName.localeCompare(b.branchName);
+          return (a.name || a.branchName).localeCompare(b.name || b.branchName);
         }
         default:
           return 0;
       }
     });
-  }, [workspaces, search, sortBy, workspaceStatuses]);
+  }, [workspaces, search, sortBy, workspaceStatuses, showArchived]);
 
   const linkClass = (active: boolean) =>
     cn(
@@ -178,12 +197,13 @@ function SidebarContents({
       <aside className="context-sidebar flex w-14 shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden transition-[width] duration-200 items-center py-3 justify-between z-30">
         {/* Top Icons */}
         <div className="flex flex-col items-center gap-3">
-          <Link to="/overview" title={`${BRAND_NAME} v${appVersion}`}>
+          <Link to="/overview" aria-label={`${BRAND_NAME} overview`} title={`${BRAND_NAME} v${appVersion}`}>
             <ContextSpaceIcon size={24} className="rounded-md shadow-xs hover:scale-105 transition-transform" />
           </Link>
 
           <NavLink
             to="/overview"
+            aria-label="Overview Activity"
             title="Overview Activity"
             className={({ isActive }) =>
               cn(
@@ -197,6 +217,7 @@ function SidebarContents({
 
           <NavLink
             to="/new"
+            aria-label="Start new work"
             title="Start new work"
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
@@ -211,6 +232,7 @@ function SidebarContents({
             <button
               type="button"
               onClick={toggleCollapsed}
+              aria-label={`Active Workspace: ${activeWorkspace.branchName} (Click to expand)`}
               title={`Active Workspace: ${activeWorkspace.branchName} (Click to expand)`}
               className="relative p-2 rounded-lg bg-primary/15 text-primary border border-primary/30 cursor-pointer hover:bg-primary/25 transition-colors"
             >
@@ -227,6 +249,7 @@ function SidebarContents({
           <button
             type="button"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
@@ -236,6 +259,7 @@ function SidebarContents({
           <button
             type="button"
             onClick={toggleCollapsed}
+            aria-label="Expand Cockpit Sidebar (Shortcut: z)"
             title="Expand Cockpit Sidebar (Shortcut: z)"
             className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 border border-border/50 transition-colors cursor-pointer"
           >
@@ -248,7 +272,7 @@ function SidebarContents({
 
   // ─── EXPANDED COCKPIT MODE (240px / w-60) ──────────────────────────────────
   return (
-    <aside className="context-sidebar flex w-60 shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden transition-[width] duration-200">
+    <aside className="context-sidebar flex w-64 shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden transition-[width] duration-200">
       {/* Top Header */}
       <div className="flex h-11 items-center justify-between px-3 border-b border-border/60">
         <Link to="/overview" className="flex items-center gap-2 group">
@@ -257,7 +281,7 @@ function SidebarContents({
             {BRAND_NAME}
           </span>
         </Link>
-        <span className="text-[10px] font-mono text-muted-foreground/60">v{appVersion}</span>
+        <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
       </div>
 
       {/* Main Content Area */}
@@ -272,21 +296,11 @@ function SidebarContents({
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60 px-2 py-1 rounded transition-colors cursor-pointer"
             >
               <ArrowLeft size={12} />
-              <span>All Workspaces</span>
+              <span>All workspaces</span>
             </button>
 
-            {/* Active Workspace Identity Card */}
-            <div className="p-2.5 rounded-lg border border-border/60 bg-muted/20 flex flex-col gap-1">
-              <div className="text-xs font-semibold text-foreground truncate" title={activeWorkspace.description || activeWorkspace.branchName}>
-                {cockpit.workspaceTitle || activeWorkspace.description || activeWorkspace.branchName}
-              </div>
-              <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground truncate">
-                <span className="truncate">{activeWorkspace.branchName}</span>
-                <span>•</span>
-                <span>{activeWorkspace.repos.length} repos</span>
-              </div>
-            </div>
-
+            {/* The workspace header names the workspace; here only the repository picker. */}
+            <div className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Repositories</div>
             {/* Worktree Hierarchy Picker */}
             <WorktreePicker
               repoGroups={repoGroups}
@@ -296,10 +310,9 @@ function SidebarContents({
               onUpdateWorktreeTitle={(wtId, title, intent) => {
                 updateTitle(wtId, title, intent);
               }}
-              onNewWorktree={(repoName) => {
-                navigate(`/new?repo=${encodeURIComponent(repoName)}`);
-              }}
+              onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
             />
+            <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
           </div>
         ) : (
           /* ─── GLOBAL WORKSPACE SWITCHER LIST ───────────────────────────── */
@@ -309,13 +322,13 @@ function SidebarContents({
 
             {/* Top Nav Actions */}
             <div className="flex flex-col gap-0.5">
-              <NavLink to="/overview" className={({ isActive }) => linkClass(isActive)}>
+              <NavLink to="/overview" aria-label="Overview" className={({ isActive }) => linkClass(isActive)}>
                 <Activity size={14} />
-                <span>Overview</span>
+                <span className="min-w-0"><span className="block">Overview</span><span className="block text-[10px] font-normal text-muted-foreground">Pick up where you left off</span></span>
               </NavLink>
-              <NavLink to="/new" className={({ isActive }) => linkClass(isActive)}>
+              <NavLink to="/new" aria-label="New workspace" className={({ isActive }) => linkClass(isActive)}>
                 <Plus size={14} />
-                <span>Start work</span>
+                <span className="min-w-0"><span className="block">New workspace</span><span className="block text-[10px] font-normal text-muted-foreground">Start a task with your repos</span></span>
               </NavLink>
             </div>
 
@@ -323,21 +336,21 @@ function SidebarContents({
             <div className="pt-2 border-t border-border/60">
               <div className="flex items-center justify-between pb-1 px-1">
                 <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Workspaces
+                  {showArchived ? 'Archived workspaces' : 'Workspaces'}
                 </span>
-                <span className="text-[10px] font-mono text-muted-foreground/80">
-                  {workspaces.length}
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {showArchived ? archivedCount : workspaces.length - archivedCount}
                 </span>
               </div>
 
               {/* Filter Search & Sort */}
               <div className="flex items-center gap-1 mb-2">
                 <div className="relative flex-1">
-                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+                  <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
                   <input
                     type="text"
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => { setSearch(e.target.value); setVisibleWorkspaceCount(30); }}
                     placeholder="Filter..."
                     className="w-full rounded-md border border-border/60 bg-muted/30 pl-6 pr-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:bg-background focus:outline-hidden focus:ring-1 focus:ring-primary"
                   />
@@ -352,7 +365,7 @@ function SidebarContents({
                   </MenuTrigger>
                   <MenuPopup side="bottom" align="end" className="w-36 text-xs">
                     {(Object.keys(sortLabelMap) as WorkspaceSortOption[]).map((key) => (
-                      <MenuItem key={key} onClick={() => setSortBy(key)} className="flex items-center justify-between">
+                      <MenuItem key={key} onClick={() => { setSortBy(key); setVisibleWorkspaceCount(30); }} className="flex items-center justify-between">
                         <span>{sortLabelMap[key]}</span>
                         {sortBy === key && <Check size={12} className="text-primary" />}
                       </MenuItem>
@@ -369,10 +382,10 @@ function SidebarContents({
                   </div>
                 ) : filteredWorkspaces.length === 0 ? (
                   <div className="px-2 py-3 text-center text-xs text-muted-foreground italic">
-                    No workspaces match
+                    {search.trim() ? 'No workspaces match' : showArchived ? 'No archived workspaces' : 'No active workspaces'}
                   </div>
                 ) : (
-                  filteredWorkspaces.map((w) => {
+                  filteredWorkspaces.slice(0, visibleWorkspaceCount).map((w) => {
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
@@ -392,43 +405,38 @@ function SidebarContents({
                           onClick={() => onSelectWorkspace?.(w.branchName)}
                           className="flex min-w-0 flex-1 flex-col gap-0.5"
                         >
-                          <span className="truncate font-mono tracking-tight font-medium text-foreground" title={w.branchName}>
-                            {w.branchName}
+                          <span className="truncate font-medium text-foreground" title={w.name || w.branchName}>
+                            {w.name || w.branchName}
                           </span>
-                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground/80 font-mono">
+                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                            {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
+                            {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
                             <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
-                            {hasChanges && <span className="text-amber-500 font-semibold">• ±{st!.changedFiles}</span>}
+                            {w.archivedAt && <span className="font-semibold">archived</span>}
+                            {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
                         </Link>
                         <div className="flex items-center gap-1 shrink-0">
                           {st?.activeAssistants && st.activeAssistants.length > 0 && (
                             <div className="flex items-center gap-1">
                               {st.activeAssistants.map((ast) => (
-                                <span key={ast} className="inline-flex size-3.5 opacity-75">
-                                  {ast === 'antigravity' ? (
-                                    <AntigravityIcon className="size-3" />
-                                  ) : ast === 'claude' ? (
-                                    <SiClaude className="size-2.5 text-[#D97757]" />
-                                  ) : ast === 'codex' ? (
-                                    <BsOpenai className="size-2.5 text-foreground" />
-                                  ) : ast === 'cursor' ? (
-                                    <SiCursor className="size-2.5 text-foreground" />
-                                  ) : (
-                                    <SiGithubcopilot className="size-2.5 text-blue-400" />
-                                  )}
+                                <span key={ast} title={harnessName(ast)} className="inline-flex size-3.5 opacity-75">
+                                  <HarnessIcon harness={ast} className="size-3" />
                                 </span>
                               ))}
                             </div>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => openCli(w.branchName)}
-                            className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-                            title={`Open CLI chat for ${w.branchName}`}
-                            aria-label={`Open CLI chat for ${w.branchName}`}
-                          >
-                            <Terminal size={12} aria-hidden="true" />
-                          </button>
+                          {!w.archivedAt && (
+                            <button
+                              type="button"
+                              onClick={() => openCli(w.branchName)}
+                              className="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                              title={`Resume CLI chat for ${w.branchName}`}
+                              aria-label={`Resume CLI chat for ${w.branchName}`}
+                            >
+                              <History size={12} aria-hidden="true" />
+                            </button>
+                          )}
                           <span
                             className={cn(
                               'size-1.5 rounded-full shrink-0',
@@ -441,88 +449,72 @@ function SidebarContents({
                   })
                 )}
               </div>
+              {filteredWorkspaces.length > visibleWorkspaceCount && (
+                <button type="button" className="mt-2 w-full rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => setVisibleWorkspaceCount((count) => count + 30)}>
+                  Show more workspaces ({filteredWorkspaces.length - visibleWorkspaceCount} remaining)
+                </button>
+              )}
+              {(archivedCount > 0 || showArchived) && (
+                <button
+                  type="button"
+                  aria-pressed={showArchived}
+                  className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => { setShowArchived((shown) => !shown); setVisibleWorkspaceCount(30); }}
+                >
+                  {showArchived ? 'Back to active workspaces' : `Show archived (${archivedCount})`}
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* Tools & Library Accordion */}
-        <div className="mt-auto pt-2 border-t border-border/60">
-          <button
-            type="button"
-            onClick={() => setToolsExpanded(!toolsExpanded)}
-            aria-expanded={toolsExpanded}
-            className="flex w-full items-center justify-between px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground uppercase tracking-wider transition-colors cursor-pointer"
-          >
-            <span>Tools & Library</span>
-            <ChevronDown size={12} className={cn('transition-transform duration-200', !toolsExpanded && '-rotate-90')} />
+        <div className="border-t border-border/60 pt-2">
+          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Reusable setup</p>
+          {SETUP_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return <NavLink key={item.to} to={item.to} aria-label={item.label} className={linkClass(item.match(pathname))}>
+              <Icon size={14} />
+              <span className="min-w-0"><span className="block">{item.label}</span><span className="block text-[10px] font-normal text-muted-foreground">{item.description}</span></span>
+            </NavLink>;
+          })}
+          <p className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced tools</p>
+          {ADVANCED_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return <NavLink key={item.to} to={item.to} aria-label={item.label} className={linkClass(item.match(pathname))}>
+              <Icon size={14} />
+              <span className="min-w-0"><span className="block">{item.label}</span><span className="block text-[10px] font-normal text-muted-foreground">{item.description}</span></span>
+            </NavLink>;
+          })}
+        </div>
+
+        <div className="mt-auto border-t border-border/60 pt-2">
+          <NavLink to="/settings" aria-label="Settings" className={linkClass(pathname.startsWith('/settings'))}>
+            <SettingsIcon size={14} /><span>Settings</span>
+          </NavLink>
+          <a href="https://github.com/antan87/NexusFlow#readme" target="_blank" rel="noreferrer"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+            <BookOpen size={14} /><span>Guide</span>
+          </a>
+          <button type="button" onClick={() => setAppearanceExpanded((open) => !open)} aria-expanded={appearanceExpanded}
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+            <span>Appearance</span><ChevronDown size={13} className={cn('transition-transform', appearanceExpanded && 'rotate-180')} />
           </button>
-
-          {toolsExpanded && (
-            <div className="flex flex-col gap-0.5 mt-1">
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = item.match(pathname);
-                return (
-                  <NavLink key={item.to} to={item.to} className={linkClass(active)}>
-                    <Icon size={13} />
-                    <span>{item.label}</span>
-                  </NavLink>
-                );
-              })}
-
-              <a
-                href="https://github.com/antan87/NexusFlow#readme"
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <BookOpen size={13} />
-                <span>Guide</span>
-              </a>
-
-              {/* Color Theme Switcher */}
-              <div className="flex flex-col gap-1 py-1">
-                <div className="flex items-center justify-between px-2 text-[11px] text-muted-foreground">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <span className="size-2 rounded-full bg-primary" />
-                    <span>Theme: {COLOR_THEMES.find((t) => t.id === colorTheme)?.label ?? 'Sunset'}</span>
-                  </span>
-                </div>
-                <div className="grid grid-cols-5 gap-1 px-1">
-                  {COLOR_THEMES.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setColorTheme(t.id)}
-                      aria-label={`Switch to ${t.label} palette`}
-                      aria-pressed={colorTheme === t.id}
-                      title={`${t.label} palette — ${t.description}`}
-                      className={cn(
-                        'flex flex-col items-center justify-center py-1 px-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                        colorTheme === t.id
-                          ? 'bg-accent text-accent-foreground font-semibold ring-1 ring-border shadow-xs'
-                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
-                      )}
-                    >
-                      <span className={cn('size-2 rounded-full mb-0.5', t.dotClass)} />
-                      <span className="truncate max-w-full tracking-tight">{t.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dark/Light mode */}
-              <button
-                type="button"
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
-              >
-                {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-                <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-              </button>
+          {appearanceExpanded && <div className="space-y-2 p-2">
+            <div className="grid grid-cols-5 gap-1">
+              {COLOR_THEMES.map((palette) => <button key={palette.id} type="button" onClick={() => setColorTheme(palette.id)}
+                aria-label={`Switch to ${palette.label} palette`} aria-pressed={colorTheme === palette.id}
+                title={`${palette.label} palette — ${palette.description}`}
+                className={cn('flex flex-col items-center gap-1 rounded p-1 text-[10px]', colorTheme === palette.id ? 'bg-accent ring-1 ring-border' : 'hover:bg-accent/60')}>
+                <span className={cn('size-2 rounded-full', palette.dotClass)} />{palette.label}
+              </button>)}
             </div>
-          )}
+            <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            </button>
+          </div>}
         </div>
       </div>
 
@@ -538,7 +530,7 @@ function SidebarContents({
           <span>Collapse (z)</span>
         </button>
 
-        <span className="font-mono text-[10px] text-muted-foreground/50">240px</span>
+        <span className="font-mono text-[10px] text-muted-foreground">256px</span>
       </div>
     </aside>
   );

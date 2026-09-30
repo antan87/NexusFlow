@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Dialog,
   DialogPopup,
@@ -16,6 +17,10 @@ interface DeleteWorkspaceDialogProps {
   open: boolean;
   onClose: () => void;
   onConfirm: (name: string) => Promise<void>;
+  /** Offer archive, which keeps the record, instead of deleting it. */
+  onArchiveInstead?: (name: string) => void;
+  /** Whether the workspace is already archived (then there is nothing to archive instead). */
+  archived?: boolean;
   loading?: boolean;
 }
 
@@ -24,6 +29,8 @@ export function DeleteWorkspaceDialog({
   open,
   onClose,
   onConfirm,
+  onArchiveInstead,
+  archived = false,
   loading = false,
 }: DeleteWorkspaceDialogProps) {
   const [typedName, setTypedName] = useState('');
@@ -49,11 +56,26 @@ export function DeleteWorkspaceDialog({
         <DialogHeader>
           <DialogTitle className="text-destructive">Delete workspace</DialogTitle>
           <DialogDescription>
-            This action cannot be undone. This will force-remove all git worktrees and delete the entire folder for{' '}
-            <strong className="font-semibold text-foreground">{workspaceName}</strong>.
+            This action cannot be undone. This will force-remove all git worktrees, including uncommitted changes, and delete the entire folder for{' '}
+            <strong className="font-semibold text-foreground">{workspaceName}</strong>: its milestones, verification results, planning notes, knowledge and documents.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
+          {onArchiveInstead && !archived && (
+            <div className="rounded-md border border-border bg-secondary/40 p-3 text-xs">
+              <p className="text-foreground">To keep the record and only give back the worktrees, archive the workspace instead.</p>
+              <Button
+                variant="outline"
+                size="xs"
+                className="mt-2"
+                onClick={() => { const name = workspaceName; handleClose(); onArchiveInstead(name); }}
+                disabled={loading}
+              >
+                Archive instead
+              </Button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">Source repositories outside this workspace remain. Global ContextSpace chat and approvals, assistant-owned histories, and shared Workroom copies are separate. <Link className="underline" to="/settings#data-and-privacy" onClick={handleClose}>Review data and deletion boundaries</Link>.</p>
           <label className="block">
             <span className="mb-1 block text-xs text-muted-foreground">
               Please type <strong className="font-mono text-foreground">{workspaceName}</strong> to confirm:

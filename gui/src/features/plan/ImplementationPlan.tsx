@@ -22,6 +22,8 @@ import { ChatMarkdown } from '../../components/ChatMarkdown.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateDeliveryState } from '../../lib/api/queries.js';
 import type { WorkspaceLifecycle, WorkspaceVerificationReport } from '../../types.js';
 
 interface ImplementationPlanProps {
@@ -31,6 +33,8 @@ interface ImplementationPlanProps {
   handleRetryPlan: (wsId: string) => Promise<void>;
   workspaceId?: string;
   defaultViewMode?: 'flow' | 'preview' | 'raw';
+  /** Archived: show milestones and verification history, run nothing. */
+  readOnly?: boolean;
 }
 
 export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
@@ -40,6 +44,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   handleRetryPlan,
   workspaceId,
   defaultViewMode = 'flow',
+  readOnly = false,
 }) => {
   const [viewMode, setViewMode] = useState<'flow' | 'preview' | 'raw'>(defaultViewMode);
   const [milestoneMarkdown, setMilestoneMarkdown] = useState<string | null>(null);
@@ -50,6 +55,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
   const [verificationReport, setVerificationReport] = useState<WorkspaceVerificationReport | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [isFleetExpanded, setIsFleetExpanded] = useState(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (defaultViewMode) {
@@ -109,6 +115,9 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       setVerifyMessage({ status: 'fail', text: `Verification failed: ${err.message}` });
     } finally {
       setVerifying(false);
+      // The header gate, finish readiness and repository views read shared
+      // queries; refresh them together with this panel.
+      void invalidateDeliveryState(queryClient, workspaceId);
     }
   };
 
@@ -131,6 +140,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
       await loadLifecycle();
     } finally {
       setActionLoading(null);
+      void invalidateDeliveryState(queryClient, workspaceId);
     }
   };
 
@@ -193,10 +203,10 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           role="status"
           className={`mb-4 flex items-center justify-between p-3 rounded-lg text-xs font-medium border ${
             verifyMessage.status === 'pass'
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              ? 'bg-emerald-500/10 text-success-foreground border-emerald-500/30'
               : ['pass_dirty', 'no-tests', 'skipped'].includes(verifyMessage.status)
-              ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-              : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+              ? 'bg-amber-500/10 text-warning-foreground border-amber-500/30'
+              : 'bg-rose-500/10 text-destructive-foreground border-rose-500/30'
           }`}
         >
           <div className="flex items-center gap-2">
@@ -270,10 +280,10 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
           {hasMilestones && <Button size="xs" variant="outline" onClick={() => void loadLifecycle()} disabled={lifecycleLoading}>
             <RefreshCw size={12} className={lifecycleLoading ? 'animate-spin' : ''} /> Refresh Radar
           </Button>}
-          <Button size="xs" onClick={() => void handleVerify()} disabled={!workspaceId || verifying || actionLoading !== null}>
+          {!readOnly && <Button size="xs" onClick={() => void handleVerify()} disabled={!workspaceId || verifying || actionLoading !== null}>
             <ShieldCheck size={14} className={verifying ? 'animate-spin' : ''} />
             {verifying ? 'Running Tests...' : 'Run verification'}
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -310,15 +320,15 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                       <div className="flex items-start gap-3">
                         <div className="mt-0.5 shrink-0">
                           {step.status === 'completed' ? (
-                            <CheckCircle2 size={18} className="text-emerald-400" />
+                            <CheckCircle2 size={18} className="text-success-foreground" />
                           ) : step.status === 'verified' ? (
                             <ShieldCheck size={18} className="text-cyan-400" />
                           ) : step.status === 'in_progress' ? (
                             <PlayCircle size={18} className="text-primary animate-pulse" />
                           ) : step.status === 'blocked' ? (
-                            <Lock size={18} className="text-muted-foreground/60" />
+                            <Lock size={18} className="text-muted-foreground" />
                           ) : (
-                            <Clock size={18} className="text-amber-400/80" />
+                            <Clock size={18} className="text-warning-foreground/80" />
                           )}
                         </div>
 
@@ -330,7 +340,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                             <h5 className="text-sm font-semibold text-foreground">
                               {step.title}
                             </h5>
-                            {step.status === 'blocked' && <p className="w-full text-xs text-amber-500">Blocked: {step.unblockCondition || (step.dependsOn?.length ? `Complete ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}.` : 'Set an unblock condition in Edit milestones.')}</p>}
+                            {step.status === 'blocked' && <p className="w-full text-xs text-warning-foreground">Blocked: {step.unblockCondition || (step.dependsOn?.length ? `Complete ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}.` : 'Set an unblock condition in Edit milestones.')}</p>}
                             {step.owner && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
                                 <User size={10} /> {step.owner}
@@ -352,7 +362,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                           )}
 
                           {step.dependsOn && step.dependsOn.length > 0 && (
-                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+                            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                               <span className="font-semibold">Depends on:</span>
                               {step.dependsOn.map((dep) => (
                                 <span
@@ -366,7 +376,7 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                           )}
 
                           {step.lastVerificationStatus && (
-                            <div className={`mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded border ${step.lastVerificationStatus === 'pass' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
+                            <div className={`mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded border ${step.lastVerificationStatus === 'pass' ? 'text-success-foreground bg-emerald-500/10 border-emerald-500/20' : 'text-warning-foreground bg-amber-500/10 border-amber-500/20'}`}>
                               <ShieldCheck size={12} />
                               <span>Gate: {step.lastVerificationStatus.toUpperCase()}</span>
                               {step.lastVerificationSha && (
@@ -380,18 +390,18 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {(step.status === 'in_progress' || step.status === 'verified') && (
+                        {!readOnly && (step.status === 'in_progress' || step.status === 'verified') && (
                           <Button
                             size="xs"
                             variant="outline"
                             onClick={() => void handleStepAction(step.id, 'complete')}
                             disabled={verifying || actionLoading !== null}
-                            className="text-[11px] gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                            className="text-[11px] gap-1 border-emerald-500/40 text-success-foreground hover:bg-emerald-500/10"
                           >
                             <Check size={12} /> {actionLoading === step.id ? 'Working...' : requiresVerification ? 'Verify & Complete' : 'Mark Complete'}
                           </Button>
                         )}
-                        {step.status === 'pending' && (
+                        {!readOnly && step.status === 'pending' && (
                           <Button
                             size="xs"
                             variant="ghost"
@@ -405,14 +415,14 @@ export const ImplementationPlan: React.FC<ImplementationPlanProps> = ({
                         <span
                           className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
                             step.status === 'completed'
-                              ? 'bg-emerald-500/20 text-emerald-400'
+                              ? 'bg-emerald-500/20 text-success-foreground'
                               : step.status === 'verified'
                               ? 'bg-cyan-500/20 text-cyan-400'
                               : step.status === 'in_progress'
                               ? 'bg-primary/20 text-primary'
                               : step.status === 'blocked'
                               ? 'bg-muted/40 text-muted-foreground'
-                              : 'bg-amber-500/20 text-amber-400'
+                              : 'bg-amber-500/20 text-warning-foreground'
                           }`}
                         >
                           {step.status.replace('_', ' ')}
