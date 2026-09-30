@@ -17,6 +17,7 @@ import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
 import { getHarness, launchCommandFor, type HarnessManifest } from '../harness/manifest.js';
+import { BRAND_NAME } from './constants.js';
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
 
@@ -355,6 +356,20 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
       const harness = getHarness(a);
+      // A harness that reads MCP config only through an extension gets its
+      // `.mcp.json` written, so saying nothing here leaves the user to notice
+      // the tools are missing rather than why.
+      if (harness?.mcpViaExtension) {
+        warnings.push(
+          `Workspace assistant "${a}" needs the "${harness.mcpViaExtension}" extension to reach the ${BRAND_NAME} MCP server; without it the generated config is not read.`,
+        );
+        checks.push({
+          category: 'AI Assistants',
+          name: `${a} MCP`,
+          status: 'warn',
+          message: `requires the ${harness.mcpViaExtension} extension`,
+        });
+      }
       if (harness?.detection.kind === 'api-key') {
         const set = harness.detection.env.filter((name) => process.env[name]);
         if (set.length > 0) {

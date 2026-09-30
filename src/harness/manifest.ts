@@ -129,6 +129,15 @@ export interface HarnessManifest {
   /** Omitted when the harness configures MCP at the user level instead. */
   mcp?: McpTargetSpec[];
   /**
+   * The MCP client this harness needs, when it ships no built-in one.
+   *
+   * Writing the config is not enough: pi has no MCP client in its own binary,
+   * so a generated `.mcp.json` reaches it only through an extension. Declared
+   * here so the workspace check can say so, instead of leaving a user to
+   * discover it by noticing the tools are missing.
+   */
+  mcpViaExtension?: string;
+  /**
    * Saved-session and terminal-launch support. Omitted for a harness with no
    * local binary, which can still be an assistant and a chat provider.
    */
@@ -221,11 +230,14 @@ export const HARNESSES = {
   pi: {
     id: 'pi',
     label: 'Pi',
-    // Launchable and resumable, but generates no workspace resources yet.
-    role: 'session-only',
+    // A first-class assistant. It needs no generator: pi reads AGENTS.md
+    // natively, the same as codex and antigravity.
+    role: 'assistant',
     detection: { kind: 'binary', probe: 'pi', launchCommand: 'pi' },
     context: { kind: 'native-agents-md' },
     skills: [PORTABLE_SKILLS],
+    mcp: [ROOT_MCP],
+    mcpViaExtension: 'pi-mcp-adapter',
     terminal: { resumeArgs: (id: string) => ['--session', id], continueArgs: ['--continue'], history: true },
   },
   grok: {
@@ -340,6 +352,8 @@ export interface HarnessDescription {
   mcpConfigPaths: string[];
   /** Agent definition directory, when the harness supports agent files. */
   agentsDir?: string;
+  /** The MCP client this harness needs, when it ships none of its own. */
+  mcpViaExtension?: string;
 }
 
 /** Placeholder marking where a session id belongs in {@link HarnessDescription.resumeArgs}. */
@@ -364,6 +378,7 @@ export function describeHarnesses(): HarnessDescription[] {
     skillRoots: harness.skills.map((root) => root.root),
     mcpConfigPaths: (harness.mcp ?? []).map((target) => target.path),
     ...(harness.agents ? { agentsDir: harness.agents.dir } : {}),
+    ...(harness.mcpViaExtension ? { mcpViaExtension: harness.mcpViaExtension } : {}),
   }));
 }
 

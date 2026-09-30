@@ -118,9 +118,16 @@ describe('Server API Endpoints Unit Tests', () => {
     }
     // Only the agent-capable harness declares an agents directory.
     expect(harnesses.filter((harness) => harness.agentsDir).map((harness) => harness.id)).toEqual(['codex']);
-    // pi is launchable but not an assistant, which is the state the GUI cannot
-    // express without this endpoint.
-    expect(harnesses.find((harness) => harness.id === 'pi')).toMatchObject({ isAssistant: false, hasHistory: true });
+    // pi is both: a first-class assistant and a launchable one. It also
+    // declares the MCP client it needs, so a renderer can say why the server
+    // is unreachable rather than leaving the user to notice.
+    expect(harnesses.find((harness) => harness.id === 'pi')).toMatchObject({
+      isAssistant: true,
+      isLaunchable: true,
+      hasHistory: true,
+      mcpConfigPaths: ['.mcp.json'],
+      mcpViaExtension: 'pi-mcp-adapter',
+    });
     // grok is the reverse: a full assistant with no local binary at all.
     expect(harnesses.find((harness) => harness.id === 'grok')).toMatchObject({
       isAssistant: true,

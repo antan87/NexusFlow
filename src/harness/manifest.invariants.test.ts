@@ -145,17 +145,31 @@ describe('Harness manifest invariants', () => {
   });
 
   it('keeps the derived assistant type in step with the manifest role', () => {
-    // Deliberately explicit about pi: it is launchable and resumable but not an
-    // assistant, so it is absent from AIAssistant. Promoting it to `assistant`
-    // (milestone M2) must break this test on purpose, so the promotion is a
-    // reviewed change rather than a silent one.
+    // pi is an assistant as of M2. It was deliberately the one session-only
+    // harness before that, and this assertion is why the promotion had to be a
+    // reviewed change: flipping the role fails here rather than silently
+    // changing what the picker and the config schema accept.
     const derived: readonly AIAssistant[] = ASSISTANT_HARNESSES;
-    expect(derived).not.toContain('pi');
+    expect(derived).toContain('pi');
+    expect(HARNESSES.pi.role).toBe('assistant');
     expect(derived).toHaveLength(ASSISTANT_HARNESSES.length);
-    expect(HARNESSES.pi.role).toBe('session-only');
     // Every harness id is a valid SessionAssistant, so history can name pi.
     const sessions: readonly SessionAssistant[] = HARNESS_LIST.map((harness) => harness.id);
     expect(sessions).toContain('pi');
+  });
+
+  it('declares the MCP client pi needs, rather than leaving it tribal knowledge', () => {
+    // pi writes no MCP config of its own and reads none by default: the binary
+    // has no MCP client, so a generated `.mcp.json` only reaches it through an
+    // extension. That is the reason the pi harness was invisible in this
+    // workspace until a global config was hand-written.
+    expect(HARNESSES.pi.mcp?.map((target) => target.path)).toContain('.mcp.json');
+    expect(HARNESSES.pi.mcpViaExtension).toBe('pi-mcp-adapter');
+    // Every other assistant reads MCP config natively.
+    for (const harness of HARNESS_LIST) {
+      if (harness.id === 'pi' || !(harness.mcp ?? []).length) continue;
+      expect(harness.mcpViaExtension, `${harness.id} should not need an MCP extension`).toBeUndefined();
+    }
   });
 
   it('records a vendor only for a harness the normalized layer can drive', () => {

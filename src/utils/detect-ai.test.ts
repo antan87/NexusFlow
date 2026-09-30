@@ -4,6 +4,10 @@ import { detectAIAssistants } from './detect-ai.js';
 
 vi.mock('execa');
 
+/** Compare by name: the picker's order follows manifest declaration order, which is a
+ * product choice rather than a contract. */
+const byName = (entries: Array<{ name: string }>) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
+
 describe('detectAIAssistants', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -19,16 +23,19 @@ describe('detectAIAssistants', () => {
 
     const result = await detectAIAssistants();
 
-    expect(result).toEqual([
+    expect(byName(result)).toEqual(byName([
       { name: 'claude', displayName: 'Claude Code', detected: true, command: 'claude' },
       { name: 'antigravity', displayName: 'Antigravity', detected: true, command: 'agy' },
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      // pi is a full assistant as of M2; whether it is detected is still the
+      // `pi` binary being on PATH, because that is how a terminal session runs.
+      { name: 'pi', displayName: 'Pi', detected: false },
       // Credential-only: offered, but with no binary to launch and detected
       // from its env var rather than from PATH.
       { name: 'grok', displayName: 'Grok (xAI)', detected: false },
-    ]);
+    ]));
   });
 
   it('should handle failures gracefully and set detected to false', async () => {
@@ -36,16 +43,19 @@ describe('detectAIAssistants', () => {
 
     const result = await detectAIAssistants();
 
-    expect(result).toEqual([
+    expect(byName(result)).toEqual(byName([
       { name: 'claude', displayName: 'Claude Code', detected: false },
       { name: 'antigravity', displayName: 'Antigravity', detected: false },
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      // pi is a full assistant as of M2; whether it is detected is still the
+      // `pi` binary being on PATH, because that is how a terminal session runs.
+      { name: 'pi', displayName: 'Pi', detected: false },
       // Credential-only: offered, but with no binary to launch and detected
       // from its env var rather than from PATH.
       { name: 'grok', displayName: 'Grok (xAI)', detected: false },
-    ]);
+    ]));
   });
 
   it('gives copilot a launch command only when the copilot CLI is present', async () => {
