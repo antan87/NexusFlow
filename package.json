@@ -87,6 +87,7 @@
     "@hono/node-ws": {
       "@hono/node-server": "$@hono/node-server"
     },
+    "basic-ftp": "6.2.1",
     "pm2": {
       "js-yaml": "4.3.2"
     }
