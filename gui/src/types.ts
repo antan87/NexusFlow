@@ -324,6 +324,24 @@ export interface ServiceConfig {
   args: string[];
   port?: number;
   source: string;
+  /** Declared by a repository Procfile.dev/Procfile line; otherwise guessed. */
+  declared?: boolean;
+  declaredIn?: { file: string; line: number };
+  /** The command as written, when it runs through the shell. */
+  display?: string;
+}
+
+/** Why a service did not start or stopped unexpectedly. */
+export interface ServiceFailure {
+  name: string;
+  reason: string;
+  at: string;
+}
+
+/** A suggested Procfile.dev built from guessed services. */
+export interface ProcfileSuggestion {
+  file: string;
+  content: string;
 }
 
 export interface OrchestrationDetection {

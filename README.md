@@ -216,7 +216,7 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace archive` | Complete a workspace: remove its worktrees and merged branches it created, keep its record (`--park`, `--keep-branches`, `--delete-remote-branches`, `--dry-run`, `--json`) |
 | `ctxspace unarchive` | Restore an archived workspace as active; its repositories stay read-only references until prepared for editing |
 | `ctxspace remove` | Delete a workspace and its record, force-removing its git worktrees (alias: `rm`); `archive` keeps the record |
-| `ctxspace start` | Start all services in a workspace (auto-detected) |
+| `ctxspace start` | Start the services a workspace's `Procfile.dev`/`Procfile` declares; offers guessed services only after asking, and reports why any did not start |
 | `ctxspace stop` | Stop all running services |
 | `ctxspace status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
 | `ctxspace flow` | Visualize active lifecycle steps, milestone gates, and multi-branch sister fleet (`--step`, `--action`, `--assignment`) |

@@ -125,6 +125,7 @@ import {
 } from './core/scheduler.js';
 import {
   detectAllServices,
+  suggestProcfiles,
   detectOrchestrationTools,
   startServices,
   stopServices,
@@ -133,9 +134,10 @@ import {
   restartService,
   startOrchestrator,
   stopOrchestrator,
+  stopRecordedOrchestrator,
   tailLogFile,
   loadRunningState,
-  getPm2List,
+  readPm2List,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
@@ -1136,7 +1138,7 @@ const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 const statusSnapshots = new Map<string, {
   workspacesDir: string;
   workspaces: Feature[];
-  pm2List: Promise<any[]>;
+  pm2List: Promise<any[] | null>;
   expiresAt: number;
 }>();
 
@@ -1175,7 +1177,7 @@ app.get('/api/workspaces/status', async (c) => {
       snapshot = {
         workspacesDir: config.workspacesDir,
         workspaces,
-        pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        pm2List: workspaces.length ? readPm2List() : Promise.resolve([]),
         expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
       };
       snapshotId = randomUUID();
@@ -1187,7 +1189,7 @@ app.get('/api/workspaces/status', async (c) => {
 
     // Fetch the PM2 process list once for the whole overview instead of
     // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
-    const pm2List = selected.length ? await (snapshot?.pm2List ?? getPm2List()) : [];
+    const pm2List = selected.length ? await (snapshot?.pm2List ?? readPm2List()) : [];
 
     const entries = await Promise.all(
       selected.map(async (ws) => {
@@ -2053,6 +2055,9 @@ app.get('/api/workspace/:id/services', async (c) => {
       orchestrationTools: tools,
       runningState: runningState?.services || [],
       runningOrchestrators: runningState?.orchestrators || [],
+      failures: runningState?.failures || [],
+      // One suggestion per repository that declares nothing, even when others do.
+      suggestions: suggestProcfiles(services.filter((service) => !service.declared)),
     });
   } catch (error) {
     return errorResponse(c, error);
@@ -2068,7 +2073,8 @@ function getWorkspaceLogDir(workspacePath: string): string {
 }
 
 // 10. Start services in workspace. Configs are re-detected server-side —
-// the client only says "start", never what to execute.
+// the client only says "start", never what to execute. Only services the
+// repositories declare start together; guessed ones start one at a time.
 app.post('/api/workspace/:id/services/start', async (c) => {
   try {
     const id = c.req.param('id');
@@ -2076,9 +2082,12 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = getWorkspaceLogDir(workspacePath);
 
-    const services = await detectAllServices(workspacePath);
-    await startServices(services, workspacePath, logDir);
-    return c.json({ success: true });
+    const declared = (await detectAllServices(workspacePath)).filter((service) => service.declared);
+    if (declared.length === 0) {
+      return c.json({ error: 'No declared services. Add a Procfile.dev with one `name: command` line per process, or start a guessed service on its own.' }, 409);
+    }
+    const results = await startServices(declared, workspacePath, logDir);
+    return c.json({ success: results.every((result) => result.status === 'running'), results });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2119,10 +2128,10 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
     if (!service) {
       return c.json({ error: `Unknown service "${serviceName}" in this workspace.` }, 404);
     }
-    const running = action === 'restart'
+    const result = action === 'restart'
       ? await restartService(service, workspacePath, logDir)
       : await startService(service, workspacePath, logDir);
-    return c.json({ success: running !== null, service: running });
+    return c.json({ success: result.status === 'running', service: result, reason: result.reason });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2240,6 +2249,8 @@ app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
     const tools = await detectOrchestrationTools(workspacePath);
     const detection = tools.find((t) => t.id === body.id);
     if (!detection) {
+      // A recorded tool that is no longer detected can still be stopped.
+      if (action === 'stop' && await stopRecordedOrchestrator(body.id, workspacePath)) return c.json({ success: true });
       return c.json({ error: `Unknown orchestration tool "${body.id}" in this workspace.` }, 404);
     }
 

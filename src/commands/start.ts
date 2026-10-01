@@ -14,6 +14,7 @@ import {
   detectOrchestrationTools,
   startServices,
   startOrchestrator,
+  suggestProcfiles,
 } from '../orchestration/index.js';
 
 import { BRAND_NAME, CLI_NAME, PRIMARY_LOGS_DIR } from '../core/constants.js';
@@ -69,37 +70,72 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
     }
   }
 
-  // Auto-detect services
+  // Services the repositories declare start together; guesses need consent.
   console.log(chalk.cyan('Detecting services...'));
-  const services = await detectAllServices(workspacePath);
+  const detected = await detectAllServices(workspacePath);
+  const declared = detected.filter((svc) => svc.declared);
+  const guessed = detected.filter((svc) => !svc.declared);
 
-  if (services.length === 0) {
-    console.log(chalk.yellow('  No startable services found in workspace.'));
-    console.log(chalk.dim('  Make sure projects have package.json scripts, .csproj, or similar.\n'));
+  if (detected.length === 0) {
+    console.log(chalk.yellow('  No services found in this workspace.'));
+    console.log(chalk.dim('  Declare the processes to run in a Procfile.dev at a repository root, one per line:'));
+    console.log(chalk.dim('    web: npm run dev\n'));
     return;
   }
 
-  console.log(chalk.green(`  Found ${services.length} service(s):\n`));
-  for (const svc of services) {
+  for (const svc of declared) {
     const portStr = svc.port ? chalk.dim(` :${svc.port}`) : '';
-    console.log(`  ${chalk.bold(svc.name)}${portStr} — ${chalk.dim(`${svc.command} ${svc.args.join(' ')}`)}`);
+    const from = svc.declaredIn ? chalk.dim(` (${svc.declaredIn.file}:${svc.declaredIn.line})`) : '';
+    console.log(`  ${chalk.bold(svc.name)}${portStr} — ${chalk.dim(svc.display ?? `${svc.command} ${svc.args.join(' ')}`)}${from}`);
+  }
+  for (const svc of guessed) {
+    const portStr = svc.port ? chalk.dim(` :${svc.port}`) : '';
+    console.log(`  ${chalk.bold(svc.name)}${portStr} — ${chalk.dim(`${svc.command} ${svc.args.join(' ')}`)} ${chalk.yellow(`(guessed from ${svc.source})`)}`);
   }
   console.log();
 
-  const shouldStart = await confirm({
-    message: `Start ${services.length} service(s)?`,
-    default: true,
-  });
-
-  if (!shouldStart) {
-    console.log(chalk.dim('  Cancelled.\n'));
-    return;
+  let toStart = declared;
+  if (declared.length === 0) {
+    console.log(chalk.yellow('  Nothing is declared, so these are guesses. To declare them, review and save:'));
+    for (const suggestion of suggestProcfiles(guessed)) {
+      console.log(chalk.dim(`\n  ${suggestion.file}`));
+      for (const line of suggestion.content.trimEnd().split('\n')) console.log(`    ${line}`);
+    }
+    console.log();
+    const startGuessed = await confirm({ message: `Start the ${guessed.length} guessed service(s) anyway?`, default: false });
+    if (!startGuessed) {
+      console.log(chalk.dim('  Cancelled.\n'));
+      return;
+    }
+    toStart = guessed;
+  } else {
+    if (guessed.length > 0) {
+      console.log(chalk.yellow(`  ${guessed.length} guessed service(s) will not start with the declared ones. To declare them, review and save:`));
+      for (const suggestion of suggestProcfiles(guessed)) {
+        console.log(chalk.dim(`\n  ${suggestion.file}`));
+        for (const line of suggestion.content.trimEnd().split('\n')) console.log(`    ${line}`);
+      }
+      console.log();
+    }
+    const shouldStart = await confirm({ message: `Start ${declared.length} declared service(s)?`, default: true });
+    if (!shouldStart) {
+      console.log(chalk.dim('  Cancelled.\n'));
+      return;
+    }
   }
 
   const logDir = path.join(workspacePath, PRIMARY_LOGS_DIR);
-  await startServices(services, workspacePath, logDir);
+  const results = await startServices(toStart, workspacePath, logDir);
+  const failed = results.filter((result) => result.status === 'failed');
 
-  console.log(chalk.bold.green('\n✅ Services started!\n'));
+  if (failed.length === 0) {
+    console.log(chalk.bold.green(`\n✅ ${results.length} service(s) started.\n`));
+  } else {
+    console.log(chalk.bold.yellow(`\n${results.length - failed.length} of ${results.length} service(s) started. Not started:`));
+    for (const result of failed) console.log(`  ${chalk.red('✖')} ${chalk.bold(result.name)}: ${result.reason}`);
+    console.log();
+    process.exitCode = 1;
+  }
   console.log(chalk.dim(`  View logs:  ${CLI_NAME} logs`));
   console.log(chalk.dim(`  Stop all:   ${CLI_NAME} stop`));
   console.log(chalk.dim(`  Log dir:    ${logDir}\n`));

@@ -2278,9 +2278,9 @@ describe('Server API Endpoints Unit Tests', () => {
 
     it('POST /services/start re-detects server-side and ignores the request body', async () => {
       vi.mocked(orchestration.detectAllServices).mockResolvedValue([
-        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' },
+        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: true },
       ] as any);
-      vi.mocked(orchestration.startServices).mockResolvedValue(undefined);
+      vi.mocked(orchestration.startServices).mockResolvedValue([{ name: 'api', status: 'running', pid: 7 }]);
 
       const response = await app.request('/api/workspace/ws/services/start', {
         method: 'POST',
@@ -2292,7 +2292,32 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(orchestration.detectAllServices).toHaveBeenCalled();
       // The started services are the DETECTED ones, not the client's payload.
       const started = vi.mocked(orchestration.startServices).mock.calls[0]?.[0];
-      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' }]);
+      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: true }]);
+    });
+
+    it('POST /services/start starts only declared services and reports each result', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'app/web', command: '/bin/sh', args: ['-c', 'npm run dev'], cwd: '/mock', source: 'procfile', declared: true },
+        { name: 'tools', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: false },
+      ] as any);
+      vi.mocked(orchestration.startServices).mockResolvedValue([{ name: 'app/web', status: 'failed', reason: 'Port 3000 is already in use by another process.' }]);
+
+      const response = await app.request('/api/workspace/ws/services/start', { method: 'POST' });
+      expect(response.status).toBe(200);
+      expect(vi.mocked(orchestration.startServices).mock.calls.at(-1)?.[0].map((s: any) => s.name)).toEqual(['app/web']);
+      await expect(response.json()).resolves.toMatchObject({ success: false, results: [{ name: 'app/web', status: 'failed', reason: expect.stringContaining('Port 3000') }] });
+    });
+
+    it('POST /services/start refuses when nothing is declared instead of starting guesses', async () => {
+      vi.mocked(orchestration.startServices).mockClear();
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'tools', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: false },
+      ] as any);
+
+      const response = await app.request('/api/workspace/ws/services/start', { method: 'POST' });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('Procfile.dev') });
+      expect(orchestration.startServices).not.toHaveBeenCalled();
     });
 
     it('POST /services/:name/start 404s for an unknown service', async () => {
@@ -2311,6 +2336,19 @@ describe('Server API Endpoints Unit Tests', () => {
         body: JSON.stringify({ id: 'docker-compose:nope.yml' }),
       });
       expect(response.status).toBe(404);
+    });
+
+    it('POST /orchestrators/stop still stops a recorded tool that is no longer detected', async () => {
+      vi.mocked(orchestration.detectOrchestrationTools).mockResolvedValue([]);
+      vi.mocked(orchestration.stopRecordedOrchestrator).mockResolvedValue(true);
+
+      const response = await app.request('/api/workspace/ws/orchestrators/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'procfile:Procfile' }),
+      });
+      expect(response.status).toBe(200);
+      expect(orchestration.stopRecordedOrchestrator).toHaveBeenCalledWith('procfile:Procfile', expect.any(String));
     });
 
     it('GET /services/logs/:name rejects a traversal service name without reading outside the log dir', async () => {

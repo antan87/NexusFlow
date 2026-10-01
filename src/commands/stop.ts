@@ -13,6 +13,7 @@ import {
   readRawRunningState,
   stopOrchestrator,
   stopServices,
+  stopRecordedOrchestrator,
 } from '../orchestration/index.js';
 import { BRAND_NAME } from '../core/constants.js';
 
@@ -39,7 +40,9 @@ export async function stopCommand(workspaceArg?: string): Promise<void> {
     for (const running of orchestrators) {
       const detection = tools.find((t) => t.id === running.id);
       if (!detection) {
-        console.log(chalk.yellow(`  ⚠ ${running.tool} (${running.id}) is recorded as running but no longer detected — skipping.`));
+        // e.g. a Procfile started through honcho before Procfiles became declared services.
+        console.log(chalk.dim(`  Stopping ${running.tool} (no longer detected; stopping what was recorded)...`));
+        await stopRecordedOrchestrator(running.id, workspacePath);
         continue;
       }
       console.log(chalk.dim(`  Stopping ${running.tool}...`));
