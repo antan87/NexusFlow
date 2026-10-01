@@ -1,6 +1,7 @@
 import type { AISession, ChatMessage } from '../types.js';
 import type { SessionSource } from './cli-harnesses.js';
 import { findPiSessions, getPiTranscript, hasPiSessions } from './pi-sessions.js';
+import { findGrokSessions, getGrokTranscript, hasGrokSessions } from './grok-sessions.js';
 
 /** One provider owns all three operations needed for saved-session support. */
 export interface SessionLocationContext {
@@ -28,6 +29,11 @@ export const MODULAR_SESSION_READERS: Record<ModularSessionSource, SessionReader
     list: ({ roots, matchesCwd, targetCwd }) => findPiSessions(roots, matchesCwd, targetCwd),
     hasAny: ({ roots, matchesCwd }) => hasPiSessions(roots, matchesCwd),
     transcript: getPiTranscript,
+  },
+  grok: {
+    list: ({ roots, matchesCwd, targetCwd }) => findGrokSessions(roots, matchesCwd, targetCwd),
+    hasAny: ({ roots, matchesCwd }) => hasGrokSessions(roots, matchesCwd),
+    transcript: getGrokTranscript,
   },
 };
 

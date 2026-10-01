@@ -13,6 +13,7 @@ import { Separator } from '../components/ui/separator.js';
 import { Spinner } from '../components/ui/spinner.js';
 import { Switch } from '../components/ui/switch.js';
 import type { DetectedEditor, ContextSpaceConfig, StorageAdapterMeta } from '../types.js';
+import { useHarnesses } from '../lib/api/queries.js';
 import { FolderField } from '../features/setup/FolderField.js';
 import { checkFolders, repoSummary, type ConfigPathsReport, type FolderKey } from '../features/setup/setupApi.js';
 
@@ -63,6 +64,9 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [folderReport, setFolderReport] = useState<ConfigPathsReport | null>(null);
   const [checking, setChecking] = useState<Partial<Record<FolderKey, boolean>>>({});
+  // Selectable assistants, straight from the server's harness manifest.
+  const harnesses = useHarnesses();
+  const assistantOptions = (harnesses.data ?? []).filter((harness) => harness.isAssistant);
   const checkRequest = useRef(0);
   // A refused save reports which folder failed; show it on that field.
   useEffect(() => { if (saveError?.fields) setFolderReport(saveError.fields); }, [saveError]);
@@ -164,26 +168,21 @@ export function SettingsPage({
             >
               <SelectTrigger aria-label="Default Assistant">
                 <SelectValue>
-                  {config.defaultAssistant === 'claude'
-                    ? 'Claude Code'
-                    : config.defaultAssistant === 'antigravity'
-                      ? 'Antigravity'
-                      : config.defaultAssistant === 'codex'
-                        ? 'Codex'
-                        : config.defaultAssistant === 'copilot'
-                          ? 'GitHub Copilot'
-                          : config.defaultAssistant === 'cursor'
-                            ? 'Cursor'
-                            : 'None (Prompt me)'}
+                  {config.defaultAssistant
+                    ? assistantOptions.find((option) => option.id === config.defaultAssistant)?.pickerLabel ??
+                      config.defaultAssistant
+                    : 'None (Prompt me)'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup alignItemWithTrigger={false}>
                 <SelectItem value="">None (Prompt me)</SelectItem>
-                <SelectItem value="claude">Claude Code</SelectItem>
-                <SelectItem value="antigravity">Antigravity</SelectItem>
-                <SelectItem value="codex">Codex</SelectItem>
-                <SelectItem value="copilot">GitHub Copilot</SelectItem>
-                <SelectItem value="cursor">Cursor</SelectItem>
+                {/* Options come from the server's manifest, so a harness added
+                    on the backend appears here without editing this file. */}
+                {assistantOptions.map((assistant) => (
+                  <SelectItem key={assistant.id} value={assistant.id}>
+                    {assistant.pickerLabel}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
             <span className="text-xs text-muted-foreground">Your preferred workspace context manager.</span>

@@ -17,10 +17,19 @@ export type {
   CostConfidence,
 };
 
-/** Supported AI assistant identifiers. */
-export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
+import type { HarnessId, HarnessOfRole } from './harness/manifest.js';
+
+/**
+ * Supported AI assistant identifiers.
+ *
+ * Derived from the harness manifest rather than written by hand, so adding a
+ * harness cannot leave this union and the manifest disagreeing. Only harnesses
+ * with the `assistant` role qualify: a session-only harness (pi today) is
+ * launchable and resumable but generates no workspace resources.
+ */
+export type AIAssistant = HarnessOfRole<'assistant'>;
 /** CLI histories may come from tools that do not generate workspace resources. */
-export type SessionAssistant = AIAssistant | 'pi';
+export type SessionAssistant = HarnessId;
 
 /** Top-level NexusFlow configuration stored in ~/.nexusflow/config.json. */
 export interface NexusFlowConfig {

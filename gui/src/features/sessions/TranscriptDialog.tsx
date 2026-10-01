@@ -14,9 +14,9 @@ import {
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { findWorkspaceForSession } from '../../lib/status.js';
-import { useWorkspaceLaunchTargets, useLaunchTerminal } from '../../lib/api/queries.js';
+import { useWorkspaceLaunchTargets, useLaunchTerminal, useHarnesses } from '../../lib/api/queries.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
-import type { AISession, Feature, TranscriptMessage } from '../../types.js';
+import type { AISession, Feature, HarnessDescription, TranscriptMessage } from '../../types.js';
 
 interface TranscriptDialogProps {
   activeSession: AISession;
@@ -29,33 +29,22 @@ interface TranscriptDialogProps {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-const assistantLabel = (assistant: string) =>
-  assistant === 'antigravity'
-    ? 'Antigravity'
-    : assistant === 'claude'
-      ? 'Claude Code'
-      : assistant === 'codex'
-        ? 'OpenAI Codex'
-        : 'GitHub Copilot';
-
+/**
+ * Display name, badge tone and resume command all come from the manifest.
+ *
+ * These were a nested ternary, a tone chain and a switch whose default returned
+ * the Antigravity command, so a pi transcript was labelled "GitHub Copilot" and
+ * its "copy resume command" button copied `agy --conversation <id>` — a command
+ * for a different tool. An unknown harness now falls back to its raw id and no
+ * command rather than to a confident wrong answer.
+ */
 const assistantTone = (assistant: string) =>
   assistant === 'claude' ? 'warning' : assistant === 'codex' ? 'success' : assistant === 'antigravity' ? 'accent' : 'info';
 
-const getResumeCommand = (assistant: string, sessionId: string): string => {
-  switch (assistant) {
-    case 'antigravity':
-      return `agy --conversation ${sessionId}`;
-    case 'claude':
-      return `claude --resume ${sessionId}`;
-    case 'codex':
-      return `codex resume ${sessionId}`;
-    case 'copilot':
-      return `copilot --resume ${sessionId}`;
-    case 'cursor':
-      return `cursor-agent --resume ${sessionId}`;
-    default:
-      return `agy --conversation ${sessionId}`;
-  }
+/** The command that resumes `sessionId`, composed from the manifest's args. */
+const resumeCommandFor = (harness: HarnessDescription | undefined, sessionId: string): string => {
+  if (!harness?.launchCommand || harness.resumeArgs.length === 0) return '';
+  return [harness.launchCommand, ...harness.resumeArgs.map((arg) => arg.replace('{sessionId}', sessionId))].join(' ');
 };
 
 export function TranscriptDialog({
@@ -69,6 +58,10 @@ export function TranscriptDialog({
   showToast,
 }: TranscriptDialogProps) {
   const launchTargets = useWorkspaceLaunchTargets();
+  const harnesses = useHarnesses();
+  const activeHarness: HarnessDescription | undefined = activeSession
+    ? harnesses.data?.find((harness) => harness.id === activeSession.assistant)
+    : undefined;
   const launchTerminalMutation = useLaunchTerminal();
   const codexDesktop = launchTargets.data?.find((target) => target.id === 'codex-desktop');
   const codexDesktopAvailable = codexDesktop?.available === true;
@@ -142,10 +135,14 @@ export function TranscriptDialog({
         sessionId: activeSession.id,
         cwd: activeSession.workspacePath,
       });
-      showToast(`Opened ${assistantLabel(activeSession.assistant)} inside ContextSpace.`, 'success');
+      showToast(`Opened ${activeHarness?.label ?? activeSession.assistant} inside ContextSpace.`, 'success');
       setActiveSession(null);
     } catch {
-      const cmd = getResumeCommand(activeSession.assistant, activeSession.id);
+      const cmd = resumeCommandFor(activeHarness, activeSession.id);
+      if (!cmd) {
+        showToast(`No resume command is known for ${activeHarness?.label ?? activeSession.assistant}.`, 'error');
+        return;
+      }
       const copied = await safeCopyToClipboard(cmd);
       if (copied) {
         showToast(`Could not open terminal automatically. Copied command to clipboard:\n\n${cmd}`, 'info');
@@ -165,7 +162,7 @@ export function TranscriptDialog({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <StatusBadge tone={assistantTone(activeSession.assistant)}>
-                {assistantLabel(activeSession.assistant)}
+                {activeHarness?.label ?? activeSession.assistant}
               </StatusBadge>
               <span className="text-[10px] font-mono bg-muted/60 text-muted-foreground px-1.5 py-0.5 rounded">
                 Read-Only Transcript · {transcript.length} turns{totalTokens > 0 ? ` · ${totalTokens.toLocaleString()} tokens` : ''}
@@ -238,7 +235,16 @@ export function TranscriptDialog({
               variant="outline"
               size="sm"
               onClick={async () => {
-                const cmd = getResumeCommand(activeSession.assistant, activeSession.id);
+                const cmd = resumeCommandFor(activeHarness, activeSession.id);
+                if (!cmd) {
+                  // Copying an empty string and reporting success is worse than
+                  // saying why there is nothing to copy.
+                  showToast(
+                    `No resume command is known for ${activeHarness?.label ?? activeSession.assistant}.`,
+                    'error',
+                  );
+                  return;
+                }
                 await safeCopyToClipboard(cmd);
                 showToast(`Copied run command to clipboard:\n\n${cmd}`, 'success');
               }}

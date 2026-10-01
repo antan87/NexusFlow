@@ -55,12 +55,29 @@ export const ANTIGRAVITY_MODELS: readonly ModelOption[] = [
   { id: 'antigravity-preview-05-2026', label: 'Antigravity Preview', description: 'Preview model with experimental agentic capabilities.' },
 ] as const satisfies readonly ModelOption[];
 
+
+/**
+ * xAI's Grok catalog.
+ *
+ * The baseline is a floor, not a list: xAI ships models faster than a release
+ * cycle, so `fetchXaiModelsOnline` replaces it with what the account can actually
+ * reach. Guessing ids here that do not exist would produce a picker that fails
+ * on the first turn.
+ */
+export const GROK_MODELS: readonly ModelOption[] = [
+  { id: '', label: 'Automatic', description: 'Use the default selected for this xAI account.' },
+  { id: 'grok-4', label: 'Grok 4', description: 'Frontier reasoning and agentic coding.' },
+  { id: 'grok-4-fast', label: 'Grok 4 Fast', description: 'Lower latency for interactive work.' },
+  { id: 'grok-code-fast-1', label: 'Grok Code Fast 1', description: 'Cost-efficient model tuned for code editing.' },
+] as const satisfies readonly ModelOption[];
+
 export const PROVIDER_MODELS: Record<string, readonly ModelOption[]> = {
   'claude-cli': CLAUDE_MODELS,
   'claude-sdk': CLAUDE_MODELS,
   'codex-cli': CODEX_MODELS,
   'codex-sdk': CODEX_MODELS,
   'antigravity-cli': ANTIGRAVITY_MODELS,
+  'grok-native': GROK_MODELS,
 };
 
 export function parseAgyModels(rawOutput: string): ModelOption[] {
@@ -138,11 +155,35 @@ interface CachedModels {
   timestamp: number;
 }
 let cachedAgyModels: CachedModels | null = null;
+let cachedGrokModels: CachedModels | null = null;
 let cachedCodexModels: CachedModels | null = null;
 let cachedClaudeModels: CachedModels | null = null;
 let isRefreshingClaude = false;
 let isRefreshingAgy = false;
+let isRefreshingGrok = false;
 const CACHE_TTL_MS = 60_000;
+
+
+function refreshGrokModelsInBackground(): void {
+  if (isRefreshingGrok) return;
+  isRefreshingGrok = true;
+  fetchXaiModelsOnline()
+    .then((discovered) => {
+      isRefreshingGrok = false;
+      if (discovered.length <= 1) return;
+      const seen = new Set(discovered.map((model) => model.id));
+      for (const base of GROK_MODELS) {
+        if (!seen.has(base.id)) {
+          discovered.push(base);
+          seen.add(base.id);
+        }
+      }
+      cachedGrokModels = { models: discovered, timestamp: Date.now() };
+    })
+    .catch(() => {
+      isRefreshingGrok = false;
+    });
+}
 
 function refreshAgyModelsInBackground(): void {
   if (isRefreshingAgy) return;
@@ -204,8 +245,48 @@ export async function fetchAnthropicModelsOnline(apiKey?: string): Promise<Model
   return [];
 }
 
+
+/**
+ * Live model list from xAI.
+ *
+ * xAI's `/v1/models` follows the OpenAI shape, so the same request shape works.
+ * Best-effort and silent on failure: a missing key or a network blip must leave
+ * the baseline catalog in place rather than empty the picker.
+ */
+export async function fetchXaiModelsOnline(apiKey?: string): Promise<ModelOption[]> {
+  const key = apiKey || process.env.XAI_API_KEY;
+  if (!key) return [];
+  try {
+    const base = (process.env.XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, '');
+    const res = await fetch(`${base}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: Array<{ id: string }> };
+    if (!Array.isArray(json.data) || json.data.length === 0) return [];
+    const models: ModelOption[] = [
+      { id: '', label: 'Automatic', description: 'Use the default selected for this xAI account.' },
+    ];
+    const seen = new Set<string>(['']);
+    for (const model of json.data) {
+      if (!model?.id || seen.has(model.id)) continue;
+      seen.add(model.id);
+      models.push({
+        id: model.id,
+        label: model.id,
+        description: 'Model available to this xAI account.',
+      });
+    }
+    return models;
+  } catch {
+    return [];
+  }
+}
+
 export function invalidateModelsCache(providerId?: string): void {
   if (!providerId || providerId === 'antigravity-cli') cachedAgyModels = null;
+  if (!providerId || providerId === 'grok-native') cachedGrokModels = null;
   if (!providerId || providerId.startsWith('codex')) cachedCodexModels = null;
   if (!providerId || providerId.startsWith('claude')) cachedClaudeModels = null;
 }
@@ -243,6 +324,37 @@ export function getAvailableModels(providerId: string): readonly ModelOption[] {
       refreshAgyModelsInBackground();
     }
     return ANTIGRAVITY_MODELS;
+  }
+
+
+  if (providerId === 'grok-native') {
+    if (cachedGrokModels && now - cachedGrokModels.timestamp < CACHE_TTL_MS) {
+      return cachedGrokModels.models;
+    }
+    if (cachedGrokModels) {
+      refreshGrokModelsInBackground();
+      return cachedGrokModels.models;
+    }
+    if (process.env.XAI_API_KEY && !isRefreshingGrok) {
+      isRefreshingGrok = true;
+      fetchXaiModelsOnline()
+        .then((discovered) => {
+          if (discovered.length > 1) {
+            const seen = new Set(discovered.map((model) => model.id));
+            for (const base of GROK_MODELS) {
+              if (!seen.has(base.id)) {
+                discovered.push(base);
+                seen.add(base.id);
+              }
+            }
+            cachedGrokModels = { models: discovered, timestamp: Date.now() };
+          }
+        })
+        .finally(() => {
+          isRefreshingGrok = false;
+        });
+    }
+    return GROK_MODELS;
   }
 
   if (providerId === 'codex-cli' || providerId === 'codex-sdk') {

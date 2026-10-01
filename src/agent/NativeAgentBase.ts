@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import type { AgentSession } from './session.js';
+import { openWorkspaceMcp, type McpConnection, type McpTool } from './nativeMcp.js';
 
 /**
  * Shared lifecycle for the SDK-backed native agents. Owns the processing guard,
@@ -28,9 +30,51 @@ export abstract class NativeAgentBase extends EventEmitter {
     return null;
   }
 
-  public async start(cwd: string): Promise<void> {
+  /** Session for this turn, when the caller supplied one. */
+  protected session?: AgentSession;
+
+  public async start(cwd: string, session?: AgentSession): Promise<void> {
     this.cwd = cwd;
+    this.session = session;
     this.resetHistory();
+    // Connect once per session; a reconnect after stop() opens a fresh one.
+    this.mcp = undefined;
+  }
+
+  /** Terminates the MCP server process this session spawned, if any. */
+  protected async closeMcp(): Promise<void> {
+    const connection = this.mcp;
+    this.mcp = undefined;
+    await connection?.close();
+  }
+
+  /**
+   * The model to call, in the order a user expects: the model chosen in chat
+   * settings, then the provider's environment override, then its baseline.
+   *
+   * This existed only as the second and third steps, so choosing a model in the
+   * UI had no effect on any native provider — the selection was silently dropped
+   * and the baseline was sent instead.
+   */
+  protected resolveModel(baseline: string, envVar: string): string {
+    return this.session?.model ?? process.env[envVar] ?? baseline;
+  }
+
+
+  /** The session's MCP connection, opened once in start() and closed in stop(). */
+  private mcp?: McpConnection;
+
+  /**
+   * MCP tools for this turn, or none.
+   *
+   * A workspace generated for a native provider carries an `.mcp.json` that
+   * nothing read, so the tools the workspace advertises simply were not there.
+   * The connection is per *session*, not per turn: it owns a spawned server
+   * process, and connecting per turn leaked one process per turn.
+   */
+  protected async mcpTools(): Promise<McpTool[]> {
+    if (!this.mcp) this.mcp = await openWorkspaceMcp({ cwd: this.cwd });
+    return this.mcp.tools;
   }
 
   public async send(data: string): Promise<void> {
@@ -65,6 +109,10 @@ export abstract class NativeAgentBase extends EventEmitter {
   public stop(): void {
     this.abortController?.abort();
     this.abortController = null;
+    // Fire and forget: stop() is synchronous by contract, and a close failure
+    // has nothing to report to a caller that has already moved on. The
+    // connection is dropped either way, so it cannot be reused.
+    void this.closeMcp();
     this.emit('close', 0);
   }
 }

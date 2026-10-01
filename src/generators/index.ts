@@ -5,8 +5,6 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import type { AIAssistant, WorkspaceContext } from '../types.js';
 import { generateClaudeConfig } from './claude.js';
-import { generateAntigravityConfig } from './antigravity.js';
-import { generateCodexConfig } from './codex.js';
 import { generateCopilotConfig } from './copilot.js';
 import { generateCursorConfig } from './cursor.js';
 import { buildContextContent } from './base.js';
@@ -32,17 +30,24 @@ import {
   CLI_NAME,
 } from '../core/constants.js';
 
-/** Maps each assistant to its generator function and the file it produces. */
-const GENERATORS: Record<
-  AIAssistant,
-  {
-    generate: (ctx: WorkspaceContext, workspacePath: string) => Promise<void>;
-    outputFile: string;
-  }
+/**
+ * Generator implementations, keyed by harness id.
+ *
+ * The manifest decides *whether* a harness needs one: a `native-agents-md`
+ * harness reads the `AGENTS.md` written unconditionally above, so it has no
+ * entry here and needs no skip special case. Adding a harness that owns a
+ * context file is one manifest entry plus one line below.
+ */
+const GENERATORS: Partial<
+  Record<
+    AIAssistant,
+    {
+      generate: (ctx: WorkspaceContext, workspacePath: string) => Promise<void>;
+      outputFile: string;
+    }
+  >
 > = {
   claude: { generate: generateClaudeConfig, outputFile: 'CLAUDE.md' },
-  antigravity: { generate: generateAntigravityConfig, outputFile: 'AGENTS.md' },
-  codex: { generate: generateCodexConfig, outputFile: 'AGENTS.md' },
   copilot: { generate: generateCopilotConfig, outputFile: '.github/copilot-instructions.md' },
   cursor: { generate: generateCursorConfig, outputFile: PRIMARY_CURSOR_RULE_FILE },
 };
@@ -252,10 +257,10 @@ export async function generateContextFiles(
     }
   }
 
-  // Generate configuration for each selected assistant
+  // Generate configuration for each selected assistant that owns a context file
   for (const assistant of assistants) {
-    if (assistant === 'codex' || assistant === 'antigravity') continue;
     const entry = GENERATORS[assistant];
+    if (!entry) continue;
 
     try {
       await entry.generate(renderCtx, workspacePath);

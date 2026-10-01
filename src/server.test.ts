@@ -88,6 +88,62 @@ describe('Server API Endpoints Unit Tests', () => {
     vi.clearAllMocks();
   });
 
+  it('serves harness identity so renderers do not hardcode it', async () => {
+    const response = await app.request('/api/harnesses');
+    expect(response.status).toBe(200);
+    const harnesses = (await response.json()) as Array<Record<string, unknown>>;
+    // Every declared harness, including the session-only one the GUI used to
+    // be unable to name.
+    expect(harnesses.map((harness) => harness.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'copilot', 'cursor', 'grok', 'pi']);
+    for (const harness of harnesses) {
+      expect(harness).toMatchObject({
+        label: expect.any(String),
+        pickerLabel: expect.any(String),
+        role: expect.any(String),
+        isAssistant: expect.any(Boolean),
+        isLaunchable: expect.any(Boolean),
+        hasHistory: expect.any(Boolean),
+      });
+      if (harness.isLaunchable) {
+        expect(harness.launchCommand).toEqual(expect.any(String));
+        // Resume args must carry the placeholder exactly once, or a renderer
+        // cannot build a resume command without guessing.
+        const resumeArgs = harness.resumeArgs as string[];
+        expect(resumeArgs.filter((arg) => arg.includes('{sessionId}'))).toHaveLength(1);
+      } else {
+        // Nothing to launch, so nothing to resume.
+        expect(harness.resumeArgs).toEqual([]);
+        expect(harness.launchCommand).toBeUndefined();
+      }
+    }
+    // Only the agent-capable harness declares an agents directory.
+    expect(harnesses.filter((harness) => harness.agentsDir).map((harness) => harness.id)).toEqual(['codex']);
+    // pi is both: a first-class assistant and a launchable one. It also
+    // declares the MCP client it needs, so a renderer can say why the server
+    // is unreachable rather than leaving the user to notice.
+    expect(harnesses.find((harness) => harness.id === 'pi')).toMatchObject({
+      isAssistant: true,
+      isLaunchable: true,
+      hasHistory: true,
+      mcpConfigPaths: ['.mcp.json'],
+      mcpViaExtension: 'pi-mcp-adapter',
+    });
+    // grok is a full assistant *and* a launchable one: the official CLI exists,
+    // so it reaches CLI chat and the sessions tab. Its MCP config is TOML, in
+    // its own project-level file, because grok does not read `.mcp.json`.
+    expect(harnesses.find((harness) => harness.id === 'grok')).toMatchObject({
+      isAssistant: true,
+      isLaunchable: true,
+      hasHistory: true,
+      launchCommand: 'grok',
+      resumeArgs: ['--resume', '{sessionId}'],
+      // continueArgs is deliberately absent: only the server builds a continue
+      // command, and a renderer has no use for it.
+      mcpConfigPaths: ['.grok/config.toml'],
+      detection: { kind: 'binary', probe: 'grok' },
+    });
+  });
+
   it('keeps diagnostic capture and export behind the local host/origin guards', async () => {
     for (const route of ['preview', 'review', 'export']) {
       const response = await app.request(`/api/diagnostics/${route}`, {

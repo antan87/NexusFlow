@@ -64,8 +64,44 @@ export interface WorkspaceLaunchTarget {
   unavailableReason?: string;
 }
 
-export type AIAssistant = 'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor';
-export type SessionAssistant = AIAssistant | 'pi';
+/**
+ * Harness identity comes from `/api/harnesses`, not from a union copied here.
+ *
+ * This type used to be `'claude' | 'antigravity' | 'codex' | 'copilot' | 'cursor'`
+ * with `pi` bolted on for sessions, hand-mirrored from `src/types.ts` with
+ * nothing checking the two agreed. It is now the identity the server reports:
+ * `string`, narrowed where it matters by the data. See `HarnessDescription`.
+ */
+export type AIAssistant = string;
+export type SessionAssistant = string;
+
+/**
+ * The manifest as the server reports it. Mirrors `HarnessDescription` in
+ * `src/harness/manifest.ts` — keep the two in step. It was previously missing
+ * `isLaunchable` and `resumeArgs`, which is how three components ended up
+ * referencing fields the type did not declare.
+ */
+export interface HarnessDescription {
+  id: string;
+  label: string;
+  pickerLabel: string;
+  role: 'assistant' | 'session-only';
+  isAssistant: boolean;
+  /** A local binary exists, so there is a terminal target. */
+  isLaunchable: boolean;
+  hasHistory: boolean;
+  /** Binary that hosts a terminal session; absent for a credential-only harness. */
+  launchCommand?: string;
+  detection: { kind: 'binary'; probe: string } | { kind: 'api-key'; env: string[]; missingMessage: string };
+  /** Args that resume a session, with `{sessionId}` where the id goes. */
+  resumeArgs: string[];
+  contextPath?: string;
+  skillRoots: string[];
+  mcpConfigPaths: string[];
+  agentsDir?: string;
+  /** The MCP client this harness needs, when it ships none of its own. */
+  mcpViaExtension?: string;
+}
 
 export interface QuotaWindow {
   unit: 'tokens' | 'requests' | 'percent';

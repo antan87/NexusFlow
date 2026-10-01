@@ -16,6 +16,22 @@ import { getRepoStatus } from '../utils/multi-git.js';
 import { workspaceFileExists } from './storage.js';
 import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
+import { getHarness, launchCommandFor } from '../harness/manifest.js';
+import { BRAND_NAME } from './constants.js';
+import { CLI_LAUNCHER } from './workspace-tools.js';
+import * as fsSync from 'node:fs';
+import { accessSync, constants as fsConstants } from 'node:fs';
+
+/** Whether a path is executable by this process. Mode bits are not readable on Windows. */
+const isExecutable = (target: string): boolean => {
+  if (process.platform === 'win32') return true;
+  try {
+    accessSync(target, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
 
@@ -348,17 +364,63 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
   }
 
   // ── 7. AI Assistant CLIs ────────────────────────────────────────────────
-  const astMap: Record<string, string> = {
-    claude: 'claude',
-    codex: 'codex',
-    antigravity: 'agy',
-    copilot: 'copilot',
-    cursor: 'cursor-agent',
-  };
+  // What "available" means comes from the manifest: a binary harness is
+  // available when its command is on PATH, a credential-only harness when its
+  // env var is set. Probing a CLI for the second kind would always warn.
+  // ── 6b. Workspace CLI launcher ──────────────────────────────────────────
+  // Every generated MCP config invokes this launcher, so a launcher that lost
+  // its executable bit (an archive export, a checkout that does not preserve
+  // modes) breaks MCP for every client at once, with the client's error rather
+  // than ours. It is a committed file, so this is worth saying out loud.
+  {
+    const launcher = path.join(workspacePath, CLI_LAUNCHER);
+    if (fsSync.existsSync(launcher)) {
+      const executable = isExecutable(launcher);
+      if (!executable) {
+        warnings.push(`Workspace CLI launcher ${CLI_LAUNCHER} is not executable: run \`${BRAND_NAME} refresh\` in this workspace to restore it, or every MCP client will fail to start it.`);
+        checks.push({ category: 'Core Artifacts', name: CLI_LAUNCHER, status: 'warn', message: 'not executable' });
+      } else {
+        checks.push({ category: 'Core Artifacts', name: CLI_LAUNCHER, status: 'pass', message: 'executable' });
+      }
+    }
+  }
 
   if (feature.assistants && feature.assistants.length > 0) {
     for (const a of feature.assistants) {
-      const bin = astMap[a.toLowerCase()] ?? a.toLowerCase();
+      const harness = getHarness(a);
+      // A harness that reads MCP config only through an extension gets its
+      // `.mcp.json` written, so saying nothing here leaves the user to notice
+      // the tools are missing rather than why.
+      if (harness?.mcpViaExtension) {
+        warnings.push(
+          `Workspace assistant "${a}" needs the "${harness.mcpViaExtension}" extension to reach the ${BRAND_NAME} MCP server; without it the generated config is not read.`,
+        );
+        checks.push({
+          category: 'AI Assistants',
+          name: `${a} MCP`,
+          status: 'warn',
+          message: `requires the ${harness.mcpViaExtension} extension`,
+        });
+      }
+      if (harness?.detection.kind === 'api-key') {
+        const set = harness.detection.env.filter((name) => process.env[name]);
+        if (set.length > 0) {
+          checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `configured via ${set[0]}` });
+        } else {
+          warnings.push(`Workspace assistant "${a}" is not configured. ${harness.detection.missingMessage}`);
+          checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: harness.detection.missingMessage });
+        }
+        continue;
+      }
+      // An assistant id this build does not know is reported, not fatal: a
+      // workspace outlives the harness it was created with, and a health check
+      // that throws on unrecognised input is worse than useless.
+      if (!harness) {
+        warnings.push(`Workspace assistant "${a}" is not a known harness in this version of ${BRAND_NAME}.`);
+        checks.push({ category: 'AI Assistants', name: a, status: 'warn', message: 'unknown harness for this version' });
+        continue;
+      }
+      const bin = launchCommandFor(harness) ?? a.toLowerCase();
       const resolved = findExecutable(bin);
       if (!resolved) {
         warnings.push(`Workspace assistant "${a}" (${bin}) is not on system PATH.`);

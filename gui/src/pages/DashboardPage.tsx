@@ -13,15 +13,16 @@ import {
   Search,
   ExternalLink,
   Code2,
+  Pi,
 } from 'lucide-react';
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
-import type { Feature, WorkspaceStatus, WorkspaceLaunchTarget } from '../types.js';
+import type { Feature, HarnessDescription, WorkspaceStatus, WorkspaceLaunchTarget } from '../types.js';
 import { Button } from '../components/ui/button.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
 import { Spinner } from '../components/ui/spinner.js';
-import { useAiDetect, useWorkspaceLaunchTargets, useLaunchTerminal } from '../lib/api/queries.js';
+import { useAiDetect, useHarnesses, useWorkspaceLaunchTargets, useLaunchTerminal } from '../lib/api/queries.js';
 import { apiFetch } from '../lib/api/client.js';
 import { repoName } from '../lib/status.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
@@ -51,135 +52,122 @@ export interface HarnessConfig {
   }) => HarnessOption[];
 }
 
-const HARNESS_REGISTRY: HarnessConfig[] = [
-  {
-    id: 'antigravity',
-    name: 'Google Antigravity',
+/**
+ * Presentation for the launch targets a harness can open *besides* its CLI: a
+ * desktop app, an IDE, an editor. Identity, name and CLI binary come from the
+ * manifest — this used to be a hand-written registry, which is why a harness
+ * added on the backend had no dashboard card until someone edited this file.
+ */
+interface ExtraTarget {
+  targetId: string;
+  label: string;
+  shortLabel: string;
+  type: 'app' | 'editor';
+  unavailableReason: string;
+  icon: ReactNode;
+}
+
+const HARNESS_PRESENTATION: Record<string, {
+  name?: string;
+  shortName: string;
+  icon: ReactNode;
+  extras: ExtraTarget[];
+}> = {
+  antigravity: {
     shortName: 'Antigravity',
-    cliCommand: 'agy',
     icon: <AntigravityIcon className="size-4" />,
-    getOptions: ({ aiDetected, launchTargets }) => [
-      {
-        id: 'antigravity-cli',
-        label: 'CLI in Terminal',
-        shortLabel: 'CLI',
-        type: 'cli',
-        command: 'agy',
-        isAvailable: aiDetected['antigravity'] ?? false,
-        unavailableReason: 'CLI "agy" not found on PATH',
-        icon: <Terminal size={12} />,
-      },
-      {
-        id: 'antigravity-ide',
-        label: 'Antigravity IDE Workspace',
-        shortLabel: 'IDE',
-        type: 'editor',
-        targetId: 'antigravity',
-        isAvailable: launchTargets.find((t) => t.id === 'antigravity')?.available ?? false,
-        unavailableReason: 'Antigravity IDE not installed',
-        icon: <Code2 size={12} />,
-      },
-    ],
+    extras: [{
+      targetId: 'antigravity', label: 'Antigravity IDE Workspace', shortLabel: 'IDE',
+      type: 'editor', unavailableReason: 'Antigravity IDE not detected', icon: <Code2 size={12} />,
+    }],
   },
-  {
-    id: 'claude',
-    name: 'Claude Code',
+  claude: {
     shortName: 'Claude',
-    cliCommand: 'claude',
     icon: (
       <span className="grid size-5 place-items-center rounded bg-[#D97757] text-white shadow-2xs">
         <SiClaude className="size-3" />
       </span>
     ),
-    getOptions: ({ aiDetected, launchTargets }) => [
-      {
-        id: 'claude-cli',
-        label: 'CLI in Terminal',
-        shortLabel: 'CLI',
-        type: 'cli',
-        command: 'claude',
-        isAvailable: aiDetected['claude'] ?? false,
-        unavailableReason: 'CLI "claude" not found on PATH',
-        icon: <Terminal size={12} />,
-      },
-      {
-        id: 'claude-desktop',
-        label: 'Claude Desktop App',
-        shortLabel: 'App',
-        type: 'app',
-        targetId: 'claude-desktop',
-        isAvailable: launchTargets.find((t) => t.id === 'claude-desktop')?.available ?? false,
-        unavailableReason: 'Claude Desktop not detected',
-        icon: <ExternalLink size={12} />,
-      },
-    ],
+    extras: [{
+      targetId: 'claude-desktop', label: 'Claude Desktop App', shortLabel: 'App',
+      type: 'app', unavailableReason: 'Claude Desktop not detected', icon: <ExternalLink size={12} />,
+    }],
   },
-  {
-    id: 'codex',
+  codex: {
     name: 'OpenAI Codex',
     shortName: 'Codex',
-    cliCommand: 'codex',
     icon: (
       <span className="grid size-5 place-items-center rounded bg-foreground text-background shadow-2xs">
         <BsOpenai className="size-3" />
       </span>
     ),
-    getOptions: ({ aiDetected, launchTargets }) => [
-      {
-        id: 'codex-cli',
-        label: 'CLI in Terminal',
-        shortLabel: 'CLI',
-        type: 'cli',
-        command: 'codex',
-        isAvailable: aiDetected['codex'] ?? false,
-        unavailableReason: 'CLI "codex" not found on PATH',
-        icon: <Terminal size={12} />,
-      },
-      {
-        id: 'codex-desktop',
-        label: 'Codex Desktop App',
-        shortLabel: 'App',
-        type: 'app',
-        targetId: 'codex-desktop',
-        isAvailable: launchTargets.find((t) => t.id === 'codex-desktop')?.available ?? false,
-        unavailableReason: 'Codex Desktop not detected',
-        icon: <ExternalLink size={12} />,
-      },
-    ],
+    extras: [{
+      targetId: 'codex-desktop', label: 'Codex Desktop App', shortLabel: 'App',
+      type: 'app', unavailableReason: 'Codex Desktop not detected', icon: <ExternalLink size={12} />,
+    }],
   },
-  {
-    id: 'copilot',
-    name: 'GitHub Copilot',
+  copilot: {
     shortName: 'Copilot',
-    cliCommand: 'copilot',
     icon: (
       <span className="grid size-5 place-items-center rounded bg-gradient-to-tr from-purple-600 via-indigo-500 to-blue-600 text-white shadow-2xs">
         <SiGithubcopilot className="size-3" />
       </span>
     ),
-    getOptions: ({ aiDetected, launchTargets }) => [
-      {
-        id: 'copilot-cli',
-        label: 'Copilot CLI in Terminal',
-        shortLabel: 'CLI',
-        type: 'cli',
-        command: 'copilot',
-        isAvailable: aiDetected['copilot'] ?? false,
-        icon: <Terminal size={12} />,
-      },
-      {
-        id: 'copilot-vscode',
-        label: 'VS Code with Copilot',
-        shortLabel: 'VS Code',
-        type: 'editor',
-        targetId: 'vscode',
-        isAvailable: launchTargets.find((t) => t.id === 'vscode')?.available ?? false,
-        unavailableReason: 'VS Code not detected',
-        icon: <Code2 size={12} />,
-      },
-    ],
+    extras: [{
+      targetId: 'vscode', label: 'VS Code with Copilot', shortLabel: 'VS Code',
+      type: 'editor', unavailableReason: 'VS Code not detected', icon: <Code2 size={12} />,
+    }],
   },
-];
+  pi: {
+    shortName: 'Pi',
+    icon: <Pi className="size-4" />,
+    extras: [],
+  },
+  grok: {
+    shortName: 'Grok',
+    icon: <span className="grid size-5 place-items-center rounded bg-foreground text-background font-bold text-[10px] shadow-2xs">G</span>,
+    extras: [],
+  },
+};
+
+/** One card per launchable harness, plus whatever extras it declares above. */
+export function buildHarnesses(
+  harnesses: HarnessDescription[],
+  ctx: { aiDetected: Record<string, boolean>; launchTargets: WorkspaceLaunchTarget[] },
+): HarnessConfig[] {
+  return harnesses
+    // A credential-only harness has no terminal to start, so a card would launch
+    // nothing.
+    .filter((harness) => harness.isLaunchable)
+    .map((harness) => {
+      const extra = HARNESS_PRESENTATION[harness.id] ?? { shortName: harness.label, icon: <Terminal size={12} />, extras: [] };
+      const cli = harness.launchCommand ?? harness.id;
+      return {
+        id: harness.id,
+        name: extra.name ?? harness.label,
+        shortName: extra.shortName,
+        cliCommand: cli,
+        icon: extra.icon,
+        getOptions: () => [
+          {
+            id: `${harness.id}-cli`,
+            label: 'CLI in Terminal',
+            shortLabel: 'CLI',
+            type: 'cli' as const,
+            command: cli,
+            isAvailable: ctx.aiDetected[harness.id] ?? false,
+            unavailableReason: `CLI "${cli}" not found on PATH`,
+            icon: <Terminal size={12} />,
+          },
+          ...extra.extras.map((target) => ({
+            ...target,
+            id: `${harness.id}-${target.targetId}`,
+            isAvailable: ctx.launchTargets.find((t) => t.id === target.targetId)?.available ?? false,
+          })),
+        ],
+      } satisfies HarnessConfig;
+    });
+}
 
 interface DashboardPageProps {
   workspaces: Feature[];
@@ -207,6 +195,7 @@ export function DashboardPage({
   showToast,
 }: DashboardPageProps) {
   const aiDetect = useAiDetect();
+  const harnesses = useHarnesses();
   const launchTargets = useWorkspaceLaunchTargets();
   const launchTerminalMutation = useLaunchTerminal();
 
@@ -235,7 +224,10 @@ export function DashboardPage({
 
   // Evaluated Harnesses with Options
   const evaluatedHarnesses = useMemo(() => {
-    return HARNESS_REGISTRY.map((harness) => {
+    return buildHarnesses(harnesses.data ?? [], {
+      aiDetected: aiDetectedMap,
+      launchTargets: targetsList,
+    }).map((harness) => {
       const allOptions = harness.getOptions({
         aiDetected: aiDetectedMap,
         launchTargets: targetsList,

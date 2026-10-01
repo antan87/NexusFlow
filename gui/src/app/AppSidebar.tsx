@@ -21,7 +21,7 @@ import {
   ArrowLeft,
   type LucideIcon,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
+import { HarnessIcon, useHarnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -86,6 +86,8 @@ function SidebarContents({
   const navigate = useNavigate();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { openCli } = useFloatingChat();
+  // Harness display names come from the server manifest, not a local id map.
+  const harnessName = useHarnessName();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);

@@ -39,6 +39,7 @@ import { API_BASE } from './lib/apiBase.js';
 import { apiFetch } from './lib/api/client.js';
 import {
   useAiDetect,
+  useHarnesses,
   useEditorDetect,
   useRepos,
   useWorkflowTemplates,
@@ -118,6 +119,7 @@ function AppInner() {
   // the Projects/Start-work pages read) — one fetch, one source of truth.
   const reposQuery = useRepos();
   const aiDetectQuery = useAiDetect();
+  const harnesses = useHarnesses();
   const editorsQuery = useEditorDetect();
   const templatesQuery = useWorkflowTemplates();
   const repos: RepoInfo[] = reposQuery.data ?? [];
@@ -681,7 +683,17 @@ function AppInner() {
     assistant: string,
   ): Promise<boolean> => {
     if (assistant !== 'codex') {
-      const cmd = assistant === 'claude' ? `claude --resume ${sessionId}` : `agy --conversation ${sessionId}`;
+      // Built from the manifest's resume args. This used to be a ternary that
+      // sent every harness other than claude and codex to `agy --conversation`,
+      // silently producing a wrong command for copilot, cursor and pi.
+      const spec = harnesses.data?.find((harness) => harness.id === assistant);
+      const cmd = [spec?.launchCommand, ...(spec?.resumeArgs ?? []).map((arg) => arg.replace('{sessionId}', sessionId))]
+        .filter(Boolean)
+        .join(' ');
+      if (!cmd) {
+        showToast(`No resume command is known for ${assistant}.`, 'error');
+        return false;
+      }
       await safeCopyToClipboard(cmd);
       showToast(`Copied ${assistant} resume command to clipboard:\n\n${cmd}`, 'info');
       return true;

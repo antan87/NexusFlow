@@ -7,6 +7,7 @@ import {
   buildSystemPrompt,
   executeNativeTool,
 } from './nativeTools.js';
+import { mcpToolSchema } from './nativeMcp.js';
 
 export class NativeAgent extends NativeAgentBase {
   protected readonly label = 'NativeAgent';
@@ -16,7 +17,9 @@ export class NativeAgent extends NativeAgentBase {
 
   constructor() {
     super();
-    this.modelName = process.env.OPENAI_MODEL || 'gpt-4o';
+    // Resolved per turn in runLoop: the model can be chosen in chat settings,
+    // which start() only learns after construction.
+    this.modelName = this.resolveModel('gpt-4o', 'OPENAI_MODEL');
   }
 
   // The OpenAI SDK throws on an empty key, so build the client lazily — after
@@ -34,20 +37,31 @@ export class NativeAgent extends NativeAgentBase {
   }
 
   protected async runLoop(userInput: string, signal: AbortSignal) {
+    // The session is supplied by start(), after construction.
+    this.modelName = this.resolveModel('gpt-4o', 'OPENAI_MODEL');
     this.messages.push({ role: 'user', content: userInput });
 
-    const tools = NATIVE_TOOLS.map((t) => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: {
-          type: 'object',
-          properties: { [t.argName]: { type: 'string', description: t.argDescription } },
-          required: [t.argName],
+    // Same gap as the xAI agent: a generated .mcp.json was never read, because a
+    // native provider brings no MCP client of its own.
+    const mcp = await this.mcpTools();
+    if (mcp.length > 0) {
+      this.emit('data', `\n\n*Connected to the workspace MCP server (${mcp.length} tools)*\n`);
+    }
+    const tools = [
+      ...NATIVE_TOOLS.map((t) => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: {
+            type: 'object',
+            properties: { [t.argName]: { type: 'string', description: t.argDescription } },
+            required: [t.argName],
+          },
         },
-      },
-    }));
+      })),
+      ...mcp.map(mcpToolSchema),
+    ];
 
     let completed = false;
 
@@ -98,15 +112,18 @@ export class NativeAgent extends NativeAgentBase {
         break;
       }
 
+      const byName = new Map(mcp.map((tool) => [tool.name, tool]));
       for (const tc of toolCalls) {
+        const name = tc.function?.name;
+        const remote = byName.get(name);
         let result: string;
         try {
-          const args = JSON.parse(tc.function.arguments || '{}');
-          result = await executeNativeTool(this.cwd, tc.function.name, args);
+          const args = JSON.parse(tc.function?.arguments || '{}');
+          result = remote ? await remote.call(args) : await executeNativeTool(this.cwd, name, args);
         } catch (err: any) {
-          result = `Error: ${err.message}`;
+          result = `Error: ${err?.message}`;
         }
-        this.messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: result });
+        this.messages.push({ role: 'tool', tool_call_id: tc.id, name, content: result });
       }
     }
 
