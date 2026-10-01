@@ -5,7 +5,8 @@ import { useServiceAction, useWorkspaceServices } from '../../lib/api/queries.js
 export function WorkspaceServicesControl({ workspace, active }: { workspace: string; active: boolean }) {
   const services = useWorkspaceServices(active ? workspace : null);
   const action = useServiceAction(workspace);
-  if (!services.data?.services.length) return null;
+  // Only declared services start together; guesses are started from the Services tab.
+  if (!services.data?.services.some(service => service.declared)) return null;
   const running = services.data.runningState.length;
   return <span className="inline-flex items-center gap-1">
     {running ? <span className="text-[10px] text-emerald-700" title={`${running} running service${running === 1 ? '' : 's'}`}>{running} running</span>

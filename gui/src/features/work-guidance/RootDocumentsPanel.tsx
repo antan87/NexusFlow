@@ -4,7 +4,8 @@ import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { API_BASE } from '../../lib/apiBase.js';
-import { DocumentPreview, type DocumentKind, type DocumentPreviewData } from './DocumentPreview.js';
+import type { DocumentKind, DocumentPreviewData } from './DocumentPreview.js';
+import { DocumentViewer } from './DocumentViewer.js';
 import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 
 type RootDocument = { name: string; size: number; modifiedAt: string; kind: DocumentKind };
@@ -87,17 +88,21 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
           {back && <Button size="sm" variant="ghost" className="-ml-2" onClick={() => { setTrail((previous) => previous.slice(0, -1)); setSelected(back); }}>
             <ArrowLeft size={14} />Back to {back.split('/').pop()}
           </Button>}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold break-all">{selected}</h3>
-            <div className="flex items-center gap-3 text-sm">
-              {(preview?.kind === 'markdown' || preview?.kind === 'html') && <Button size="sm" variant="outline" onClick={() => setRaw((value) => !value)}>{raw ? 'Rendered view' : 'Raw text'}</Button>}
-              <a href={`${fileUrl}&download=1`} download={selected.split('/').pop()} className="text-primary underline">Download</a>
-              <Button size="sm" variant="ghost" onClick={() => choose(null)}>Close document</Button>
-            </div>
-          </div>
-          {opening && <p role="status" className="text-sm text-muted-foreground">Opening document…</p>}
-          {previewError && <p role="alert" className="text-sm text-destructive">{previewError} <Button size="sm" variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry preview</Button></p>}
-          {preview && <div className="max-h-[70vh] overflow-auto"><DocumentPreview preview={preview} fileUrl={`${fileUrl}&revision=${revision}`} raw={raw} links={links} /></div>}
+          <DocumentViewer
+            title={selected}
+            preview={preview}
+            raw={raw}
+            onToggleRaw={preview?.kind === 'markdown' || preview?.kind === 'html' ? () => setRaw((value) => !value) : undefined}
+            downloadHref={`${fileUrl}&download=1`}
+            browserHref={preview?.kind === 'html' ? `${fileUrl}&open=1` : undefined}
+            onClose={() => choose(null)}
+            fileUrl={`${fileUrl}&revision=${revision}`}
+            links={links}
+            status={<>
+              {opening && <p role="status" className="text-sm text-muted-foreground">Opening document…</p>}
+              {previewError && <p role="alert" className="text-sm text-destructive">{previewError} <Button size="sm" variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry preview</Button></p>}
+            </>}
+          />
         </>}
       </article>
     </div>

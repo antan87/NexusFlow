@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { format } from 'node:util';
 
 import { loadConfig } from '../core/config.js';
 import type { NexusFlowConfig } from '../types.js';
@@ -88,7 +89,20 @@ async function resolveWorkspaceId(workspaceId: string, config: NexusFlowConfig):
   return canonicalWorkspace;
 }
 
+/**
+ * Stdout carries the MCP protocol. Core code logs progress with console.log
+ * (refresh, service stop, generators); route it to stderr so a tool can never
+ * write into the protocol stream. The transport writes to stdout directly.
+ */
+export function routeConsoleToStderr(): void {
+  const toStderr = (...args: unknown[]) => { process.stderr.write(`${format(...args)}\n`); };
+  console.log = toStderr;
+  console.info = toStderr;
+  console.debug = toStderr;
+}
+
 export async function startMcpServer(optionsOrWorkspacePath?: string | McpServerOptions) {
+  routeConsoleToStderr();
   const options: McpServerOptions = typeof optionsOrWorkspacePath === 'string'
     ? { workspacePath: optionsOrWorkspacePath }
     : optionsOrWorkspacePath ?? {};
@@ -146,7 +160,7 @@ export async function startMcpServer(optionsOrWorkspacePath?: string | McpServer
       };
     }
 
-    const ctx: ToolContext = { config, workspacePath: resolvedWorkspacePath };
+    const ctx: ToolContext = { config, workspacePath: resolvedWorkspacePath, ...(workspacePath ? { boundWorkspacePath: workspacePath } : {}) };
     return tool.handler((args ?? {}) as Record<string, unknown>, ctx);
   });
 

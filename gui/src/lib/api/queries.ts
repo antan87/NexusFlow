@@ -21,6 +21,8 @@ import type {
   RunningOrchestrator,
   RunningService,
   ServiceConfig,
+  ServiceFailure,
+  ProcfileSuggestion,
   SkillCategory,
   SkillItem,
   CodexAgentItem,
@@ -362,6 +364,10 @@ export interface WorkspaceServicesResponse {
   orchestrationTools: OrchestrationDetection[];
   runningState: RunningService[];
   runningOrchestrators: RunningOrchestrator[];
+  /** Why services did not start or stopped unexpectedly (older servers omit it). */
+  failures?: ServiceFailure[];
+  /** Procfile.dev suggestions when nothing is declared (older servers omit it). */
+  suggestions?: ProcfileSuggestion[];
 }
 
 /** Detected services + running state for a workspace, polled while displayed. */

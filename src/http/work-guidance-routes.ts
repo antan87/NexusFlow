@@ -31,12 +31,40 @@ export function registerWorkGuidanceRoutes(app: Hono, resolveWorkspace: (id: str
       const root = await resolveWorkspace(c.req.param('id'));
       if (!root) return c.json({ error: 'Workspace not found.' }, 404);
       const download = c.req.query('download') === '1';
+      const open = c.req.query('open') === '1';
       const document = await readRootDocument(root, c.req.query('name') ?? '', download);
       c.header('Content-Type', document.mime);
       c.header('X-Content-Type-Options', 'nosniff');
       c.header('Cache-Control', 'no-store');
-      c.header('Content-Security-Policy', "sandbox; default-src 'none'");
-      c.header('Content-Disposition', `${download || document.kind === 'download' || document.kind === 'html' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(document.name.split('/').pop() ?? document.name).replace(/'/g, '%27')}`);
+      if (open) {
+        // "Open in browser" renders the document as authored: scripts, remote stylesheets, webfonts
+        // and images all work, which is the whole point, since the in-app preview deliberately
+        // blocks all of them.
+        //
+        // The `sandbox` CSP directive without `allow-same-origin` is what keeps this safe. It puts
+        // the document on an opaque origin, so it cannot read this app's cookies or localStorage,
+        // and it inherits no privileges from being served here. Deliberately absent:
+        // `allow-same-origin` (would undo the isolation) and `allow-popups-to-escape-sandbox` (a new
+        // tab that is no longer constrained at all).
+        //
+        // Residual risk, stated plainly: an opaque origin can still *send* cross-origin requests, so
+        // this document could issue a blind POST to the local API. CORS stops it reading any
+        // response, and the local dashboard has no session to ride, but it is not a hard boundary
+        // against a hostile document. Opening one is always an explicit user action on a file the
+        // user chose.
+        c.header('Content-Security-Policy', [
+          'sandbox allow-scripts allow-popups allow-forms allow-modals',
+          "default-src * data: blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+        ].join('; '));
+      } else {
+        // Default delivery stays locked down: never executes, never renders in the app origin.
+        c.header('Content-Security-Policy', "sandbox; default-src 'none'");
+      }
+      const filename = document.name.split('/').pop() ?? document.name;
+      // `download=1` always attaches, `open=1` always renders, and otherwise only non-HTML,
+      // non-download kinds render in place.
+      const inline = !download && (open || (document.kind !== 'download' && document.kind !== 'html'));
+      c.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(filename).replace(/'/g, '%27')}`);
       return c.body(new Uint8Array(document.bytes));
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : 'Unable to open document.' }, 400);

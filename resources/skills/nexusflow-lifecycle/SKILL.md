@@ -86,6 +86,8 @@ milestone's verification command. Wait for one transition to finish before start
 another, then check `ctxspace flow --json` for the recorded gate status and tested
 revision. A successful transition command can still record a failed verification;
 investigate the gate result before retrying or treating the milestone as complete.
+A gate that records `timeout` hit its time limit (30 minutes unless the milestone sets
+`verificationTimeoutSeconds`); raise the limit rather than weakening the command.
 
 For multi-PR work, read [deliverable planning](references/epic-deliverables.md). Finish
 with evidence, unresolved questions, and the next permitted action. Keep handoffs in

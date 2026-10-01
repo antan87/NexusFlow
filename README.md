@@ -216,7 +216,7 @@ Open this folder in your editor → your AI assistant picks up the context and s
 | `ctxspace archive` | Complete a workspace: remove its worktrees and merged branches it created, keep its record (`--park`, `--keep-branches`, `--delete-remote-branches`, `--dry-run`, `--json`) |
 | `ctxspace unarchive` | Restore an archived workspace as active; its repositories stay read-only references until prepared for editing |
 | `ctxspace remove` | Delete a workspace and its record, force-removing its git worktrees (alias: `rm`); `archive` keeps the record |
-| `ctxspace start` | Start all services in a workspace (auto-detected) |
+| `ctxspace start` | Start the services a workspace's `Procfile.dev`/`Procfile` declares; offers guessed services only after asking, and reports why any did not start |
 | `ctxspace stop` | Stop all running services |
 | `ctxspace status` | Show live repo SHA/branch/dirty/push state, generated-context freshness, and service status |
 | `ctxspace flow` | Visualize active lifecycle steps, milestone gates, and multi-branch sister fleet (`--step`, `--action`, `--assignment`) |
@@ -349,6 +349,8 @@ ctxspace verify --command "npm test" --timeout 120
 ctxspace verify --json
 ```
 
+A milestone gate (`ctxspace flow --step <id> --action complete`) runs that milestone's verification command with a 30-minute limit, since gates usually run a full suite, a build and browser tests. Set a different limit per milestone with `verificationTimeoutSeconds` (30 seconds to 2 hours) in the plan, or "verification time limit" in the milestone editor. A gate that runs out of time records `timeout` and says which limit it hit.
+
 ### Verification Invariants & Security
 - **Strict Sequential Execution**: Tests are executed sequentially per repository to prevent resource starvation and test harness interference.
 - **Dangerous Operator Rejection**: Command strings containing shell operators (`&&`, `||`, `;`, `|`, `` ` ``, `$()`) are rejected to eliminate command injection risks and ensure deterministic status reporting.
@@ -374,7 +376,9 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `add_knowledge` | Record a titled decision, gotcha, assumption, or question with optional scope/evidence |
 | `promote_knowledge` | Copy a learning into a repo's persistent base knowledge |
 | `finish_workspace` | Commit, push, and return PR/compare links (never deletes anything) |
-| `preview_archive` | Show what archiving would remove and keep, and what blocks it (changes nothing; archive itself runs from the CLI or app) |
+| `preview_archive` | Show what archiving would remove and keep, and what blocks it (changes nothing) |
+| `archive_workspace` | Archive another workspace (never the one the server serves or runs inside); `park`, `keepBranches`, `dryRun`; never deletes remote branches |
+| `unarchive_workspace` | Restore an archived workspace as active; nothing is removed or checked out |
 | `get_service_logs` | Tail a running service's logs |
 | `get_work_context` | Read the assignment, document IDs, milestones, and edit revisions |
 | `update_milestone_plan` | Create, edit, reorder, or remove feature-specific milestones; an empty list disables them |
@@ -389,7 +393,7 @@ Planning writes are available to `interactive`, `developer`, and `full` roles.
 Read the current revision before editing; see [planning through MCP](docs/work-guidance.md#planning-through-mcp).
 After upgrading a running MCP server, reconnect it in the assistant to discover the new tools.
 
-Read-only tools are annotated as such; `finish_workspace` and `preview_archive` deliberately cannot remove worktrees (archive and cleanup stay human-confirmed CLI or app actions). `list_workspaces` leaves archived workspaces out unless `includeArchived` is set. Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
+Read-only tools are annotated as such. `finish_workspace` never removes worktrees, and `archive_workspace` refuses the workspace the server serves or runs inside, because an agent works in those worktrees; archive that one with the CLI or the app. Naming another workspace needs an `interactive` or `full` session. MCP servers route console output to stderr, so tools never write into the protocol stream. `list_workspaces` leaves archived workspaces out unless `includeArchived` is set. Pass `--debug` (or set `CONTEXTSPACE_DEBUG=1`) on any CLI command to surface diagnostic logging on stderr.
 
 ## 🕐 Session History & Resumption
 

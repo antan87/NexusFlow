@@ -5,10 +5,10 @@
  */
 
 import chalk from 'chalk';
+import { isLocalPortListening } from '../utils/ports.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
-import * as net from 'node:net';
 import * as fs from 'node:fs/promises';
 import { getConfigDir } from '../core/config.js';
 import { startServer } from '../server.js';
@@ -57,16 +57,7 @@ export async function findActiveServerPort(): Promise<number | null> {
 }
 
 export function isPortActive(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect(port, 'localhost');
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('error', () => {
-      resolve(false);
-    });
-  });
+  return isLocalPortListening(port);
 }
 
 function sleep(ms: number): Promise<void> {

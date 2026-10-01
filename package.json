@@ -1,6 +1,6 @@
 {
   "name": "@mrpatronz/nexusflow",
-  "version": "2.27.1",
+  "version": "2.29.0",
   "description": "Combine multiple repos into a workspace with rich AI assistant context",
   "type": "module",
   "repository": {
@@ -90,6 +90,7 @@
     "@hono/node-ws": {
       "@hono/node-server": "$@hono/node-server"
     },
+    "basic-ftp": "6.2.1",
     "pm2": {
       "js-yaml": "4.3.2"
     }

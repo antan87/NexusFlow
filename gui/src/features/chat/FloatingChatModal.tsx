@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { Button } from '../../components/ui/button.js';
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../../components/ui/menu.js';
+import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { useFloatingChat, CHAT_GEOMETRY, clampChatSize } from './floatingChatStore.js';
@@ -53,6 +53,8 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
   } = useFloatingChat();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [pickerQuery, setPickerQuery] = useState('');
+  const [pickerVisibleCount, setPickerVisibleCount] = useState(12);
   const [terminalStates, setTerminalStates] = useState<Record<string, 'idle' | 'running' | 'exited' | 'disconnected'>>({});
   const [unreadOutput, setUnreadOutput] = useState<Record<string, boolean>>({});
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
@@ -100,6 +102,21 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
       (w) => w.branchName.toLowerCase().includes(q) || (w.description && w.description.toLowerCase().includes(q)),
     );
   }, [workspaces, searchQuery]);
+
+  // The empty state's own search, kept separate from the header menu's query so
+  // the two surfaces never clear or filter each other.
+  const pickerQueryTrimmed = pickerQuery.trim();
+  const pickerMatches = useMemo(() => {
+    const q = pickerQueryTrimmed.toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter(
+      (w) => w.branchName.toLowerCase().includes(q) || (w.description && w.description.toLowerCase().includes(q)),
+    );
+  }, [workspaces, pickerQueryTrimmed]);
+
+  // Progressive reveal rather than a hard cap: a long list stays scannable, but
+  // nothing becomes unreachable the way a fixed slice made it.
+  const pickerVisible = pickerMatches.slice(0, pickerVisibleCount);
 
   // Handle Dragging
   const handleDragStart = useCallback((e: React.PointerEvent) => {
@@ -312,13 +329,13 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               <p className="border-t border-border px-2 pt-2 text-[10px] text-muted-foreground">Open existing</p>
               <div className="px-2 py-1 mb-1">
                 <div className="relative">
-                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
-                  <input
-                    type="text"
+                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" aria-hidden="true" />
+                  <MenuSearchInput
+                    aria-label="Search workspaces to add"
                     placeholder="Search workspaces..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-7 pr-2 py-1 text-xs rounded-md bg-muted/50 border border-border focus:outline-hidden focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
+                    className="pl-7"
                     autoFocus
                   />
                 </div>
@@ -414,29 +431,62 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
       {/* Main Chat Body (Multi-Tab Mounted Execution) */}
       <div ref={bodyRef} className="flex flex-1 min-h-0 relative overflow-hidden bg-card" data-no-drag>
         {openTabs.length === 0 ? (
-          <div className="h-full w-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground gap-3">
-            <div className="size-12 rounded-2xl bg-muted/50 border border-border grid place-items-center text-muted-foreground">
+          <div className="h-full w-full flex flex-col items-center p-6 text-center text-muted-foreground gap-3 overflow-y-auto">
+            <div className="size-12 rounded-2xl bg-muted/50 border border-border grid place-items-center text-muted-foreground shrink-0">
               <MessageSquare className="size-6 text-primary" />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 shrink-0">
               <h3 className="text-sm font-semibold text-foreground">Choose a workspace for CLI chat</h3>
               <p className="text-xs text-muted-foreground max-w-xs">
                 Open an existing workspace or create one. A session starts only when you choose to start or resume it.
               </p>
             </div>
-            <div className="flex flex-wrap justify-center gap-1.5 mt-2 max-w-sm">
-              {workspaces.slice(0, 5).map((ws) => (
-                <Button
-                  key={ws.branchName}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openCli(ws.branchName)}
-                  className="text-xs h-7 gap-1.5"
-                >
-                  <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                  <span>{ws.branchName}</span>
-                </Button>
-              ))}
+            {/* This state used to render workspaces.slice(0, 5) with no way to
+                reach the rest. Search plus progressive reveal keeps every
+                workspace reachable without dumping a long list at once. */}
+            {workspaces.length > 0 && (
+              <div className="relative w-full max-w-sm shrink-0">
+                <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search workspaces for CLI chat"
+                  placeholder="Search workspaces..."
+                  value={pickerQuery}
+                  onChange={(event) => { setPickerQuery(event.target.value); setPickerVisibleCount(12); }}
+                  className="h-8 w-full rounded-md border border-input bg-card pl-8 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+                />
+              </div>
+            )}
+            <div className="flex w-full max-w-sm flex-col gap-1.5">
+              {workspaces.length === 0 ? (
+                <p className="py-2 text-xs text-muted-foreground">No workspaces yet.</p>
+              ) : pickerMatches.length === 0 ? (
+                <p className="py-2 text-xs text-muted-foreground">No workspaces match "{pickerQueryTrimmed}"</p>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-1.5" role="group" aria-label="Workspaces available for CLI chat">
+                    {pickerVisible.map((ws) => (
+                      <Button
+                        key={ws.branchName}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { openCli(ws.branchName); setPickerQuery(''); }}
+                        className="text-xs h-7 justify-start gap-1.5"
+                      >
+                        <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">{ws.branchName}</span>
+                        {ws.description && <span className="truncate text-[10px] text-muted-foreground font-normal">{ws.description}</span>}
+                      </Button>
+                    ))}
+                  </div>
+                  {pickerMatches.length > pickerVisible.length && (
+                    <Button variant="ghost" size="sm" onClick={() => setPickerVisibleCount(count => count + 24)}
+                      className="text-xs h-7">
+                      Show {Math.min(24, pickerMatches.length - pickerVisible.length)} more of {pickerMatches.length}
+                    </Button>
+                  )}
+                </>
+              )}
               <Button variant="outline" size="sm" onClick={() => { minimize(); navigate('/new?from=chat'); }} className="text-xs h-7 gap-1.5"><Plus className="size-3" />Create workspace for CLI chat</Button>
             </div>
           </div>

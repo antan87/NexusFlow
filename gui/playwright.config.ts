@@ -14,6 +14,8 @@ const baseURL = `http://127.0.0.1:${port}`;
  */
 export default defineConfig({
   testDir: './e2e',
+  /* Compile the app once so the first test does not absorb the dev server's cold start. */
+  globalSetup: './e2e/global-setup.ts',
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
