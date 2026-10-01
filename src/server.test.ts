@@ -2338,6 +2338,19 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(response.status).toBe(404);
     });
 
+    it('POST /orchestrators/stop still stops a recorded tool that is no longer detected', async () => {
+      vi.mocked(orchestration.detectOrchestrationTools).mockResolvedValue([]);
+      vi.mocked(orchestration.stopRecordedOrchestrator).mockResolvedValue(true);
+
+      const response = await app.request('/api/workspace/ws/orchestrators/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'procfile:Procfile' }),
+      });
+      expect(response.status).toBe(200);
+      expect(orchestration.stopRecordedOrchestrator).toHaveBeenCalledWith('procfile:Procfile', expect.any(String));
+    });
+
     it('GET /services/logs/:name rejects a traversal service name without reading outside the log dir', async () => {
       const response = await app.request(
         `/api/workspace/ws/services/logs/${encodeURIComponent('../../secret')}`,

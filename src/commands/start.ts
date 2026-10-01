@@ -109,6 +109,14 @@ export async function startCommand(workspaceArg?: string): Promise<void> {
     }
     toStart = guessed;
   } else {
+    if (guessed.length > 0) {
+      console.log(chalk.yellow(`  ${guessed.length} guessed service(s) will not start with the declared ones. To declare them, review and save:`));
+      for (const suggestion of suggestProcfiles(guessed)) {
+        console.log(chalk.dim(`\n  ${suggestion.file}`));
+        for (const line of suggestion.content.trimEnd().split('\n')) console.log(`    ${line}`);
+      }
+      console.log();
+    }
     const shouldStart = await confirm({ message: `Start ${declared.length} declared service(s)?`, default: true });
     if (!shouldStart) {
       console.log(chalk.dim('  Cancelled.\n'));

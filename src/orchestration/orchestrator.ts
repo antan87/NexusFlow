@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { execa } from 'execa';
 
 import type { OrchestrationDetection, RunningOrchestrator } from '../types.js';
-import { getPm2List, mutateRunningState, pm2Prefix, pm2Start, serviceLogFile } from './runner.js';
+import { getPm2List, mutateRunningState, pm2Prefix, pm2Start, readRawRunningState, serviceLogFile } from './runner.js';
 
 /**
  * Slugifies a detection id into a PM2/filesystem-safe token. Keyed on the id
@@ -117,4 +117,24 @@ export async function stopOrchestrator(
     ...state,
     orchestrators: (state.orchestrators ?? []).filter((o) => o.id !== detection.id),
   }));
+}
+
+/**
+ * Stops an orchestrator recorded in the running state that is no longer
+ * detected, such as a Procfile started through honcho before Procfiles became
+ * declared services. Its PM2 app is deleted by the recorded name. Returns
+ * whether such an entry existed.
+ */
+export async function stopRecordedOrchestrator(id: string, workspacePath: string): Promise<boolean> {
+  const state = await readRawRunningState(workspacePath);
+  const recorded = state?.orchestrators?.find((o) => o.id === id);
+  if (!recorded) return false;
+  if (recorded.mode === 'pm2' && recorded.pm2Name) {
+    await execa('npx', ['pm2', 'delete', recorded.pm2Name], { reject: false });
+  }
+  await mutateRunningState(workspacePath, (current) => ({
+    ...current,
+    orchestrators: (current.orchestrators ?? []).filter((o) => o.id !== id),
+  }));
+  return true;
 }

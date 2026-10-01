@@ -178,7 +178,7 @@ export function shellInvocation(command: string, platform: NodeJS.Platform = pro
  * Services a project declares: every line of its `Procfile.dev`, or of its
  * `Procfile` when there is no `Procfile.dev`. Names are `project/process`.
  */
-export async function detectDeclaredServices(projectPath: string, projectName: string): Promise<ServiceConfig[]> {
+export async function detectDeclaredServices(projectPath: string, projectName: string, portBase = 5000): Promise<ServiceConfig[]> {
   for (const file of PROCFILE_NAMES) {
     let content: string;
     try {
@@ -186,16 +186,26 @@ export async function detectDeclaredServices(projectPath: string, projectName: s
     } catch {
       continue;
     }
-    return parseProcfile(content).map((entry) => ({
-      name: `${projectName}/${entry.name}`,
-      cwd: projectPath,
-      ...shellInvocation(entry.command),
-      port: explicitPort(entry.command),
-      source: 'procfile' as const,
-      declared: true,
-      declaredIn: { file, line: entry.line },
-      display: entry.command,
-    }));
+    // Heroku's `release` phase runs once per deploy; it is not a process to keep running.
+    const entries = parseProcfile(content).filter((entry) => entry.name !== 'release');
+    // A file that declares nothing (empty or all comments) does not hide the next one.
+    if (entries.length === 0) continue;
+    return entries.map((entry, index) => {
+      // Like foreman and honcho, each process gets PORT = base + 100 × its position.
+      const assigned = portBase + index * 100;
+      const usesPort = /\$\{?PORT\b/.test(entry.command);
+      return {
+        name: `${projectName}/${entry.name}`,
+        cwd: projectPath,
+        ...shellInvocation(entry.command),
+        port: explicitPort(entry.command) ?? (usesPort ? assigned : undefined),
+        env: { PORT: String(assigned) },
+        source: 'procfile' as const,
+        declared: true,
+        declaredIn: { file, line: entry.line },
+        display: entry.command,
+      };
+    });
   }
   return [];
 }
@@ -394,6 +404,10 @@ export async function detectAllServices(
     }
   }
 
+  // A Procfile at the workspace root (beside the repositories) declares
+  // processes that span them; it used to run through honcho.
+  services.push(...await detectDeclaredServices(workspacePath, 'workspace', nextPortBase(services)));
+
   if (feature) {
     for (const repoPath of feature.repos) {
       const name = path.basename(repoPath);
@@ -421,6 +435,12 @@ export async function detectAllServices(
   return services;
 }
 
+/** Each declaring project gets its own block of 1000 ports, so two `web` lines do not both get 5000. */
+function nextPortBase(services: ServiceConfig[]): number {
+  const projects = new Set(services.filter((service) => service.declared).map((service) => service.cwd));
+  return 5000 + projects.size * 1000;
+}
+
 /**
  * Detects a project's service config at its root, falling back to first-level
  * subdirectories (e.g. nested packages), appending results to `services`.
@@ -431,7 +451,7 @@ async function detectProjectServices(
   services: ServiceConfig[],
 ): Promise<void> {
   // What the repository declares replaces anything we would guess for it.
-  const declared = await detectDeclaredServices(projectPath, projectName);
+  const declared = await detectDeclaredServices(projectPath, projectName, nextPortBase(services));
   if (declared.length > 0) {
     services.push(...declared);
     return;

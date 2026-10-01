@@ -75,6 +75,32 @@ describe('declared first, guesses labelled', () => {
     expect(byName.tools).toMatchObject({ declared: false, source: 'package.json', command: 'npm', args: ['run', 'dev'] });
   });
 
+  it('gives each process a PORT like foreman, skips release, and reads Procfile when Procfile.dev declares nothing', async () => {
+    await write('shop/Procfile.dev', '# nothing yet\n');
+    await write('shop/Procfile', 'release: python manage.py migrate\nweb: gunicorn app:app --bind 0.0.0.0:$PORT\nworker: celery -A app worker\n');
+    await write('blog/Procfile.dev', 'web: PORT=4000 npm run dev\n');
+
+    const services = await detectAllServices(root);
+    const byName = Object.fromEntries(services.map((s) => [s.name, s]));
+    expect(Object.keys(byName).sort()).toEqual(['blog/web', 'shop/web', 'shop/worker']);
+    expect(byName['shop/web']!.declaredIn).toEqual({ file: 'Procfile', line: 2 });
+    // Two declaring projects get separate blocks, so their first processes do not collide.
+    const shopBase = Number(byName['shop/web']!.env!.PORT);
+    expect(byName['shop/worker']!.env).toEqual({ PORT: String(shopBase + 100) });
+    expect(byName['shop/web']!.port).toBe(shopBase); // uses $PORT, so its port is the assigned one
+    expect(byName['shop/worker']!.port).toBeUndefined();
+    expect(byName['blog/web']!.port).toBe(4000);
+    expect(new Set([shopBase, Number(byName['blog/web']!.env!.PORT)]).size).toBe(2);
+  });
+
+  it('reads a Procfile beside the repositories at the workspace root', async () => {
+    await write('Procfile.dev', 'all: ./bin/dev\n');
+    await write('shop/package.json', pkg({ dev: 'vite' }));
+    const services = await detectAllServices(root);
+    expect(services.find((s) => s.name === 'workspace/all')).toMatchObject({ declared: true, cwd: root });
+    expect(services.find((s) => s.name === 'shop')).toMatchObject({ declared: false });
+  });
+
   it('no longer offers a Procfile as a honcho orchestrator', async () => {
     await write('shop/Procfile', 'web: npm start\n');
     expect((await detectOrchestrationTools(root)).map((t) => t.tool)).not.toContain('procfile');

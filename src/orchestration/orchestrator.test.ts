@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import { execa } from 'execa';
 
-import { startOrchestrator, stopOrchestrator, orchestratorPm2Name } from './orchestrator.js';
+import { startOrchestrator, stopOrchestrator, stopRecordedOrchestrator, orchestratorPm2Name } from './orchestrator.js';
 import type { OrchestrationDetection } from '../types.js';
 
 vi.mock('node:fs/promises');
@@ -98,5 +98,22 @@ describe('orchestrator runner', () => {
     ]);
     // No services and no orchestrators left → state file removed.
     expect(fs.unlink).toHaveBeenCalled();
+  });
+
+  it('stops a recorded orchestrator that is no longer detected, by its recorded PM2 name', async () => {
+    const state = {
+      workspacePath: WS,
+      services: [],
+      orchestrators: [{ id: 'procfile:Procfile', tool: 'procfile', configPath: '/ws/feature-a/Procfile', mode: 'pm2', pm2Name: 'ctxspace-feature-a-1234abcd-orch-procfile', startedAt: 'x' }],
+      updatedAt: 'x',
+    };
+    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+    vi.mocked(fs.unlink).mockResolvedValue(undefined as any);
+    vi.mocked(execa).mockResolvedValue({ stdout: '' } as any);
+
+    expect(await stopRecordedOrchestrator('procfile:Procfile', WS)).toBe(true);
+    expect(execa).toHaveBeenCalledWith('npx', ['pm2', 'delete', 'ctxspace-feature-a-1234abcd-orch-procfile'], { reject: false });
+    expect(fs.unlink).toHaveBeenCalled(); // nothing left recorded
+    expect(await stopRecordedOrchestrator('tilt:Tiltfile', WS)).toBe(false);
   });
 });

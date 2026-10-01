@@ -128,7 +128,7 @@ web: npm run dev
 worker: node worker.js
 ```
 
-ContextSpace runs each line through the shell from that repository. Without a Procfile it guesses from project files (`package.json` `dev`/`start`/`serve`, `.csproj`, Django, FastAPI/Flask, `go.mod`, Makefile `dev`/`run`). Guessed services are labelled, can be started one at a time, and are never started by **Start declared services**. The Services tab suggests a `Procfile.dev` built from the guesses: review it, keep only processes that should run while you work, save it, and press **Rescan**.
+ContextSpace runs each line through the shell from that repository. As with foreman and honcho, each process gets `PORT` (5000, 5100, … in file order; another repository's Procfile gets the next block of 1000), and a `release:` line is skipped. `.env` is not loaded; load it in the command if you need it (`set -a; . ./.env; set +a; npm run dev`). A `Procfile.dev` that declares nothing falls back to the `Procfile`, and a Procfile at the workspace root declares processes too. Without a Procfile it guesses from project files (`package.json` `dev`/`start`/`serve`, `.csproj`, Django, FastAPI/Flask, `go.mod`, Makefile `dev`/`run`). Guessed services are labelled, can be started one at a time, and are never started by **Start declared services**. The Services tab suggests a `Procfile.dev` built from the guesses: review it, keep only processes that should run while you work, save it, and press **Rescan**.
 
 **On the Web Dashboard:**
 * Open **Run → Services** in your workspace to see declared and guessed services.

@@ -228,4 +228,21 @@ test.describe('Service console', () => {
     await page.getByRole('button', { name: 'Start declared services' }).click();
     await bulk;
   });
+
+  test('a repository that declares nothing still gets its own suggestion beside declared ones', async ({ page }) => {
+    const web = { name: 'api/web', command: '/bin/sh', args: ['-c', 'npm run dev'], cwd: 'C:\\mock-dev\\api', source: 'procfile', declared: true, declaredIn: { file: 'Procfile.dev', line: 1 }, display: 'npm run dev' };
+    const tools = { name: 'tools', command: 'npm', args: ['run', 'dev'], cwd: 'C:\\mock-dev\\tools', source: 'package.json', declared: false };
+    await page.route('**/api/workspace/*/services', async (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ services: [web, tools], orchestrationTools: [], runningState: [], runningOrchestrators: [], failures: [], suggestions: [{ file: 'C:\\mock-dev\\tools\\Procfile.dev', content: 'web: npm run dev\n' }] }),
+      }),
+    );
+    await page.goto('/#/workspaces/demo/services');
+    const panel = page.getByRole('region', { name: 'Some services are not declared' });
+    await expect(panel).toContainText('will not start with the declared ones');
+    await expect(panel.getByText('C:\\mock-dev\\tools\\Procfile.dev')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start declared services' })).toBeEnabled();
+  });
 });

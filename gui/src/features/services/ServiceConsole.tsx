@@ -114,18 +114,18 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
         </div>
       )}
 
-      {!servicesQuery.isLoading && !servicesQuery.isError && declared.length === 0 && (
+      {!servicesQuery.isLoading && !servicesQuery.isError && (declared.length === 0 || guessedCount > 0) && (
         <section aria-labelledby="declare-services-heading" className="mb-4 rounded-md border border-border/80 bg-card p-4 surface-card">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h4 id="declare-services-heading" className="flex items-center gap-2 text-xs font-bold text-foreground">
                 <Terminal size={14} className="text-muted-foreground" />
-                {services.length ? 'No declared services' : 'No services found'}
+                {declared.length > 0 ? 'Some services are not declared' : services.length ? 'No declared services' : 'No services found'}
               </h4>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Start All runs the processes a repository declares in a <code className="font-mono text-[10px]">Procfile.dev</code> at its root, one <code className="font-mono text-[10px]">name: command</code> per line.{' '}
                 {guessedCount > 0
-                  ? `${guessedCount} service${guessedCount === 1 ? ' was' : 's were'} guessed from project files; start ${guessedCount === 1 ? 'it' : 'them'} one at a time below, or review this suggestion, keep only processes that should run while you work, and save it.`
+                  ? `${guessedCount} service${guessedCount === 1 ? ' was' : 's were'} guessed from project files${declared.length > 0 ? ' and will not start with the declared ones' : ''}; start ${guessedCount === 1 ? 'it' : 'them'} one at a time below, or review this suggestion, keep only processes that should run while you work, and save it.`
                   : 'Add one, then rescan.'}
               </p>
             </div>

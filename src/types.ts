@@ -582,6 +582,8 @@ export interface ServiceConfig {
   declaredIn?: { file: string; line: number };
   /** The command as written, for display (a Procfile line runs through the shell). */
   display?: string;
+  /** Environment set for this process only, such as the PORT a Procfile line is given. */
+  env?: Record<string, string>;
 }
 
 /** Why a service did not start or stopped unexpectedly, kept beside its logs until the next action. */

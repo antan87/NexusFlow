@@ -134,9 +134,10 @@ import {
   restartService,
   startOrchestrator,
   stopOrchestrator,
+  stopRecordedOrchestrator,
   tailLogFile,
   loadRunningState,
-  getPm2List,
+  readPm2List,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
@@ -1137,7 +1138,7 @@ const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 const statusSnapshots = new Map<string, {
   workspacesDir: string;
   workspaces: Feature[];
-  pm2List: Promise<any[]>;
+  pm2List: Promise<any[] | null>;
   expiresAt: number;
 }>();
 
@@ -1176,7 +1177,7 @@ app.get('/api/workspaces/status', async (c) => {
       snapshot = {
         workspacesDir: config.workspacesDir,
         workspaces,
-        pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        pm2List: workspaces.length ? readPm2List() : Promise.resolve([]),
         expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
       };
       snapshotId = randomUUID();
@@ -1188,7 +1189,7 @@ app.get('/api/workspaces/status', async (c) => {
 
     // Fetch the PM2 process list once for the whole overview instead of
     // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
-    const pm2List = selected.length ? await (snapshot?.pm2List ?? getPm2List()) : [];
+    const pm2List = selected.length ? await (snapshot?.pm2List ?? readPm2List()) : [];
 
     const entries = await Promise.all(
       selected.map(async (ws) => {
@@ -2055,7 +2056,8 @@ app.get('/api/workspace/:id/services', async (c) => {
       runningState: runningState?.services || [],
       runningOrchestrators: runningState?.orchestrators || [],
       failures: runningState?.failures || [],
-      suggestions: services.some((service) => service.declared) ? [] : suggestProcfiles(services),
+      // One suggestion per repository that declares nothing, even when others do.
+      suggestions: suggestProcfiles(services.filter((service) => !service.declared)),
     });
   } catch (error) {
     return errorResponse(c, error);
@@ -2247,6 +2249,8 @@ app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
     const tools = await detectOrchestrationTools(workspacePath);
     const detection = tools.find((t) => t.id === body.id);
     if (!detection) {
+      // A recorded tool that is no longer detected can still be stopped.
+      if (action === 'stop' && await stopRecordedOrchestrator(body.id, workspacePath)) return c.json({ success: true });
       return c.json({ error: `Unknown orchestration tool "${body.id}" in this workspace.` }, 404);
     }
 
