@@ -571,7 +571,32 @@ export interface ServiceConfig {
   /** Optional port the service listens on. */
   port?: number;
   /** How the start command was detected. */
-  source: 'package.json' | 'dotnet' | 'docker-compose' | 'aspire' | 'python' | 'go' | 'makefile' | 'manual';
+  source: 'package.json' | 'dotnet' | 'docker-compose' | 'aspire' | 'python' | 'go' | 'makefile' | 'manual' | 'procfile';
+  /**
+   * True when the repository declares this process (a `Procfile.dev` or
+   * `Procfile` line). Everything else is guessed from project files; guessed
+   * services can be started one at a time but never by Start All.
+   */
+  declared?: boolean;
+  /** The file and 1-based line that declared this service. */
+  declaredIn?: { file: string; line: number };
+  /** The command as written, for display (a Procfile line runs through the shell). */
+  display?: string;
+}
+
+/** Why a service did not start or stopped unexpectedly, kept beside its logs until the next action. */
+export interface ServiceFailure {
+  name: string;
+  reason: string;
+  at: string;
+}
+
+/** Outcome of starting one service. */
+export interface ServiceStartResult {
+  name: string;
+  status: 'running' | 'failed';
+  pid?: number;
+  reason?: string;
 }
 
 /** Detected orchestration tool in a workspace. */
@@ -615,6 +640,8 @@ export interface RunningService {
   config: ServiceConfig;
   /** Timestamp when started. */
   startedAt: string;
+  /** Its log file, so an unexpected stop can quote the last line it wrote. */
+  logFile?: string;
 }
 
 /** State file saved to track running services. */
@@ -642,6 +669,8 @@ export interface RunningState {
    * (docker compose up -d) have no PID for the services filter to verify.
    */
   orchestrators?: RunningOrchestrator[];
+  /** The latest failure per service, cleared when it starts or is stopped. */
+  failures?: ServiceFailure[];
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }

@@ -92,34 +92,24 @@ export async function detectOrchestrationTools(
       });
     } catch { /* not found */ }
 
-    // Procfile
-    try {
-      const procPath = path.join(folder, 'Procfile');
-      await fs.access(procPath);
-      results.push({
-        id: idFor('procfile', procPath),
-        tool: 'procfile',
-        configPath: procPath,
-        startCommand: prefix ? `honcho start -f ${path.join(prefix, 'Procfile')}` : 'honcho start',
-        stopCommand: 'Stopped via ContextSpace',
-        run: { command: 'honcho', args: ['start', '-f', procPath], cwd: folder },
-        mode: 'pm2',
-      });
-    } catch { /* not found */ }
+    // A Procfile is read as declared services (see detectDeclaredServices),
+    // run directly instead of through honcho, which is rarely installed.
 
     // Makefile
     try {
       const makePath = path.join(folder, 'Makefile');
       const content = await fs.readFile(makePath, 'utf-8');
-      if (content.includes('start:') || content.includes('dev:') || content.includes('run:')) {
-        const makeCmd = prefix ? `make -C "${prefix}" dev` : 'make dev';
+      // Run the target that exists, not always `dev`; `restart:` is not `start:`.
+      const target = makeTarget(content, ['dev', 'start', 'run']);
+      if (target) {
+        const makeCmd = prefix ? `make -C "${prefix}" ${target}` : `make ${target}`;
         results.push({
           id: idFor('makefile', makePath),
           tool: 'makefile',
           configPath: makePath,
           startCommand: makeCmd,
           stopCommand: 'Stopped via ContextSpace',
-          run: { command: 'make', args: ['-C', folder, 'dev'], cwd: folder },
+          run: { command: 'make', args: ['-C', folder, target], cwd: folder },
           mode: 'pm2',
         });
       }
@@ -140,6 +130,97 @@ export async function detectOrchestrationTools(
   } catch { /* ignore */ }
 
   return results;
+}
+
+/** The first of `targets` that the Makefile defines as a rule (`name:` at line start, not `name:=`). */
+function makeTarget(content: string, targets: string[]): string | undefined {
+  return targets.find((target) => new RegExp(`^${target}:(?!=)`, 'm').test(content));
+}
+
+/** Declaration files, most specific first: a Procfile.dev is for local development. */
+export const PROCFILE_NAMES = ['Procfile.dev', 'Procfile'] as const;
+
+/** One `name: command` line of a Procfile. */
+export interface ProcfileEntry { name: string; command: string; line: number }
+
+/**
+ * Parses Procfile lines (`name: command`). Blank lines and `#` comments are
+ * skipped; a line that is not `name: command` with a name of letters, digits,
+ * `_` or `-` is ignored rather than guessed at.
+ */
+export function parseProcfile(content: string): ProcfileEntry[] {
+  const entries: ProcfileEntry[] = [];
+  const seen = new Set<string>();
+  content.split(/\r?\n/).forEach((raw, index) => {
+    const match = /^([A-Za-z0-9_-]+):\s*(\S.*)$/.exec(raw.trim());
+    if (!match || raw.trim().startsWith('#') || seen.has(match[1]!)) return;
+    seen.add(match[1]!);
+    entries.push({ name: match[1]!, command: match[2]!.trim(), line: index + 1 });
+  });
+  return entries;
+}
+
+/** A port a command names explicitly (`PORT=4000`, `--port 4000`, `-p 4000`), if any. */
+export function explicitPort(command: string): number | undefined {
+  const match = /(?:^|\s)PORT=(\d{2,5})\b/.exec(command) ?? /--port[=\s]+(\d{2,5})\b/i.exec(command) ?? /(?:^|\s)-p\s+(\d{2,5})\b/.exec(command);
+  const port = match ? Number(match[1]) : NaN;
+  return port > 0 && port < 65536 ? port : undefined;
+}
+
+/** How a Procfile line runs: through the platform shell, as foreman and honcho do. */
+export function shellInvocation(command: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+  return platform === 'win32'
+    ? { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', command] }
+    : { command: '/bin/sh', args: ['-c', command] };
+}
+
+/**
+ * Services a project declares: every line of its `Procfile.dev`, or of its
+ * `Procfile` when there is no `Procfile.dev`. Names are `project/process`.
+ */
+export async function detectDeclaredServices(projectPath: string, projectName: string): Promise<ServiceConfig[]> {
+  for (const file of PROCFILE_NAMES) {
+    let content: string;
+    try {
+      content = await fs.readFile(path.join(projectPath, file), 'utf-8');
+    } catch {
+      continue;
+    }
+    return parseProcfile(content).map((entry) => ({
+      name: `${projectName}/${entry.name}`,
+      cwd: projectPath,
+      ...shellInvocation(entry.command),
+      port: explicitPort(entry.command),
+      source: 'procfile' as const,
+      declared: true,
+      declaredIn: { file, line: entry.line },
+      display: entry.command,
+    }));
+  }
+  return [];
+}
+
+/** A suggested `Procfile.dev` for one repository, built from its guessed services. */
+export interface ProcfileSuggestion { file: string; content: string }
+
+/**
+ * Turns guessed services into `Procfile.dev` suggestions, one file per
+ * repository root, so declaring them is a review-and-save step. A service
+ * found in a subfolder runs from there with `cd`. The commands are the
+ * guesses as they are: the reader keeps only real long-running processes.
+ */
+export function suggestProcfiles(guessed: ServiceConfig[]): ProcfileSuggestion[] {
+  const byRoot = new Map<string, string[]>();
+  for (const service of guessed) {
+    const [, sub] = service.name.split('/');
+    const root = sub ? path.dirname(service.cwd) : service.cwd;
+    const processName = (sub ?? 'web').replace(/[^A-Za-z0-9_-]/g, '-') || 'web';
+    const command = [service.command, ...service.args].map((part) => (/\s/.test(part) ? JSON.stringify(part) : part)).join(' ');
+    const lines = byRoot.get(root) ?? [];
+    lines.push(`${processName}: ${sub ? `cd ${sub} && ` : ''}${command}`);
+    byRoot.set(root, lines);
+  }
+  return [...byRoot].map(([root, lines]) => ({ file: path.join(root, 'Procfile.dev'), content: `${lines.join('\n')}\n` }));
 }
 
 /**
@@ -276,11 +357,9 @@ export async function detectServiceConfig(
   // ── Makefile ──────────────────────────────────────────────────────
   try {
     const content = await fs.readFile(path.join(projectPath, 'Makefile'), 'utf-8');
-    if (content.includes('dev:')) {
-      return { name: projectName, cwd: projectPath, command: 'make', args: ['dev'], source: 'makefile' };
-    }
-    if (content.includes('run:')) {
-      return { name: projectName, cwd: projectPath, command: 'make', args: ['run'], source: 'makefile' };
+    const target = makeTarget(content, ['dev', 'run']);
+    if (target) {
+      return { name: projectName, cwd: projectPath, command: 'make', args: [target], source: 'makefile' };
     }
   } catch { /* no Makefile */ }
 
@@ -351,9 +430,16 @@ async function detectProjectServices(
   projectName: string,
   services: ServiceConfig[],
 ): Promise<void> {
+  // What the repository declares replaces anything we would guess for it.
+  const declared = await detectDeclaredServices(projectPath, projectName);
+  if (declared.length > 0) {
+    services.push(...declared);
+    return;
+  }
+
   const config = await detectServiceConfig(projectPath, projectName);
   if (config) {
-    services.push(config);
+    services.push({ ...config, declared: false });
     return;
   }
 
@@ -366,7 +452,7 @@ async function detectProjectServices(
       const subProjectPath = path.join(projectPath, subEntry.name);
       const subConfig = await detectServiceConfig(subProjectPath, `${projectName}/${subEntry.name}`);
       if (subConfig) {
-        services.push(subConfig);
+        services.push({ ...subConfig, declared: false });
       }
     }
   } catch { /* ignore read errors */ }

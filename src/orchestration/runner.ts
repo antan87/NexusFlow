@@ -6,12 +6,14 @@
 
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import * as net from 'node:net';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { execa } from 'execa';
 
-import type { ServiceConfig, RunningService, RunningState } from '../types.js';
+import type { ServiceConfig, RunningService, RunningState, ServiceFailure, ServiceStartResult } from '../types.js';
 import { BRAND_CONFIG, getPm2ProcessPrefix } from '../core/constants.js';
+import { findExecutable } from '../utils/user-paths.js';
 
 /** Name of the state file that tracks running services. */
 const PRIMARY_STATE_FILE = BRAND_CONFIG.files.runningState.primary;
@@ -157,24 +159,37 @@ export async function loadRunningState(workspacePath: string, pm2List?: any[]): 
       return !!app && app.pm2_env?.status === 'online';
     };
 
-    const activeServices = state.services.map((service) => {
+    // A recorded service that is no longer online stopped without being asked
+    // to; say so beside it instead of silently dropping it from the list.
+    const checked = await Promise.all(state.services.map(async (service) => {
       const uniqueName = pm2AppName(workspacePath, service.name);
       const pm2App = list.find((app: any) => app.name === uniqueName);
       const running = pm2App && pm2App.pm2_env?.status === 'online';
-      return {
-        ...service,
-        pid: running ? (pm2App.pid || service.pid) : 0,
+      if (running) return { service: { ...service, pid: pm2App.pid || service.pid } };
+      const status = pm2App?.pm2_env?.status;
+      const output = status && service.logFile ? await lastLogLine(service.logFile) : undefined;
+      const failure: ServiceFailure = {
+        name: service.name,
+        reason: status
+          ? `Stopped unexpectedly (PM2 status: ${status}).${output ? ` Last output: "${output}".` : ' Its log shows why.'} Start it again when fixed.`
+          : 'Stopped outside ContextSpace; no PM2 process remains. Start it again if you still need it.',
+        at: new Date().toISOString(),
       };
-    }).filter((service) => service.pid > 0);
+      return { failure };
+    }));
+    const activeServices = checked.flatMap((entry) => (entry.service ? [entry.service] : []));
+    const stoppedUnexpectedly = checked.flatMap((entry) => (entry.failure ? [entry.failure] : []));
 
     const orchestrators = state.orchestrators?.filter(
       (o) => o.mode !== 'pm2' || !o.pm2Name || isOnline(o.pm2Name),
     );
 
+    const recorded = (state.failures ?? []).filter((f) => !stoppedUnexpectedly.some((u) => u.name === f.name));
     return {
       ...state,
       services: activeServices,
       orchestrators,
+      failures: [...recorded, ...stoppedUnexpectedly],
       updatedAt: new Date().toISOString(),
     };
   } catch {
@@ -210,7 +225,7 @@ export async function mutateRunningState(
     const updated = mutator(state);
     updated.updatedAt = new Date().toISOString();
 
-    if (updated.services.length === 0 && (updated.orchestrators?.length ?? 0) === 0) {
+    if (updated.services.length === 0 && (updated.orchestrators?.length ?? 0) === 0 && (updated.failures?.length ?? 0) === 0) {
       await fs.unlink(getStatePath(workspacePath)).catch(() => {});
       return;
     }
@@ -223,22 +238,116 @@ export async function mutateRunningState(
 
 // ─── Per-service lifecycle ────────────────────────────────────────────────────
 
+/** Words that run the next word as the program. */
+const COMMAND_PREFIXES = new Set(['exec', 'env', 'nohup', 'time']);
+/** Shell words that are not programs; a line starting with one is not checked. */
+const SHELL_BUILTINS = new Set(['cd', '.', 'source', 'export', 'set', 'test', '[', 'eval', 'if', 'for', 'while']);
+
+/**
+ * The program a service runs: its command, or for a Procfile line the first
+ * word after `NAME=value` assignments and prefixes such as `exec`. Undefined
+ * when the line starts with a shell builtin, which has nothing to find on PATH.
+ */
+export function serviceExecutable(service: ServiceConfig): string | undefined {
+  if (service.source !== 'procfile') return service.command;
+  for (const token of (service.display ?? '').trim().split(/\s+/)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
+    const word = token.replace(/^['"]|['"]$/g, '');
+    if (COMMAND_PREFIXES.has(word)) continue;
+    return word && !SHELL_BUILTINS.has(word) ? word : undefined;
+  }
+  return undefined;
+}
+
+/** Whether something already accepts connections on a local port (IPv4 or IPv6 loopback). */
+export async function portInUse(port: number): Promise<boolean> {
+  const probe = (host: string) => new Promise<boolean>((resolve) => {
+    const socket = net.connect({ port, host });
+    const done = (inUse: boolean) => { socket.destroy(); resolve(inUse); };
+    socket.setTimeout(500, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+  return (await probe('127.0.0.1')) || (await probe('::1'));
+}
+
+const where = (service: ServiceConfig) =>
+  service.declaredIn ? ` in ${service.declaredIn.file} line ${service.declaredIn.line}` : '';
+
+/**
+ * Checks what would make a start fail before PM2 is involved: a program that
+ * is not installed, or a port another process already holds. Returns the
+ * reason to show beside the service, or null when it can start.
+ */
+export async function preflightService(service: ServiceConfig, opts: { checkPort?: boolean } = {}): Promise<string | null> {
+  const executable = serviceExecutable(service);
+  if (executable) {
+    const found = /[\\/]/.test(executable)
+      ? await fs.access(path.resolve(service.cwd, executable)).then(() => true, () => false)
+      : !!findExecutable(executable, process.env);
+    if (!found) return `"${executable}" was not found${/[\\/]/.test(executable) ? ` in ${service.cwd}` : ' on PATH'}. Install it, or change the command${where(service)}.`;
+  }
+  if (opts.checkPort !== false && service.port && await portInUse(service.port)) {
+    return `Port ${service.port} is already in use by another process. Stop that process, or change the port${where(service)}.`;
+  }
+  return null;
+}
+
+/** The last non-empty line a service wrote, to explain a failed start. */
+async function lastLogLine(logFile: string): Promise<string | undefined> {
+  try {
+    const handle = await fs.open(logFile, 'r');
+    try {
+      const { size } = await handle.stat();
+      const length = Math.min(size, 2048);
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, size - length);
+      return buffer.toString('utf-8').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1)?.slice(0, 300);
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/** Records why a service did not start, replacing its previous failure. */
+async function recordFailure(workspacePath: string, name: string, reason: string): Promise<void> {
+  await mutateRunningState(workspacePath, (state) => ({
+    ...state,
+    failures: [...(state.failures ?? []).filter((f) => f.name !== name), { name, reason, at: new Date().toISOString() }],
+  }));
+}
+
 /**
  * Starts ONE service under PM2 (deleting any same-named app first), resolves
- * its PID, and upserts it into the running state. Returns the running entry,
- * or null when the start failed or the PID could not be resolved.
+ * its PID, and upserts it into the running state. A service that cannot start
+ * (missing program, occupied port, no running PM2 process) is not started or
+ * recorded as running; its reason is recorded beside it instead.
+ *
+ * @param opts.restart - The service may be running; skip the port check, since
+ *   it would find the service's own port in use.
  */
 export async function startService(
   service: ServiceConfig,
   workspacePath: string,
   logDir: string,
-): Promise<RunningService | null> {
+  opts: { restart?: boolean } = {},
+): Promise<ServiceStartResult> {
   const logFile = serviceLogFile(logDir, service.name);
   const uniqueName = pm2AppName(workspacePath, service.name);
   const portStr = service.port ? ` on port ${service.port}` : '';
+  const failed = async (reason: string): Promise<ServiceStartResult> => {
+    console.error(chalk.red(`  ✖ ${service.name}: ${reason}`));
+    await recordFailure(workspacePath, service.name, reason);
+    return { name: service.name, status: 'failed', reason };
+  };
+
+  const problem = await preflightService(service, { checkPort: !opts.restart });
+  if (problem) return failed(problem);
 
   console.log(chalk.cyan(`  Starting ${chalk.bold(service.name)}${portStr} under PM2...`));
-  console.log(chalk.dim(`    ${service.command} ${service.args.join(' ')} (in ${service.cwd})`));
+  console.log(chalk.dim(`    ${service.display ?? `${service.command} ${service.args.join(' ')}`} (in ${service.cwd})`));
 
   try {
     await fs.mkdir(path.dirname(logFile), { recursive: true });
@@ -258,9 +367,10 @@ export async function startService(
     const pm2App = pm2List.find((app: any) => app.name === uniqueName);
     const pid = pm2App?.pid || 0;
 
-    if (!pid) {
-      console.warn(chalk.yellow(`  ⚠ Started ${service.name} but could not resolve PID from PM2.`));
-      return null;
+    if (!pid || pm2App?.pm2_env?.status !== 'online') {
+      const status = pm2App?.pm2_env?.status;
+      const output = await lastLogLine(logFile);
+      return failed(`PM2 started it but it is not running${status ? ` (status: ${status})` : ''}.${output ? ` Last output: ${output}` : ' Check its log.'}`);
     }
 
     const running: RunningService = {
@@ -268,17 +378,18 @@ export async function startService(
       pid,
       config: service,
       startedAt: new Date().toISOString(),
+      logFile,
     };
     await mutateRunningState(workspacePath, (state) => ({
       ...state,
       services: [...state.services.filter((s) => s.name !== service.name), running],
+      failures: (state.failures ?? []).filter((f) => f.name !== service.name),
     }));
     console.log(chalk.green(`  ✔ ${service.name} started under PM2 (PID: ${pid})`));
-    return running;
+    return { name: service.name, status: 'running', pid };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red(`  ✖ Failed to start ${service.name} via PM2: ${msg}`));
-    return null;
+    return failed(`PM2 could not start it: ${msg}`);
   }
 }
 
@@ -303,7 +414,11 @@ export async function stopService(workspacePath: string, serviceName: string): P
   if (deleteSuccess) {
     await mutateRunningState(workspacePath, (state) => {
       if (state.services.some((s) => s.name === serviceName)) existed = true;
-      return { ...state, services: state.services.filter((s) => s.name !== serviceName) };
+      return {
+        ...state,
+        services: state.services.filter((s) => s.name !== serviceName),
+        failures: (state.failures ?? []).filter((f) => f.name !== serviceName),
+      };
     });
   }
 
@@ -318,8 +433,8 @@ export async function restartService(
   service: ServiceConfig,
   workspacePath: string,
   logDir: string,
-): Promise<RunningService | null> {
-  return startService(service, workspacePath, logDir);
+): Promise<ServiceStartResult> {
+  return startService(service, workspacePath, logDir, { restart: true });
 }
 
 /**
@@ -333,11 +448,14 @@ export async function startServices(
   services: ServiceConfig[],
   workspacePath: string,
   logDir: string,
-): Promise<void> {
+): Promise<ServiceStartResult[]> {
   await fs.mkdir(logDir, { recursive: true });
+  // One failure does not stop the rest; each service keeps its own result.
+  const results: ServiceStartResult[] = [];
   for (const service of services) {
-    await startService(service, workspacePath, logDir);
+    results.push(await startService(service, workspacePath, logDir));
   }
+  return results;
 }
 
 /**
@@ -393,6 +511,8 @@ export async function stopServices(workspacePath: string): Promise<void> {
   await mutateRunningState(workspacePath, (state) => ({
     ...state,
     services: state.services.filter((s) => failedApps.has(pm2AppName(workspacePath, s.name))),
+    // Stop All is the user's reset: earlier start failures no longer apply.
+    failures: [],
   }));
 }
 

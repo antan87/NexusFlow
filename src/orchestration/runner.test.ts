@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
+import * as net from 'node:net';
 import { execa } from 'execa';
 import * as path from 'node:path';
 
@@ -9,16 +10,20 @@ import {
   parsePm2Json,
   pm2AppName,
   pm2Prefix,
+  serviceExecutable,
   serviceLogFile,
   showLogs,
   startService,
+  startServices,
   stopService,
   stopServices,
 } from './runner.js';
 import type { RunningState, ServiceConfig } from '../types.js';
+import { findExecutable } from '../utils/user-paths.js';
 
 vi.mock('node:fs/promises');
 vi.mock('execa');
+vi.mock('../utils/user-paths.js', () => ({ findExecutable: vi.fn(() => '/usr/bin/npm') }));
 
 function service(name: string, cwd: string): ServiceConfig {
   return {
@@ -149,11 +154,11 @@ describe('orchestration runner PM2 state handling', () => {
       vi.mocked(execa)
         .mockResolvedValueOnce({ stdout: '' } as any) // pm2 delete
         .mockResolvedValueOnce({ stdout: '' } as any) // pm2 start
-        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp, pid: 4321 }]) } as any); // pm2 jlist
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp, pid: 4321, pm2_env: { status: 'online' } }]) } as any); // pm2 jlist
 
       const running = await startService(service('api', ws), ws, '/logs');
 
-      expect(running?.pid).toBe(4321);
+      expect(running).toEqual({ name: 'api', status: 'running', pid: 4321 });
       const calls = vi.mocked(execa).mock.calls;
       expect(calls[0]).toEqual(['npx', ['pm2', 'delete', expectedApp], { reject: false }]);
       expect(calls[1]?.[1]).toContain('start');
@@ -163,15 +168,82 @@ describe('orchestration runner PM2 state handling', () => {
       expect(written.services.map((s: any) => s.name)).toEqual(['api']);
     });
 
-    it('startService returns null when the PID cannot be resolved', async () => {
+    it('startService reports and records a failure when PM2 has no running process for it', async () => {
       const ws = path.join(process.cwd(), 'my-ws');
+      const expectedApp = pm2AppName(ws, 'api');
       vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
       vi.mocked(execa)
         .mockResolvedValueOnce({ stdout: '' } as any)
         .mockResolvedValueOnce({ stdout: '' } as any)
-        .mockResolvedValueOnce({ stdout: '[]' } as any); // jlist: app not found
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: expectedApp, pid: 0, pm2_env: { status: 'errored' } }]) } as any);
 
-      expect(await startService(service('api', ws), ws, '/logs')).toBeNull();
+      const result = await startService(service('api', ws), ws, '/logs');
+      expect(result).toMatchObject({ name: 'api', status: 'failed', reason: expect.stringContaining('status: errored') });
+      const written = JSON.parse(vi.mocked(fs.writeFile).mock.calls.at(-1)?.[1] as string);
+      expect(written.services).toEqual([]);
+      expect(written.failures).toEqual([expect.objectContaining({ name: 'api', reason: result.reason })]);
+    });
+
+    it('does not hand a service to PM2 when its program is missing, and says which one', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      vi.mocked(findExecutable).mockReturnValueOnce(null);
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+      const declared: ServiceConfig = { ...service('app/worker', ws), command: '/bin/sh', args: ['-c', 'PORT=1 exec honcho start'], source: 'procfile', declared: true, declaredIn: { file: 'Procfile.dev', line: 2 }, display: 'PORT=1 exec honcho start' };
+
+      const result = await startService(declared, ws, '/logs');
+      expect(findExecutable).toHaveBeenLastCalledWith('honcho', process.env);
+      expect(result).toMatchObject({ status: 'failed', reason: '"honcho" was not found on PATH. Install it, or change the command in Procfile.dev line 2.' });
+      expect(execa).not.toHaveBeenCalled();
+    });
+
+    it('reports an occupied port before starting, but a restart skips that check', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      const holder = net.createServer().listen(0, '127.0.0.1');
+      await new Promise((resolve) => holder.once('listening', resolve));
+      const port = (holder.address() as net.AddressInfo).port;
+      try {
+        vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+        vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+        vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+        const web = { ...service('web', ws), port };
+        const result = await startService(web, ws, '/logs');
+        expect(result).toMatchObject({ status: 'failed', reason: `Port ${port} is already in use by another process. Stop that process, or change the port.` });
+        expect(execa).not.toHaveBeenCalled();
+
+        vi.mocked(execa)
+          .mockResolvedValueOnce({ stdout: '' } as any)
+          .mockResolvedValueOnce({ stdout: '' } as any)
+          .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: pm2AppName(ws, 'web'), pid: 9, pm2_env: { status: 'online' } }]) } as any);
+        await expect(startService(web, ws, '/logs', { restart: true })).resolves.toMatchObject({ status: 'running' });
+      } finally {
+        holder.close();
+      }
+    });
+
+    it('startServices keeps going after a failure and returns one result per service', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      vi.mocked(findExecutable).mockReturnValueOnce(null);
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined as any);
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+      vi.mocked(execa)
+        .mockResolvedValueOnce({ stdout: '' } as any)
+        .mockResolvedValueOnce({ stdout: '' } as any)
+        .mockResolvedValueOnce({ stdout: JSON.stringify([{ name: pm2AppName(ws, 'api'), pid: 5, pm2_env: { status: 'online' } }]) } as any);
+
+      const results = await startServices([service('broken', ws), service('api', ws)], ws, '/logs');
+      expect(results.map((r) => [r.name, r.status])).toEqual([['broken', 'failed'], ['api', 'running']]);
+    });
+
+    it('finds the program behind Procfile assignments and prefixes, and skips shell builtins', () => {
+      const line = (display: string): ServiceConfig => ({ ...service('x', '/w'), source: 'procfile', display });
+      expect(serviceExecutable(line('PORT=3000 NODE_ENV=dev exec node server.js'))).toBe('node');
+      expect(serviceExecutable(line('env FOO=1 "./bin/web" --flag'))).toBe('./bin/web');
+      expect(serviceExecutable(line('cd api && npm run dev'))).toBeUndefined();
+      expect(serviceExecutable(service('y', '/w'))).toBe('npm');
     });
 
     it('stopService deletes the PM2 app and removes it from state', async () => {
@@ -211,6 +283,64 @@ describe('orchestration runner PM2 state handling', () => {
       expect(await stopService(ws, 'api')).toBe(false);
       // Service was retained in state — unlink was NOT called.
       expect(fs.unlink).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('failures beside each service', () => {
+    it('loadRunningState reports a recorded service that PM2 no longer runs as stopped unexpectedly', async () => {
+      const ws = path.join(process.cwd(), 'my-ws');
+      const state: RunningState = {
+        workspacePath: ws,
+        services: [
+          { name: 'api', pid: 1, config: service('api', ws), startedAt: 'x' },
+          { name: 'web', pid: 2, config: service('web', ws), startedAt: 'x', logFile: '/logs/web.log' },
+          { name: 'gone', pid: 3, config: service('gone', ws), startedAt: 'x' },
+        ],
+        failures: [{ name: 'worker', reason: 'Port 5000 is already in use by another process.', at: 'x' }],
+        updatedAt: 'x',
+      };
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(state) as any);
+      const tail = Buffer.from('starting\nboom: missing DATABASE_URL\n');
+      vi.mocked(fs.open).mockResolvedValue({
+        stat: async () => ({ size: tail.length }),
+        read: async (buffer: Buffer) => { tail.copy(buffer); return { bytesRead: tail.length, buffer }; },
+        close: async () => {},
+      } as any);
+      const list = [
+        { name: pm2AppName(ws, 'api'), pid: 11, pm2_env: { status: 'online' } },
+        { name: pm2AppName(ws, 'web'), pid: 0, pm2_env: { status: 'errored' } },
+      ];
+
+      const loaded = await loadRunningState(ws, list);
+      expect(loaded?.services.map((s) => s.name)).toEqual(['api']);
+      expect(loaded?.failures).toEqual([
+        expect.objectContaining({ name: 'worker', reason: expect.stringContaining('Port 5000') }),
+        expect.objectContaining({ name: 'web', reason: 'Stopped unexpectedly (PM2 status: errored). Last output: "boom: missing DATABASE_URL". Start it again when fixed.' }),
+        expect.objectContaining({ name: 'gone', reason: expect.stringContaining('no PM2 process remains') }),
+      ]);
+    });
+  });
+
+  describe('workspace ownership', () => {
+    it('stop-all deletes only this workspace\'s PM2 apps, even when another workspace name is a prefix of it', async () => {
+      const ws = path.join(process.cwd(), 'shop');
+      const other = path.join(process.cwd(), 'shop-v2');
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined as any);
+      vi.mocked(execa)
+        .mockResolvedValueOnce({ stdout: JSON.stringify([
+          { name: pm2AppName(ws, 'api') },
+          { name: pm2AppName(other, 'api') },
+          { name: pm2AppName(other, 'web') },
+        ]) } as any)
+        .mockResolvedValue({ stdout: '' } as any);
+
+      await stopServices(ws);
+
+      const deleted = vi.mocked(execa).mock.calls
+        .filter((c) => (c[1] as string[] | undefined)?.[1] === 'delete')
+        .map((c) => (c[1] as string[])[2]);
+      expect(deleted).toEqual([pm2AppName(ws, 'api')]);
     });
   });
 

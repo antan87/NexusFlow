@@ -99,7 +99,8 @@ export function VsCodeShell({
             <div className="flex gap-2 mb-3">
               <button
                 onClick={() => serviceAction.mutate({ action: 'start' })}
-                disabled={serviceAction.isPending}
+                disabled={serviceAction.isPending || !services.some((service) => service.declared)}
+                title={services.some((service) => service.declared) ? undefined : 'Nothing is declared. Add a Procfile.dev, or start guessed services from the Services tab.'}
                 className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-success/20 bg-success/10 hover:bg-success/20 text-success font-bold transition-all cursor-pointer text-[10px] disabled:opacity-50"
               >
                 <Play size={10} /> [START SERVICES]
@@ -138,6 +139,7 @@ export function VsCodeShell({
                         <div className="flex items-center gap-2 truncate">
                           <span className={`h-1.5 w-1.5 rounded-full ${isRunning ? 'bg-success' : 'bg-destructive'}`}></span>
                           <span className="font-bold truncate">{service.name}</span>
+                          {!service.declared && <span className="text-[8px] uppercase text-warning" title={`Guessed from ${service.source}`}>guessed</span>}
                         </div>
                         <span className="text-[10px] font-mono shrink-0">
                           {isRunning ? (

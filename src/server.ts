@@ -125,6 +125,7 @@ import {
 } from './core/scheduler.js';
 import {
   detectAllServices,
+  suggestProcfiles,
   detectOrchestrationTools,
   startServices,
   stopServices,
@@ -2053,6 +2054,8 @@ app.get('/api/workspace/:id/services', async (c) => {
       orchestrationTools: tools,
       runningState: runningState?.services || [],
       runningOrchestrators: runningState?.orchestrators || [],
+      failures: runningState?.failures || [],
+      suggestions: services.some((service) => service.declared) ? [] : suggestProcfiles(services),
     });
   } catch (error) {
     return errorResponse(c, error);
@@ -2068,7 +2071,8 @@ function getWorkspaceLogDir(workspacePath: string): string {
 }
 
 // 10. Start services in workspace. Configs are re-detected server-side —
-// the client only says "start", never what to execute.
+// the client only says "start", never what to execute. Only services the
+// repositories declare start together; guessed ones start one at a time.
 app.post('/api/workspace/:id/services/start', async (c) => {
   try {
     const id = c.req.param('id');
@@ -2076,9 +2080,12 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = getWorkspaceLogDir(workspacePath);
 
-    const services = await detectAllServices(workspacePath);
-    await startServices(services, workspacePath, logDir);
-    return c.json({ success: true });
+    const declared = (await detectAllServices(workspacePath)).filter((service) => service.declared);
+    if (declared.length === 0) {
+      return c.json({ error: 'No declared services. Add a Procfile.dev with one `name: command` line per process, or start a guessed service on its own.' }, 409);
+    }
+    const results = await startServices(declared, workspacePath, logDir);
+    return c.json({ success: results.every((result) => result.status === 'running'), results });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2119,10 +2126,10 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
     if (!service) {
       return c.json({ error: `Unknown service "${serviceName}" in this workspace.` }, 404);
     }
-    const running = action === 'restart'
+    const result = action === 'restart'
       ? await restartService(service, workspacePath, logDir)
       : await startService(service, workspacePath, logDir);
-    return c.json({ success: running !== null, service: running });
+    return c.json({ success: result.status === 'running', service: result, reason: result.reason });
   } catch (error) {
     return errorResponse(c, error);
   }

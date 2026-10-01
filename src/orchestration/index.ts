@@ -3,7 +3,7 @@
  * Re-exports all orchestration modules.
  */
 
-export { detectOrchestrationTools, detectServiceConfig, detectAllServices } from './detect.js';
+export { detectOrchestrationTools, detectServiceConfig, detectAllServices, detectDeclaredServices, parseProcfile, suggestProcfiles } from './detect.js';
 export {
   startServices,
   stopServices,
