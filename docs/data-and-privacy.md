@@ -57,7 +57,10 @@ The guide and diagnostics CLI commands skip ContextSpace's post-command update
 check. Opening Settings does not check npm for toolchain updates; **Check Now**
 does. Dashboard release checks, packaged desktop updates, assistant execution,
 Git operations and plugin behavior are separate outbound paths described in the
-inventory. This feature is not a global offline mode.
+inventory. On Windows and Linux the packaged desktop app keeps Chromium's spell
+checker off, so it never downloads dictionaries from Google; macOS uses the
+system spell checker, which downloads nothing. This feature is not a global
+offline mode.
 
 ## Deletion and recovery are separate
 

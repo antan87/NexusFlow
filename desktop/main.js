@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import updaterPackage from 'electron-updater';
 import { externalLinkTarget, isAppShellNavigation, isTrustedIpcEvent } from './lib/security.js';
+import { applySpellCheckerPolicy, spellCheckerEnabled } from './lib/spellcheck.js';
 import { configureDesktopUserData } from './lib/upgrade.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,9 @@ const { autoUpdater } = updaterPackage;
 
 // Keep cookies, preferences and local storage when upgrading the renamed app.
 configureDesktopUserData(app);
+// No automatic dictionary downloads from Google on Windows/Linux. Only this
+// event is early enough; see lib/spellcheck.js.
+app.on('session-created', (created) => applySpellCheckerPolicy(created, process.platform));
 
 const UPDATE_EVENT = 'update:event';
 const SUPPORTED_UPDATE_PLATFORMS = new Set(['win32', 'linux']);
@@ -258,7 +262,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      spellcheck: spellCheckerEnabled(process.platform)
     }
   });
 

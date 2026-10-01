@@ -110,7 +110,7 @@ export const DATA_INVENTORY: readonly DataClass[] = [
   {
     id: 'updates', title: 'Update checks and downloads', owner: 'ContextSpace and upstream registries',
     storage: 'Release metadata cached in config for 24 hours; tool-version cache is in memory for 60 seconds.',
-    network: 'Interactive CLI commands can check api.github.com for release metadata. The dashboard checks releases, and Check Now queries registry.npmjs.org for installed tools. Packaged desktop checks GitHub releases separately. Requests reveal IP/network metadata and product/package identity, not workspace content; installing downloads software.',
+    network: 'Interactive CLI commands can check api.github.com for release metadata. The dashboard checks releases, and Check Now queries registry.npmjs.org for installed tools. Packaged desktop checks GitHub releases separately; on Windows and Linux it does not download spell-check dictionaries. Requests reveal IP/network metadata and product/package identity, not workspace content; installing downloads software.',
     retention: 'Local caches are replaced on later checks. Upstream services control their own request-log retention.',
     controls: 'Data guide and diagnostics CLI commands skip the CLI update hook. Toolchain checks in Settings require Check Now. Dashboard/desktop release checks have separate behavior; this is not a global offline switch.',
     recovery: 'Update caches are not authored data and do not need restoration.',
