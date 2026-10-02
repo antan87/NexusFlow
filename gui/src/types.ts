@@ -555,6 +555,15 @@ export interface WorkspaceStreamMessage {
   [key: string]: any;
 }
 
+/** An agent asked for the user's attention through the MCP `request_user_input` tool. */
+export interface InputRequest {
+  workspaceId: string;
+  id: string;
+  timestamp: string;
+  harness: string;
+  message: string;
+}
+
 export interface WorkspaceStreamResponse {
   workspaceId: string;
   messages: WorkspaceStreamMessage[];

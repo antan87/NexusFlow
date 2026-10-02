@@ -32,6 +32,7 @@ import type {
   WorkspaceStatus,
   WorkspaceStreamMessage,
   WorkspaceStreamResponse,
+  InputRequest,
   RepoFreshness,
   FastForwardResult,
   WorkspaceLifecycle,
@@ -628,6 +629,27 @@ export function useWorkspaceStream(workspaceId: string | null, options: { refetc
     queryFn: () => apiFetch<WorkspaceStreamResponse>(`/api/workspace/${encodeURIComponent(workspaceId!)}/stream`),
     enabled: Boolean(workspaceId),
     refetchInterval: options.refetchInterval ?? 3000,
+  });
+}
+
+/**
+ * The newest "agent needs input" request in each named workspace (the open CLI
+ * chats). Polls even when the window is in the background, because being away
+ * is exactly when the user needs the alert.
+ */
+export function useInputRequests(workspaceIds: readonly string[]) {
+  const ids = [...new Set(workspaceIds)].sort();
+  return useQuery({
+    queryKey: ['input-requests', ids],
+    queryFn: async () => {
+      const { requests } = await apiFetch<{ requests: InputRequest[] }>(
+        `/api/attention?workspaces=${encodeURIComponent(ids.join(','))}`,
+      );
+      return requests;
+    },
+    enabled: ids.length > 0,
+    refetchInterval: 4000,
+    refetchIntervalInBackground: true,
   });
 }
 

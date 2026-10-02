@@ -1,9 +1,11 @@
 import { MessagesSquare } from 'lucide-react';
 import { useFloatingChat } from './floatingChatStore.js';
+import { useChatAttention } from './useChatAttention.js';
 import { cn } from '../../lib/utils.js';
 
 export function FloatingChatLauncher() {
   const { isOpen, isMinimized, openTabs, open } = useFloatingChat();
+  const { waiting } = useChatAttention();
 
   // If the full window is already open and not minimized, don't show the redundant floating trigger button
   if (isOpen && !isMinimized) {
@@ -25,12 +27,16 @@ export function FloatingChatLauncher() {
           'hover:scale-105 hover:shadow-xl hover:shadow-primary/35 active:scale-95',
           'transition-all duration-200 cursor-pointer border border-primary/20',
         )}
-        title="Open CLI Chat launcher"
-        aria-label="Open CLI Chat launcher"
+        title={waiting.size > 0 ? `${waiting.size} waiting for you` : 'Open CLI Chat launcher'}
+        aria-label={waiting.size > 0 ? `Open CLI Chat launcher, ${waiting.size} waiting for you` : 'Open CLI Chat launcher'}
       >
         <MessagesSquare className="size-4" aria-hidden="true" /><span className="text-xs font-medium">CLI Chat</span>
 
-        {openTabs.length > 0 && (
+        {waiting.size > 0 ? (
+          <span className="absolute -top-1 -right-1 size-5 animate-pulse rounded-full bg-amber-500 text-amber-950 text-[10px] font-bold grid place-items-center shadow-md border-2 border-background" aria-hidden="true">
+            {waiting.size}
+          </span>
+        ) : openTabs.length > 0 && (
           <span className="absolute -top-1 -right-1 size-5 rounded-full bg-emerald-500 text-white text-[10px] font-bold grid place-items-center shadow-md border-2 border-background">
             {openTabs.length}
           </span>
