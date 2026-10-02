@@ -5,7 +5,7 @@ import { floatingChatStore } from '../../features/chat/floatingChatStore.js';
  * hand-rolled refetch effects.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './client.js';
 import type {
@@ -650,6 +650,9 @@ export function useInputRequests(workspaceIds: readonly string[]) {
     enabled: ids.length > 0,
     refetchInterval: 4000,
     refetchIntervalInBackground: true,
+    // Opening or closing a tab changes the key. Keep showing the last answer until
+    // the new one arrives, or the indicators would blink off for a poll.
+    placeholderData: keepPreviousData,
   });
 }
 

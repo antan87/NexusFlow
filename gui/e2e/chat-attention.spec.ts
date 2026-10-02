@@ -14,6 +14,8 @@ type Request = { workspaceId: string; id: string; timestamp: string; harness: st
 let requests: Request[] = [];
 let polls = 0;
 let counter = 0;
+/** Held back before each answer when a test needs the server to be slow. */
+let answerDelayMs = 0;
 
 const ask = (workspaceId: string, message: string, id = `req-${++counter}`): Request => ({
   workspaceId, id, timestamp: new Date().toISOString(), harness: 'claude', message,
@@ -37,14 +39,17 @@ async function chatState(page: Page, state: { isOpen: boolean; isMinimized?: boo
 test.beforeEach(async ({ page }) => {
   requests = [];
   polls = 0;
+  answerDelayMs = 0;
   await page.route('**/api/terminals/bootstrap', route => route.fulfill({ json: { token: 'test-token', expiresAt: Date.now() + 300_000 } }));
   await page.route('**/api/terminals/*/status', route => route.fulfill({ json: { available: true, sessions: [], targets: [] } }));
   await page.route('**/api/workspace/*/sessions', route => route.fulfill({ json: { sessions: [] } }));
   await page.route('**/api/workspace/*/plan', route => route.fulfill({ json: { content: '# Plan' } }));
-  await page.route('**/api/attention?*', route => {
+  await page.route('**/api/attention?*', async route => {
     polls++;
     const wanted = new URL(route.request().url()).searchParams.get('workspaces')?.split(',') ?? [];
-    return route.fulfill({ json: { requests: requests.filter(request => wanted.includes(request.workspaceId)) } });
+    const answer = { requests: requests.filter(request => wanted.includes(request.workspaceId)) };
+    if (answerDelayMs > 0 && wanted.includes('gamma')) await new Promise(resolve => setTimeout(resolve, answerDelayMs));
+    return route.fulfill({ json: answer });
   });
   // By default two chats are open with alpha in front. Seeded once, so a reload keeps whatever the app saved.
   await page.addInitScript((key) => {
@@ -125,6 +130,23 @@ test.describe('chat window open', () => {
     await expect(chipOf(page)).toHaveCount(0);
   });
 
+  test('keeps showing the waiting chat while opening another tab waits on the server', async ({ page }) => {
+    await page.goto('/#/overview');
+    requests.push(ask('beta', 'Which database should the migration target?'));
+    await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
+
+    // Opening a tab changes which chats are asked about; make the answer slow so a gap would show.
+    answerDelayMs = 3000;
+    const slowRequest = page.waitForRequest(request => /workspaces=[^&]*gamma/.test(decodeURIComponent(request.url())));
+    await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for gamma' }).click();
+    await slowRequest;
+    await page.waitForTimeout(500);
+
+    // Counted at once, not with a retrying assertion: that would wait out the slow answer and pass anyway.
+    expect(await chipOf(page).count()).toBe(1);
+    expect(await chatOf(page).getByRole('tab', { name: 'Show beta in the left pane, waiting for your input' }).count()).toBe(1);
+  });
+
   test('counts every waiting chat in the chip', async ({ page }) => {
     await chatState(page, { isOpen: true, tabs: ['alpha', 'beta', 'gamma', 'delta'] });
     await page.goto('/#/overview');
@@ -156,6 +178,20 @@ test.describe('chat window closed or minimized', () => {
     await expect(chat.getByRole('tab', { name: /^Show beta in the left pane/ })).toHaveAttribute('aria-selected', 'true');
     await expect(alerts).toHaveCount(0);
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
+  });
+
+  test('puts back only a window title it set itself', async ({ page }) => {
+    await chatState(page, { isOpen: false });
+    await page.goto('/#/overview');
+    requests.push(ask('beta', 'Ready?'));
+    await expect(page).toHaveTitle(/^\(1\) /, { timeout: 12_000 });
+
+    // Something else renames the window while the alert is up.
+    await page.evaluate(() => { document.title = 'Renamed elsewhere'; });
+    await alertsOf(page).getByRole('button', { name: 'Dismiss the alert for beta' }).click();
+
+    await expect(alertsOf(page)).toHaveCount(0);
+    await expect(page).toHaveTitle('Renamed elsewhere');
   });
 
   test('a dismissed alert stays dismissed after a reload, and a new question raises it again', async ({ page }) => {

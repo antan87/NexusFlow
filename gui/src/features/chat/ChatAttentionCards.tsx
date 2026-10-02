@@ -23,10 +23,15 @@ export function ChatAttentionCards() {
   const { pending } = useChatAttention();
 
   // The count in the window title shows in a taskbar or tab strip, whatever is open.
+  // Only a title this effect itself wrote is put back, so a title set elsewhere meanwhile is kept.
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+\) /, '');
-    document.title = pending.length > 0 ? `(${pending.length}) ${base}` : base;
-    return () => { document.title = base; };
+    if (pending.length === 0) return;
+    const original = document.title;
+    const marked = `(${pending.length}) ${original}`;
+    document.title = marked;
+    return () => {
+      if (document.title === marked) document.title = original;
+    };
   }, [pending.length]);
 
   if (pending.length === 0 || (isOpen && !isMinimized)) return null;
