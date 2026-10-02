@@ -73,10 +73,17 @@ async function commitsSince(ctx, latestTag) {
 }
 
 function rollupOf(pr) {
-  return (pr.statusCheckRollup ?? []).map((check) => ({
-    status: check.status ?? (check.state ? 'COMPLETED' : 'IN_PROGRESS'),
-    conclusion: check.conclusion ?? check.state ?? '',
-  }));
+  return (pr.statusCheckRollup ?? []).map((check) => {
+    // A check run has `status` and `conclusion`.
+    if (check.status) return { status: check.status, conclusion: check.conclusion ?? '' };
+    // A legacy commit status has only `state`. PENDING, and EXPECTED (a required status that has
+    // not reported yet), mean it is still running; only SUCCESS, FAILURE and ERROR are results.
+    if (check.state) {
+      const reported = !['PENDING', 'EXPECTED'].includes(check.state);
+      return { status: reported ? 'COMPLETED' : 'IN_PROGRESS', conclusion: reported ? check.state : '' };
+    }
+    return { status: 'IN_PROGRESS', conclusion: '' };
+  });
 }
 
 async function readReleasePr(ctx) {
@@ -232,13 +239,24 @@ export async function closeReleasePr(ctx, step) {
   ctx.log(`Closed release PR #${step.number}: ${step.reason}`);
 }
 
-async function findDispatchedRun(ctx, since) {
+async function listDispatchedRuns(ctx) {
+  return JSON.parse(await ctx.gh([
+    'run', 'list', '--repo', ctx.repo, '--workflow', 'release.yml', '--event', 'workflow_dispatch', '--limit', '10', '--json', 'databaseId,status,createdAt',
+  ]));
+}
+
+/**
+ * The run this command started is the one that was not there before it dispatched. Comparing
+ * GitHub's createdAt with the local clock would miss it whenever the two clocks differ by more
+ * than the allowance, and would take another agent's run that began moments earlier for ours.
+ */
+async function findDispatchedRun(ctx, runsBefore) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const runs = JSON.parse(await ctx.gh([
-      'run', 'list', '--repo', ctx.repo, '--workflow', 'release.yml', '--event', 'workflow_dispatch', '--limit', '10', '--json', 'databaseId,status,createdAt',
-    ]));
-    const mine = runs.filter((run) => Date.parse(run.createdAt) >= since - 10_000).sort((a, b) => a.databaseId - b.databaseId);
-    if (mine.length > 0) return mine[0];
+    const fresh = (await listDispatchedRuns(ctx))
+      .filter((run) => !runsBefore.has(run.databaseId))
+      .sort((a, b) => a.databaseId - b.databaseId);
+    if (fresh.length > 1) ctx.log(`Several release runs appeared at once (${fresh.map((run) => run.databaseId).join(', ')}); following the first.`);
+    if (fresh.length > 0) return fresh[0];
     await ctx.sleep(5000);
   }
   throw new Error('The dispatched release run did not appear. Check the Actions tab; do not dispatch again until you have.');
@@ -250,9 +268,11 @@ async function findDispatchedRun(ctx, since) {
  */
 export async function dispatchAndWatch(ctx, step, { timeoutMs, pollMs }) {
   const startedAt = ctx.now();
+  // Taken before dispatching, so the new run can be told apart from every earlier one.
+  const runsBefore = new Set((await listDispatchedRuns(ctx)).map((run) => run.databaseId));
   await ctx.gh(['workflow', 'run', 'release.yml', '--repo', ctx.repo, '-f', `version=${step.version}`, '-f', `expected_sha=${step.tipSha}`]);
   ctx.log(`Dispatched release.yml for v${step.version} pinned to ${step.tipSha.slice(0, 7)}.`);
-  const run = await findDispatchedRun(ctx, startedAt);
+  const run = await findDispatchedRun(ctx, runsBefore);
 
   let announcedGate = false;
   for (;;) {

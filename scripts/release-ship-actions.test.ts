@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createReleasePr, expectedAssets, gatherFacts, ship, verifyRelease } from './release-ship-actions.mjs';
+import { createReleasePr, dispatchAndWatch, expectedAssets, gatherFacts, ship, verifyRelease } from './release-ship-actions.mjs';
 import { RELEASE_BRANCH, VERSION_FILES } from './release-ship-core.mjs';
 
 const TIP = 'a'.repeat(40);
@@ -545,3 +545,65 @@ describe('gatherFacts and verifyRelease', () => {
     ]);
   });
 });
+
+describe('ship: legacy commit statuses on the release PR', () => {
+  const ok = { status: 'COMPLETED', conclusion: 'SUCCESS' };
+  const commitStatus = (state: string) => ({ __typename: 'StatusContext', context: 'ci/other', state });
+  const nextStep = async (rollup: Array<Record<string, string>>, mergeStateStatus = 'BLOCKED') => {
+    const { ctx } = setup({ prs: [releasePr({ mergeStateStatus, statusCheckRollup: rollup })] });
+    return (await ship(ctx, { ...FAST, dryRun: true })).step as { action: string; code?: string; waitFor?: string };
+  };
+
+  it.each(['PENDING', 'EXPECTED'])('waits while a commit status is %s, instead of calling the PR failing', async (state) => {
+    expect(await nextStep([ok, commitStatus(state)])).toMatchObject({ action: 'wait', waitFor: 'release-pr-checks' });
+  });
+
+  it.each(['FAILURE', 'ERROR'])('still stops on a commit status that is %s', async (state) => {
+    // A stop is returned before the dry-run branch, so it carries a code and message, not a step.
+    const { ctx, calls } = setup({ prs: [releasePr({ mergeStateStatus: 'BLOCKED', statusCheckRollup: [ok, commitStatus(state)] })] });
+    const result = await ship(ctx, { ...FAST, dryRun: true });
+    expect(result.code).toBe(1);
+    expect(result.message).toContain('Checks on release PR #360 failed');
+    expect(mutating(calls)).toEqual([]);
+  });
+
+  it('merges once the commit status has succeeded', async () => {
+    expect(await nextStep([ok, commitStatus('SUCCESS')], 'CLEAN')).toMatchObject({ action: 'merge-release-pr' });
+  });
+});
+
+describe('dispatchAndWatch: finding the run it dispatched', () => {
+  const step = { version: '2.32.0', tipSha: TIP };
+  const finish = (world: World) => {
+    const run = world.runs[world.runs.length - 1];
+    Object.assign(run, { status: 'completed', conclusion: 'success' });
+    return run;
+  };
+
+  it('finds its run when GitHub\'s clock is well behind the local one', async () => {
+    const { world, ctx } = setup();
+    world.onWorkflowRun = (w) => { finish(w).createdAt = new Date(ctx.now() - 5 * MINUTE).toISOString(); };
+
+    await expect(dispatchAndWatch(ctx, step, FAST)).resolves.toEqual({ runId: 900 });
+  });
+
+  it('does not mistake a dispatch that started moments earlier for its own', async () => {
+    const earlier = {
+      databaseId: 100, status: 'in_progress', conclusion: '', event: 'workflow_dispatch', headSha: OLD, jobs: [],
+      createdAt: new Date(Date.parse('2026-10-02T12:00:00Z') - 5000).toISOString(),
+    };
+    const { world, ctx } = setup({ runs: [earlier] });
+    world.onWorkflowRun = (w) => { finish(w); };
+
+    await expect(dispatchAndWatch(ctx, step, FAST)).resolves.toEqual({ runId: 900 });
+  });
+
+  it('still says so, and does not dispatch twice, when no new run ever appears', async () => {
+    const { world, ctx, calls } = setup();
+    world.onWorkflowRun = (w) => { w.runs.length = 0; };
+
+    await expect(dispatchAndWatch(ctx, step, FAST)).rejects.toThrow(/did not appear/);
+    expect(calls.filter((call) => call[0] === 'gh' && call[1] === 'workflow')).toHaveLength(1);
+  });
+});
+
