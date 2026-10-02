@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
+import { Parser, Tree } from 'web-tree-sitter';
 import { extractAstSymbols, MonacoSymbolKind } from './symbolService.js';
 
 describe('symbolService AST Extraction', () => {
@@ -225,5 +226,47 @@ pub fn global_helper() {}
   it('returns empty array for unsupported or empty files', async () => {
     expect(await extractAstSymbols('style.css', 'body { color: red; }')).toEqual([]);
     expect(await extractAstSymbols('empty.cs', '   ')).toEqual([]);
+  });
+});
+
+describe('symbolService WASM resource release', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('deletes the parser and the tree after a successful extraction', async () => {
+    const deleteParser = vi.spyOn(Parser.prototype, 'delete');
+    const deleteTree = vi.spyOn(Tree.prototype, 'delete');
+
+    const symbols = await extractAstSymbols('sample.ts', 'export class Sample { run() { return 1; } }');
+
+    expect(symbols.map((s) => s.name)).toContain('Sample');
+    expect(deleteParser).toHaveBeenCalledTimes(1);
+    expect(deleteTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('still deletes both when walking the tree throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(Tree.prototype, 'rootNode', 'get').mockImplementation(() => {
+      throw new Error('walk failed');
+    });
+    const deleteParser = vi.spyOn(Parser.prototype, 'delete');
+    const deleteTree = vi.spyOn(Tree.prototype, 'delete');
+
+    await expect(extractAstSymbols('sample.ts', 'export const a = 1;')).resolves.toEqual([]);
+
+    expect(deleteParser).toHaveBeenCalledTimes(1);
+    expect(deleteTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes the parser when parsing yields no tree', async () => {
+    vi.spyOn(Parser.prototype, 'parse').mockReturnValue(null);
+    const deleteParser = vi.spyOn(Parser.prototype, 'delete');
+    const deleteTree = vi.spyOn(Tree.prototype, 'delete');
+
+    await expect(extractAstSymbols('sample.ts', 'export const a = 1;')).resolves.toEqual([]);
+
+    expect(deleteParser).toHaveBeenCalledTimes(1);
+    expect(deleteTree).not.toHaveBeenCalled();
   });
 });

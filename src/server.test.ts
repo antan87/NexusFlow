@@ -391,6 +391,11 @@ describe('Server API Endpoints Unit Tests', () => {
         isDirectory: () => true
       } as any);
       vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      // A launch target must exist as a regular file, so describe one.
+      vi.spyOn(fs, 'lstat').mockResolvedValue({
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      } as any);
       vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
         id: 'test-workspace',
         workspacePath,

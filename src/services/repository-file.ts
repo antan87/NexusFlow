@@ -1,9 +1,25 @@
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import * as path from 'node:path';
-import { assertPathWithin, assertNoLinkedPathComponents, assertFileHandleMatchesPath } from '../resources/fs-safety.js';
+import { assertPathWithin, assertNoLinkedPathComponents, assertFileHandleMatchesPath, assertRegularFile } from '../resources/fs-safety.js';
 
 export class RepositoryFileAccessError extends Error {}
+
+/**
+ * Resolve a file an editor may be asked to open. Unlike readRepositoryFile, the
+ * file must exist: a path that names nothing is never a legitimate launch target,
+ * and accepting one lets a caller smuggle arbitrary text into the launch command.
+ */
+export async function resolveRepositoryFileForLaunch(repoPath: string, filePath: string): Promise<string> {
+  try {
+    const target = assertPathWithin(repoPath, path.resolve(repoPath, filePath));
+    await assertNoLinkedPathComponents(repoPath, target);
+    await assertRegularFile(target);
+    return target;
+  } catch {
+    throw new RepositoryFileAccessError('Invalid repository file path.');
+  }
+}
 
 /** Read only regular files below the selected repository; deleted files are empty. */
 export async function readRepositoryFile(repoPath: string, filePath: string): Promise<string> {

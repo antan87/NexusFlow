@@ -1,9 +1,9 @@
-import { listRepositoryChangesWithFingerprint } from './core/repository-changes.js';
+import { listRepositoryChangesWithFingerprint, parseGitStatus } from './core/repository-changes.js';
 import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
-import { readRepositoryFile, RepositoryFileAccessError } from './services/repository-file.js';
+import { readRepositoryFile, RepositoryFileAccessError, resolveRepositoryFileForLaunch } from './services/repository-file.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -2050,9 +2050,14 @@ app.post('/api/open-editor', async (c) => {
 
     let resolvedFilePath: string | undefined;
     if (typeof filePath === 'string' && filePath.trim()) {
-      const resolved = path.resolve(safeWorkspacePath, filePath.trim());
-      assertWithin(safeWorkspacePath, resolved);
-      resolvedFilePath = resolved;
+      try {
+        resolvedFilePath = await resolveRepositoryFileForLaunch(safeWorkspacePath, filePath.trim());
+      } catch (error) {
+        if (error instanceof RepositoryFileAccessError) {
+          return c.json({ error: 'File does not exist or is not a regular file inside the workspace.' }, 400);
+        }
+        throw error;
+      }
     }
 
     await launchWorkspaceTarget(
@@ -2448,13 +2453,16 @@ app.get('/api/workspace/:id/changes/symbols', async (c) => {
         const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
         try {
-          const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
-          const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+          // -z with --untracked-files=all keeps renames, files in new directories
+          // and paths with spaces intact; plain porcelain quotes or folds them.
+          const { stdout } = await execa(
+            'git',
+            ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
+            { cwd: worktreePath, stripFinalNewline: false },
+          );
 
-          const readPromises = lines.map(async (line) => {
-            const status = line.slice(0, 2).trim();
-            const file = line.slice(2).trim();
-            if (status === 'D') return; // Deleted files have no symbols on disk
+          const readPromises = parseGitStatus(stdout).map(async ({ file, type }) => {
+            if (type === 'deleted') return; // Deleted files have no symbols on disk
 
             const ext = file.split('.').pop()?.toLowerCase();
             if (!ext || !['cs', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs'].includes(ext)) {
