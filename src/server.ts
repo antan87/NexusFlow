@@ -57,6 +57,7 @@ import {
 } from './utils/repo-freshness.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, saveFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
+import { latestInputRequest, type InputRequest } from './core/attention.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import {
@@ -3005,6 +3006,29 @@ app.post('/api/workspace/:id/stream', async (c) => {
     await fs.appendFile(chatFile, JSON.stringify(entry) + '\n', 'utf-8');
 
     return c.json({ success: true, entry });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-6. Newest "agent needs input" request for each named workspace (the open CLI chats).
+// Cheap by design: it only tail-reads the ledgers of the ids it is given, no directory scan.
+const ATTENTION_MAX_WORKSPACES = 100;
+app.get('/api/attention', async (c) => {
+  try {
+    const config = await loadConfig();
+    const ids = [...new Set((c.req.query('workspaces') ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
+      .slice(0, ATTENTION_MAX_WORKSPACES);
+    const found = await Promise.all(ids.map(async (workspaceId) => {
+      try {
+        const request = await latestInputRequest(resolveWorkspacePath(config.workspacesDir, workspaceId));
+        return request ? { workspaceId, ...request } : null;
+      } catch {
+        // An id outside the workspaces directory or an unreadable ledger is not an alert.
+        return null;
+      }
+    }));
+    return c.json({ requests: found.filter((request): request is InputRequest & { workspaceId: string } => request !== null) });
   } catch (error) {
     return errorResponse(c, error);
   }
