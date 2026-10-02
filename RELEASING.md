@@ -130,14 +130,27 @@ GH_TOKEN=$(gh auth token) node scripts/release-guard.mjs checks \
 Only one release runs at a time (the `release` concurrency group), and a run that is
 waiting for approval in the `release` environment keeps the group. GitHub keeps at most
 one pending run per group, so a newer pending dispatch silently cancels an older one.
-Before bumping or dispatching, check what is already in flight and do not dispatch a
-version that already has a run:
+Before dispatching, run the read-only preflight. It never dispatches, tags or approves
+anything:
 
 ```bash
-gh run list --workflow release.yml --limit 5 \
-  --json databaseId,status,conclusion,headSha,createdAt \
-  --jq '.[] | "\(.createdAt) \(.status)/\(.conclusion) \(.headSha[0:7]) \(.databaseId)"'
+npm run release:preflight                      # the version main carries
+npm run release:preflight -- --version 2.30.0  # or name it
+npm run release:preflight -- --rerun           # only to finish a partial release
 ```
+
+It prints `NO-GO` with every reason, or `GO` with the exact dispatch command pinned to the
+commit it verified. It refuses when:
+
+- a release run is queued, waiting, pending or in progress (it names the run);
+- `main` does not carry the version yet, or the version is lower than an existing tag;
+- the version is already released from this commit (use `--rerun` to finish a partial
+  release, such as a Marketplace retry) or its tag sits on a different commit;
+- a required check on the tip of `main` is not green. It reuses the publish gate's own
+  decision, so the two cannot disagree.
+
+Anything it cannot read is a `NO-GO`, not a guess. Dispatch only the command it prints,
+and only with the owner's go-ahead for that release.
 
 The guard enforces two rules that do not depend on anyone checking first:
 
