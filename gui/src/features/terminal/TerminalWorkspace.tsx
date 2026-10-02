@@ -7,6 +7,7 @@ import { hasModifier, modifierLabel, usePaneHotkey } from './usePaneHotkey.js';
 import { WorkspaceCodePanel } from '../changes/WorkspaceCodePanel.js';
 import { TerminalPane } from './TerminalPane.js';
 import { WorkspaceDocumentsInspector } from './WorkspaceDocumentsInspector.js';
+import { isUnreadableDocument, workspaceDocumentName } from './documentReference.js';
 import { WorkspaceContextPeek } from './WorkspaceContextPeek.js';
 
 /** The inspector may never squeeze the terminal below this share of the pane. */
@@ -14,7 +15,7 @@ const INSPECTOR_MIN_PERCENT = 28;
 const INSPECTOR_MAX_PERCENT = 80;
 const clampPercent = (value: number) => Math.max(INSPECTOR_MIN_PERCENT, Math.min(INSPECTOR_MAX_PERCENT, value));
 
-export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<typeof TerminalPane> & { workspacePath: string }) {
+export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: ComponentProps<typeof TerminalPane> & { workspacePath: string; repoPaths?: string[] }) {
   const [inspector, setInspector] = useState<'code' | 'documents' | null>(null);
   const [openReference, setOpenReference] = useState<{ path: string; line?: number; id: number } | null>(null);
   const [openDocument, setOpenDocument] = useState<{ name: string; id: number } | null>(null);
@@ -92,19 +93,27 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
 
   const openFile = async (reference: { path: string; line?: number }) => {
     const request = ++referenceRequest.current;
-    const normalized = reference.path.replaceAll('\\', '/').replace(/^\.\//, '');
-    const root = workspacePath.replaceAll('\\', '/').replace(/\/$/, '');
-    const relative = normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized;
-    if (!relative.includes('/')) {
+    const name = workspaceDocumentName(reference, workspacePath, repoPaths);
+    if (name) {
+      const nested = name.includes('/');
+      const documents = `/api/workspace/${encodeURIComponent(props.workspace)}/documents`;
+      let isDocument: boolean;
       try {
-        const result = await apiFetch<{ documents: { name: string }[] }>(`/api/workspace/${encodeURIComponent(props.workspace)}/documents`);
-        if (request !== referenceRequest.current) return;
-        if (result.documents.some(document => document.name === relative)) {
-          setOpenDocument(current => ({ name: relative, id: (current?.id ?? 0) + 1 }));
-          setInspector('documents');
-          return;
-        }
-      } catch { /* The code panel can still resolve a repository file. */ }
+        // Documents in folders are not in the root listing, so the server is asked to open them.
+        isDocument = nested
+          ? await apiFetch(`${documents}/preview?name=${encodeURIComponent(name)}`).then(() => true)
+          : (await apiFetch<{ documents: { name: string }[] }>(documents)).documents.some(document => document.name === name);
+      } catch (error) {
+        // A nested file the server found but cannot preview still belongs in the inspector, which
+        // says why. Anything else is not a workspace document; the code panel can still resolve a repository file.
+        isDocument = nested && isUnreadableDocument(error);
+      }
+      if (request !== referenceRequest.current) return;
+      if (isDocument) {
+        setOpenDocument(current => ({ name, id: (current?.id ?? 0) + 1 }));
+        setInspector('documents');
+        return;
+      }
     }
     if (request !== referenceRequest.current) return;
     setOpenReference(current => ({ ...reference, id: (current?.id ?? 0) + 1 }));
@@ -112,7 +121,7 @@ export function TerminalWorkspace({ workspacePath, ...props }: ComponentProps<ty
   };
 
   const codePanel = <WorkspaceCodePanel workspace={props.workspace} active={props.active} openReference={openReference} onClose={() => setInspector(null)} />;
-  const documentsPanel = <WorkspaceDocumentsInspector workspace={props.workspace} active={props.active} openDocument={openDocument} />;
+  const documentsPanel = <WorkspaceDocumentsInspector workspace={props.workspace} workspacePath={workspacePath} active={props.active} openDocument={openDocument} />;
   const mod = modifierLabel();
   const codeShortcut = `${mod}+Shift+E`;
   const docsShortcut = `${mod}+Shift+D`;

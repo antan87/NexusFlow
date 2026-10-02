@@ -63,6 +63,17 @@ function withinRoot(absolute: string, root: string): string | null {
   return normalizeRelative(absolute.slice(prefix.length).split('/'));
 }
 
+/**
+ * Workspace-relative path (with `/`) for a relative or absolute file path, or
+ * null when it is outside the workspace or names nothing. Accepts `\` separators
+ * and compares Windows roots case-insensitively.
+ */
+export function toWorkspaceRelative(rawPath: string, workspaceRoot?: string): string | null {
+  const target = toSlashes(rawPath.trim());
+  if (isAbsolutePath(target)) return workspaceRoot ? withinRoot(target, workspaceRoot) : null;
+  return normalizeRelative(target.split('/'));
+}
+
 export function classifyMarkdownLink(rawHref: string | undefined | null, context?: MarkdownLinkContext): MarkdownLinkTarget {
   const href = (rawHref ?? '').trim();
   if (!href) return { kind: 'inert', label: '' };
@@ -91,13 +102,10 @@ export function classifyMarkdownLink(rawHref: string | undefined | null, context
   if (!context) return { kind: 'inert', label };
   const target = toSlashes(label);
 
-  let relative: string | null;
-  if (isAbsolutePath(target)) {
-    relative = context.workspaceRoot ? withinRoot(target, context.workspaceRoot) : null;
-  } else {
-    const documentDir = (context.documentPath ?? '').split('/').slice(0, -1);
-    relative = normalizeRelative([...documentDir, ...target.split('/')]);
-  }
+  const documentDir = (context.documentPath ?? '').split('/').slice(0, -1);
+  const relative = isAbsolutePath(target)
+    ? toWorkspaceRelative(target, context.workspaceRoot)
+    : normalizeRelative([...documentDir, ...target.split('/')]);
   return relative ? { kind: 'workspace-file', path: relative } : { kind: 'inert', label };
 }
 

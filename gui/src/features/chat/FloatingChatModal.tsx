@@ -571,7 +571,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                 </div>}
                 {!ws ? <div role="status" className="space-y-2 p-4 text-xs text-muted-foreground"><p>This workspace is unavailable. It may have been removed or is still loading.</p><Button size="xs" variant="outline" onClick={() => removeTab(branchName)}>Close unavailable tab</Button></div> : <>
                   <div className="flex-1 min-h-0">
-                    <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} active={isOpen && !isMinimized && visible} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
+                    <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} repoPaths={ws.repos} active={isOpen && !isMinimized && visible} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
                       onStatusChange={status => setTerminalStates(current => current[branchName] === status ? current : { ...current, [branchName]: status })}
                       onBackgroundOutput={() => setUnreadOutput(current => current[branchName] ? current : { ...current, [branchName]: true })} />
                   </div>

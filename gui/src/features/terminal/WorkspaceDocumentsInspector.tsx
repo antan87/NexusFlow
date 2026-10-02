@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, RefreshCw } from 'lucide-react';
+import { ArrowLeft, FileText, RefreshCw } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import type { WorkDocument } from '../../types.js';
 import type { DocumentKind, DocumentPreviewData } from '../work-guidance/DocumentPreview.js';
+import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { usePaneHotkey } from './usePaneHotkey.js';
 
@@ -13,12 +14,14 @@ const DocumentViewer = lazy(() => import('../work-guidance/DocumentViewer.js').t
 type RootDocument = { name: string; kind: DocumentKind; modifiedAt: string };
 type SourceDocument = WorkDocument & { workspaceId?: string };
 
-export function WorkspaceDocumentsInspector({ workspace, active = true, openDocument }: { workspace: string; active?: boolean; openDocument?: { name: string; id: number } | null }) {
+export function WorkspaceDocumentsInspector({ workspace, workspacePath, active = true, openDocument }: { workspace: string; workspacePath?: string; active?: boolean; openDocument?: { name: string; id: number } | null }) {
   const { isMaximized, toggleMaximize } = useFloatingChat();
   const handledDocument = useRef(0);
   const [files, setFiles] = useState<RootDocument[]>([]);
   const [sources, setSources] = useState<SourceDocument[]>([]);
   const [selected, setSelected] = useState<{ type: 'file' | 'source'; id: string } | null>(null);
+  // Documents opened from a link, so Back returns to the one that linked them.
+  const [trail, setTrail] = useState<string[]>([]);
   const [preview, setPreview] = useState<DocumentPreviewData | null>(null);
   const [sourcePreview, setSourcePreview] = useState<{ content?: string; location: string } | null>(null);
   const [query, setQuery] = useState('');
@@ -39,12 +42,16 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
     return () => controller.abort();
   }, [base, revision]);
 
+  const choose = useCallback((next: { type: 'file' | 'source'; id: string }) => { setTrail([]); setSelected(next); }, []);
+
   useEffect(() => {
-    if (openDocument && openDocument.id !== handledDocument.current && files.some(file => file.name === openDocument.name)) {
+    if (!openDocument || openDocument.id === handledDocument.current) return;
+    // Documents in folders are not in the root listing; the caller has already asked the server to open them.
+    if (openDocument.name.includes('/') || files.some(file => file.name === openDocument.name)) {
       handledDocument.current = openDocument.id;
-      setSelected({ type: 'file', id: openDocument.name });
+      choose({ type: 'file', id: openDocument.name });
     }
-  }, [files, openDocument]);
+  }, [files, openDocument, choose]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,15 +86,27 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
       ? (delta > 0 ? 0 : allSelectable.length - 1)
       : Math.min(allSelectable.length - 1, Math.max(0, index + delta));
     const target = allSelectable[next];
-    if (target) setSelected(target);
-  }, [allSelectable, selected]);
+    if (target) choose(target);
+  }, [allSelectable, selected, choose]);
 
   usePaneHotkey((event) => {
     if (!event.altKey || event.metaKey || event.ctrlKey) return;
     if (event.key === 'ArrowDown') { event.preventDefault(); step(1); }
     if (event.key === 'ArrowUp') { event.preventDefault(); step(-1); }
   }, { respectTerminal: false, enabled: active });
-  const fileUrl = selected?.type === 'file' ? `${API_BASE}${base}/documents/file?name=${encodeURIComponent(selected.id)}` : '';
+  const fileUrlFor = useCallback((name: string) => `${API_BASE}${base}/documents/file?name=${encodeURIComponent(name)}`, [base]);
+  const fileUrl = selected?.type === 'file' ? fileUrlFor(selected.id) : '';
+  const links = useMemo<MarkdownDocumentLinks | undefined>(() => selected?.type === 'file' ? {
+    workspaceRoot: workspacePath,
+    documentPath: selected.id,
+    fileUrl: fileUrlFor,
+    onOpenFile: name => {
+      if (name === selected.id) return;
+      setTrail(previous => [...previous, selected.id]);
+      setSelected({ type: 'file', id: name });
+    },
+  } : undefined, [fileUrlFor, selected, workspacePath]);
+  const back = trail.at(-1);
 
   return <section aria-label="Workspace documents" className="flex h-full min-h-0 flex-col bg-background">
     <div className="flex items-center gap-2 border-b border-border p-2">
@@ -102,17 +121,20 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
       {visibleFiles.map(file => <button key={file.name} type="button" aria-pressed={selected?.type === 'file' && selected.id === file.name}
         aria-keyshortcuts="Alt+ArrowDown Alt+ArrowUp"
         className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent aria-pressed:bg-accent"
-        onClick={() => setSelected({ type: 'file', id: file.name })}><FileText className="size-3 shrink-0" /><span className="truncate">{file.name}</span></button>)}
+        onClick={() => choose({ type: 'file', id: file.name })}><FileText className="size-3 shrink-0" /><span className="truncate">{file.name}</span></button>)}
       {!visibleFiles.length && <p className="text-xs text-muted-foreground">No matching files.</p>}
       <p className="pt-2 text-[11px] font-semibold text-muted-foreground">Source documents</p>
       {visibleSources.map(source => <button key={source.id} type="button" aria-pressed={selected?.type === 'source' && selected.id === source.id}
         aria-keyshortcuts="Alt+ArrowDown Alt+ArrowUp"
         className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent aria-pressed:bg-accent"
-        onClick={() => setSelected({ type: 'source', id: source.id })}><span className="truncate">{source.title}</span><span className="shrink-0 text-[10px] text-muted-foreground">{source.status}</span></button>)}
+        onClick={() => choose({ type: 'source', id: source.id })}><span className="truncate">{source.title}</span><span className="shrink-0 text-[10px] text-muted-foreground">{source.status}</span></button>)}
       {!visibleSources.length && <p className="text-xs text-muted-foreground">No matching sources.</p>}
     </div>
     <div className="min-h-0 flex-1 overflow-auto p-3">
       {!selected && <p className="text-xs text-muted-foreground">Select a file or source to read beside the CLI session.</p>}
+      {selected && back && <Button size="xs" variant="ghost" className="mb-2 -ml-2" onClick={() => { setTrail(previous => previous.slice(0, -1)); setSelected({ type: 'file', id: back }); }}>
+        <ArrowLeft className="size-3" />Back to {back.split('/').pop()}
+      </Button>}
       {selected && <Suspense fallback={<p role="status" className="text-xs">Opening viewer…</p>}>
         <DocumentViewer
           compact
@@ -122,6 +144,7 @@ export function WorkspaceDocumentsInspector({ workspace, active = true, openDocu
           rawLabels={['Raw', 'Rendered']}
           onToggleRaw={selected.type === 'file' ? (preview && (preview.kind === 'html' || preview.kind === 'markdown') ? () => setRaw(value => !value) : undefined) : (sourcePreview?.content !== undefined ? () => setRaw(value => !value) : undefined)}
           fileUrl={fileUrl}
+          links={links}
           downloadHref={selected.type === 'file' ? `${fileUrl}&download=1` : undefined}
           browserHref={selected.type === 'file' && preview?.kind === 'html' ? `${fileUrl}&open=1` : undefined}
           status={sourcePreview?.content === undefined && sourcePreview?.location
