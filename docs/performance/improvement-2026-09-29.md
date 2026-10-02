@@ -12,7 +12,7 @@ listed there are implemented on `feat/performance` (commits `96fc42e` to
   - switching back to a visited workspace: **−97%**;
   - saved sessions: **−26%**, now within budget.
 - **First open at L** takes 1.33 s (p95). The owner accepted this, and its budget is now 1.5 s, so every L budget passes.
-- **Tier M** (31 workspaces): switching −86%, saved sessions −37%. Startup, which these fixes did not change, sits at the budget limit on a heavily loaded machine. It needs a confirmation run on a quiet machine.
+- **Tier M** (31 workspaces): switching −86%, saved sessions −37%. Startup, which these fixes did not change, sat at the budget limit on a heavily loaded machine. A re-run on a quiet machine on 2026-10-02 passes (see [Confirmation](#confirmation-on-the-merged-branch--2026-10-02)).
 
 ## Method
 
@@ -89,13 +89,35 @@ All seven pass and are listed in `perf/rules-enforced.json`:
 | 5. Status scan (H3) | `c5790f4` | One `git status` per distinct repository per scan, one shared Codex header scan, and 32 KB header reads. |
 | 6. Warm switching | `027b284` | The last data of up to 16 recent workspaces is shown at once while a fresh load runs. |
 
+## Confirmation on the merged branch — 2026-10-02
+
+Re-run after merging `origin/main` (head `e7900e9`), on a quiet machine. Raw results are in [`data/2026-10-02/`](data/2026-10-02/compare-M.json).
+
+- **Checks on `e7900e9`:** `npm test` 2152 passed (183 files); `npm run build`; rules R1–R5 all pass; GUI E2E 162 passed, 2 skipped.
+- **Timing:** tier M, the baseline build (`e754215`) against a package built from `e7900e9`. Launches alternated, 20 measured per app after 2 warm-ups. The laptop was on AC power, with a load average of 1.44 at the start.
+- **Power profile:** the OS profile was `performance`. The harness records only the CPU governor, which stayed `powersave`. The earlier runs did not use this profile. The comparison between the two apps is unaffected, since both ran under the same conditions. Absolute numbers are lower than in the 2026-09-29 tables, and a budget pass is more lenient than on the original settings.
+
+| Metric | Baseline p50 / p95 | Head p50 / p95 | p50 change | Budget (p95) |
+|---|---|---|---|---|
+| Cards usable | 1531 / 2388 | 1511 / 1852 | −1% | 3000 ✓ |
+| Git status complete | 2452 / 4399 | 2230 / 2644 | −9% | 5000 ✓ |
+| Backend memory (MiB) | 257.5 / 259.3 | 203 / 205 | −21% | — |
+| First workspace open | 257 / 602 | 248 / 314 | −4% | 1000 ✓ |
+| Cached switch | 116 / 243 | **14 / 25** | **−88%** | 500 ✓ |
+| Diff open | 60 / 74 | 61 / 65 | +2% | 300 ✓ |
+| Saved sessions, first source | 81 / 105 | 112 / 118 | +38% | — |
+| Saved sessions, all sources | 257 / 322 | 133 / 170 | **−48%** | 1000 ✓ |
+
+- **M startup passes.** The 2026-09-29 miss (3481 ms against 3000) came from machine load. Even the baseline build now stays under budget (2388 ms p95).
+- **The first-source delay is reproducible.** The first saved-session source arrives later on both runs: +31 ms at p50 and +13 ms at p95 here, against +60 ms at p50 on 2026-09-29. The time for all sources to settle is 48% lower, so the net effect is positive. Its cause has not been investigated.
+
 ## Remaining work and decisions
 
 1. **First open at L (1.33 s p95).** Accepted by the owner on 2026-09-29; the L budget is now 1500 ms. The remaining cost is the first parse of a workspace's session history in a new app process.
-2. **Confirm M startup on a quiet machine.** Re-run `node perf/timing.mjs --tier M` with the two apps once nothing else is running.
-3. **Check the +60 ms first-source time at M**, which may be noise.
+2. **M startup on a quiet machine.** Done 2026-10-02: passes (see above).
+3. **First saved-session source at M arrives 30–60 ms later.** Reproduced on two runs; the cause is not known. Small, and the settled time is better.
 4. **Rules in CI.** The rules are deterministic and could run on every PR as a separate, non-release-blocking workflow.
-5. **Merge with `main`.** Since this branch started, `main` gained 25 commits. One conflict, in `gui/src/pages/WorkspacesPage.tsx`, must be resolved and re-verified before a PR.
+5. **Merge with `main`.** Done: `origin/main` was merged into the branch at `e7900e9` on 2026-10-01, and the checks above pass on the result.
 
 ## Limits
 
