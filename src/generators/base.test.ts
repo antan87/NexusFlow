@@ -286,6 +286,14 @@ describe('buildContextContent', () => {
       expect(content).not.toContain('post_workroom_handoff');
     });
 
+    it('points agents at request_user_input in one line, with a fallback when MCP is absent', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      const mentions = content.split('\n').filter((line) => line.includes('request_user_input'));
+      expect(mentions).toHaveLength(1);
+      expect(mentions[0]).toContain('end your turn');
+      expect(mentions[0]).toContain('No MCP');
+    });
 
     it('says nothing about relationships or ordering when there are none', async () => {
       // An empty "needs: none" column and a start hint that asserts a
@@ -305,7 +313,10 @@ describe('buildContextContent', () => {
       const content = await buildContextContent(relatedCtx());
 
       expect(content.split('\n').length).toBeLessThan(40);
-      expect(content.length).toBeLessThan(1600);
+      // 1600 until the request_user_input pointer was added. Agents that load MCP
+      // tools on demand need it to know the tool exists, so it is the one line
+      // allowed past the old cap.
+      expect(content.length).toBeLessThan(1800);
     });
   });
 

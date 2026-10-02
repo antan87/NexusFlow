@@ -280,5 +280,6 @@ If \`ctxspace\` is not on PATH, use \`./.contextspace/bin/ctxspace\` (bash) or \
 - \`${PRIMARY_PLAN_FILE}\` — generated milestones and dependencies; use Plan or MCP \`update_milestone_plan\`.
 - \`contextspace-work.json\` — assignment and sources. Read live guidance with \`ctxspace flow --assignment\` or MCP \`get_work_context\`.
 - \`.agents/skills/\` — enabled playbooks; Claude copies: \`.claude/skills/\`.
+- Need the user's answer or approval? Call MCP \`request_user_input\` (one short question) so this chat is flagged, then ask in the chat and end your turn. No MCP: just ask.
 ${ownInstructions}${customCommands}${teamwork}${enterpriseSection}`;
 }
