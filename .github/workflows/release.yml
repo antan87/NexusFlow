@@ -50,6 +50,22 @@ jobs:
       contents: write   # creates the immutable release tag
       checks: read      # reads required check results for the exact source SHA
     steps:
+      # The owner's brake. While the repository variable RELEASES_PAUSED is set, nothing
+      # publishes, whoever dispatched the run. It uses the same values as
+      # `npm run release:ship`, so the two cannot disagree about whether releases are paused.
+      - name: Refuse while releases are paused
+        env:
+          RELEASES_PAUSED: ${{ vars.RELEASES_PAUSED }}
+        run: |
+          value="${RELEASES_PAUSED,,}"
+          value="${value//[[:space:]]/}"
+          case "$value" in
+            1|true|yes|on)
+              echo "::error::Releases are paused (the RELEASES_PAUSED repository variable is set). Nothing was published. Clear the variable to release."
+              exit 1
+              ;;
+          esac
+
       - uses: actions/checkout@v4
         with:
           # The release guard must prove the dispatched source belongs to the
