@@ -101,7 +101,13 @@ describe('unboundMcpServer', () => {
   it('names no workspace, so the server finds it from the agent working directory', () => {
     const server = unboundMcpServer();
     expect(server.command).toBe('npx');
-    expect(server.args).toEqual(['-y', ENGINE_NPM_PACKAGE, 'mcp', 'run', '--role', 'interactive']);
+    expect(server.args).toEqual(['-y', `${ENGINE_NPM_PACKAGE}@latest`, 'mcp', 'run', '--role', 'interactive']);
+  });
+
+  it('asks the registry for the latest version, because npx reuses a bare package from its cache forever', () => {
+    const [, spec] = unboundMcpServer().args;
+    expect(spec).not.toBe(ENGINE_NPM_PACKAGE);
+    expect(spec).toBe(`${ENGINE_NPM_PACKAGE}@latest`);
   });
 });
 

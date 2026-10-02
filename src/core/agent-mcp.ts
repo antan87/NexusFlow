@@ -30,9 +30,16 @@ export interface McpServerDefinition {
   args: string[];
 }
 
-/** Shared by every registration; matches what `ctxspace mcp setup` writes for editors. */
+/**
+ * Shared by every registration; matches what `ctxspace mcp setup` writes for editors.
+ *
+ * The package must carry `@latest`. A bare `npx -y <package>` runs whatever copy is already in
+ * npx's cache and never asks the registry again, so a registration made once would keep running
+ * the same old version for good: on one machine it started 2.24.1 while 2.31.0 was current, and
+ * the agent never saw the newer tools.
+ */
 export function unboundMcpServer(): McpServerDefinition {
-  return { command: 'npx', args: ['-y', ENGINE_NPM_PACKAGE, 'mcp', 'run', '--role', 'interactive'] };
+  return { command: 'npx', args: ['-y', `${ENGINE_NPM_PACKAGE}@latest`, 'mcp', 'run', '--role', 'interactive'] };
 }
 
 /** The name new registrations use. */

@@ -365,7 +365,7 @@ A milestone gate (`ctxspace flow --step <id> --action complete`) runs that miles
 - **AI agents:** Claude Code, Codex, Antigravity (`agy`), and Pi (which needs the `pi-mcp-adapter` package). One server is registered per agent at user level, so it works in every workspace and finds the workspace from the agent's working directory.
 - **Editors and desktop apps:** Claude Desktop, Cursor, and VS Code.
 
-An existing ContextSpace entry is never replaced for an agent. Run `ctxspace mcp setup --dry-run` to see what would be registered with each agent without changing anything, or `--no-agents` to configure editors and desktop apps only. `ctxspace doctor` lists installed agents that have no registration. Registering agents is not yet available on native Windows.
+Registrations run `npx -y @mrpatronz/nexusflow@latest`, so they follow new releases (npx would reuse a cached copy of a bare package name indefinitely). An existing ContextSpace entry is never replaced for an agent. Run `ctxspace mcp setup --dry-run` to see what would be registered with each agent without changing anything, or `--no-agents` to configure editors and desktop apps only. `ctxspace doctor` lists installed agents that have no registration. Registering agents is not yet available on native Windows.
 
 An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` tool surface. The explicit `nexusflow mcp setup` command installs `--role interactive` for the full workspace-management experience, including committing, finishing, and archiving workspaces; use `--role readonly` or `--role review` for untrusted or inspection-only agents. The server exposes:
 
