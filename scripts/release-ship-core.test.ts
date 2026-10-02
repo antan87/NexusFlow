@@ -104,6 +104,27 @@ describe('isVersionOnlyDiff', () => {
     }
     expect(isVersionOnlyDiff(`${file('')}diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n`)).toBe(false);
   });
+  it('requires the removed and added version lines to pair up around one new version', () => {
+    const lock = `${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n   "packages": {\n-      "version": "2.31.1",\n+      "version": "2.32.0",\n`;
+    expect(isVersionOnlyDiff(lock)).toBe(true);
+    // A deleted version line, an extra added one, and a dependency moved to another version.
+    expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n`)).toBe(false);
+    expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n+  "version": "9.9.9",\n`)).toBe(false);
+    expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n-      "version": "1.0.0",\n+      "version": "2.0.0",\n`)).toBe(false);
+  });
+  it('can require the new version to be the one the release is for', () => {
+    const bump = `${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n`;
+    expect(isVersionOnlyDiff(bump, '2.32.0')).toBe(true);
+    expect(isVersionOnlyDiff(bump, '2.33.0')).toBe(false);
+    expect(isVersionOnlyDiff(bump)).toBe(true);
+  });
+  it('refuses a line inside a hunk that it does not understand, such as a binary section after a hunk', () => {
+    const bump = `${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n`;
+    expect(isVersionOnlyDiff(`${bump}Binary files a/x and b/x differ\n`)).toBe(false);
+    expect(isVersionOnlyDiff(`${bump}GIT binary patch\n`)).toBe(false);
+    // An empty context line (a tool that strips trailing space) is fine.
+    expect(isVersionOnlyDiff(`${bump}\n`)).toBe(true);
+  });
   it('rejects an empty diff, which is not a bump', () => {
     expect(isVersionOnlyDiff('')).toBe(false);
     expect(isVersionOnlyDiff(header)).toBe(false);

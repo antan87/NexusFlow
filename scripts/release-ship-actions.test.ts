@@ -572,6 +572,20 @@ describe('ship: legacy commit statuses on the release PR', () => {
   });
 });
 
+describe('ship: status checks it cannot read', () => {
+  it.each([
+    ['an entry with neither a status nor a state', { __typename: 'Mystery', name: 'x' }],
+    ['a commit status with a state it does not know', { __typename: 'StatusContext', context: 'ci/other', state: 'FUTURE_STATE' }],
+  ])('stops and changes nothing for %s, rather than guessing', async (_label, entry) => {
+    const { ctx, calls } = setup({ prs: [releasePr({ mergeStateStatus: 'BLOCKED', statusCheckRollup: [entry as Record<string, string>] })] });
+    const result = await ship(ctx, { ...FAST, dryRun: true });
+    expect(result.code).toBe(1);
+    expect(result.message).toContain('Could not read the release state');
+    expect(result.message).toContain('Unrecognized');
+    expect(mutating(calls)).toEqual([]);
+  });
+});
+
 describe('dispatchAndWatch: finding the run it dispatched', () => {
   const step = { version: '2.32.0', tipSha: TIP };
   const finish = (world: World) => {
@@ -596,6 +610,23 @@ describe('dispatchAndWatch: finding the run it dispatched', () => {
     world.onWorkflowRun = (w) => { finish(w); };
 
     await expect(dispatchAndWatch(ctx, step, FAST)).resolves.toEqual({ runId: 900 });
+  });
+
+  it('ignores an older run that only shows up in the listing after the dispatch', async () => {
+    const stale = { databaseId: 50, status: 'in_progress', conclusion: '', event: 'workflow_dispatch', headSha: OLD, jobs: [], createdAt: '2026-10-01T00:00:00Z' };
+    const { world, ctx } = setup({ runs: [{ ...stale, databaseId: 80, status: 'completed', conclusion: 'success' }] });
+    world.onWorkflowRun = (w) => { finish(w); w.runs.unshift(stale); };
+
+    await expect(dispatchAndWatch(ctx, step, FAST)).resolves.toEqual({ runId: 900 });
+  });
+
+  it('says so and follows the first when several runs appear at once', async () => {
+    const { world, ctx, logs } = setup();
+    const other = { databaseId: 899, status: 'completed', conclusion: 'success', event: 'workflow_dispatch', headSha: TIP, jobs: [], createdAt: '2026-10-02T12:00:00Z' };
+    world.onWorkflowRun = (w) => { finish(w); w.runs.push(other); };
+
+    await expect(dispatchAndWatch(ctx, step, FAST)).resolves.toEqual({ runId: 899 });
+    expect(logs.join('\n')).toContain('Several release runs appeared at once (899, 900)');
   });
 
   it('still says so, and does not dispatch twice, when no new run ever appears', async () => {
