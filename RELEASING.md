@@ -29,7 +29,71 @@ from `desktop/package.json` (already synced above).
 
 CI runs `node scripts/sync-version.mjs --check` and **fails on any drift**.
 
-## How to cut a release
+## Releasing with one command
+
+```bash
+npm run release:ship                   # release whatever is unreleased on main
+npm run release:ship -- --dry-run      # say what the next step would be; change nothing
+npm run release:ship -- --bump minor   # choose the bump instead of inferring it
+```
+
+This is the normal way to release, for a person or an agent. It reads GitHub's own state, takes
+the one next step, and repeats until the release is published and verified. Because it works from
+that state and not from anything an agent remembers, several agents running it at once land on the
+same step and join one release instead of each preparing their own.
+
+What it does, in order:
+
+1. **Stops if releases are paused** (see [The brake](#the-brake)) or a release run is already going,
+   and waits for that run instead of racing it.
+2. **Opens one release PR**, `chore: prepare release X.Y.Z`, on the branch `release/next`. The bump
+   comes from the unreleased commits: `feat` is minor; `fix`, `perf` and `revert` are patch; docs,
+   chores, tests and refactors do not release by themselves. A breaking change (`!` or a
+   `BREAKING CHANGE:` footer) is never turned into a major release unless you pass `--bump major`.
+   The branch is created only if nobody else has, so two agents cannot both open one.
+3. **Merges it only if it is a plain version bump**: only the version files changed, only
+   `"version"` lines changed, and the PR is the one it checked. It merges that exact commit
+   (`--match-head-commit`). Anything else stops for a person.
+4. **Waits for every required check on the tip of `main`**, then dispatches the release pinned to
+   that commit. If `main` moves while it waits, it releases the newer tip, so a busy `main` does not
+   make the pinned dispatch fail.
+5. **Follows the run to the end**, then checks that the tag, the GitHub Release assets and npm agree.
+
+It resumes from whatever state it finds, so running it again after a timeout, a crash or a
+failure continues instead of starting over. Exit codes: `0` released or nothing to release, `1`
+failed or needs a person, `2` paused, `3` timed out while waiting (run it again).
+
+It never approves a deployment, cancels a run, force-pushes, or edits repository settings. If the
+`release` environment still lists required reviewers, the run waits for them and the command says so.
+
+### The brake
+
+Set the repository variable `RELEASES_PAUSED` to `true` to stop every release, whoever or whatever
+asks for it. The workflow's guard refuses to publish and `release:ship` stops before changing anything.
+Clear it to release again:
+
+```bash
+gh variable set RELEASES_PAUSED --body true   # pause
+gh variable delete RELEASES_PAUSED            # resume
+```
+
+Only the owner should set or clear it; agents never do.
+
+### When it stops for a person
+
+| It says | Why | What to do |
+| --- | --- | --- |
+| paused | `RELEASES_PAUSED` is set | The owner clears it |
+| a breaking change calls for a major release | `!` or `BREAKING CHANGE:` since the last tag | Run it again with `--bump major` if that is intended |
+| required checks are not green | A check failed on the tip of `main` | Fix `main`, then run it again |
+| release PR is not a plain version bump | Someone changed the PR | Look at it; close it and run again, or fix it |
+| the branch `release/next` has no open PR | An agent died after pushing | Open a PR from it or delete the branch |
+
+## The manual path
+
+The command above automates the following; use it by hand only when the command cannot run.
+
+### How to cut a release
 
 The release workflow is dispatched explicitly from the protected default branch.
 Do not push a hand-created tag: the workflow guard creates the immutable tag only
@@ -127,6 +191,8 @@ GH_TOKEN=$(gh auth token) node scripts/release-guard.mjs checks \
 
 ### Several releases at once
 
+`npm run release:ship` is built for this: every agent that runs it converges on the same release PR and the same dispatch. The notes below describe the guard's own protections, which apply however a release is started.
+
 Only one release runs at a time (the `release` concurrency group), and a run that is
 waiting for approval in the `release` environment keeps the group. GitHub keeps at most
 one pending run per group, so a newer pending dispatch silently cancels an older one.
@@ -182,9 +248,24 @@ The workflow cannot configure these itself. Apply and review them as the reposit
    (`15368` is the GitHub Actions app ID; confirm it with
    `gh api repos/antan87/NexusFlow/commits/<sha>/check-runs --jq '.check_runs[0].app.id'`.)
 2. **Include administrators** (`enforce_admins`) so direct pushes cannot skip those checks.
-3. **`release` environment**: deployment branches limited to `main`, and the owner as the
-   required reviewer. The branch policy is what stops a workflow edited on another
-   branch from reaching the credentials; the guard's ref check only fails early.
+3. **`release` environment**: deployment branches limited to `main`. The branch policy is what
+   stops a workflow edited on another branch from reaching the credentials; the guard's ref check
+   only fails early. Required reviewers are the owner's choice:
+   - **With reviewers** (the original setup), every release waits for the owner to approve each
+     job that uses the environment, so agents have to hand the owner a click.
+   - **Without reviewers**, a release runs unattended once the guard is satisfied: it dispatches
+     only from `main`, every required check is green on that exact commit, the version moves
+     forward, and `RELEASES_PAUSED` is not set. The owner's control is then the merge to `main`
+     and the brake. To remove the reviewers and keep the branch policy:
+
+     ```bash
+     gh api -X PUT repos/antan87/NexusFlow/environments/release --input - <<'JSON'
+     {"reviewers": [], "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+     JSON
+     ```
+
+     Check the result with `gh api repos/antan87/NexusFlow/environments/release`. Put the reviewer
+     back with `{"reviewers": [{"type": "User", "id": <your user id>}], ...}` if you want the click again.
 4. **Credentials bound to the environment**: set the npm trusted publisher's environment
    to `release`. If Marketplace publishing is enabled, give the Azure federated credential
    the subject `repo:antan87/NexusFlow:environment:release`. Keep no long-lived publish

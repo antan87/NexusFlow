@@ -5,7 +5,7 @@
 import { evaluateVersionOrder, parseVersion } from './release-guard-core.mjs';
 
 /** Workflow-run statuses that mean a release still holds the release lane. */
-const IN_FLIGHT = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
+export const IN_FLIGHT = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
 
 /**
  * Decide whether it is safe to dispatch `version` from `tipSha`.
