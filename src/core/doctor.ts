@@ -382,7 +382,7 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
           checks.push({ category, name: agent.name, status: 'pass', message: `MCP server available as "${agent.status.serverName}"` });
           break;
         case 'missing':
-          checks.push({ category, name: agent.name, status: 'info', message: `MCP server is not registered, so it cannot call tools such as request_user_input. Run \`${CLI_NAME} mcp setup\`` });
+          checks.push({ category, name: agent.name, status: 'info', message: `has no user-level MCP registration, so it only gets the server where a workspace config provides one (for example, it cannot call request_user_input elsewhere). Run \`${CLI_NAME} mcp setup\`` });
           break;
         case 'unsupported':
           checks.push({ category, name: agent.name, status: 'info', message: agent.status.reason });

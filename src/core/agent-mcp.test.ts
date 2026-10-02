@@ -225,7 +225,7 @@ describe('registerAgentMcp', () => {
     await install('claude');
     const results = await registerAgentMcp(options());
     expect(calls.map((c) => c.file)).toEqual(['claude']);
-    expect(byId(results, 'codex').outcome).toEqual({ result: 'skipped', reason: 'not installed' });
+    expect(byId(results, 'codex').outcome).toEqual({ result: 'not-installed' });
     expect(await exists('.codex/config.toml')).toBe(false);
   });
 
@@ -237,7 +237,7 @@ describe('registerAgentMcp', () => {
     const again = await registerAgentMcp(options());
 
     expect(calls).toEqual([]);
-    expect(again.map((r) => r.outcome.result)).toEqual(['already', 'already', 'already', 'skipped']);
+    expect(again.map((r) => r.outcome.result)).toEqual(['already', 'already', 'already', 'not-installed']);
   });
 
   it('never replaces an existing entry, which Codex and Antigravity would overwrite silently', async () => {
@@ -277,6 +277,34 @@ describe('registerAgentMcp', () => {
     expect(await exists('.codex/config.toml')).toBe(false);
     expect(await exists('.gemini/config/mcp_config.json')).toBe(false);
     expect(results.filter((r) => r.outcome.result === 'would-add').map((r) => r.id).sort()).toEqual(['antigravity', 'claude', 'codex']);
+  });
+
+  describe('on native Windows', () => {
+    const windows = (extra: Partial<AgentMcpOptions> = {}) =>
+      options({ platform: 'win32', findBinary: (name) => (['claude', 'codex', 'agy'].includes(name) ? `C:\\bin\\${name}.exe` : null), ...extra });
+
+    it('declines to register, because npx cannot be started there without an untested wrapper', async () => {
+      const results = await registerAgentMcp(windows());
+
+      expect(calls).toEqual([]);
+      for (const id of ['claude', 'codex', 'antigravity']) {
+        const outcome = byId(results, id).outcome;
+        expect(outcome).toMatchObject({ result: 'skipped' });
+        expect((outcome as { reason: string }).reason).toContain('Windows');
+      }
+      expect(byId(results, 'pi').outcome).toEqual({ result: 'not-installed' });
+      expect(await exists('.claude.json')).toBe(false);
+    });
+
+    it('reports the same reason to doctor, so it does not tell the user to run a setup that will skip them', async () => {
+      const claude = byId(await inspectAgentMcp(windows()), 'claude').status;
+      expect(claude.state).toBe('unsupported');
+    });
+
+    it('still recognises a server the user added by hand', async () => {
+      await write('.claude.json', JSON.stringify({ mcpServers: { [MCP_REGISTRATION_NAME]: { command: 'cmd' } } }));
+      expect(byId(await inspectAgentMcp(windows()), 'claude').status.state).toBe('registered');
+    });
   });
 
   describe('when registration goes wrong', () => {

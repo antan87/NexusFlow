@@ -64,6 +64,7 @@ export interface AgentMcpStatus {
 }
 
 export type AgentMcpOutcome =
+  | { result: 'not-installed' }
   | { result: 'added'; how: string }
   | { result: 'already'; serverName: string }
   | { result: 'would-add'; how: string }
@@ -91,6 +92,8 @@ export interface AgentMcpOptions {
   run?: CommandRunner;
   /** Report what would change without changing anything. */
   dryRun?: boolean;
+  /** Finds an agent's executable. Replaced in tests, which cannot fake another platform's PATH rules. */
+  findBinary?: (name: string) => string | null;
 }
 
 const defaultRunner: CommandRunner = async (file, args, env) => {
@@ -103,6 +106,7 @@ interface Context {
   home: string;
   platform: NodeJS.Platform;
   run: CommandRunner;
+  find: (name: string) => string | null;
 }
 
 function contextOf(options: AgentMcpOptions): Context {
@@ -111,7 +115,13 @@ function contextOf(options: AgentMcpOptions): Context {
   const platform = options.platform ?? process.platform;
   // A desktop app often starts with a narrower PATH than the user's shell.
   const searchEnv = { ...env, PATH: getAugmentedPath(env, platform, home) };
-  return { env: searchEnv, home, platform, run: options.run ?? defaultRunner };
+  return {
+    env: searchEnv,
+    home,
+    platform,
+    run: options.run ?? defaultRunner,
+    find: options.findBinary ?? ((name) => findExecutable(name, searchEnv, platform)),
+  };
 }
 
 interface AgentTarget {
@@ -248,7 +258,7 @@ const TARGETS: readonly AgentTarget[] = [
 
 async function inspectTarget(target: AgentTarget, ctx: Context): Promise<AgentMcpStatus> {
   const base = { id: target.id, name: target.name, configPath: target.configPath(ctx) };
-  if (!findExecutable(target.binary, ctx.env, ctx.platform)) return { ...base, status: { state: 'not-installed' } };
+  if (!ctx.find(target.binary)) return { ...base, status: { state: 'not-installed' } };
 
   const reason = await target.unsupported?.(ctx);
   if (reason) return { ...base, status: { state: 'unsupported', reason } };
@@ -260,7 +270,14 @@ async function inspectTarget(target: AgentTarget, ctx: Context): Promise<AgentMc
     return { ...base, status: { state: 'unreadable', reason: `${base.configPath}: ${(error as Error).message}` } };
   }
   const present = KNOWN_SERVER_NAMES.find((name) => servers.includes(name));
-  return { ...base, status: present ? { state: 'registered', serverName: present } : { state: 'missing' } };
+  if (present) return { ...base, status: { state: 'registered', serverName: present } };
+  // Native Windows runs npx through a .cmd shim that agents cannot start directly; the
+  // wrapper that fixes that has not been tried here. Registering would report success for
+  // a server that never connects, so decline and let the user add it by hand.
+  if (ctx.platform === 'win32') {
+    return { ...base, status: { state: 'unsupported', reason: 'automatic registration is not available on Windows yet (npx needs a cmd /c wrapper that is untested); add the server to the agent by hand' } };
+  }
+  return { ...base, status: { state: 'missing' } };
 }
 
 /** Whether each supported agent is installed and has the server. Reads config files only. */
@@ -283,14 +300,14 @@ export async function registerAgentMcp(options: AgentMcpOptions = {}): Promise<A
     const done = (outcome: AgentMcpOutcome) => results.push({ id: target.id, name: target.name, outcome });
 
     switch (status.state) {
-      case 'not-installed': done({ result: 'skipped', reason: 'not installed' }); continue;
+      case 'not-installed': done({ result: 'not-installed' }); continue;
       case 'registered': done({ result: 'already', serverName: status.serverName }); continue;
       case 'unsupported': done({ result: 'skipped', reason: status.reason }); continue;
       case 'unreadable': done({ result: 'skipped', reason: `left alone, could not read ${status.reason}` }); continue;
       case 'missing': break;
     }
 
-    const binaryPath = findExecutable(target.binary, ctx.env, ctx.platform)!;
+    const binaryPath = ctx.find(target.binary)!;
     if (options.dryRun) {
       done({ result: 'would-add', how: target.id === 'pi' ? `write ${target.configPath(ctx)}` : `${target.binary} mcp add` });
       continue;
