@@ -603,6 +603,17 @@
 .context-ring .ring-blocked { stroke: var(--muted-foreground); stroke-dasharray: 2 6; }
 .context-ring .ring-sun { fill: var(--state-now); stroke: var(--background); stroke-width: 6; }
 
+/* A state word with a dot, for the Where Are We strip and its panel. The colour is one of the --state-* tokens,
+   which paletteContrast.test.ts holds to 4.5:1 on the background and the card in every palette and theme.
+   The word carries the meaning, so the colour is never the only signal. */
+.state-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 11px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.state-chip::before { content: ""; width: 0.45rem; height: 0.45rem; flex: none; border-radius: 9999px; background: currentColor; }
+.state-chip[data-tone="needs"] { color: var(--state-needs); }
+.state-chip[data-tone="ai"] { color: var(--state-ai); }
+.state-chip[data-tone="done"] { color: var(--state-done); }
+.state-chip[data-tone="reopened"] { color: var(--state-reopened); }
+.state-chip[data-tone="idle"] { color: var(--muted-foreground); }
+
 /* Dark values for the progress tokens. Last on purpose: this block must win over every palette's light
    block of equal specificity (the sunset and dusk ring colours above). */
 :root.dark {

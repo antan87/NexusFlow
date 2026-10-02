@@ -132,6 +132,24 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
       lifecycle: null, assignment: '', sharedDocuments: [],
     }));
     await page.route('**/api/workspace/*/changes', json({ changes: [] }));
+    // The Where Are We strip above the chat: an empty plan and a live feed with nothing in it. A spec that
+    // exercises the strip registers its own routes, which win over these.
+    await page.route('**/api/workspace/*/progress-facts', async (route) => {
+      const workspaceId = new URL(route.request().url()).pathname.split('/')[3] ?? '';
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ facts: {
+          workspaceId, generatedAt: '2026-10-02T12:00:00.000Z', milestones: [],
+          counts: { total: 0, done: 0, inProgress: 0, reopened: 0, blocked: 0, upcoming: 0 },
+          openQuestions: [], changes: { repos: [], files: 0, additions: 0, deletions: 0 },
+          verification: { status: 'never', freshness: 'unknown' }, unavailable: [],
+        } }),
+      });
+    });
+    await page.route('**/api/workspace/*/screen-events**', async (route) =>
+      route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ping\ndata: {}\n\n' }),
+    );
     // Nothing is waiting by default; a spec that exercises alerts registers its own route.
     await page.route('**/api/attention?*', json({ requests: [] }));
 

@@ -27,12 +27,75 @@ async function mockWorkspace(page: Page) {
   await page.route('**/api/workspace/demo/changes', (route) => route.fulfill({ json: { changes: [{ repoName: 'api', repoPath: '/dev/api', files: [{ file: 'cache.ts', type: 'modified', additions: 4, deletions: 1 }] }] } }));
 }
 
-async function expectNoSeriousViolations(page: Page, label: string) {
+/**
+ * The CLI chat on the demo workspace with the Where Are We strip showing every state at once: a question,
+ * a blocked, a reopened, a finished and an unstarted milestone, a failing check, an AI proposal and a
+ * suggested next step. Every colour the strip uses is on screen, so axe sees all of them.
+ */
+async function mockChatStrip(page: Page) {
+  const terminal = { id: '0199a213-81c0-7800-8aa1-bbab2a035a50', workspace: 'demo', target: 'shell', label: 'bash', cwd: workspace.workspacePath, state: 'running' };
+  const milestone = (id: string, title: string, state: string, extra: Record<string, unknown> = {}) => ({ id, title, state, verified: false, reopenCount: 0, waitingOn: [], ...extra });
+  const milestones = [
+    milestone('a', 'Cache invoice lookups', 'done', { verified: true, completedAt: '2026-10-02T09:00:00.000Z' }),
+    milestone('b', 'Index the invoice table', 'reopened', { reopen: { at: '2026-10-02T11:00:00.000Z', reason: 'Misses the expiry case', by: 'user' }, reopenCount: 1 }),
+    milestone('c', 'Call the billing API', 'blocked', { blockedReason: 'Waiting for an API key' }),
+    milestone('d', 'Add cache tests', 'in_progress'),
+    milestone('e', 'Document the cache', 'upcoming', { waitingOn: ['d'] }),
+  ];
+  const frame = (type: string, body: Record<string, unknown>, id: string) => `event: ${type}\nid: ${id}\ndata: ${JSON.stringify({ type, ...body })}\n\n`;
+  const events = frame('screen', { event: { id: 'n1', timestamp: '2026-10-02T11:30:00.000Z', harness: 'claude', event: 'next', payload: { title: 'Cover the cache', reason: 'It has no tests' } } }, '2026-10-02T11:30:00.000Z')
+    + frame('screen', { event: { id: 'p1', timestamp: '2026-10-02T11:40:00.000Z', harness: 'claude', event: 'milestone_proposal', payload: { stepId: 'a', proposal: 'reopen', reason: 'The expiry case is not covered' } } }, '2026-10-02T11:40:00.000Z');
+  await page.route('**/api/terminals/bootstrap', (route) => route.fulfill({ json: { token: 'test-token', expiresAt: Date.now() + 300_000 } }));
+  await page.route('**/api/terminals/demo/status', (route) => route.fulfill({ json: { available: true, sessions: [terminal], targets: [{ id: 'shell', name: 'Shell', available: true, reason: null }] } }));
+  await page.route('**/api/workspace/demo/progress-facts', (route) => route.fulfill({ json: { facts: {
+    workspaceId: 'demo', generatedAt: '2026-10-02T12:00:00.000Z', milestones, currentMilestoneId: 'd',
+    counts: { total: 5, done: 1, inProgress: 1, reopened: 1, blocked: 1, upcoming: 1 },
+    openQuestions: [{ id: 'q1', timestamp: '2026-10-02T11:00:00.000Z', harness: 'claude', message: 'Which cache backend should we use?', options: ['Redis', 'In memory'] }],
+    changes: { repos: [{ repoName: 'api', files: 1, additions: 4, deletions: 1 }], files: 1, additions: 4, deletions: 1 },
+    verification: { status: 'fail', freshness: 'fresh', verifiedAt: '2026-10-02T11:00:00.000Z' }, unavailable: [],
+  } } }));
+  await page.route('**/api/workspace/demo/screen-events**', (route) => route.fulfill({ status: 200, contentType: 'text/event-stream', body: events }));
+  await page.routeWebSocket('**/ws/terminal', (socket) => {
+    socket.onMessage((message) => {
+      if (JSON.parse(String(message)).type !== 'attach') return;
+      socket.send(JSON.stringify({ type: 'ready', terminal, truncated: false }));
+      socket.send(JSON.stringify({ type: 'replayed' }));
+    });
+  });
+}
+
+/**
+ * Opens the chat on the demo workspace, then the strip's panel, and checks both states with axe.
+ *
+ * Only the strip is checked, not the whole chat window. The window's own tab buttons have role="tab"
+ * with no tablist around them (an existing defect in FloatingChatModal, found when this test first
+ * opened the chat), and that chrome is replaced by the docked workspace milestone. Checking the whole
+ * page here would fail on markup this change does not touch.
+ */
+const STRIP = 'section[aria-label="Where are we"]';
+
+async function checkChatStrip(page: Page, label: string) {
+  await mockWorkspace(page);
+  await mockChatStrip(page);
+  await page.goto('/#/workspaces/demo/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const strip = page.getByRole('region', { name: 'Where are we', exact: true });
+  await expect(strip).toContainText('Needs you');
+  await expect(strip.getByRole('button', { name: /^Next: / })).toBeVisible();
+  await expectNoSeriousViolations(page, `${label} strip`, STRIP);
+  await strip.getByRole('button', { expanded: false }).click();
+  const detail = strip.getByRole('region', { name: 'Progress details' });
+  await expect(detail.getByText('The AI suggests reopening this')).toBeVisible();
+  await expect(detail.getByText('Waiting for an API key').first()).toBeVisible();
+  await expectNoSeriousViolations(page, `${label} strip panel`, STRIP);
+}
+
+async function expectNoSeriousViolations(page: Page, label: string, scope?: string) {
   // Measure settled colours: a fade or an enabled/disabled transition caught
   // mid-way reports a contrast no user sees.
   await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
-  const results = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+  const builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']);
+  const results = await (scope ? builder.include(scope) : builder)
     // Third-party code editors and terminals manage their own accessibility tree.
     .exclude('.monaco-editor')
     .exclude('.xterm')
@@ -85,6 +148,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await expectNoSeriousViolations(page, `workspace ${section}`);
       }
     });
+
+    test('chat with the Where Are We strip', async ({ page }) => {
+      await checkChatStrip(page, `${colorScheme} chat`);
+    });
   });
 }
 
@@ -129,6 +196,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
         await expectNoSeriousViolations(page, `dusk ${colorScheme} workspace ${section}`);
       }
+    });
+
+    test('chat with the Where Are We strip', async ({ page }) => {
+      await checkChatStrip(page, `dusk ${colorScheme} chat`);
     });
   });
 }

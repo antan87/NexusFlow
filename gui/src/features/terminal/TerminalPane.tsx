@@ -16,6 +16,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
+import { toPromptText } from './promptFill.js';
 import { SHIFT_ENTER_SEQUENCE, terminalKeyAction } from './terminalKeys.js';
 import type { AISession } from '../../types.js';
 
@@ -65,8 +66,8 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
   }
 };
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void }
-export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput }: Props) {
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null } }
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput, fillPromptRef }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -119,6 +120,21 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     statusChangeRef.current?.(paneStatusFor(shownKind));
   }, [shownKind]);
   const send = useCallback((message: object) => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify(message)); }, []);
+  // Lets the Where Are We strip type a suggestion into the prompt. It only types: the text has every
+  // line break and control character removed, so the developer is the one who presses Enter. Nothing is
+  // typed while the terminal is disconnected, replaying or ended, and the caller is told so.
+  useEffect(() => {
+    if (!fillPromptRef) return;
+    fillPromptRef.current = (text: string) => {
+      const data = toPromptText(text);
+      const term = renderer.current;
+      if (!data || !term || term.options.disableStdin || socket.current?.readyState !== WebSocket.OPEN) return false;
+      send({ type: 'input', data });
+      if (activeRef.current) term.focus();
+      return true;
+    };
+    return () => { fillPromptRef.current = null; };
+  }, [fillPromptRef, send]);
   // Only the latest status request may replace the list; an older response that
   // lacks a just-created terminal would otherwise report it as ended.
   const refreshSeq = useRef(0);

@@ -562,6 +562,8 @@ export interface InputRequest {
   timestamp: string;
   harness: string;
   message: string;
+  /** Short answers the agent suggests. A button fills the prompt with one. */
+  options?: string[];
 }
 
 export interface WorkspaceStreamResponse {
@@ -800,4 +802,97 @@ export interface FinishRecord {
   repos: Array<Pick<FinishRepoReport, 'name' | 'committed' | 'commitHash' | 'pushed' | 'prUrl' | 'compareUrl' | 'skipped' | 'error'>>;
   override?: VerificationOverrideRecord;
   safeToCleanup: boolean;
+}
+
+// ─── Progress facts and the screen feed ────────────────────────────────────
+
+/** Where one milestone stands. Work loops back, so `reopened` is a state of its own. */
+export type MilestoneState = 'done' | 'in_progress' | 'reopened' | 'blocked' | 'upcoming';
+
+export interface MilestoneFact {
+  id: string;
+  title: string;
+  state: MilestoneState;
+  /** The last verification gate passed for the work as it stands. */
+  verified: boolean;
+  completedAt?: string;
+  /** Present while the milestone is being redone after being finished. */
+  reopen?: { at: string; reason: string; by: 'user' | 'agent' };
+  reopenCount: number;
+  /** Milestones it depends on that are not finished. */
+  waitingOn: string[];
+  unblockCondition?: string;
+  /** Why the milestone is blocked, in the words of whoever said so. */
+  blockedReason?: string;
+}
+
+export interface RepoChangeFact {
+  repoName: string;
+  files: number;
+  additions: number;
+  deletions: number;
+  /** The repository could not be read, so its counts are not known. */
+  unavailable?: boolean;
+}
+
+/** A question the AI asked that nobody has marked answered. */
+export interface OpenQuestion {
+  id: string;
+  timestamp: string;
+  harness: string;
+  message: string;
+  options?: string[];
+}
+
+/** GET /api/workspace/:id/progress-facts. Every number comes from stored state, never from AI prose. */
+export interface ProgressFacts {
+  workspaceId: string;
+  generatedAt: string;
+  milestones: MilestoneFact[];
+  counts: { total: number; done: number; inProgress: number; reopened: number; blocked: number; upcoming: number };
+  currentMilestoneId?: string;
+  openQuestions: OpenQuestion[];
+  changes: { repos: RepoChangeFact[]; files: number; additions: number; deletions: number };
+  verification: {
+    /** `never` when no verification has run. */
+    status: 'pass' | 'pass_dirty' | 'fail' | 'timeout' | 'no-tests' | 'skipped' | 'never';
+    verifiedAt?: string;
+    durationMs?: number;
+    /** Whether the code still matches what was verified. */
+    freshness: 'fresh' | 'stale' | 'unknown';
+  };
+  /** Sources that could not be read. Their facts above are empty, not zero. */
+  unavailable: Array<{ source: 'milestones' | 'questions' | 'changes' | 'verification'; reason: string }>;
+}
+
+export type AnnotationTag = 'question' | 'risk' | 'todo';
+
+/** What the AI told the screen to show (GET /api/workspace/:id/screen-events). */
+export type ScreenEvent = { id: string; timestamp: string; harness: string } & (
+  | { event: 'show'; payload: { view: 'document' | 'file' | 'diff'; path?: string; repo?: string; line?: number; endLine?: number; note?: string } }
+  | { event: 'annotate'; payload: { path: string; repo?: string; line: number; text: string; tag: AnnotationTag } }
+  | { event: 'next'; payload: { title: string; reason: string; path?: string; repo?: string; line?: number } }
+  | { event: 'milestone'; payload: { stepId: string; state: 'in_progress' | 'blocked'; note?: string } }
+  | { event: 'milestone_proposal'; payload: { stepId: string; proposal: 'reopen' | 'complete'; reason: string } }
+);
+
+/** Everything the live feed carries to the screen. */
+export type LiveEvent =
+  | { type: 'screen'; event: ScreenEvent }
+  | { type: 'question'; request: OpenQuestion }
+  | { type: 'answered'; timestamp: string };
+
+/** One changed file, as GET /api/workspace/:id/changes lists it. */
+export interface ChangedFileEntry {
+  file: string;
+  type?: string;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface RepoChangeListing {
+  repoName: string;
+  repoPath: string;
+  files: ChangedFileEntry[];
+  error?: string;
 }

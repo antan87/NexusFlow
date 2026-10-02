@@ -41,6 +41,8 @@ import type {
   ProgressionDecision,
   FinishRecord,
   WorkGuidance,
+  ProgressFacts,
+  RepoChangeListing,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -710,6 +712,66 @@ export function useWorkGuidance(wsId: string | null) {
     queryFn: async ({ signal }) => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId!)}/work`, { signal })).guidance,
     enabled: Boolean(wsId),
     staleTime: 10_000,
+  });
+}
+
+// ─── Progress facts (the Where Are We strip) ──────────────────────────────
+
+export const progressFactsKey = (wsId: string | null) => ['progress-facts', wsId] as const;
+
+/**
+ * Checkable progress facts: milestones (with reopened work), open questions, changed
+ * files and the last check. Polled only while the workspace is on screen; the live
+ * feed asks for a fresh read the moment something changes.
+ */
+export function useProgressFacts(wsId: string | null, active: boolean) {
+  return useQuery({
+    queryKey: progressFactsKey(wsId),
+    queryFn: async ({ signal }) => (await apiFetch<{ facts: ProgressFacts }>(`/api/workspace/${encodeURIComponent(wsId!)}/progress-facts`, { signal })).facts,
+    enabled: Boolean(wsId) && active,
+    refetchInterval: 8000,
+    staleTime: 3000,
+    // The strip is on screen all the time, so a failure is reported after one quick retry rather than after three slow ones.
+    retry: 1,
+    retryDelay: 1000,
+  });
+}
+
+/** The files changed in each repository, for the strip's Touched list. Fetched only while the panel is open. */
+export function useWorkspaceChanges(wsId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['workspace-changes-list', wsId],
+    queryFn: async ({ signal }) => (await apiFetch<{ changes: RepoChangeListing[] }>(`/api/workspace/${encodeURIComponent(wsId!)}/changes`, { signal })).changes,
+    enabled: Boolean(wsId) && enabled,
+    staleTime: 5000,
+  });
+}
+
+/** Sends a finished milestone back for rework. This is the developer's own action, so it is recorded as theirs. */
+export function useReopenMilestone(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { stepId: string; reason: string }) => apiFetch<{ lifecycle: WorkspaceLifecycle }>(
+      `/api/workspace/${encodeURIComponent(wsId)}/lifecycle/reopen`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: progressFactsKey(wsId) });
+      void queryClient.invalidateQueries({ queryKey: ['workspace-lifecycle', wsId] });
+      void queryClient.invalidateQueries({ queryKey: ['workspace-work', wsId] });
+    },
+  });
+}
+
+/** Marks every question the AI has asked so far as answered. Replies typed into the chat never reach the ledger. */
+export function useAcknowledgeQuestions(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<unknown>(`/api/workspace/${encodeURIComponent(wsId)}/input-requests/acknowledge`, { method: 'POST' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: progressFactsKey(wsId) });
+      void queryClient.invalidateQueries({ queryKey: ['input-requests'] });
+    },
   });
 }
 
