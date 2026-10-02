@@ -3,7 +3,7 @@ import { decodeImageAttachment, InvalidImageAttachment } from './services/image-
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
-import { readRepositoryFile, RepositoryFileAccessError, resolveRepositoryFileForLaunch } from './services/repository-file.js';
+import { looksBinary, MAX_VIEWABLE_FILE_BYTES, readRepositoryFileForView, RepositoryFileAccessError, resolveRepositoryFileForLaunch, type OmittedReason } from './services/repository-file.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -2417,22 +2417,38 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     const normalizedFile = filePath.replace(/\\/g, '/');
 
     // Run git diff, disk file read, and git show HEAD in parallel
-    const [diffResult, fileContentResult, originalContentResult] = await Promise.allSettled([
+    const [diffResult, fileResult, originalResult] = await Promise.allSettled([
       execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
-      readRepositoryFile(worktreePath, filePath),
-      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false }),
+      readRepositoryFileForView(worktreePath, filePath),
+      // Capped like the working copy: an oversized original reports isMaxBuffer instead of filling memory.
+      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false, maxBuffer: MAX_VIEWABLE_FILE_BYTES }),
     ]);
 
     let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
-    if (fileContentResult.status === 'rejected') {
-      if (fileContentResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileContentResult.reason.message);
-      throw fileContentResult.reason;
+    if (fileResult.status === 'rejected') {
+      if (fileResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileResult.reason.message);
+      throw fileResult.reason;
     }
-    let fileContent = fileContentResult.value;
-    let originalContent = originalContentResult.status === 'fulfilled' ? (originalContentResult.value.stdout || '') : '';
+    let fileContent = fileResult.value.content;
+    let originalContent = '';
+    // Why the full text was not loaded, if it was not. The viewer then shows the patch hunks only.
+    let contentOmitted: OmittedReason | undefined = fileResult.value.omitted;
+    let trackedAtHead = false;
+    if (originalResult.status === 'fulfilled') {
+      const original = originalResult.value;
+      trackedAtHead = original.exitCode === 0 || Boolean(original.isMaxBuffer);
+      if (original.isMaxBuffer) contentOmitted ??= 'too-large';
+      else if (looksBinary(original.stdout || '')) contentOmitted ??= 'binary';
+      else originalContent = original.stdout || '';
+    }
+    // Both sides or neither: a diff view of one real side against an empty one would mislead.
+    if (contentOmitted) {
+      fileContent = '';
+      originalContent = '';
+    }
 
     // Handle untracked new files if diff is empty but file exists on disk
-    if (!diff && fileContent && !originalContent) {
+    if (!diff && (fileContent || fileResult.value.omitted) && !trackedAtHead) {
       try {
         const untrackedDiff = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
           cwd: worktreePath,
@@ -2453,7 +2469,7 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       }
     }
 
-    return c.json({ diff, fileContent, originalContent, symbols });
+    return c.json({ diff, fileContent, originalContent, symbols, ...(contentOmitted ? { contentOmitted } : {}) });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2496,7 +2512,8 @@ app.get('/api/workspace/:id/changes/symbols', async (c) => {
             }
 
             try {
-              const content = await readRepositoryFile(worktreePath, file);
+              const { content, omitted } = await readRepositoryFileForView(worktreePath, file);
+              if (omitted) return; // too large or binary: not worth a synchronous parse
               const extracted = await extractAstSymbols(file, content);
               if (extracted && extracted.length > 0) {
                 for (const s of extracted) {
