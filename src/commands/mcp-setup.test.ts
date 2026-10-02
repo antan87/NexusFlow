@@ -66,7 +66,7 @@ describe('mcp setup output', () => {
   });
 
   describe('editor configs', () => {
-    const entry = { command: 'npx', args: ['-y', '@mrpatronz/nexusflow', 'mcp', 'run', '--role', 'interactive'] };
+    const entry = { command: 'npx', args: ['-y', '@mrpatronz/nexusflow@latest', 'mcp', 'run', '--role', 'interactive'] };
 
     it('leaves a config that already holds this entry as it is, and says nothing needed changing', async () => {
       await fs.mkdir(path.join(home, '.cursor'), { recursive: true });
