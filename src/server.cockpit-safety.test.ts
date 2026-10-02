@@ -194,6 +194,20 @@ describe('cockpit endpoints against a real repository', () => {
       expect(body.diff).toContain('+++ b/generated.ts');
     });
 
+    it('does not send an enormous diff: it reports the diff as omitted and sends none of it', async () => {
+      const lines = (name: string) => Array.from({ length: 250_000 }, (_, i) => `const ${name}${i} = ${i};`).join('\n') + '\n';
+      await fs.writeFile(path.join(repo, 'big.ts'), lines('before'));
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-q', '-m', 'init');
+      await fs.writeFile(path.join(repo, 'big.ts'), lines('after'));
+      await fs.writeFile(path.join(repo, 'fresh-big.ts'), lines('fresh'));
+
+      for (const file of ['big.ts', 'fresh-big.ts']) {
+        const body = await diffOf(file);
+        expect(body, file).toMatchObject({ diff: '', diffOmitted: true, contentOmitted: 'too-large', fileContent: '', originalContent: '', symbols: [] });
+      }
+    });
+
     it('still produces content and a diff for a small untracked file', async () => {
       await fs.writeFile(path.join(repo, 'seed.ts'), 'export {};\n');
       git(repo, 'add', '.');

@@ -61,12 +61,12 @@ export function getEditorUriScheme(defaultEditor?: string | null): string {
 /**
  * Percent-encodes each path segment. encodeURI leaves `#` and `?` alone, and in a
  * URI those start a fragment or a query, so a file such as `notes/#1.md` would
- * open as `notes/`. A Windows drive (`C:`) keeps its colon.
+ * open as `notes/`. A Windows drive (`C:`, only as the first segment) keeps its colon.
  */
 function encodeUriPath(path: string): string {
   return path
     .split('/')
-    .map((segment) => (/^[a-zA-Z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
+    .map((segment, index) => (index === 0 && /^[a-zA-Z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
     .join('/');
 }
 

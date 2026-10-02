@@ -18,6 +18,13 @@ describe('computeEditorUri', () => {
     expect(computeEditorUri('C:\\Work\\repo', 'C:\\Other\\y #1.ts')).toBe('vscode://file/C:/Other/y%20%231.ts:1:1');
   });
 
+  it('keeps a colon only as a drive: any other segment with one is encoded', () => {
+    expect(computeEditorUri('/work/repo', 'src/a:b.ts')).toBe('vscode://file/work/repo/src/a%3Ab.ts:1:1');
+    // A folder literally named `d:` below the root is not a drive.
+    expect(computeEditorUri('/work/repo', 'sub/d:/x.ts')).toBe('vscode://file/work/repo/sub/d%3A/x.ts:1:1');
+    expect(computeEditorUri('D:\\w', 'x.ts')).toBe('vscode://file/D:/w/x.ts:1:1');
+  });
+
   it('uses an absolute file path as given, without the repository path', () => {
     expect(computeEditorUri('/work/repo', '/etc/hosts')).toBe('vscode://file/etc/hosts:1:1');
   });

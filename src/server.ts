@@ -371,6 +371,9 @@ app.get('/ws', async (c, next) => {
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs', 'windsurf', 'zed']);
 
+// A patch is allowed to be a few times the largest file shown in full: it holds both sides.
+const MAX_DIFF_BYTES = MAX_VIEWABLE_FILE_BYTES * 4;
+
 // ─── Path containment guards ──────────────────────────────────────────────
 // The server exposes state-changing routes keyed by a workspace `:id` taken
 // straight from the URL. Without containment checks, `..%2f..` sequences let a
@@ -2418,13 +2421,19 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
 
     // Run git diff, disk file read, and git show HEAD in parallel
     const [diffResult, fileResult, originalResult] = await Promise.allSettled([
-      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
+      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false, maxBuffer: MAX_DIFF_BYTES }),
       readRepositoryFileForView(worktreePath, filePath),
       // Capped like the working copy: an oversized original reports isMaxBuffer instead of filling memory.
       execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false, maxBuffer: MAX_VIEWABLE_FILE_BYTES }),
     ]);
 
-    let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
+    let diff = '';
+    // An enormous patch is as costly to send and to parse as an enormous file, so it is not sent.
+    let diffOmitted = false;
+    if (diffResult.status === 'fulfilled') {
+      if (diffResult.value.isMaxBuffer) diffOmitted = true;
+      else diff = diffResult.value.stdout || diffResult.value.stderr || '';
+    }
     if (fileResult.status === 'rejected') {
       if (fileResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileResult.reason.message);
       throw fileResult.reason;
@@ -2448,16 +2457,24 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     // Handle untracked new files if diff is empty but file exists on disk
-    if (!diff && (fileContent || fileResult.value.omitted) && !trackedAtHead) {
+    if (!diff && !diffOmitted && (fileContent || fileResult.value.omitted) && !trackedAtHead) {
       try {
         const untrackedDiff = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
           cwd: worktreePath,
           reject: false,
+          maxBuffer: MAX_DIFF_BYTES,
         });
-        diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
+        if (untrackedDiff.isMaxBuffer) diffOmitted = true;
+        else diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
       } catch {
         diff = '';
       }
+    }
+    // A diff too large to send means the file is too large to show in full as well.
+    if (diffOmitted) {
+      contentOmitted ??= 'too-large';
+      fileContent = '';
+      originalContent = '';
     }
 
     let symbols: any[] = [];
@@ -2469,7 +2486,7 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       }
     }
 
-    return c.json({ diff, fileContent, originalContent, symbols, ...(contentOmitted ? { contentOmitted } : {}) });
+    return c.json({ diff, fileContent, originalContent, symbols, ...(contentOmitted ? { contentOmitted } : {}), ...(diffOmitted ? { diffOmitted: true } : {}) });
   } catch (error) {
     return errorResponse(c, error);
   }

@@ -34,6 +34,7 @@ import {
 } from './utils/changesetSymbolIndex.js';
 import { parseUnifiedDiff } from './utils/diffParser.js';
 import { cacheKeyFor, changeVersion, diffCacheDelta, type FetchedFile } from './utils/changeVersion.js';
+import { omittedNotice, type OmittedContent } from './utils/omittedContent.js';
 import { findChangedFileIndex, isAbsoluteReference, repoDirName } from './utils/changesetNavigation.js';
 import { disposeChangesetModelsAfterEditors } from './utils/changesetModelStore.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
@@ -99,6 +100,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [fileContentCache, setFileContentCache] = useState<Record<string, string>>({});
   const [originalContentCache, setOriginalContentCache] = useState<Record<string, string>>({});
   const [symbolsCache, setSymbolsCache] = useState<Record<string, RawAstSymbol[]>>({});
+  const [omittedCache, setOmittedCache] = useState<Record<string, OmittedContent>>({});
   const [diffLoading, setDiffLoading] = useState<Record<string, boolean>>({});
   const [diffErrors, setDiffErrors] = useState<Record<string, string>>({});
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
@@ -128,6 +130,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setFileContentCache({});
     setOriginalContentCache({});
     setSymbolsCache({});
+    setOmittedCache({});
     setExpandedFiles({});
     setDiffErrors({});
     setTargetLineMap({});
@@ -274,6 +277,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setFileContentCache(without);
     setOriginalContentCache(without);
     setSymbolsCache(without);
+    setOmittedCache(without);
     setDiffErrors(without);
   }, []);
 
@@ -312,6 +316,11 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         setOrClear(setFileContentCache, cacheKey, data.fileContent);
         setOrClear(setOriginalContentCache, cacheKey, data.originalContent);
         setOrClear(setSymbolsCache, cacheKey, data.symbols);
+        setOrClear<OmittedContent>(
+          setOmittedCache,
+          cacheKey,
+          data.contentOmitted || data.diffOmitted ? { content: data.contentOmitted, diff: data.diffOmitted || undefined } : undefined,
+        );
         setOrClear(setDiffErrors, cacheKey, '');
         if (data.diff) {
           const parsed = parseUnifiedDiff(data.diff);
@@ -828,6 +837,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                         const isLoading = !!diffLoading[cacheKey];
                         const fileDiff = diffCache[cacheKey] || '';
                         const error = diffErrors[cacheKey] || '';
+                        const omitted = omittedCache[cacheKey];
+                        const notice = omittedNotice(omitted);
                         const cleanDomId = `file-diff-${repo.repoName}-${fileInfo.file.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
                         return (
@@ -887,6 +898,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                 ) : error ? (
                                   <div className="p-2 font-mono text-[10px] text-destructive-foreground">Error: {error}</div>
                                 ) : (
+                                  <>
+                                  {notice && (
+                                    <p role="note" className="mb-2 rounded border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                                      {notice}
+                                    </p>
+                                  )}
+                                  {!omitted?.diff && (
                                   <DiffErrorBoundary filePath={fileInfo.file} fallbackContent={fileDiff}>
                                     <PluggableDiffViewer
                                       filePath={fileInfo.file}
@@ -919,6 +937,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                                       showToast={showToast}
                                     />
                                   </DiffErrorBoundary>
+                                  )}
+                                  </>
                                 )}
                               </div>
                             )}

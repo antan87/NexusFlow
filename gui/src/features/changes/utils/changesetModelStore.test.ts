@@ -47,21 +47,22 @@ function fakeMonaco() {
   return { api: api as unknown as Api, registry, diffEditors, openers };
 }
 
+let store: StoreModule;
+
+beforeEach(async () => {
+  // The store remembers the Monaco API it was given, so each test starts clean.
+  vi.resetModules();
+  store = await import('./changesetModelStore.js');
+});
+
+/** Opens a file's two models the way the diff adapter does. */
+function openFile(api: Api, repo: string, file: string, scope?: string) {
+  const modified = store.getOrCreateTextModel(store.getModifiedFileUri(repo, file, api, scope), 'new', 'typescript', api);
+  const original = store.getOrCreateTextModel(store.getOriginalFileUri(repo, file, api, scope), 'old', 'typescript', api);
+  return { modified: modified as unknown as FakeModel, original: original as unknown as FakeModel };
+}
+
 describe('changeset model disposal', () => {
-  let store: StoreModule;
-
-  beforeEach(async () => {
-    // The store remembers the Monaco API it was given, so each test starts clean.
-    vi.resetModules();
-    store = await import('./changesetModelStore.js');
-  });
-
-  function openFile(api: Api, repo: string, file: string, scope?: string) {
-    const modified = store.getOrCreateTextModel(store.getModifiedFileUri(repo, file, api, scope), 'new', 'typescript', api);
-    const original = store.getOrCreateTextModel(store.getOriginalFileUri(repo, file, api, scope), 'old', 'typescript', api);
-    return { modified: modified as unknown as FakeModel, original: original as unknown as FakeModel };
-  }
-
   it('disposes both models of one file and leaves other files alone', () => {
     const { api } = fakeMonaco();
     const target = openFile(api, 'app', 'src/a.ts');
@@ -177,19 +178,6 @@ describe('changeset model disposal', () => {
 });
 
 describe('workspace-scoped model URIs', () => {
-  let store: StoreModule;
-
-  function openFile(api: Api, repo: string, file: string, scope?: string) {
-    const modified = store.getOrCreateTextModel(store.getModifiedFileUri(repo, file, api, scope), 'new', 'typescript', api);
-    const original = store.getOrCreateTextModel(store.getOriginalFileUri(repo, file, api, scope), 'old', 'typescript', api);
-    return { modified: modified as unknown as FakeModel, original: original as unknown as FakeModel };
-  }
-
-  beforeEach(async () => {
-    vi.resetModules();
-    store = await import('./changesetModelStore.js');
-  });
-
   const uri = (repo: string, file: string, scope?: string) => store.getModifiedFileUri(repo, file, undefined, scope).toString();
 
   it('leaves the URI as it was when there is no scope', () => {

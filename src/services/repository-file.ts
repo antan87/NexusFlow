@@ -6,7 +6,7 @@ import { assertPathWithin, assertNoLinkedPathComponents, assertFileHandleMatches
 export class RepositoryFileAccessError extends Error {}
 
 /**
- * Resolve a file an editor may be asked to open. Unlike readRepositoryFile, the
+ * Resolve a file an editor may be asked to open. Unlike readRepositoryFileForView, the
  * file must exist: a path that names nothing is never a legitimate launch target,
  * and accepting one lets a caller smuggle arbitrary text into the launch command.
  */
@@ -71,15 +71,34 @@ async function readGuarded<T>(
   }
 }
 
-/** Read only regular files below the selected repository; deleted files are empty. */
-export async function readRepositoryFile(repoPath: string, filePath: string): Promise<string> {
-  return readGuarded(repoPath, filePath, (handle) => handle.readFile('utf8'), '');
+const READ_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Everything the handle has left, or null as soon as that is more than `maxBytes`.
+ * It never holds more than `maxBytes` plus one chunk, however much the file grows
+ * after it was measured.
+ */
+export async function readHandleAtMost(
+  handle: { read(buffer: Buffer, offset: number, length: number, position: number | null): Promise<{ bytesRead: number }> },
+  maxBytes: number,
+): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  const chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES);
+  let total = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, total);
+    total += bytesRead;
+    if (total > maxBytes) return null;
+    chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+  }
 }
 
 /**
- * Like readRepositoryFile, for the review view: a file above `maxBytes`, or one
- * that looks binary, is reported rather than loaded. Loading it would put megabytes
- * of text into the response and hold the server's event loop in the symbol parser.
+ * Read a regular file below the repository for the review view: a file above
+ * `maxBytes`, or one that looks binary, is reported rather than loaded. Loading it
+ * would put megabytes of text into the response and hold the server's event loop in
+ * the symbol parser. A deleted file reads as empty.
  */
 export async function readRepositoryFileForView(
   repoPath: string,
@@ -89,7 +108,9 @@ export async function readRepositoryFileForView(
   return readGuarded<ViewableFile>(repoPath, filePath, async (handle) => {
     const { size } = await handle.stat();
     if (size > maxBytes) return { content: '', omitted: 'too-large' };
-    const bytes = await handle.readFile();
+    // Bounded again: a file being appended to can outgrow the size just measured.
+    const bytes = await readHandleAtMost(handle, maxBytes);
+    if (bytes === null) return { content: '', omitted: 'too-large' };
     if (looksBinary(bytes)) return { content: '', omitted: 'binary' };
     return { content: bytes.toString('utf8') };
   }, { content: '' });
