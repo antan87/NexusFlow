@@ -33,6 +33,7 @@
     "ui": "node dist/index.js ui",
     "test": "vitest run",
     "release:preflight": "node scripts/release-preflight.mjs",
+    "release:ship": "node scripts/release-ship.mjs",
     "test:watch": "vitest",
     "test:gui": "npm run test:e2e --prefix gui",
     "check:skills": "node scripts/check-development-skills.mjs",
