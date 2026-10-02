@@ -44,6 +44,12 @@ import {
 } from '../core/knowledge.js';
 import { loadPinnedWorkroomClientForWorkspace } from '../workrooms/manager.js';
 import {
+  INPUT_REQUEST_DISPLAY_LIMIT,
+  INPUT_REQUEST_HARNESS_LIMIT,
+  cleanInputRequestText,
+  latestInputRequest,
+} from '../core/attention.js';
+import {
   BRAND_NAME,
   CLI_NAME,
   PRIMARY_LOCK_FILE,
@@ -140,12 +146,15 @@ async function archiveTargetRefusal(ctx: ToolContext): Promise<string | null> {
   return null;
 }
 
-/** Longest `request_user_input` message. It becomes a toast; the detail belongs in the chat. */
-export const INPUT_REQUEST_MAX_LENGTH = 500;
-/** An identical request from the same harness inside this window is one alert, not two. */
-const INPUT_REQUEST_REPEAT_WINDOW_MS = 5 * 60_000;
-/** How many recent ledger entries are checked for a repeat. */
-const INPUT_REQUEST_REPEAT_SCAN = 20;
+/** Longest `request_user_input` message. It becomes an alert; the detail belongs in the chat. */
+export const INPUT_REQUEST_MAX_LENGTH = INPUT_REQUEST_DISPLAY_LIMIT;
+/**
+ * An identical request from the same harness inside this window is one alert, not
+ * two. It exists for a retried or doubled call. It is short because an agent that
+ * asks the same generic question ("Proceed?") again after the user has answered
+ * must still be able to raise a new alert, and the tool cannot see the reply.
+ */
+const INPUT_REQUEST_REPEAT_WINDOW_MS = 30_000;
 
 let inputRequestQueue: Promise<unknown> = Promise.resolve();
 
@@ -1205,29 +1214,30 @@ export const tools: NexusFlowTool[] = [
         await requireWorkspace(ctx);
         const feature = await loadFeatureConfig(ctx.workspacePath);
         if (!feature) return errorResult('Workspace not found.');
-        const message = String(args.message ?? '').trim();
+        // Stored exactly as it will be shown, so what is recorded and what is compared agree.
+        const message = cleanInputRequestText(args.message);
         if (!message) return errorResult('The request message cannot be empty.');
         if (message.length > INPUT_REQUEST_MAX_LENGTH) {
           return errorResult(
             `The request message is ${message.length} characters; keep it to ${INPUT_REQUEST_MAX_LENGTH} or fewer and put the detail in the chat.`,
           );
         }
-        const harness = args.harness ? String(args.harness).trim() : 'agent';
+        const harness = cleanInputRequestText(args.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent';
 
         // This server can be started below the workspace root; the ledger lives at the root.
         const root = (await findWorkspaceRoot(ctx.workspacePath)) ?? ctx.workspacePath;
         const waitNote = 'The user has been alerted. Write your full question in the chat and end your turn; they will reply there. Do not continue the task or call this tool again for the same question.';
 
         return await serializeInputRequests(async () => {
-          const { messages } = await readWorkspaceChatMessages(root, INPUT_REQUEST_REPEAT_SCAN);
           const now = Date.now();
-          const repeat = messages.find(
-            (entry) =>
-              entry.kind === 'input_request' &&
-              entry.harness === harness &&
-              entry.message === message &&
-              now - Date.parse(entry.timestamp) < INPUT_REQUEST_REPEAT_WINDOW_MS,
-          );
+          // Reads the end of the ledger only, so a long-lived workspace does not pay for its history.
+          const latest = await latestInputRequest(root, now);
+          const repeat = latest
+            && latest.harness === harness
+            && latest.message === message
+            && now - Date.parse(latest.timestamp) < INPUT_REQUEST_REPEAT_WINDOW_MS
+            ? latest
+            : null;
           if (repeat) {
             return json({
               status: 'already_requested',

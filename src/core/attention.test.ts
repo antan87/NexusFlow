@@ -3,7 +3,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { INPUT_REQUEST_DISPLAY_LIMIT, INPUT_REQUEST_MAX_AGE_MS, latestInputRequest } from './attention.js';
+import {
+  INPUT_REQUEST_DISPLAY_LIMIT,
+  INPUT_REQUEST_HARNESS_LIMIT,
+  INPUT_REQUEST_MAX_AGE_MS,
+  latestInputRequest,
+} from './attention.js';
 
 const cleanup: string[] = [];
 
@@ -115,6 +120,37 @@ describe('latestInputRequest', () => {
     expect(filler.length).toBeGreaterThan(64 * 1024);
     await fs.writeFile(ledger, filler + line(request({ message: 'Buried at the end?' })), 'utf8');
     expect((await latestInputRequest(dir, NOW))?.message).toBe('Buried at the end?');
+  });
+
+  it('finds a request that has more than 64 KB of newer entries after it', async () => {
+    const { dir, ledger } = await workspace();
+    const after = Array.from({ length: 2500 }, (_, i) => line({ id: `n${i}`, timestamp: ago(MIN / 2), author: 'agent', message: `Handoff ${i} ${'z'.repeat(40)}` })).join('');
+    expect(after.length).toBeGreaterThan(64 * 1024);
+    await fs.writeFile(ledger, line(request({ message: 'Still waiting?' })) + after, 'utf8');
+    expect((await latestInputRequest(dir, NOW))?.message).toBe('Still waiting?');
+  });
+
+  it('does not look past the last 512 KB, which bounds the cost of a poll', async () => {
+    const { dir, ledger } = await workspace();
+    const after = Array.from({ length: 12_000 }, (_, i) => line({ id: `n${i}`, timestamp: ago(MIN / 2), author: 'agent', message: `Handoff ${i} ${'z'.repeat(40)}` })).join('');
+    expect(after.length).toBeGreaterThan(512 * 1024);
+    await fs.writeFile(ledger, line(request({ message: 'Too far back' })) + after, 'utf8');
+    expect(await latestInputRequest(dir, NOW)).toBeNull();
+  });
+
+  it('keeps the request when a newer entry follows it in the same small file', async () => {
+    const { dir, ledger } = await workspace();
+    await fs.writeFile(ledger, line(request({ message: 'Question' })) + line({ id: 'h', timestamp: ago(MIN / 2), author: 'agent', message: 'note' }), 'utf8');
+    expect((await latestInputRequest(dir, NOW))?.message).toBe('Question');
+  });
+
+  it('strips control characters from the harness name and bounds its length', async () => {
+    const { dir, ledger } = await workspace();
+    await fs.writeFile(ledger, line(request({ harness: `cl\u001bau\u0000de${'x'.repeat(100)}` })), 'utf8');
+    const result = await latestInputRequest(dir, NOW);
+    expect(result?.harness).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f]/);
+    expect(result?.harness.length).toBe(INPUT_REQUEST_HARNESS_LIMIT);
+    expect(result?.harness.startsWith('claude')).toBe(true);
   });
 
   it('does not misread the line cut by the tail boundary', async () => {

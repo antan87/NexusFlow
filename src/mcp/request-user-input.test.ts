@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enabledTools, findTool, INPUT_REQUEST_MAX_LENGTH, type ToolContext } from './tools.js';
 import * as workspace from '../core/workspace.js';
 import { PRIMARY_MANIFEST_FILE, readWorkspaceChatMessages } from '../core/constants.js';
+import { INPUT_REQUEST_HARNESS_LIMIT } from '../core/attention.js';
 import type { NexusFlowConfig } from '../types.js';
 
 const config: NexusFlowConfig = {
@@ -105,6 +106,39 @@ describe('request_user_input', () => {
     expect((await ledgerEntries(ledger))[0].harness).toBe('agent');
   });
 
+  describe('keeps what it stores safe to show', () => {
+    it('strips control characters from the message and compares the cleaned text', async () => {
+      const { dir, ledger } = await makeWorkspace();
+      const first = await tool().handler({ message: '\u001b[31mDelete\u0007 it?\u0000' }, ctxFor(dir));
+      // The same text without the control characters is the same request.
+      const second = await tool().handler({ message: '[31mDelete it?' }, ctxFor(dir));
+
+      expect(body(first).status).toBe('requested');
+      expect(body(second).status).toBe('already_requested');
+      const entries = await ledgerEntries(ledger);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].message).toBe('[31mDelete it?');
+    });
+
+    it('rejects a message that is only control characters', async () => {
+      const { dir, ledger } = await makeWorkspace();
+      const result = await tool().handler({ message: '\u0007\u0000\u001b' }, ctxFor(dir));
+      expect(result.isError).toBe(true);
+      expect(await ledgerEntries(ledger)).toEqual([]);
+    });
+
+    it.each([
+      ['whitespace only', '   ', 'agent'],
+      ['control characters only', '\u0007\u0000', 'agent'],
+      ['control characters inside', 'cl\u001bau\u0000de', 'claude'],
+      ['longer than the limit', 'h'.repeat(100), 'h'.repeat(INPUT_REQUEST_HARNESS_LIMIT)],
+    ])('cleans a harness name that is %s', async (_label, harness, expected) => {
+      const { dir, ledger } = await makeWorkspace();
+      await tool().handler({ message: 'Ready?', harness }, ctxFor(dir));
+      expect((await ledgerEntries(ledger))[0].harness).toBe(expected);
+    });
+  });
+
   it('writes to the workspace root when the server runs in a subfolder', async () => {
     const { dir, ledger } = await makeWorkspace();
     const sub = path.join(dir, 'NexusFlow', 'src');
@@ -197,9 +231,22 @@ describe('request_user_input', () => {
       expect(await ledgerEntries(ledger)).toHaveLength(2);
     });
 
+    it('raises a new alert for the same generic question asked again after the user answered', async () => {
+      // The tool cannot see the user's reply in the terminal, so a repeat a couple of
+      // minutes later must not be swallowed as a duplicate.
+      const { dir, ledger } = await makeWorkspace();
+      const earlier = new Date(Date.now() - 2 * 60_000).toISOString();
+      await fs.writeFile(ledger, JSON.stringify({ id: 'q1', timestamp: earlier, harness: 'agent', author: 'agent', kind: 'input_request', message: 'Proceed?' }) + '\n', 'utf8');
+
+      const result = await tool().handler({ message: 'Proceed?' }, ctxFor(dir));
+
+      expect(body(result).status).toBe('requested');
+      expect(await ledgerEntries(ledger)).toHaveLength(2);
+    });
+
     it('treats a recent identical request written by another process as a repeat', async () => {
       const { dir, ledger } = await makeWorkspace();
-      const recent = new Date(Date.now() - 60_000).toISOString();
+      const recent = new Date(Date.now() - 10_000).toISOString();
       await fs.writeFile(ledger, JSON.stringify({ id: 'other', timestamp: recent, harness: 'agent', author: 'agent', kind: 'input_request', message: 'Proceed?' }) + '\n', 'utf8');
 
       const result = await tool().handler({ message: 'Proceed?' }, ctxFor(dir));
