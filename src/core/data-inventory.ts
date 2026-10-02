@@ -28,6 +28,14 @@ export const DATA_INVENTORY: readonly DataClass[] = [
     recovery: 'General authored-state backup/restore is not yet available. Keep original documents and their metadata; generated plan text alone is insufficient.',
   },
   {
+    id: 'chat-alerts', title: 'Chat alerts', owner: 'ContextSpace, partly in the app’s browser storage',
+    storage: 'When an agent asks for your attention, its question is added to the workspace chat ledger (.contextspace/chat.jsonl). The app keeps, per workspace, the id of the newest request you have already seen in local browser storage.',
+    network: 'Not sent anywhere by ContextSpace. The seen record lives in the browser profile of the app or browser that you use, not in the workspace folder.',
+    retention: 'The ledger has no automatic expiry. A request older than 24 hours raises no alert. The seen record remembers the 200 most recent workspaces.',
+    controls: 'Open the chat or dismiss the alert to mark a request seen. Clearing the site data of the app or browser forgets what you have seen, so a request from the last 24 hours can alert again. If storage is blocked, alerts still work for the open session.',
+    recovery: 'The seen record is not a backup and is not in exports or support reports. The ledger is part of the workspace.',
+  },
+  {
     id: 'unsaved-drafts', title: 'Unsaved brief drafts', owner: 'ContextSpace, in the app’s browser storage',
     storage: 'While you edit a work brief, the app keeps unsaved assignment, milestone and delivery-notes edits in local browser storage, per workspace, and a half-filled Add source document form, which can hold pasted text, in session storage.',
     network: 'Not sent anywhere by ContextSpace. They live in the browser profile of the app or browser that you use, not in the workspace folder.',

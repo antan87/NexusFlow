@@ -20,6 +20,7 @@ import {
   listWorkspaces,
   createWorkspace,
   resolveRepoInfos,
+  findWorkspaceRoot,
 } from '../core/workspace.js';
 import { resolveFeatureRepoPath } from '../utils/feature.js';
 import { syncWorkspace } from '../core/sync.js';
@@ -42,6 +43,12 @@ import {
   type ParsedKnowledgeEntry,
 } from '../core/knowledge.js';
 import { loadPinnedWorkroomClientForWorkspace } from '../workrooms/manager.js';
+import {
+  INPUT_REQUEST_DISPLAY_LIMIT,
+  INPUT_REQUEST_HARNESS_LIMIT,
+  cleanInputRequestText,
+  latestInputRequest,
+} from '../core/attention.js';
 import {
   BRAND_NAME,
   CLI_NAME,
@@ -137,6 +144,28 @@ async function archiveTargetRefusal(ctx: ToolContext): Promise<string | null> {
     return `This server runs inside "${path.basename(target)}", so it will not archive it. Run \`${CLI_NAME} archive ${path.basename(target)}\` from outside the workspace, or use the app.`;
   }
   return null;
+}
+
+/** Longest `request_user_input` message. It becomes an alert; the detail belongs in the chat. */
+export const INPUT_REQUEST_MAX_LENGTH = INPUT_REQUEST_DISPLAY_LIMIT;
+/**
+ * An identical request from the same harness inside this window is one alert, not
+ * two. It exists for a retried or doubled call. It is short because an agent that
+ * asks the same generic question ("Proceed?") again after the user has answered
+ * must still be able to raise a new alert, and the tool cannot see the reply.
+ */
+const INPUT_REQUEST_REPEAT_WINDOW_MS = 30_000;
+
+let inputRequestQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Runs input requests one at a time in this process, so the repeat check and the
+ * append cannot interleave when an agent issues parallel calls.
+ */
+function serializeInputRequests<T>(task: () => Promise<T>): Promise<T> {
+  const run = inputRequestQueue.then(task, task);
+  inputRequestQueue = run.catch(() => undefined);
+  return run;
 }
 
 async function requireWorkspace(ctx: ToolContext): Promise<void> {
@@ -1158,6 +1187,88 @@ export const tools: NexusFlowTool[] = [
         });
       } catch (error: any) {
         return errorResult(`Error posting workroom handoff: ${error.message}`);
+      }
+    },
+  },
+  {
+    name: 'request_user_input',
+    description:
+      `Alert the user that you are blocked and need their answer, decision, approval or review before you can continue. ${BRAND_NAME} marks this workspace's CLI chat as needing attention and shows your question, so a user with many chats open can tell which one is waiting on them. Call it when you would otherwise end your turn with a question for the user. Then write the full question in the chat as usual and end your turn; the user replies there. Do not use it for progress updates (use post_workroom_handoff) or for questions you can settle yourself.`,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          minLength: 1,
+          maxLength: INPUT_REQUEST_MAX_LENGTH,
+          description: `The question or decision you need from the user, as plain text of at most ${INPUT_REQUEST_MAX_LENGTH} characters. Put longer context in the chat itself.`,
+        },
+        harness: { type: 'string', description: 'Optional originating harness name (e.g. "antigravity", "claude", "codex", "pi").' },
+        ...workspaceIdProp,
+      },
+      required: ['message'],
+    },
+    handler: async (args, ctx) => {
+      try {
+        await requireWorkspace(ctx);
+        const feature = await loadFeatureConfig(ctx.workspacePath);
+        if (!feature) return errorResult('Workspace not found.');
+        // Stored exactly as it will be shown, so what is recorded and what is compared agree.
+        const message = cleanInputRequestText(args.message);
+        if (!message) return errorResult('The request message cannot be empty.');
+        if (message.length > INPUT_REQUEST_MAX_LENGTH) {
+          return errorResult(
+            `The request message is ${message.length} characters; keep it to ${INPUT_REQUEST_MAX_LENGTH} or fewer and put the detail in the chat.`,
+          );
+        }
+        const harness = cleanInputRequestText(args.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent';
+
+        // This server can be started below the workspace root; the ledger lives at the root.
+        const root = (await findWorkspaceRoot(ctx.workspacePath)) ?? ctx.workspacePath;
+        const waitNote = 'The user has been alerted. Write your full question in the chat and end your turn; they will reply there. Do not continue the task or call this tool again for the same question.';
+
+        return await serializeInputRequests(async () => {
+          const now = Date.now();
+          // Reads the end of the ledger only, so a long-lived workspace does not pay for its history.
+          const latest = await latestInputRequest(root, now);
+          const repeat = latest
+            && latest.harness === harness
+            && latest.message === message
+            && now - Date.parse(latest.timestamp) < INPUT_REQUEST_REPEAT_WINDOW_MS
+            ? latest
+            : null;
+          if (repeat) {
+            return json({
+              status: 'already_requested',
+              workspaceId: feature.id,
+              harness,
+              timestamp: repeat.timestamp,
+              message: waitNote,
+            });
+          }
+
+          const ledger = await resolveWorkspaceChatLedger(root);
+          await fs.mkdir(ledger.chatDir, { recursive: true });
+          const entry = {
+            id: randomUUID(),
+            timestamp: new Date(now).toISOString(),
+            harness,
+            author: 'agent',
+            kind: 'input_request',
+            message,
+          };
+          await fs.appendFile(ledger.chatPath, JSON.stringify(entry) + '\n', 'utf8');
+          return json({
+            status: 'requested',
+            workspaceId: feature.id,
+            harness,
+            timestamp: entry.timestamp,
+            message: waitNote,
+          });
+        });
+      } catch (error: any) {
+        return errorResult(`Error requesting user input: ${error.message}`);
       }
     },
   },

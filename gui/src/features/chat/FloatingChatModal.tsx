@@ -2,6 +2,7 @@ import { TerminalWorkspace } from '../terminal/TerminalWorkspace.js';
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  BellRing,
   MessagesSquare,
   X,
   Minus,
@@ -20,6 +21,8 @@ import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../c
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
 import { useFloatingChat, CHAT_GEOMETRY, clampChatSize } from './floatingChatStore.js';
+import { attentionStore } from './chatAttention.js';
+import { useChatAttention, useWindowAttentive } from './useChatAttention.js';
 
 interface FloatingChatModalProps {
   workspaces: Feature[];
@@ -81,6 +84,18 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
       return next;
     });
   }, [isOpen, isMinimized, activeTab, splitTab, showSplit]);
+
+  // A request counts as seen once its chat is on screen in a window the user is
+  // looking at. A chat left open on another monitor must keep its alert.
+  const { pending, waiting } = useChatAttention();
+  const attentive = useWindowAttentive();
+  useEffect(() => {
+    if (!isOpen || isMinimized || !attentive) return;
+    const visible = new Set([activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value)));
+    for (const request of pending) {
+      if (visible.has(request.workspaceId)) attentionStore.markSeen(request.workspaceId, request.id);
+    }
+  }, [pending, isOpen, isMinimized, attentive, activeTab, splitTab, showSplit]);
 
   const moveSplit = useCallback((event: React.PointerEvent) => {
     if (!splitDragRef.current || !bodyRef.current) return;
@@ -251,7 +266,10 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
       <div className="fixed bottom-5 right-6 z-50 animate-fade-in">
         <button
           onClick={restore}
-          className="flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-card/95 backdrop-blur-md border border-border shadow-xl hover:border-primary/50 text-foreground transition-all duration-200 cursor-pointer group"
+          className={cn(
+            'flex items-center gap-2.5 px-4 py-2.5 rounded-full bg-card/95 backdrop-blur-md border border-border shadow-xl hover:border-primary/50 text-foreground transition-all duration-200 cursor-pointer group',
+            waiting.size > 0 && 'border-amber-500/70 hover:border-amber-500',
+          )}
           title="Restore floating CLI chat"
         >
           <div className="size-7 rounded-full bg-primary/10 grid place-items-center text-primary group-hover:scale-105 transition-transform">
@@ -267,7 +285,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
               )}
             </span>
             <span className="text-[10px] text-muted-foreground leading-tight max-w-[140px] truncate">
-              {runningTabs.length ? `CLI running · hidden${runningTabs.length > 1 ? ` (${runningTabs.length})` : ''}` : disconnectedTabs.length ? 'CLI disconnected · hidden' : activeWorkspace?.branchName || 'No active tab'}
+              {waiting.size > 0 ? `${waiting.size} waiting for you` : runningTabs.length ? `CLI running · hidden${runningTabs.length > 1 ? ` (${runningTabs.length})` : ''}` : disconnectedTabs.length ? 'CLI disconnected · hidden' : activeWorkspace?.branchName || 'No active tab'}
             </span>
           </div>
           <Maximize2 className="size-3.5 text-muted-foreground group-hover:text-foreground ml-1" />
@@ -305,6 +323,20 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
           <span className="text-xs font-bold text-foreground shrink-0">CLI chat</span>
         </div>
 
+        {/* The tab strip scrolls, so a waiting chat can be out of sight; this stays put and jumps to the one waiting longest. */}
+        {pending.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setActiveTab(pending[0]!.workspaceId)}
+            title={pending.map((request) => `${request.workspaceId}: ${request.message}`).join('\n')}
+            aria-label={`${pending.length} ${pending.length === 1 ? 'chat' : 'chats'} waiting for you. Show ${pending[0]!.workspaceId}.`}
+            className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-amber-500/70 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-amber-500/20"
+          >
+            <BellRing className="size-3 text-amber-500" aria-hidden="true" />
+            {pending.length} waiting
+          </button>
+        )}
+
         <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto no-scrollbar" data-no-drag>
           {openTabs.map((branchName) => {
             const isActive = branchName === activeTab;
@@ -316,15 +348,17 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   isActive || splitTab === branchName
                     ? 'bg-card border-border shadow-xs text-foreground font-semibold'
                     : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  waiting.has(branchName) && 'border-amber-500/70 bg-amber-500/10 text-foreground',
                 )}
               >
-                <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane`} title={branchName}
+                <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-label={`Show ${branchName} in the left pane${waiting.has(branchName) ? ', waiting for your input' : ''}`} title={branchName}
                   className="flex min-w-0 items-center gap-1.5" onClick={() => setActiveTab(branchName)}>
                   <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                   <span className="truncate">{branchName}</span>
                   {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
                   {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
                   {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                  {waiting.has(branchName) && <span title="Waiting for your input" className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />}
                 </button>
                 <button
                   type="button"

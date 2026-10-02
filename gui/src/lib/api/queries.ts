@@ -5,7 +5,7 @@ import { floatingChatStore } from '../../features/chat/floatingChatStore.js';
  * hand-rolled refetch effects.
  */
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './client.js';
 import type {
@@ -32,6 +32,7 @@ import type {
   WorkspaceStatus,
   WorkspaceStreamMessage,
   WorkspaceStreamResponse,
+  InputRequest,
   RepoFreshness,
   FastForwardResult,
   WorkspaceLifecycle,
@@ -629,6 +630,30 @@ export function useWorkspaceStream(workspaceId: string | null, options: { refetc
     queryFn: ({ signal }) => apiFetch<WorkspaceStreamResponse>(`/api/workspace/${encodeURIComponent(workspaceId!)}/stream`, { signal }),
     enabled: Boolean(workspaceId),
     refetchInterval: options.refetchInterval ?? 3000,
+  });
+}
+
+/**
+ * The newest "agent needs input" request in each named workspace (the open CLI
+ * chats). Polls even when the window is in the background, because being away
+ * is exactly when the user needs the alert.
+ */
+export function useInputRequests(workspaceIds: readonly string[]) {
+  const ids = [...new Set(workspaceIds)].sort();
+  return useQuery({
+    queryKey: ['input-requests', ids],
+    queryFn: async () => {
+      const { requests } = await apiFetch<{ requests: InputRequest[] }>(
+        `/api/attention?workspaces=${encodeURIComponent(ids.join(','))}`,
+      );
+      return requests;
+    },
+    enabled: ids.length > 0,
+    refetchInterval: 4000,
+    refetchIntervalInBackground: true,
+    // Opening or closing a tab changes the key. Keep showing the last answer until
+    // the new one arrives, or the indicators would blink off for a poll.
+    placeholderData: keepPreviousData,
   });
 }
 

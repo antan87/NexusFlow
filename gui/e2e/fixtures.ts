@@ -132,6 +132,8 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
       lifecycle: null, assignment: '', sharedDocuments: [],
     }));
     await page.route('**/api/workspace/*/changes', json({ changes: [] }));
+    // Nothing is waiting by default; a spec that exercises alerts registers its own route.
+    await page.route('**/api/attention?*', json({ requests: [] }));
 
     await use();
   }, { auto: true }],

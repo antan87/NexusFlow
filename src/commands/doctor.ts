@@ -19,6 +19,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   'Core Artifacts': '📄 Core Artifacts:',
   'Generated Context': '🔒 Generated Context Provenance:',
   'Explicit Contracts': '🔗 Explicit Runtime Contracts:',
+  'AI Agent MCP': '🔌 AI Agent MCP Server:',
 };
 
 const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);

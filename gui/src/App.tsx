@@ -13,6 +13,7 @@ import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from '
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
 import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
+import { ChatAttentionCards } from './features/chat/ChatAttentionCards.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
@@ -1352,6 +1353,7 @@ Core Instructions:
 
       <FloatingChatModal workspaces={activeWorkspaces} />
       <FloatingChatLauncher />
+      <ChatAttentionCards />
 
       <ToastStack
         toasts={toasts}
