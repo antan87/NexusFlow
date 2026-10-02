@@ -840,7 +840,8 @@ mcp
 
 mcp
   .command('setup')
-  .description(`Automatically configure your AI environments (Claude Desktop, Cursor, VS Code) to use the ${BRAND_NAME} MCP Server`)
+  .description(`Automatically configure your AI agents (Claude Code, Codex, Antigravity, Pi) and editors (Claude Desktop, Cursor, VS Code) to use the ${BRAND_NAME} MCP Server`)
+  .option('--dry-run', 'Show what would be registered with each AI agent without changing anything')
   .action(runAction(mcpSetupCommand));
 
 program.hook('postAction', async (thisCommand, actionCommand) => {
