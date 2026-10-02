@@ -82,6 +82,28 @@ describe('isVersionOnlyDiff', () => {
     expect(isVersionOnlyDiff(`${header}+  "versions": "2.32.0",\n`)).toBe(false);
     expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n+  "version": "2.32.0"; rm -rf /,\n`)).toBe(false);
   });
+  it('does not mistake a changed content line that starts like a file header for one', () => {
+    const bump = `${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n`;
+    // A removed `-- sql comment`, a removed markdown rule `---`, and an added `++ x`.
+    for (const line of ['--- sql comment', '----', '+++ x']) {
+      expect(isVersionOnlyDiff(`${bump}${line}\n`), line).toBe(false);
+    }
+  });
+  it('still reads every file header of a multi-file patch as a header', () => {
+    const lock = 'diff --git a/package-lock.json b/package-lock.json\nindex 333..444 100644\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1,3 +1,3 @@\n-  "version": "2.31.1",\n+  "version": "2.32.0",\n';
+    expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n${lock}`)).toBe(true);
+  });
+  it('ignores the no-newline marker', () => {
+    expect(isVersionOnlyDiff(`${header}-  "version": "2.31.1",\n+  "version": "2.32.0",\n\\ No newline at end of file\n`)).toBe(true);
+  });
+  it('rejects a mode change, rename, copy or binary patch that has no +/- lines of its own', () => {
+    const bump = '@@ -1,4 +1,4 @@\n-  "version": "2.31.1",\n+  "version": "2.32.0",\n';
+    const file = (extra: string) => `diff --git a/package.json b/package.json\n${extra}index 111..222 100644\n--- a/package.json\n+++ b/package.json\n${bump}`;
+    for (const extra of ['old mode 100644\nnew mode 100755\n', 'new file mode 100644\n', 'deleted file mode 100644\n', 'similarity index 90%\nrename from a\nrename to package.json\n', 'copy from a\ncopy to package.json\n']) {
+      expect(isVersionOnlyDiff(file(extra)), extra).toBe(false);
+    }
+    expect(isVersionOnlyDiff(`${file('')}diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n`)).toBe(false);
+  });
   it('rejects an empty diff, which is not a bump', () => {
     expect(isVersionOnlyDiff('')).toBe(false);
     expect(isVersionOnlyDiff(header)).toBe(false);

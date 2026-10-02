@@ -63,8 +63,19 @@ export function nextVersion(current, bump) {
  */
 export function isVersionOnlyDiff(patch) {
   let changed = 0;
+  let inHunk = false;
   for (const line of String(patch ?? '').split('\n')) {
-    if (/^(\+\+\+|---|diff |index |@@|\\ )/.test(line)) continue;
+    // Inside a hunk every line carries a one-character prefix, so a line that starts with
+    // `diff ` or `@@` is always structure, and one that starts with `---` or `+++` is a changed
+    // line whose text begins with `--` or `++`. Only before a file's first hunk are those headers.
+    if (line.startsWith('diff ')) { inHunk = false; continue; }
+    if (line.startsWith('@@')) { inHunk = true; continue; }
+    if (!inHunk) {
+      // Part of a file's header. A version bump has no mode change, rename, copy or binary patch.
+      if (/^(old mode|new mode|new file mode|deleted file mode|similarity index|dissimilarity index|rename |copy |Binary files|GIT binary patch)/.test(line)) return false;
+      continue;
+    }
+    if (line.startsWith('\\ ')) continue;
     if (line[0] === '+' || line[0] === '-') {
       changed += 1;
       if (!/^[+-]\s*"version": "[^"]+",?\s*$/.test(line)) return false;
