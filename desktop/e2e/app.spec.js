@@ -103,6 +103,18 @@ test.describe('desktop app', () => {
     expect(icon.height).toBeGreaterThan(0);
   });
 
+  test('does not download spell-check dictionaries on Windows or Linux', async () => {
+    const spellcheck = await app.evaluate(({ session }) => ({
+      languages: session.defaultSession.getSpellCheckerLanguages(),
+      enabled: session.defaultSession.isSpellCheckerEnabled(),
+    }));
+    if (process.platform === 'darwin') {
+      expect(spellcheck.enabled).toBe(true);
+    } else {
+      expect(spellcheck).toEqual({ languages: [], enabled: false });
+    }
+  });
+
   test('exposes a guarded updater IPC status', async () => {
     const state = await window.evaluate(() => (window.contextspaceBridge || window.nexusBridge)?.updates?.getStatus());
     expect(state).toBeTruthy();
