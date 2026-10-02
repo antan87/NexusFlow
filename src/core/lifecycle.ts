@@ -117,7 +117,11 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
 /**
  * Loads or initializes the active lifecycle for a workspace.
  */
-export async function loadWorkspaceLifecycle(workspacePath: string): Promise<WorkspaceLifecycle> {
+export async function loadWorkspaceLifecycle(
+  workspacePath: string,
+  options: { includeFleet?: boolean } = {},
+): Promise<WorkspaceLifecycle> {
+  const includeFleet = options.includeFleet ?? true;
   const state = await loadWorkspaceState(workspacePath);
   const feature = await loadFeatureConfig(workspacePath);
 
@@ -138,11 +142,13 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
         });
       } finally { await release(); }
     }
-    // Refresh branch fleet asynchronously
-    try {
-      state.lifecycle.fleet = await getBranchFleet(workspacePath);
-    } catch {
-      // Best-effort
+    // Refresh branch fleet asynchronously. It can query remotes, so a caller that polls skips it.
+    if (includeFleet) {
+      try {
+        state.lifecycle.fleet = await getBranchFleet(workspacePath);
+      } catch {
+        // Best-effort
+      }
     }
     return state.lifecycle;
   }
@@ -160,10 +166,12 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   }
 
   let fleet: BranchFleetMember[] = [];
-  try {
-    fleet = await getBranchFleet(workspacePath);
-  } catch {
-    // Best-effort
+  if (includeFleet) {
+    try {
+      fleet = await getBranchFleet(workspacePath);
+    } catch {
+      // Best-effort
+    }
   }
 
   const lifecycle: WorkspaceLifecycle = {
@@ -245,6 +253,10 @@ export async function advanceLifecycleStep(
     } else if (action === 'complete' && !gateFailed) {
       currentStep.status = 'completed';
       currentStep.completedAt = new Date().toISOString();
+      // Finished again: the rework is over. The count stays as history.
+      delete currentStep.reopenedAt;
+      delete currentStep.reopenReason;
+      delete currentStep.reopenedBy;
       for (const nextStep of lifecycle.steps) {
         if (nextStep.status === 'blocked' && dependenciesAreComplete(lifecycle.steps, nextStep)) {
           nextStep.status = 'pending';
@@ -268,6 +280,70 @@ export async function advanceLifecycleStep(
   }
 
   return updated;
+}
+
+/** A reopen request that cannot be carried out, with a code the server maps to an HTTP status. */
+export class LifecycleStepError extends Error {
+  constructor(message: string, readonly code: 'not_found' | 'not_reopenable' | 'conflict') {
+    super(message);
+    this.name = 'LifecycleStepError';
+  }
+}
+
+/** Longest reason kept with a reopened milestone. */
+export const REOPEN_REASON_MAX_LENGTH = 500;
+
+const reopenSchema = z.object({
+  // Control characters could reshape a terminal or a toast, so they are removed before the length check.
+  // eslint-disable-next-line no-control-regex
+  // Whitespace is collapsed so a reason cannot break the milestone plan's list formatting.
+  reason: z.string().transform((value) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(1, 'Say why the milestone is being reopened.').max(REOPEN_REASON_MAX_LENGTH, `Keep the reason to ${REOPEN_REASON_MAX_LENGTH} characters or fewer.`)),
+  by: z.enum(['user', 'agent']),
+});
+
+/**
+ * Sends a finished milestone back for rework and records why. Work loops back,
+ * so this is a first-class, checkable fact on the step (when, why, by whom, how
+ * many times) and not a silent status flip. Only a completed or verified
+ * milestone can be reopened. The earlier completion and its verification proof
+ * no longer describe the work, so both are cleared.
+ */
+export async function reopenLifecycleStep(
+  workspacePath: string,
+  stepId: string,
+  input: { reason: string; by: 'user' | 'agent' },
+): Promise<WorkspaceLifecycle> {
+  const { reason, by } = reopenSchema.parse(input);
+  const lifecycle = await loadWorkspaceLifecycle(workspacePath);
+  const step = lifecycle.steps.find((candidate) => candidate.id === stepId);
+  if (!step) throw new LifecycleStepError(`Step "${stepId}" not found in workspace lifecycle.`, 'not_found');
+  const reopenable = (status: LifecycleStep['status']) => status === 'completed' || status === 'verified';
+  if (!reopenable(step.status)) {
+    throw new LifecycleStepError(`Step "${stepId}" is ${step.status.replace('_', ' ')}, so there is nothing to reopen. Only a finished milestone can be reopened.`, 'not_reopenable');
+  }
+  const originalStep = JSON.stringify(step);
+
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const current = state.lifecycle;
+    const currentStep = current?.steps.find((candidate) => candidate.id === stepId);
+    // Another session may have changed or reopened it while this call was waiting.
+    if (!current || !currentStep || JSON.stringify(currentStep) !== originalStep || !reopenable(currentStep.status)) {
+      throw new LifecycleStepError(`Step "${stepId}" changed during this operation. Reload the flow and retry.`, 'conflict');
+    }
+    currentStep.status = 'in_progress';
+    delete currentStep.completedAt;
+    delete currentStep.lastVerificationSha;
+    delete currentStep.lastVerificationStatus;
+    currentStep.reopenedAt = new Date().toISOString();
+    currentStep.reopenReason = reason;
+    currentStep.reopenedBy = by;
+    currentStep.reopenCount = (currentStep.reopenCount ?? 0) + 1;
+    current.currentStepId = currentStep.id;
+    current.revision = (current.revision ?? 0) + 1;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
 }
 
 /**
@@ -358,7 +434,9 @@ export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true):
   const lines = ['<!-- CONTEXTSPACE:MILESTONES:START -->', '## Milestone plan', '',
     live ? 'Current progress from the workspace lifecycle.' : 'Milestone definitions from the workspace lifecycle. Run `ctxspace flow` for current progress.', ''];
   for (const [index, step] of lifecycle.steps.entries()) {
-    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${step.status.replaceAll('_', ' ')}` : ''}`);
+    const reopened = live && Boolean(step.reopenedAt) && step.status !== 'completed';
+    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${reopened ? 'reopened, in progress' : step.status.replaceAll('_', ' ')}` : ''}`);
+    if (reopened) lines.push(`   Reopened${step.reopenedBy ? ` by ${step.reopenedBy === 'user' ? 'the user' : 'an agent'}` : ''}: ${step.reopenReason ?? 'no reason recorded'}`);
     if (step.description) lines.push(`   ${step.description}`);
     if (step.dependsOn?.length) lines.push(`   Depends on: ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}`);
     if (step.repo) lines.push(`   Repository: ${step.repo}`);

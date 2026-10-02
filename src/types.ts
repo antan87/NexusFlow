@@ -796,6 +796,13 @@ export interface LifecycleStep {
   lastVerificationSha?: string;
   lastVerificationStatus?: VerificationStatus;
   completedAt?: string;
+  /** Set while a finished milestone has been sent back for rework. Cleared when it completes again. */
+  reopenedAt?: string;
+  /** Why the milestone was reopened, in the words of whoever reopened it. */
+  reopenReason?: string;
+  reopenedBy?: 'user' | 'agent';
+  /** How many times this milestone has been reopened. Survives completion. */
+  reopenCount?: number;
 }
 
 /** Information about sister branches and collaborator commits tracked in the workspace. */

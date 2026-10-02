@@ -1,10 +1,13 @@
 /**
  * @module core/attention
- * Finds the newest "agent needs the user" request in a workspace's chat ledger,
+ * Finds the "agent needs the user" requests in a workspace's chat ledger,
  * so the app can flag the CLI chat that is waiting. Written by the MCP
- * `request_user_input` tool as a `kind: 'input_request'` ledger entry.
+ * `request_user_input` tool as a `kind: 'input_request'` ledger entry. The app
+ * answers with a `kind: 'input_ack'` entry, because replies typed into the chat
+ * terminal never reach the ledger.
  */
 
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { resolveWorkspaceChatLedger } from './constants.js';
 
@@ -71,8 +74,16 @@ async function readTail(file: string, sinceMs: number, bytes: number): Promise<T
 
 type Candidate = InputRequest & { time: number };
 
-function newestRequest(lines: readonly string[], sinceMs: number, now: number): Candidate | null {
-  let latest: Candidate | null = null;
+interface LedgerScan {
+  /** Valid input requests in file order. */
+  requests: Candidate[];
+  /** Time of the newest acknowledgement, or 0 when there is none. */
+  ackTime: number;
+}
+
+function scanLedger(lines: readonly string[], sinceMs: number, now: number): LedgerScan {
+  const requests: Candidate[] = [];
+  let ackTime = 0;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -82,27 +93,42 @@ function newestRequest(lines: readonly string[], sinceMs: number, now: number): 
     } catch {
       continue;
     }
-    if (!entry || typeof entry !== 'object' || entry.kind !== 'input_request') continue;
+    if (!entry || typeof entry !== 'object') continue;
     const time = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
-    const message = cleanInputRequestText(entry.message).slice(0, INPUT_REQUEST_DISPLAY_LIMIT);
     // A timestamp from the future would stay "newest" and pin its alert.
-    if (!Number.isFinite(time) || time < sinceMs || time > now + CLOCK_SKEW_MS || !message) continue;
-    if (latest && time < latest.time) continue;
-    latest = {
+    if (!Number.isFinite(time) || time > now + CLOCK_SKEW_MS) continue;
+    if (entry.kind === 'input_ack') {
+      ackTime = Math.max(ackTime, time);
+      continue;
+    }
+    if (entry.kind !== 'input_request') continue;
+    const message = cleanInputRequestText(entry.message).slice(0, INPUT_REQUEST_DISPLAY_LIMIT);
+    if (time < sinceMs || !message) continue;
+    requests.push({
       id: typeof entry.id === 'string' && entry.id ? entry.id : `${entry.timestamp}`,
       timestamp: entry.timestamp,
       harness: cleanInputRequestText(entry.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent',
       message,
       time,
-    };
+    });
+  }
+  return { requests, ackTime };
+}
+
+/** The newest request in a scan. A later entry wins a tie. Acknowledgements are applied by the caller. */
+function newestOf(requests: readonly Candidate[]): Candidate | null {
+  let latest: Candidate | null = null;
+  for (const request of requests) {
+    if (latest && request.time < latest.time) continue;
+    latest = request;
   }
   return latest;
 }
 
 /**
  * Returns the newest input request in the workspace's ledger that is no older
- * than {@link INPUT_REQUEST_MAX_AGE_MS}, or null. Malformed lines and entries
- * without a valid timestamp or message are skipped.
+ * than {@link INPUT_REQUEST_MAX_AGE_MS} and has not been acknowledged, or null.
+ * Malformed lines and entries without a valid timestamp or message are skipped.
  */
 export async function latestInputRequest(
   workspaceDir: string,
@@ -111,17 +137,71 @@ export async function latestInputRequest(
   const sinceMs = now - INPUT_REQUEST_MAX_AGE_MS;
   const ledger = await resolveWorkspaceChatLedger(workspaceDir);
   let latest: Candidate | null = null;
+  let ackTime = 0;
 
   for (const file of ledger.readPaths) {
     for (const bytes of TAIL_STEPS) {
       const tail = await readTail(file, sinceMs, bytes);
-      const found = newestRequest(tail.lines, sinceMs, now);
+      const scan = scanLedger(tail.lines, sinceMs, now);
+      const found = newestOf(scan.requests);
+      ackTime = Math.max(ackTime, scan.ackTime);
       if (found && (!latest || found.time >= latest.time)) latest = found;
-      if (found || tail.complete) break;
+      // An acknowledgement in the tail answers everything before it, so reading further back finds nothing open.
+      if (found || scan.ackTime > 0 || tail.complete) break;
     }
   }
 
-  if (!latest) return null;
+  if (!latest || latest.time < ackTime) return null;
   const { time: _time, ...request } = latest;
   return request;
+}
+
+/** Most open requests returned by {@link listOpenInputRequests}. */
+export const INPUT_REQUEST_LIST_LIMIT = 20;
+
+/**
+ * Every input request from the last {@link INPUT_REQUEST_MAX_AGE_MS} that has
+ * not been acknowledged, oldest first (the one waiting longest leads), at most
+ * {@link INPUT_REQUEST_LIST_LIMIT}. Reads the end of each ledger only.
+ */
+export async function listOpenInputRequests(
+  workspaceDir: string,
+  now: number = Date.now(),
+): Promise<InputRequest[]> {
+  const sinceMs = now - INPUT_REQUEST_MAX_AGE_MS;
+  const ledger = await resolveWorkspaceChatLedger(workspaceDir);
+  const byId = new Map<string, Candidate>();
+  let ackTime = 0;
+
+  for (const file of ledger.readPaths) {
+    const tail = await readTail(file, sinceMs, TAIL_STEPS[TAIL_STEPS.length - 1]!);
+    const scan = scanLedger(tail.lines, sinceMs, now);
+    ackTime = Math.max(ackTime, scan.ackTime);
+    for (const request of scan.requests) byId.set(request.id, request);
+  }
+
+  // A request at the same instant as an acknowledgement stays open: showing a question twice is safer than hiding one.
+  return [...byId.values()]
+    .filter((request) => request.time >= ackTime)
+    .sort((a, b) => a.time - b.time)
+    .slice(-INPUT_REQUEST_LIST_LIMIT)
+    .map(({ time: _time, ...request }) => request);
+}
+
+/**
+ * Marks every question asked so far as answered. Replies typed into the chat
+ * terminal never reach the ledger, so the app records this explicitly, and the
+ * alert and the open-question count both honour it.
+ */
+export async function acknowledgeInputRequests(
+  workspaceDir: string,
+  now: number = Date.now(),
+): Promise<{ acknowledged: number; timestamp: string }> {
+  const open = await listOpenInputRequests(workspaceDir, now);
+  const ledger = await resolveWorkspaceChatLedger(workspaceDir);
+  await fs.mkdir(ledger.chatDir, { recursive: true });
+  const timestamp = new Date(now).toISOString();
+  const entry = { id: randomUUID(), timestamp, harness: 'developer', author: 'human', kind: 'input_ack', message: 'Marked answered' };
+  await fs.appendFile(ledger.chatPath, JSON.stringify(entry) + '\n', 'utf8');
+  return { acknowledged: open.length, timestamp };
 }

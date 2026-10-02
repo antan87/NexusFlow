@@ -58,7 +58,7 @@ import {
 } from './utils/repo-freshness.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, saveFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
-import { latestInputRequest, type InputRequest } from './core/attention.js';
+import { acknowledgeInputRequests, latestInputRequest, type InputRequest } from './core/attention.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import {
@@ -2938,6 +2938,64 @@ app.post('/api/workspace/:id/lifecycle/step', async (c) => {
     const { advanceLifecycleStep } = await import('./core/lifecycle.js');
     const lifecycle = await advanceLifecycleStep(workspacePath, body.stepId, body.action);
     return c.json({ lifecycle });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2b. Checkable progress facts: milestones (with reopened work), open questions,
+// changed files and the last verification. Cheap enough to poll: no remote queries.
+app.get('/api/workspace/:id/progress-facts', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { getProgressFacts } = await import('./core/progress-facts.js');
+    return c.json({ facts: await getProgressFacts(workspacePath) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2c. Send a finished milestone back for rework. This route is the user's own
+// action, so the reopen is recorded as theirs.
+app.post('/api/workspace/:id/lifecycle/reopen', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const body = (await c.req.json().catch(() => ({}))) as { stepId?: unknown; reason?: unknown };
+    if (typeof body.stepId !== 'string' || !body.stepId || typeof body.reason !== 'string') {
+      return c.json({ error: 'stepId and reason are required.' }, 400);
+    }
+    const { reopenLifecycleStep, LifecycleStepError } = await import('./core/lifecycle.js');
+    try {
+      const lifecycle = await reopenLifecycleStep(workspacePath, body.stepId, { reason: body.reason, by: 'user' });
+      return c.json({ lifecycle });
+    } catch (error) {
+      if (error instanceof LifecycleStepError) {
+        return c.json({ error: error.message, code: error.code }, error.code === 'not_found' ? 404 : 409);
+      }
+      // A rejected reason (empty or too long) is the caller's mistake, not a server fault.
+      if (error instanceof Error && error.name === 'ZodError') {
+        const issues = (error as Error & { issues?: Array<{ message?: string }> }).issues;
+        return c.json({ error: issues?.[0]?.message ?? 'The reason is not valid.' }, 400);
+      }
+      throw error;
+    }
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2d. Mark every question the AI has asked so far as answered. Replies typed into
+// the chat terminal never reach the ledger, so the app records this explicitly.
+app.post('/api/workspace/:id/input-requests/acknowledge', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    return c.json(await acknowledgeInputRequests(workspacePath));
   } catch (error) {
     return errorResponse(c, error);
   }
