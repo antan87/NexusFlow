@@ -36,3 +36,10 @@ repository file; doing so leaves stale guidance on later feature branches.
   and generated-context changes.
 - Preserve unrelated working-tree changes and use explicit pathspecs for Git
   staging or commits.
+
+## Releasing
+
+- Follow `RELEASING.md`. Several agents can release at once, so run
+  `npm run release:preflight` first and dispatch only the command it prints.
+- Never dispatch a version that already has a release run, tag or GitHub Release,
+  and never approve or cancel another run's `release` environment gate.
