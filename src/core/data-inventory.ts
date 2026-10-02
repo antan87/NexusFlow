@@ -28,6 +28,14 @@ export const DATA_INVENTORY: readonly DataClass[] = [
     recovery: 'General authored-state backup/restore is not yet available. Keep original documents and their metadata; generated plan text alone is insufficient.',
   },
   {
+    id: 'unsaved-drafts', title: 'Unsaved brief drafts', owner: 'ContextSpace, in the app’s browser storage',
+    storage: 'While you edit a work brief, the app keeps unsaved assignment, milestone and delivery-notes edits in local browser storage, per workspace, and a half-filled Add source document form, which can hold pasted text, in session storage.',
+    network: 'Not sent anywhere by ContextSpace. They live in the browser profile of the app or browser that you use, not in the workspace folder.',
+    retention: 'A draft is removed when you save or discard it. Local drafts that nobody reopens expire after 30 days; a source document draft ends when its window closes.',
+    controls: 'Save, or choose Discard unsaved changes, in Plan. Clearing the site data of the app or browser removes every draft. If storage is blocked or full, the draft stays in the open page only and the page says it was not kept.',
+    recovery: 'Drafts are not a backup and are not in exports or support reports. Save the brief to keep your work.',
+  },
+  {
     id: 'knowledge', title: 'Workspace and repository knowledge', owner: 'ContextSpace, authored by you',
     storage: 'Workspace knowledge in the workspace. With the local adapter, repository base knowledge is in the brand home under base/<repository>/, keyed by origin URL (or checkout path without a remote) and shared by every workspace with that repository. Older .contextspace/base/<repo>/ and legacy .nexusflow copies are merged in once and kept.',
     network: 'The local adapter does not upload knowledge. Assistants reading it and optional Workroom publication have separate sharing boundaries.',
