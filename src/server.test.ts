@@ -24,6 +24,7 @@ import * as sessionFinder from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { workroomManager } from './workrooms/manager.js';
+import { clearEditorDetectionCache } from './utils/detect-editors.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -86,6 +87,7 @@ vi.mock('./orchestration/index.js');
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearEditorDetectionCache();
   });
 
   it('keeps diagnostic capture and export behind the local host/origin guards', async () => {
@@ -2960,6 +2962,32 @@ describe('Server API Endpoints Unit Tests', () => {
         expect((await app.request('/api/workspaces/status?offset=-1&limit=24')).status).toBe(400);
         expect((await app.request('/api/workspaces/status?offset=24&limit=24')).status).toBe(400);
         expect((await app.request('/api/workspaces/status?offset=24&limit=24&snapshot=missing')).status).toBe(410);
+      } finally {
+        findActive.mockRestore();
+      }
+    });
+
+    it('runs git status once per repository per scan when workspaces share it', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue(['a', 'b', 'c'].map((name, index) => ({
+        id: `ws-${name}`,
+        branchName: `shared-${name}`,
+        mode: 'in-place',
+        workspacePath: `/workspaces/shared-${name}`,
+        repos: ['/repos/shared'],
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      })) as any);
+      vi.mocked(execa).mockResolvedValue({ stdout: ' M src/a.ts\0', stderr: '', exitCode: 0 } as any);
+      const findActive = vi.spyOn(sessionFinder, 'findActiveAssistants').mockResolvedValue([]);
+      const statusRuns = () => vi.mocked(execa).mock.calls.filter(([, args]) => (args as string[] | undefined)?.includes('status')).length;
+      try {
+        const page = await (await app.request('/api/workspaces/status?offset=0&limit=24')).json();
+        expect(Object.values(page.statuses).map((status: any) => status.changedFiles)).toEqual([1, 1, 1]);
+        expect(statusRuns()).toBe(1);
+
+        // A new scan reads fresh status.
+        await app.request('/api/workspaces/status?offset=0&limit=24');
+        expect(statusRuns()).toBe(2);
       } finally {
         findActive.mockRestore();
       }

@@ -94,7 +94,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const [retryLaunch, setRetryLaunch] = useState<TerminalLaunch | undefined>(undefined);
   const usageHistory = useQuery({
     queryKey: ['terminal-resume-sessions', workspace],
-    queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions`),
+    queryFn: ({ signal }) => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions`, { signal }),
     enabled: active && !!terminal && terminal.target !== 'shell',
     staleTime: 15_000,
     refetchInterval: active && terminal && paneState.kind === 'running' ? 30_000 : false,

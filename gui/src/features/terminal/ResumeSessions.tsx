@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { History, RefreshCw, ArrowRight } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
@@ -8,12 +8,19 @@ import { SessionUsageDetails } from './SessionUsage.js';
 import type { AISession } from '../../types.js';
 import type { TerminalStatus } from './client.js';
 import { useWorkspaceSessionSources } from './useWorkspaceSessionSources.js';
+import { perfMark } from '../../lib/perfMarks.js';
 
 export function ResumeSessions({ workspace, active, busy, status, fill, onStartNew, onResume }: { workspace: string; active: boolean; busy: boolean; status: TerminalStatus | null; fill: boolean; onStartNew: () => void; onResume: (session: AISession) => void }) {
   const [search, setSearch] = useState('');
   const [includeChildren, setIncludeChildren] = useState(false);
   // Each source resolves independently so slow CLI history cannot hold up the rest.
   const { histories, sessions, sourcesChecked, sourcesPending, sourcesFailed, sourceCount } = useWorkspaceSessionSources(workspace, active);
+  const settled = active && sourceCount > 0 && sourcesPending === 0;
+  const firstArrived = active && sourcesChecked > 0;
+  useEffect(() => { if (firstArrived) perfMark('cs:sessions-first', { workspace }); }, [firstArrived, workspace]);
+  useEffect(() => {
+    if (settled) perfMark('cs:sessions-settled', { workspace, sources: sourceCount, failed: sourcesFailed });
+  }, [settled, workspace, sourceCount, sourcesFailed]);
   const children = sessions.filter(s => s.threadKind === 'subagent').length;
   const visible = sessions.filter(s => (includeChildren || s.threadKind !== 'subagent') && `${s.title} ${harnessName(s.assistant)} ${s.id}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));

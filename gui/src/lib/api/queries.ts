@@ -53,7 +53,7 @@ export interface ConfigResponse {
 export function useConfig() {
   return useQuery({
     queryKey: ['config'],
-    queryFn: () => apiFetch<ConfigResponse>('/api/config'),
+    queryFn: ({ signal }) => apiFetch<ConfigResponse>('/api/config', { signal }),
   });
 }
 
@@ -62,7 +62,7 @@ export function useConfig() {
 export function useWorkspaces() {
   return useQuery({
     queryKey: ['workspaces'],
-    queryFn: () => apiFetch<Feature[]>('/api/workspaces'),
+    queryFn: ({ signal }) => apiFetch<Feature[]>('/api/workspaces', { signal }),
   });
 }
 
@@ -77,7 +77,7 @@ export interface WorkspaceStatusPage {
 export function useWorkspacesStatus(options: { enabled?: boolean; intervalMs?: number | false } = {}) {
   return useInfiniteQuery({
     queryKey: ['workspaces-status'],
-    queryFn: ({ pageParam }) => apiFetch<WorkspaceStatusPage>(`/api/workspaces/status?offset=${pageParam.offset}&limit=24${pageParam.snapshot ? `&snapshot=${encodeURIComponent(pageParam.snapshot)}` : ''}`),
+    queryFn: ({ pageParam, signal }) => apiFetch<WorkspaceStatusPage>(`/api/workspaces/status?offset=${pageParam.offset}&limit=24${pageParam.snapshot ? `&snapshot=${encodeURIComponent(pageParam.snapshot)}` : ''}`, { signal }),
     initialPageParam: { offset: 0, snapshot: '' },
     getNextPageParam: (page) => page.nextOffset === null ? undefined : { offset: page.nextOffset, snapshot: page.snapshot },
     enabled: options.enabled ?? true,
@@ -108,8 +108,8 @@ export interface CreateWorkspacePayload {
 export function useDomainPacks() {
   return useQuery({
     queryKey: ['domain-packs'],
-    queryFn: async () => {
-      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs');
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch<{ domainPacks: DomainPack[] }>('/api/enterprise/domain-packs', { signal });
       return res?.domainPacks ?? [];
     },
   });
@@ -179,7 +179,7 @@ export function useCreateWorkspace() {
 export function useProjects() {
   return useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<Project[]>('/api/projects'),
+    queryFn: ({ signal }) => apiFetch<Project[]>('/api/projects', { signal }),
   });
 }
 
@@ -220,7 +220,7 @@ export function useDeleteProject() {
 export function useRepos() {
   return useQuery({
     queryKey: ['repos'],
-    queryFn: () => apiFetch<RepoInfo[]>('/api/repos'),
+    queryFn: ({ signal }) => apiFetch<RepoInfo[]>('/api/repos', { signal }),
   });
 }
 
@@ -234,7 +234,7 @@ export interface RepoBranches {
 export function useRepoBranches(repoPath: string, enabled: boolean) {
   return useQuery({
     queryKey: ['repo-branches', repoPath],
-    queryFn: () => apiFetch<RepoBranches>(`/api/repos/branches?path=${encodeURIComponent(repoPath)}`),
+    queryFn: ({ signal }) => apiFetch<RepoBranches>(`/api/repos/branches?path=${encodeURIComponent(repoPath)}`, { signal }),
     enabled,
     staleTime: 60_000,
   });
@@ -244,10 +244,10 @@ export function useRepoBranches(repoPath: string, enabled: boolean) {
 export function useRepoFreshness(repoPath: string, branch?: string, enabled = true) {
   return useQuery({
     queryKey: ['repo-freshness', repoPath, branch],
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const q = new URLSearchParams({ path: repoPath });
       if (branch) q.set('branch', branch);
-      return apiFetch<RepoFreshness>(`/api/repos/freshness?${q.toString()}`);
+      return apiFetch<RepoFreshness>(`/api/repos/freshness?${q.toString()}`, { signal });
     },
     enabled: enabled && !!repoPath,
     staleTime: 30_000,
@@ -258,8 +258,9 @@ export function useRepoFreshness(repoPath: string, branch?: string, enabled = tr
 export function useReposFreshness(repos: Array<{ path: string; branch?: string }>, enabled = true) {
   return useQuery({
     queryKey: ['repos-freshness', repos],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       apiFetch<RepoFreshness[]>('/api/repos/freshness', {
+        signal,
         method: 'POST',
         body: JSON.stringify({ repos }),
       }),
@@ -300,7 +301,7 @@ export function useCreateRepo() {
 export function useAiDetect() {
   return useQuery({
     queryKey: ['ai-detect'],
-    queryFn: () => apiFetch<DetectedAI[]>('/api/ai-detect'),
+    queryFn: ({ signal }) => apiFetch<DetectedAI[]>('/api/ai-detect', { signal }),
     staleTime: 60_000,
   });
 }
@@ -308,7 +309,7 @@ export function useAiDetect() {
 export function useEditorDetect() {
   return useQuery({
     queryKey: ['editor-detect'],
-    queryFn: () => apiFetch<DetectedEditor[]>('/api/editor-detect'),
+    queryFn: ({ signal }) => apiFetch<DetectedEditor[]>('/api/editor-detect', { signal }),
     staleTime: 60_000,
   });
 }
@@ -316,7 +317,7 @@ export function useEditorDetect() {
 export function useWorkspaceLaunchTargets() {
   return useQuery({
     queryKey: ['workspace-launch-targets'],
-    queryFn: () => apiFetch<WorkspaceLaunchTarget[]>('/api/workspace-launch-targets'),
+    queryFn: ({ signal }) => apiFetch<WorkspaceLaunchTarget[]>('/api/workspace-launch-targets', { signal }),
     staleTime: 60_000,
   });
 }
@@ -324,10 +325,10 @@ export function useWorkspaceLaunchTargets() {
 export function useWorkspaceRecentSessions(workspaceId: string, enabled: boolean) {
   return useQuery({
     queryKey: ['workspace-recent-sessions', workspaceId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ limit: '3', desktopHandoffOnly: 'true' });
       const data = await apiFetch<{ sessions: AISession[] }>(
-        `/api/workspace/${encodeURIComponent(workspaceId)}/sessions?${params}`,
+        `/api/workspace/${encodeURIComponent(workspaceId)}/sessions?${params}`, { signal },
       );
       return data.sessions;
     },
@@ -349,8 +350,8 @@ export interface WorkflowTemplate {
 export function useWorkflowTemplates() {
   return useQuery({
     queryKey: ['workflow-templates'],
-    queryFn: async () => {
-      const data = await apiFetch<{ templates: WorkflowTemplate[] }>('/api/workflows/templates');
+    queryFn: async ({ signal }) => {
+      const data = await apiFetch<{ templates: WorkflowTemplate[] }>('/api/workflows/templates', { signal });
       return data.templates;
     },
   });
@@ -373,7 +374,7 @@ export interface WorkspaceServicesResponse {
 export function useWorkspaceServices(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-services', wsId],
-    queryFn: () => apiFetch<WorkspaceServicesResponse>(`/api/workspace/${encodeURIComponent(wsId!)}/services`),
+    queryFn: ({ signal }) => apiFetch<WorkspaceServicesResponse>(`/api/workspace/${encodeURIComponent(wsId!)}/services`, { signal }),
     enabled: !!wsId,
     refetchInterval: 3000,
     retry: 1,
@@ -426,8 +427,8 @@ export type { SkillCategory, SkillItem, CodexAgentItem, WorkspaceSkillsConfig } 
 export function useSkillCategories() {
   return useQuery({
     queryKey: ['skill-categories'],
-    queryFn: async () => {
-      const data = await apiFetch<{ categories: SkillCategory[] }>('/api/skills/categories');
+    queryFn: async ({ signal }) => {
+      const data = await apiFetch<{ categories: SkillCategory[] }>('/api/skills/categories', { signal });
       return data.categories;
     },
   });
@@ -465,7 +466,7 @@ export function useDeleteSkillCategory() {
 function skillCatalogOptions(workspaceId?: string) {
   return {
     queryKey: ['skills', workspaceId],
-    queryFn: () => apiFetch<{ skills: SkillItem[]; diagnostics?: Array<{ id: string; scope: string; message: string }> }>(workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills'),
+    queryFn: ({ signal }: { signal: AbortSignal }) => apiFetch<{ skills: SkillItem[]; diagnostics?: Array<{ id: string; scope: string; message: string }> }>(workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills', { signal }),
   };
 }
 
@@ -516,8 +517,8 @@ export function useDeleteSkill() {
 export function useAgents() {
   return useQuery({
     queryKey: ['codex-agents'],
-    queryFn: async () => {
-      const data = await apiFetch<{ agents: CodexAgentItem[] }>('/api/agents');
+    queryFn: async ({ signal }) => {
+      const data = await apiFetch<{ agents: CodexAgentItem[] }>('/api/agents', { signal });
       return data.agents;
     },
   });
@@ -559,8 +560,8 @@ export function useDeleteAgent() {
 export function useWorkspaceSkills(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-skills', wsId],
-    queryFn: async () => {
-      const data = await apiFetch<{ config: WorkspaceSkillsConfig }>(`/api/skills/workspace/${encodeURIComponent(wsId!)}`);
+    queryFn: async ({ signal }) => {
+      const data = await apiFetch<{ config: WorkspaceSkillsConfig }>(`/api/skills/workspace/${encodeURIComponent(wsId!)}`, { signal });
       return data.config;
     },
     enabled: !!wsId,
@@ -625,7 +626,7 @@ export function useRefreshWorkspace() {
 export function useWorkspaceStream(workspaceId: string | null, options: { refetchInterval?: number } = {}) {
   return useQuery({
     queryKey: ['workspace-stream', workspaceId],
-    queryFn: () => apiFetch<WorkspaceStreamResponse>(`/api/workspace/${encodeURIComponent(workspaceId!)}/stream`),
+    queryFn: ({ signal }) => apiFetch<WorkspaceStreamResponse>(`/api/workspace/${encodeURIComponent(workspaceId!)}/stream`, { signal }),
     enabled: Boolean(workspaceId),
     refetchInterval: options.refetchInterval ?? 3000,
   });
@@ -666,9 +667,9 @@ export interface WorkspaceLifecycleResponse {
 export function useWorkspaceLifecycle(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-lifecycle', wsId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const data = await apiFetch<WorkspaceLifecycleResponse>(
-        `/api/workspace/${encodeURIComponent(wsId!)}/lifecycle`
+        `/api/workspace/${encodeURIComponent(wsId!)}/lifecycle`, { signal }
       );
       return data;
     },
@@ -681,7 +682,7 @@ export function useWorkspaceLifecycle(wsId: string | null) {
 export function useWorkGuidance(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-work', wsId],
-    queryFn: async () => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId!)}/work`)).guidance,
+    queryFn: async ({ signal }) => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId!)}/work`, { signal })).guidance,
     enabled: Boolean(wsId),
     staleTime: 10_000,
   });
@@ -693,8 +694,8 @@ export function useWorkGuidance(wsId: string | null) {
 export function useWorkspaceRepositories(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-repositories', wsId],
-    queryFn: async () => (await apiFetch<{ repositories: WorkspaceRepository[] }>(
-      `/api/workspace/${encodeURIComponent(wsId!)}/repositories`,
+    queryFn: async ({ signal }) => (await apiFetch<{ repositories: WorkspaceRepository[] }>(
+      `/api/workspace/${encodeURIComponent(wsId!)}/repositories`, { signal },
     )).repositories,
     enabled: Boolean(wsId),
   });
@@ -704,7 +705,7 @@ export function useWorkspaceRepositories(wsId: string | null) {
 export function useProgression(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-progression', wsId],
-    queryFn: () => apiFetch<ProgressionDecision>(`/api/workspace/${encodeURIComponent(wsId!)}/progression`),
+    queryFn: ({ signal }) => apiFetch<ProgressionDecision>(`/api/workspace/${encodeURIComponent(wsId!)}/progression`, { signal }),
     enabled: Boolean(wsId),
   });
 }
@@ -713,8 +714,8 @@ export function useProgression(wsId: string | null) {
 export function useLastFinish(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-finish-last', wsId],
-    queryFn: async () => (await apiFetch<{ lastFinish: FinishRecord | null }>(
-      `/api/workspace/${encodeURIComponent(wsId!)}/finish/last`,
+    queryFn: async ({ signal }) => (await apiFetch<{ lastFinish: FinishRecord | null }>(
+      `/api/workspace/${encodeURIComponent(wsId!)}/finish/last`, { signal },
     )).lastFinish,
     enabled: Boolean(wsId),
   });

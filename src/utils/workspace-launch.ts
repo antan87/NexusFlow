@@ -17,6 +17,7 @@ import type {
 import { isValidSessionUuid } from '../agent/session.js';
 import { detectEditors } from './detect-editors.js';
 import { openInEditor } from './open-editor.js';
+import { PROBE_TIMEOUT_MS, probeCommand } from './probe.js';
 
 interface EditorDefinition {
   id: string;
@@ -118,12 +119,7 @@ function unavailableTarget(
 }
 
 async function commandSucceeds(command: string, args: string[]): Promise<boolean> {
-  try {
-    const result = await execa(command, args, { reject: false, shell: false });
-    return result.exitCode === 0;
-  } catch {
-    return false;
-  }
+  return (await probeCommand(command, args, { shell: false })) === 'ok';
 }
 
 /** Check whether the OS can activate a provider-owned desktop URI scheme. */
@@ -154,7 +150,7 @@ export async function hasDesktopProtocol(
       const result = await execa(
         'xdg-mime',
         ['query', 'default', 'x-scheme-handler/claude'],
-        { reject: false, shell: false },
+        { reject: false, shell: false, timeout: PROBE_TIMEOUT_MS },
       );
       return result.exitCode === 0 && Boolean(result.stdout?.trim());
     } catch {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { apiFetch } from '../../lib/api/client.js';
+import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
 import { cn } from '../../lib/utils.js';
 import { FileTree } from './FileTree.js';
@@ -19,7 +20,7 @@ const TREE_MAX_PX = 420;
 const TREE_DEFAULT_PX = 208;
 const TREE_WIDTH_KEY = 'contextspace.code-panel.tree-width';
 
-interface CodeFile { file: string; type: string; additions?: number; deletions?: number }
+interface CodeFile { file: string; type: string; additions?: number; deletions?: number; size?: number; mtimeMs?: number }
 interface CodeRepo { repoName: string; repoPath: string; files: CodeFile[]; error?: string }
 interface Selection { repoName: string; repoPath: string; file: string; line?: number }
 interface FileDiff { diff: string; fileContent?: string; originalContent?: string }
@@ -61,20 +62,54 @@ export function WorkspaceCodePanel({
     }
   }, [openReference]);
 
+  // Refresh every 10 s while the panel is on screen. A hidden window does no
+  // work at all, and catches up once as soon as it is shown again.
   useEffect(() => {
     if (!active) return;
-    const timer = window.setInterval(() => setRevision(value => value + 1), 10_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const start = () => { timer ??= window.setInterval(() => setRevision(value => value + 1), 10_000); };
+    const stop = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stop();
+      } else {
+        setRevision(value => value + 1);
+        start();
+      }
+    };
+    if (document.visibilityState !== 'hidden') start();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [active]);
+
+  // The server answers a refresh with `unchanged` when this token is current,
+  // so an idle panel does not re-download (and re-compare) the whole tree.
+  const knownListing = useRef<{ key: string; token: string } | null>(null);
 
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
     setLoading(true);
     setError('');
-    void apiFetch<{ changes: CodeRepo[] }>(`${base}/changes${mode === 'files' ? '?include=all' : ''}`)
-      .then(result => {
+    // Only a plain refresh may reuse the listing; a new mode, workspace or
+    // file reference needs the full result.
+    const key = `${base}|${mode}|${openReference?.id ?? ''}`;
+    const known = knownListing.current?.key === key ? knownListing.current.token : null;
+    const params = new URLSearchParams(mode === 'files' ? { include: 'all' } : {});
+    if (known) params.set('known', known);
+    const query = params.toString();
+    void apiFetch<{ changes?: CodeRepo[]; unchanged?: boolean; token?: string }>(`${base}/changes${query ? `?${query}` : ''}`)
+      .then(response => {
         if (cancelled) return;
+        knownListing.current = response.token ? { key, token: response.token } : null;
+        if (response.unchanged || !response.changes) return;
+        const result = { changes: response.changes };
         setRepos(prev => {
           if (JSON.stringify(prev) === JSON.stringify(result.changes)) {
             return prev;
@@ -107,6 +142,14 @@ export function WorkspaceCodePanel({
     };
   }, [base, mode, revision, active, openReference]);
 
+  // The diff is fetched again only when the selected file itself changed.
+  const selectedEntry = selection
+    ? repos.find(repo => repo.repoName === selection.repoName)?.files.find(file => file.file === selection.file)
+    : undefined;
+  const selectedVersion = selectedEntry
+    ? [selectedEntry.type, selectedEntry.additions, selectedEntry.deletions, selectedEntry.size, selectedEntry.mtimeMs].join(':')
+    : '';
+
   useEffect(() => {
     if (!active || !selection) {
       setDiff(null);
@@ -118,6 +161,7 @@ export function WorkspaceCodePanel({
     void apiFetch<FileDiff>(`${base}/changes/diff?${query}`)
       .then(result => {
         if (cancelled) return;
+        perfMark('cs:diff-ready', { panel: 'code', repo: selection.repoName, file: selection.file });
         setDiff(prev => {
           if (
             prev &&
@@ -136,7 +180,7 @@ export function WorkspaceCodePanel({
     return () => {
       cancelled = true;
     };
-  }, [base, selection, revision, active]);
+  }, [base, selection, selectedVersion, active]);
 
   useEffect(() => {
     if (!selection?.line || !diff || diff.diff || !plainCode.current) return;

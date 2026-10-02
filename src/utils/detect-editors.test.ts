@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { execa } from 'execa';
-import { detectEditors } from './detect-editors.js';
+import { clearEditorDetectionCache, detectEditors } from './detect-editors.js';
+import { PROBE_TIMEOUT_MS } from './probe.js';
 
 vi.mock('execa');
 
 describe('detectEditors', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearEditorDetectionCache();
+    vi.useRealTimers();
   });
 
   it('should return detected = true for editors whose commands exit with 0', async () => {
@@ -50,10 +53,10 @@ describe('detectEditors', () => {
 
     expect(result).toEqual(expected);
 
-    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, shell: isWin, windowsHide: true });
-    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, shell: isWin, windowsHide: true });
-    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, shell: isWin, windowsHide: true });
-    expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('code', ['--version'], { reject: false, timeout: PROBE_TIMEOUT_MS, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('code-insiders', ['--version'], { reject: false, timeout: PROBE_TIMEOUT_MS, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('cursor', ['--version'], { reject: false, timeout: PROBE_TIMEOUT_MS, shell: isWin, windowsHide: true });
+    expect(execa).toHaveBeenCalledWith('antigravity', ['--version'], { reject: false, timeout: PROBE_TIMEOUT_MS, shell: isWin, windowsHide: true });
   });
 
   it('should return detected = false for all editors if execa throws an error (except built-in Windows shells)', async () => {
@@ -90,5 +93,33 @@ describe('detectEditors', () => {
         ];
 
     expect(result).toEqual(expected);
+  });
+
+  it('counts a command that starts but never answers as installed', async () => {
+    vi.mocked(execa).mockImplementation((command: any): any => Promise.resolve(
+      command === 'antigravity' ? { exitCode: undefined, timedOut: true } : { exitCode: 1 },
+    ));
+
+    const result = await detectEditors();
+
+    expect(result.find((e) => e.command === 'antigravity')?.detected).toBe(true);
+    expect(result.find((e) => e.command === 'code')?.detected).toBe(false);
+  });
+
+  it('shares one probe run between concurrent callers and reuses it for 60 s', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.mocked(execa).mockResolvedValue({ exitCode: 0 } as any);
+
+    const [first, second] = await Promise.all([detectEditors(), detectEditors()]);
+    const probesPerRun = vi.mocked(execa).mock.calls.length;
+    expect(second).toBe(first);
+
+    vi.setSystemTime(Date.now() + 59_000);
+    await detectEditors();
+    expect(execa).toHaveBeenCalledTimes(probesPerRun);
+
+    vi.setSystemTime(Date.now() + 2_000);
+    await detectEditors();
+    expect(execa).toHaveBeenCalledTimes(probesPerRun * 2);
   });
 });

@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from 'react';
+import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FolderGit2,
@@ -26,6 +26,7 @@ import { apiFetch } from '../lib/api/client.js';
 import { repoName } from '../lib/status.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
 import { WorkspaceChatResume } from '../features/chat/WorkspaceChatResume.js';
+import { perfMarkOnce } from '../lib/perfMarks.js';
 
 export interface HarnessOption {
   id: string;
@@ -208,6 +209,13 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const aiDetect = useAiDetect();
   const launchTargets = useWorkspaceLaunchTargets();
+
+  // Usable means the workspace cards are on screen; Git status is optional work.
+  useEffect(() => {
+    if (!workspacesLoading) perfMarkOnce('cs:overview-usable', { workspaces: workspaces.length });
+    if (checkedWorkspaceCount > 0) perfMarkOnce('cs:overview-status-first', { checked: checkedWorkspaceCount });
+    if (statusesComplete) perfMarkOnce('cs:overview-status-complete', { checked: checkedWorkspaceCount });
+  }, [workspacesLoading, workspaces.length, checkedWorkspaceCount, statusesComplete]);
   const launchTerminalMutation = useLaunchTerminal();
 
   const [search, setSearch] = useState('');

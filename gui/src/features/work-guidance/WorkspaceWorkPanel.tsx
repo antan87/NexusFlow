@@ -54,10 +54,12 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
   const live = useRef<LiveDrafts>({});
   const base = `/api/workspace/${encodeURIComponent(workspaceId)}`;
   const queryClient = useQueryClient();
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setError('');
     try {
-      const result = await apiFetch<WorkContext>(`${base}/work`);
+      const result = await apiFetch<WorkContext>(`${base}/work`, { signal });
+      // Leaving the workspace aborts this load: a stale result must not touch state or the stored drafts of this workspace.
+      if (signal?.aborted) return;
       let nextDraft = result.guidance;
       let nextSteps = result.lifecycle?.steps ?? [];
       const found: DraftConflicts = {};
@@ -84,9 +86,16 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
       setContext(result); setDraft(nextDraft); setSteps(nextSteps); setConflicts(found);
       if (nextForm) { setDocument(nextForm.document); setSourceType(nextForm.sourceType); setContent(nextForm.content); setUrl(nextForm.url); setEditingDocumentId(null); }
       if (kept.length) setMessage(`Unsaved ${kept.join(' and ')} edits kept. Save them, or discard them.`);
-    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to load work brief.'); }
+    } catch (error) {
+      if (signal?.aborted) return;
+      setError(error instanceof Error ? error.message : 'Unable to load work brief.');
+    }
   }, [base, workspaceId, readOnly]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   // Keep unsaved edits on this device as they are made, so leaving the workspace or reloading does not lose them.
   // A pending conflict owns the stored draft until the user chooses.

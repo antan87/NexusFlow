@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { execa } from 'execa';
 
 export interface ChangedFile {
@@ -6,6 +9,9 @@ export interface ChangedFile {
   rawStatus: string;
   additions: number;
   deletions: number;
+  /** Size and mtime of a changed file on disk, so a viewer can tell when its diff changed. */
+  size?: number;
+  mtimeMs?: number;
 }
 
 export function parseGitStatus(output: string): ChangedFile[] {
@@ -25,9 +31,53 @@ export function parseGitStatus(output: string): ChangedFile[] {
   return files;
 }
 
+export interface RepositoryListing {
+  files: ChangedFile[];
+  /** Changes whenever anything the listing depends on changes. */
+  fingerprint: string;
+}
+
+// A code view refreshes every few seconds, and listing a repository costs a
+// status, a numstat and (for the full tree) an ls-files. Only the status runs
+// every time; the rest is reused while nothing it depends on has changed: the
+// status output, the index (rewritten by commit, checkout, pull and add) and
+// the size and mtime of every changed file.
+const LISTING_CACHE_LIMIT = 64;
+const listingCache = new Map<string, RepositoryListing>();
+
+export function clearRepositoryListingCache(): void {
+  listingCache.clear();
+}
+
 export async function listRepositoryChanges(repoPath: string, includeAll = false): Promise<ChangedFile[]> {
-  const { stdout } = await execa('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: repoPath, stripFinalNewline: false });
+  return (await listRepositoryChangesWithFingerprint(repoPath, includeAll)).files;
+}
+
+export async function listRepositoryChangesWithFingerprint(repoPath: string, includeAll = false): Promise<RepositoryListing> {
+  // --no-optional-locks: a poller must not rewrite the index (that would change
+  // the signature below) or take index.lock while the user runs git.
+  const { stdout } = await execa('git', ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: repoPath, stripFinalNewline: false });
   const files = parseGitStatus(stdout);
+  await Promise.all(files.map(async (file) => {
+    try {
+      const stat = await fs.stat(path.join(repoPath, file.file));
+      file.size = stat.size;
+      file.mtimeMs = stat.mtimeMs;
+    } catch {
+      // Deleted files have no size or mtime.
+    }
+  }));
+  const index = await indexSignature(repoPath);
+  const fingerprint = createHash('sha1')
+    .update(JSON.stringify([includeAll, index, stdout, files.map((f) => [f.size, f.mtimeMs])]))
+    .digest('hex');
+  const key = `${path.resolve(repoPath)}\0${includeAll}`;
+  const cached = listingCache.get(key);
+  // Without an index signature (not a repository root) there is nothing safe to compare.
+  if (index && cached?.fingerprint === fingerprint) {
+    return { fingerprint, files: cached.files.map((file) => ({ ...file })) };
+  }
+
   // Disable rename folding only for line counts; status retains rename identity.
   const byPath = new Map(files.map(file => [file.file, file]));
   try {
@@ -47,5 +97,31 @@ export async function listRepositoryChanges(repoPath: string, includeAll = false
       if (!byPath.has(file)) byPath.set(file, { file, type: 'unchanged', rawStatus: '', additions: 0, deletions: 0 });
     }
   }
-  return [...byPath.values()];
+  const listing = { fingerprint, files: [...byPath.values()] };
+  if (index) {
+    listingCache.delete(key);
+    listingCache.set(key, { fingerprint, files: listing.files.map((file) => ({ ...file })) });
+    if (listingCache.size > LISTING_CACHE_LIMIT) listingCache.delete(listingCache.keys().next().value!);
+  }
+  return listing;
+}
+
+/** Size and mtime of the repository's index, found through `.git` (a directory, or a file for worktrees). */
+async function indexSignature(repoPath: string): Promise<string | null> {
+  try {
+    const dotGit = path.join(repoPath, '.git');
+    let gitDir = dotGit;
+    try {
+      // A linked worktree's .git is a file naming its git directory.
+      const pointer = /^gitdir:\s*(.+)$/m.exec(await fs.readFile(dotGit, 'utf8'));
+      if (!pointer) return null;
+      gitDir = path.resolve(repoPath, pointer[1]!.trim());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
+    }
+    const index = await fs.stat(path.join(gitDir, 'index'));
+    return `${index.size}:${index.mtimeMs}`;
+  } catch {
+    return null;
+  }
 }

@@ -18,6 +18,7 @@ import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
+import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -71,6 +72,28 @@ import {
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 const nativeUpdateBridge = typeof window !== 'undefined' ? (window.contextspaceBridge?.updates || window.nexusBridge?.updates) : undefined;
 let toastIdCounter = 0;
+
+/**
+ * Starts a load of one kind of workspace data, aborting the previous load of
+ * that kind so a slow response cannot land after a newer one.
+ */
+function beginWorkspaceLoad(loads: Map<string, AbortController>, kind: string): AbortSignal {
+  loads.get(kind)?.abort();
+  const controller = new AbortController();
+  loads.set(kind, controller);
+  return controller.signal;
+}
+
+/** The last changes, sessions and plan shown for a workspace. */
+interface RecentWorkspaceData { changes?: any[]; sessions?: AISession[]; plan?: string }
+const RECENT_WORKSPACE_DATA_LIMIT = 16;
+
+function rememberWorkspaceData(recent: Map<string, RecentWorkspaceData>, wsId: string, data: RecentWorkspaceData): void {
+  const merged = { ...recent.get(wsId), ...data };
+  recent.delete(wsId);
+  recent.set(wsId, merged);
+  if (recent.size > RECENT_WORKSPACE_DATA_LIMIT) recent.delete(recent.keys().next().value!);
+}
 
 type UiUpdateStatus = {
   currentVersion: string;
@@ -165,6 +188,7 @@ function AppInner() {
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
+  useEffect(() => { if (config) perfMarkOnce('cs:shell'); }, [config]);
   const statusesQuery = useWorkspacesStatus({
     enabled: configExists && !configLoading && onStatusRoute,
     intervalMs: onStatusRoute && (workspacesQuery.data?.length ?? 0) <= 24 ? 15_000 : false,
@@ -208,6 +232,11 @@ function AppInner() {
   const knowledgeLoadRequestRef = useRef(0);
   const planLoadRequestRef = useRef(0);
   const saveKnowledgeRequestRef = useRef(0);
+  // One in-flight load per kind of workspace data; see beginWorkspaceLoad.
+  const workspaceLoadsRef = useRef(new Map<string, AbortController>());
+  // Switching back to a recent workspace shows its last data at once while a
+  // fresh load runs, instead of an empty view until every request returns.
+  const recentWorkspaceDataRef = useRef(new Map<string, RecentWorkspaceData>());
   const editedKnowledgeRef = useRef('');
   const isEditingKnowledgeRef = useRef(false);
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
@@ -508,30 +537,40 @@ function AppInner() {
   };
 
   const fetchGitChanges = async (wsId: string) => {
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'changes');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     setGitChangesLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`, { signal });
       const data = await res.json();
+      perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: isCurrent() });
+      if (!isCurrent()) return;
       setGitChanges(data.changes || []);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes: data.changes || [] });
     } catch (e) {
-      console.error(e);
+      if (isCurrent()) console.error(e);
     } finally {
-      setGitChangesLoading(false);
+      if (isCurrent()) setGitChangesLoading(false);
     }
   };
 
   const fetchWorkspaceSessions = async (wsId: string) => {
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'sessions');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     setSessionsLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`, { signal });
       const data = await res.json();
+      perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: isCurrent() });
+      if (!isCurrent()) return;
       setSessions(data.sessions || []);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { sessions: data.sessions || [] });
     } catch (e) {
-      console.error(e);
+      if (isCurrent()) console.error(e);
     } finally {
-      setSessionsLoading(false);
+      if (isCurrent()) setSessionsLoading(false);
     }
   };
 
@@ -554,11 +593,12 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && knowledgeLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'knowledge');
     setKnowledgeLoading(true);
     setKnowledgeError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`, { signal });
       if (!res.ok) throw new Error('knowledge request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
@@ -633,19 +673,22 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && planLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'plan');
     setPlanLoading(true);
     setPlanError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`, { signal });
       if (!res.ok) throw new Error('plan request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
         throw new Error('plan response was malformed');
       }
+      perfMark('cs:ws-data', { id: wsId, kind: 'plan', applied: isCurrentRequest() });
       if (!isCurrentRequest()) return;
 
       setPlanContent((data as { content: string }).content);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { plan: (data as { content: string }).content });
       setPlanError(null);
     } catch (e) {
       if (!isCurrentRequest()) return;
@@ -816,8 +859,13 @@ function AppInner() {
     knowledgeLoadRequestRef.current += 1;
     planLoadRequestRef.current += 1;
     saveKnowledgeRequestRef.current += 1;
-    setSessions([]);
-    setGitChanges([]);
+    for (const controller of workspaceLoadsRef.current.values()) controller.abort();
+    workspaceLoadsRef.current.clear();
+    const recent = activeWsId ? recentWorkspaceDataRef.current.get(activeWsId) : undefined;
+    setSessions(recent?.sessions ?? []);
+    setSessionsLoading(false);
+    setGitChanges(recent?.changes ?? []);
+    setGitChangesLoading(false);
     setKnowledgeContent('');
     setKnowledgeError(null);
     setKnowledgeLoading(false);
@@ -827,9 +875,14 @@ function AppInner() {
     isEditingKnowledgeRef.current = false;
     setEditedKnowledge('');
     setIsEditingKnowledge(false);
-    setPlanContent('');
+    setPlanContent(recent?.plan ?? '');
     setPlanError(null);
     setPlanLoading(false);
+    if (activeWsId && recent) {
+      for (const kind of ['changes', 'sessions', 'plan'] as const) {
+        if (recent[kind] !== undefined) perfMark('cs:ws-data', { id: activeWsId, kind, applied: true, cached: true });
+      }
+    }
   }, [activeWsId]);
 
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)

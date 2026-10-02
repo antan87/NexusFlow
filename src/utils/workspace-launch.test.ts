@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execa } from 'execa';
 import * as path from 'node:path';
 
+import { PROBE_TIMEOUT_MS } from './probe.js';
+
 import {
   buildWorkspaceLaunchPrompt,
   detectWorkspaceLaunchTargets,
@@ -30,7 +32,7 @@ describe('workspace launch catalog', () => {
     expect(execa).toHaveBeenCalledWith(
       'reg.exe',
       ['query', 'HKCU\\Software\\Classes\\codex'],
-      { reject: false, shell: false },
+      { reject: false, shell: false, timeout: PROBE_TIMEOUT_MS },
     );
   });
 
@@ -41,7 +43,7 @@ describe('workspace launch catalog', () => {
     expect(execa).toHaveBeenCalledWith(
       'xdg-mime',
       ['query', 'default', 'x-scheme-handler/claude'],
-      { reject: false, shell: false },
+      { reject: false, shell: false, timeout: PROBE_TIMEOUT_MS },
     );
 
     await openDesktopUri('claude://code/new?folder=%2Ftmp%2Fworkspace', 'linux');

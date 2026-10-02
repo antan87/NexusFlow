@@ -1,0 +1,2063 @@
+{
+  "tier": "M",
+  "seed": 1,
+  "startedAt": "2026-10-02T05:15:42.759Z",
+  "finishedAt": "2026-10-02T05:19:26.566Z",
+  "complete": true,
+  "options": {
+    "runs": 20,
+    "warmup": 2,
+    "idleMinutes": 0,
+    "packaged": true,
+    "display": "real display"
+  },
+  "machine": {
+    "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "logicalCpus": 8,
+    "memoryGiB": 14.9,
+    "os": "Linux 7.0.0-34-generic",
+    "node": "v24.20.0",
+    "governor": "powersave",
+    "onAcPower": true,
+    "loadAverage1m": 1.44,
+    "fixtureFilesystem": "ext4",
+    "commit": "e7900e9ac1328b9a29db3ffb6dae66e51c0c2214",
+    "uncommittedChanges": 0
+  },
+  "versions": {
+    "electron": "43.2.0",
+    "chrome": "150.0.7871.129",
+    "node": "24.18.0"
+  },
+  "fixture": {
+    "treeDigest": "ff18af1e1964f79ef4c1767041cde02cfcba5ce769e7dcd42d86350ee0f4647d",
+    "workspaces": 31,
+    "repos": [
+      {
+        "name": "fixture-repo-0",
+        "files": 20000,
+        "commit": "5bfc4a4991b9dd648a0d638e7e92ded77ecdf06e"
+      },
+      {
+        "name": "fixture-repo-1",
+        "files": 5000,
+        "commit": "9b641391db72f870015dda82bbadd950542576f0"
+      },
+      {
+        "name": "fixture-repo-2",
+        "files": 1000,
+        "commit": "135709cf94bd3d2980a59de047c7aca87c75d9b6"
+      }
+    ],
+    "codex": {
+      "rollouts": 75,
+      "matching": 25,
+      "bytes": 269590950
+    },
+    "claude": {
+      "transcripts": 5,
+      "bytes": 15734442
+    },
+    "faults": [
+      "missing-repo",
+      "unreadable-worktree"
+    ]
+  },
+  "apps": [
+    {
+      "name": "base",
+      "executable": "~/.cache/contextspace-perf/apps/base/contextspace-desktop"
+    },
+    {
+      "name": "head",
+      "executable": "~/.cache/contextspace-perf/apps/head/contextspace-desktop"
+    }
+  ],
+  "targets": {
+    "dirty": "perf-ws-000",
+    "a": "perf-ws-001",
+    "b": "perf-ws-002",
+    "sessions": "perf-ws-000"
+  },
+  "summaries": {
+    "S1.backendReady": {
+      "n": 40,
+      "p50": 924,
+      "p95": 1266,
+      "max": 2797,
+      "min": 866
+    },
+    "S1.shell": {
+      "n": 40,
+      "p50": 1408,
+      "p95": 1888,
+      "max": 4341,
+      "min": 1321
+    },
+    "S1.usable": {
+      "n": 40,
+      "p50": 1531,
+      "p95": 2014,
+      "max": 4758,
+      "min": 1405
+    },
+    "S1.statusFirst": {
+      "n": 40,
+      "p50": 2312,
+      "p95": 3063,
+      "max": 6831,
+      "min": 2033
+    },
+    "S1.statusComplete": {
+      "n": 40,
+      "p50": 2402,
+      "p95": 3176,
+      "max": 7001,
+      "min": 2121
+    },
+    "S1.longTaskCount": {
+      "n": 40,
+      "p50": 2,
+      "p95": 4,
+      "max": 6,
+      "min": 2
+    },
+    "S1.longTaskMs": {
+      "n": 40,
+      "p50": 183,
+      "p95": 370,
+      "max": 847,
+      "min": 166
+    },
+    "S1.backendRssMiB": {
+      "n": 40,
+      "p50": 205.1,
+      "p95": 259,
+      "max": 259.7,
+      "min": 200.4
+    },
+    "S1.rendererHeapMiB": {
+      "n": 40,
+      "p50": 19.4,
+      "p95": 23.8,
+      "max": 24.1,
+      "min": 17.7
+    },
+    "S2.header": {
+      "n": 40,
+      "p50": 57,
+      "p95": 83,
+      "max": 146,
+      "min": 48
+    },
+    "S2.ready": {
+      "n": 40,
+      "p50": 250,
+      "p95": 361,
+      "max": 718,
+      "min": 230
+    },
+    "S3.header": {
+      "n": 200,
+      "p50": 11,
+      "p95": 22,
+      "max": 72,
+      "min": 7
+    },
+    "S3.ready": {
+      "n": 200,
+      "p50": 33,
+      "p95": 162,
+      "max": 541,
+      "min": 9
+    },
+    "S4.diff": {
+      "n": 40,
+      "p50": 61,
+      "p95": 74,
+      "max": 194,
+      "min": 42
+    },
+    "S5.first": {
+      "n": 40,
+      "p50": 101,
+      "p95": 118,
+      "max": 351,
+      "min": 74
+    },
+    "S5.settled": {
+      "n": 40,
+      "p50": 171,
+      "p95": 303,
+      "max": 791,
+      "min": 116
+    }
+  },
+  "byApp": {
+    "base": {
+      "S1.backendReady": {
+        "n": 20,
+        "p50": 937,
+        "p95": 1317,
+        "max": 2797,
+        "min": 866
+      },
+      "S1.shell": {
+        "n": 20,
+        "p50": 1400,
+        "p95": 2165,
+        "max": 4341,
+        "min": 1332
+      },
+      "S1.usable": {
+        "n": 20,
+        "p50": 1531,
+        "p95": 2388,
+        "max": 4758,
+        "min": 1405
+      },
+      "S1.statusFirst": {
+        "n": 20,
+        "p50": 2362,
+        "p95": 4217,
+        "max": 6831,
+        "min": 2192
+      },
+      "S1.statusComplete": {
+        "n": 20,
+        "p50": 2452,
+        "p95": 4399,
+        "max": 7001,
+        "min": 2279
+      },
+      "S1.longTaskCount": {
+        "n": 20,
+        "p50": 2,
+        "p95": 5,
+        "max": 6,
+        "min": 2
+      },
+      "S1.longTaskMs": {
+        "n": 20,
+        "p50": 184,
+        "p95": 549,
+        "max": 847,
+        "min": 173
+      },
+      "S1.backendRssMiB": {
+        "n": 20,
+        "p50": 257.5,
+        "p95": 259.3,
+        "max": 259.7,
+        "min": 254
+      },
+      "S1.rendererHeapMiB": {
+        "n": 20,
+        "p50": 21.5,
+        "p95": 24,
+        "max": 24.1,
+        "min": 18.5
+      },
+      "S2.header": {
+        "n": 20,
+        "p50": 56,
+        "p95": 105,
+        "max": 146,
+        "min": 48
+      },
+      "S2.ready": {
+        "n": 20,
+        "p50": 257,
+        "p95": 602,
+        "max": 718,
+        "min": 238
+      },
+      "S3.header": {
+        "n": 100,
+        "p50": 10,
+        "p95": 17,
+        "max": 72,
+        "min": 7
+      },
+      "S3.ready": {
+        "n": 100,
+        "p50": 116,
+        "p95": 243,
+        "max": 541,
+        "min": 91
+      },
+      "S4.diff": {
+        "n": 20,
+        "p50": 60,
+        "p95": 74,
+        "max": 194,
+        "min": 42
+      },
+      "S5.first": {
+        "n": 20,
+        "p50": 81,
+        "p95": 105,
+        "max": 351,
+        "min": 74
+      },
+      "S5.settled": {
+        "n": 20,
+        "p50": 257,
+        "p95": 322,
+        "max": 791,
+        "min": 236
+      }
+    },
+    "head": {
+      "S1.backendReady": {
+        "n": 20,
+        "p50": 922,
+        "p95": 1139,
+        "max": 1176,
+        "min": 868
+      },
+      "S1.shell": {
+        "n": 20,
+        "p50": 1424,
+        "p95": 1727,
+        "max": 1803,
+        "min": 1321
+      },
+      "S1.usable": {
+        "n": 20,
+        "p50": 1511,
+        "p95": 1852,
+        "max": 1897,
+        "min": 1418
+      },
+      "S1.statusFirst": {
+        "n": 20,
+        "p50": 2135,
+        "p95": 2536,
+        "max": 2634,
+        "min": 2033
+      },
+      "S1.statusComplete": {
+        "n": 20,
+        "p50": 2230,
+        "p95": 2644,
+        "max": 2761,
+        "min": 2121
+      },
+      "S1.longTaskCount": {
+        "n": 20,
+        "p50": 2,
+        "p95": 3,
+        "max": 3,
+        "min": 2
+      },
+      "S1.longTaskMs": {
+        "n": 20,
+        "p50": 181,
+        "p95": 238,
+        "max": 264,
+        "min": 166
+      },
+      "S1.backendRssMiB": {
+        "n": 20,
+        "p50": 203,
+        "p95": 205,
+        "max": 205.1,
+        "min": 200.4
+      },
+      "S1.rendererHeapMiB": {
+        "n": 20,
+        "p50": 19.1,
+        "p95": 23.6,
+        "max": 23.8,
+        "min": 17.7
+      },
+      "S2.header": {
+        "n": 20,
+        "p50": 58,
+        "p95": 75,
+        "max": 82,
+        "min": 51
+      },
+      "S2.ready": {
+        "n": 20,
+        "p50": 248,
+        "p95": 314,
+        "max": 326,
+        "min": 230
+      },
+      "S3.header": {
+        "n": 100,
+        "p50": 12,
+        "p95": 22,
+        "max": 31,
+        "min": 8
+      },
+      "S3.ready": {
+        "n": 100,
+        "p50": 14,
+        "p95": 25,
+        "max": 33,
+        "min": 9
+      },
+      "S4.diff": {
+        "n": 20,
+        "p50": 61,
+        "p95": 65,
+        "max": 102,
+        "min": 46
+      },
+      "S5.first": {
+        "n": 20,
+        "p50": 112,
+        "p95": 118,
+        "max": 154,
+        "min": 95
+      },
+      "S5.settled": {
+        "n": 20,
+        "p50": 133,
+        "p95": 170,
+        "max": 171,
+        "min": 116
+      }
+    }
+  },
+  "idle": null,
+  "budgets": [
+    {
+      "metric": "S1.usable",
+      "stat": "p95",
+      "budget": 3000,
+      "limit": 3300,
+      "observed": 1852,
+      "verdict": "pass"
+    },
+    {
+      "metric": "S1.statusComplete",
+      "stat": "p95",
+      "budget": 5000,
+      "limit": 5500,
+      "observed": 2644,
+      "verdict": "pass"
+    },
+    {
+      "metric": "S2.ready",
+      "stat": "p95",
+      "budget": 1000,
+      "limit": 1100,
+      "observed": 314,
+      "verdict": "pass"
+    },
+    {
+      "metric": "S3.ready",
+      "stat": "p95",
+      "budget": 500,
+      "limit": 550,
+      "observed": 25,
+      "verdict": "pass"
+    },
+    {
+      "metric": "S4.diff",
+      "stat": "p95",
+      "budget": 300,
+      "limit": 330,
+      "observed": 65,
+      "verdict": "pass"
+    },
+    {
+      "metric": "S5.settled",
+      "stat": "p95",
+      "budget": 1000,
+      "limit": 1100,
+      "observed": 170,
+      "verdict": "pass"
+    }
+  ],
+  "runs": [
+    {
+      "run": 0,
+      "app": "base",
+      "warmup": true,
+      "sample": {
+        "S1.backendReady": 1292,
+        "S1.shell": 1756,
+        "S1.usable": 1894,
+        "S1.statusFirst": 3029,
+        "S1.statusComplete": 3216,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 167,
+        "S1.backendRssMiB": 253.7,
+        "S1.rendererHeapMiB": 18.4,
+        "S2.header": 47,
+        "S2.ready": 240,
+        "S3.header": [
+          8,
+          8,
+          9,
+          8,
+          9
+        ],
+        "S3.ready": [
+          100,
+          94,
+          108,
+          93,
+          104
+        ],
+        "S4.diff": 68,
+        "S5.first": 102,
+        "S5.settled": 258
+      },
+      "errors": {}
+    },
+    {
+      "run": 0,
+      "app": "head",
+      "warmup": true,
+      "sample": {
+        "S1.backendReady": 833,
+        "S1.shell": 1310,
+        "S1.usable": 1375,
+        "S1.statusFirst": 1912,
+        "S1.statusComplete": 1985,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 163,
+        "S1.backendRssMiB": 203.3,
+        "S1.rendererHeapMiB": 19.9,
+        "S2.header": 48,
+        "S2.ready": 209,
+        "S3.header": [
+          10,
+          9,
+          13,
+          8,
+          8
+        ],
+        "S3.ready": [
+          12,
+          11,
+          15,
+          10,
+          9
+        ],
+        "S4.diff": 49,
+        "S5.first": 94,
+        "S5.settled": 114
+      },
+      "errors": {}
+    },
+    {
+      "run": 1,
+      "app": "head",
+      "warmup": true,
+      "sample": {
+        "S1.backendReady": 863,
+        "S1.shell": 1463,
+        "S1.usable": 1546,
+        "S1.statusFirst": 2190,
+        "S1.statusComplete": 2287,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 184,
+        "S1.backendRssMiB": 202.5,
+        "S1.rendererHeapMiB": 20,
+        "S2.header": 54,
+        "S2.ready": 275,
+        "S3.header": [
+          16,
+          26,
+          24,
+          22,
+          41
+        ],
+        "S3.ready": [
+          19,
+          33,
+          26,
+          25,
+          43
+        ],
+        "S4.diff": 160,
+        "S5.first": 200,
+        "S5.settled": 296
+      },
+      "errors": {}
+    },
+    {
+      "run": 1,
+      "app": "base",
+      "warmup": true,
+      "sample": {
+        "S1.backendReady": 1924,
+        "S1.shell": 3152,
+        "S1.usable": 3493,
+        "S1.statusFirst": 5178,
+        "S1.statusComplete": 5403,
+        "S1.longTaskCount": 4,
+        "S1.longTaskMs": 526,
+        "S1.backendRssMiB": 193.8,
+        "S1.rendererHeapMiB": 17.5,
+        "S2.header": 165,
+        "S2.ready": 786,
+        "S3.header": [
+          38,
+          17,
+          25,
+          28,
+          35
+        ],
+        "S3.ready": [
+          473,
+          323,
+          366,
+          330,
+          362
+        ],
+        "S4.diff": 197,
+        "S5.first": 299,
+        "S5.settled": 767
+      },
+      "errors": {}
+    },
+    {
+      "run": 2,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 2797,
+        "S1.shell": 4341,
+        "S1.usable": 4758,
+        "S1.statusFirst": 6831,
+        "S1.statusComplete": 7001,
+        "S1.longTaskCount": 5,
+        "S1.longTaskMs": 847,
+        "S1.backendRssMiB": 257.5,
+        "S1.rendererHeapMiB": 23.1,
+        "S2.header": 105,
+        "S2.ready": 602,
+        "S3.header": [
+          13,
+          16,
+          13,
+          12,
+          9
+        ],
+        "S3.ready": [
+          243,
+          178,
+          154,
+          126,
+          119
+        ],
+        "S4.diff": 42,
+        "S5.first": 105,
+        "S5.settled": 259
+      },
+      "errors": {}
+    },
+    {
+      "run": 2,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 871,
+        "S1.shell": 1335,
+        "S1.usable": 1432,
+        "S1.statusFirst": 2049,
+        "S1.statusComplete": 2141,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 177,
+        "S1.backendRssMiB": 202.7,
+        "S1.rendererHeapMiB": 19.1,
+        "S2.header": 58,
+        "S2.ready": 237,
+        "S3.header": [
+          11,
+          10,
+          11,
+          8,
+          11
+        ],
+        "S3.ready": [
+          13,
+          12,
+          13,
+          10,
+          13
+        ],
+        "S4.diff": 47,
+        "S5.first": 115,
+        "S5.settled": 151
+      },
+      "errors": {}
+    },
+    {
+      "run": 3,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 875,
+        "S1.shell": 1340,
+        "S1.usable": 1418,
+        "S1.statusFirst": 2065,
+        "S1.statusComplete": 2155,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 167,
+        "S1.backendRssMiB": 200.4,
+        "S1.rendererHeapMiB": 19.5,
+        "S2.header": 51,
+        "S2.ready": 234,
+        "S3.header": [
+          8,
+          8,
+          9,
+          8,
+          12
+        ],
+        "S3.ready": [
+          9,
+          10,
+          11,
+          10,
+          14
+        ],
+        "S4.diff": 46,
+        "S5.first": 101,
+        "S5.settled": 116
+      },
+      "errors": {}
+    },
+    {
+      "run": 3,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 871,
+        "S1.shell": 1332,
+        "S1.usable": 1425,
+        "S1.statusFirst": 2205,
+        "S1.statusComplete": 2289,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 173,
+        "S1.backendRssMiB": 256.2,
+        "S1.rendererHeapMiB": 18.6,
+        "S2.header": 51,
+        "S2.ready": 238,
+        "S3.header": [
+          9,
+          9,
+          11,
+          10,
+          9
+        ],
+        "S3.ready": [
+          118,
+          98,
+          127,
+          100,
+          103
+        ],
+        "S4.diff": 48,
+        "S5.first": 77,
+        "S5.settled": 236
+      },
+      "errors": {}
+    },
+    {
+      "run": 4,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 866,
+        "S1.shell": 1333,
+        "S1.usable": 1405,
+        "S1.statusFirst": 2192,
+        "S1.statusComplete": 2279,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 174,
+        "S1.backendRssMiB": 257.4,
+        "S1.rendererHeapMiB": 18.5,
+        "S2.header": 48,
+        "S2.ready": 241,
+        "S3.header": [
+          8,
+          7,
+          8,
+          11,
+          10
+        ],
+        "S3.ready": [
+          116,
+          91,
+          112,
+          96,
+          109
+        ],
+        "S4.diff": 45,
+        "S5.first": 75,
+        "S5.settled": 246
+      },
+      "errors": {}
+    },
+    {
+      "run": 4,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 868,
+        "S1.shell": 1321,
+        "S1.usable": 1421,
+        "S1.statusFirst": 2033,
+        "S1.statusComplete": 2121,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 167,
+        "S1.backendRssMiB": 203.7,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 57,
+        "S2.ready": 230,
+        "S3.header": [
+          11,
+          11,
+          12,
+          10,
+          11
+        ],
+        "S3.ready": [
+          13,
+          13,
+          14,
+          12,
+          13
+        ],
+        "S4.diff": 47,
+        "S5.first": 100,
+        "S5.settled": 120
+      },
+      "errors": {}
+    },
+    {
+      "run": 5,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 900,
+        "S1.shell": 1374,
+        "S1.usable": 1483,
+        "S1.statusFirst": 2073,
+        "S1.statusComplete": 2165,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 166,
+        "S1.backendRssMiB": 205.1,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 53,
+        "S2.ready": 248,
+        "S3.header": [
+          12,
+          15,
+          13,
+          10,
+          8
+        ],
+        "S3.ready": [
+          13,
+          16,
+          15,
+          12,
+          10
+        ],
+        "S4.diff": 56,
+        "S5.first": 118,
+        "S5.settled": 139
+      },
+      "errors": {}
+    },
+    {
+      "run": 5,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 943,
+        "S1.shell": 1408,
+        "S1.usable": 1491,
+        "S1.statusFirst": 2347,
+        "S1.statusComplete": 2438,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 180,
+        "S1.backendRssMiB": 258.5,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 53,
+        "S2.ready": 250,
+        "S3.header": [
+          10,
+          9,
+          9,
+          8,
+          9
+        ],
+        "S3.ready": [
+          114,
+          100,
+          114,
+          101,
+          116
+        ],
+        "S4.diff": 64,
+        "S5.first": 83,
+        "S5.settled": 258
+      },
+      "errors": {}
+    },
+    {
+      "run": 6,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 922,
+        "S1.shell": 1399,
+        "S1.usable": 1565,
+        "S1.statusFirst": 2362,
+        "S1.statusComplete": 2452,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 189,
+        "S1.backendRssMiB": 258.2,
+        "S1.rendererHeapMiB": 24.1,
+        "S2.header": 58,
+        "S2.ready": 251,
+        "S3.header": [
+          9,
+          12,
+          8,
+          8,
+          9
+        ],
+        "S3.ready": [
+          111,
+          116,
+          107,
+          100,
+          110
+        ],
+        "S4.diff": 62,
+        "S5.first": 74,
+        "S5.settled": 249
+      },
+      "errors": {}
+    },
+    {
+      "run": 6,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 923,
+        "S1.shell": 1402,
+        "S1.usable": 1488,
+        "S1.statusFirst": 2208,
+        "S1.statusComplete": 2324,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 184,
+        "S1.backendRssMiB": 203.6,
+        "S1.rendererHeapMiB": 18.8,
+        "S2.header": 65,
+        "S2.ready": 282,
+        "S3.header": [
+          13,
+          15,
+          13,
+          15,
+          13
+        ],
+        "S3.ready": [
+          15,
+          18,
+          15,
+          17,
+          15
+        ],
+        "S4.diff": 61,
+        "S5.first": 116,
+        "S5.settled": 160
+      },
+      "errors": {}
+    },
+    {
+      "run": 7,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 931,
+        "S1.shell": 1441,
+        "S1.usable": 1549,
+        "S1.statusFirst": 2205,
+        "S1.statusComplete": 2299,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 188,
+        "S1.backendRssMiB": 204.5,
+        "S1.rendererHeapMiB": 23.6,
+        "S2.header": 60,
+        "S2.ready": 249,
+        "S3.header": [
+          13,
+          27,
+          12,
+          15,
+          17
+        ],
+        "S3.ready": [
+          15,
+          29,
+          14,
+          17,
+          18
+        ],
+        "S4.diff": 64,
+        "S5.first": 96,
+        "S5.settled": 136
+      },
+      "errors": {}
+    },
+    {
+      "run": 7,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 940,
+        "S1.shell": 1435,
+        "S1.usable": 1531,
+        "S1.statusFirst": 2392,
+        "S1.statusComplete": 2496,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 196,
+        "S1.backendRssMiB": 256.3,
+        "S1.rendererHeapMiB": 19.4,
+        "S2.header": 57,
+        "S2.ready": 266,
+        "S3.header": [
+          12,
+          10,
+          8,
+          8,
+          9
+        ],
+        "S3.ready": [
+          154,
+          100,
+          123,
+          98,
+          113
+        ],
+        "S4.diff": 65,
+        "S5.first": 81,
+        "S5.settled": 253
+      },
+      "errors": {}
+    },
+    {
+      "run": 8,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 948,
+        "S1.shell": 1436,
+        "S1.usable": 1531,
+        "S1.statusFirst": 2361,
+        "S1.statusComplete": 2450,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 184,
+        "S1.backendRssMiB": 258.8,
+        "S1.rendererHeapMiB": 21.5,
+        "S2.header": 52,
+        "S2.ready": 250,
+        "S3.header": [
+          12,
+          11,
+          12,
+          10,
+          10
+        ],
+        "S3.ready": [
+          125,
+          107,
+          122,
+          105,
+          111
+        ],
+        "S4.diff": 65,
+        "S5.first": 79,
+        "S5.settled": 258
+      },
+      "errors": {}
+    },
+    {
+      "run": 8,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 922,
+        "S1.shell": 1418,
+        "S1.usable": 1502,
+        "S1.statusFirst": 2124,
+        "S1.statusComplete": 2216,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 177,
+        "S1.backendRssMiB": 202.6,
+        "S1.rendererHeapMiB": 21.8,
+        "S2.header": 54,
+        "S2.ready": 239,
+        "S3.header": [
+          14,
+          20,
+          14,
+          14,
+          21
+        ],
+        "S3.ready": [
+          15,
+          22,
+          15,
+          16,
+          23
+        ],
+        "S4.diff": 62,
+        "S5.first": 112,
+        "S5.settled": 133
+      },
+      "errors": {}
+    },
+    {
+      "run": 9,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 963,
+        "S1.shell": 1453,
+        "S1.usable": 1536,
+        "S1.statusFirst": 2140,
+        "S1.statusComplete": 2234,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 182,
+        "S1.backendRssMiB": 202.7,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 54,
+        "S2.ready": 240,
+        "S3.header": [
+          10,
+          10,
+          20,
+          14,
+          14
+        ],
+        "S3.ready": [
+          11,
+          12,
+          22,
+          16,
+          16
+        ],
+        "S4.diff": 64,
+        "S5.first": 95,
+        "S5.settled": 132
+      },
+      "errors": {}
+    },
+    {
+      "run": 9,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 937,
+        "S1.shell": 1402,
+        "S1.usable": 1554,
+        "S1.statusFirst": 2381,
+        "S1.statusComplete": 2470,
+        "S1.longTaskCount": 3,
+        "S1.longTaskMs": 237,
+        "S1.backendRssMiB": 257.9,
+        "S1.rendererHeapMiB": 18.6,
+        "S2.header": 56,
+        "S2.ready": 269,
+        "S3.header": [
+          9,
+          10,
+          12,
+          9,
+          9
+        ],
+        "S3.ready": [
+          121,
+          116,
+          154,
+          103,
+          113
+        ],
+        "S4.diff": 60,
+        "S5.first": 86,
+        "S5.settled": 263
+      },
+      "errors": {}
+    },
+    {
+      "run": 10,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 924,
+        "S1.shell": 1397,
+        "S1.usable": 1490,
+        "S1.statusFirst": 2333,
+        "S1.statusComplete": 2423,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 178,
+        "S1.backendRssMiB": 255.3,
+        "S1.rendererHeapMiB": 18.6,
+        "S2.header": 50,
+        "S2.ready": 249,
+        "S3.header": [
+          9,
+          8,
+          8,
+          8,
+          11
+        ],
+        "S3.ready": [
+          122,
+          96,
+          115,
+          95,
+          123
+        ],
+        "S4.diff": 60,
+        "S5.first": 81,
+        "S5.settled": 251
+      },
+      "errors": {}
+    },
+    {
+      "run": 10,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 959,
+        "S1.shell": 1455,
+        "S1.usable": 1547,
+        "S1.statusFirst": 2183,
+        "S1.statusComplete": 2278,
+        "S1.longTaskCount": 3,
+        "S1.longTaskMs": 230,
+        "S1.backendRssMiB": 201.3,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 59,
+        "S2.ready": 250,
+        "S3.header": [
+          12,
+          21,
+          15,
+          11,
+          31
+        ],
+        "S3.ready": [
+          13,
+          23,
+          17,
+          13,
+          33
+        ],
+        "S4.diff": 64,
+        "S5.first": 109,
+        "S5.settled": 145
+      },
+      "errors": {}
+    },
+    {
+      "run": 11,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 925,
+        "S1.shell": 1444,
+        "S1.usable": 1538,
+        "S1.statusFirst": 2183,
+        "S1.statusComplete": 2278,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 195,
+        "S1.backendRssMiB": 203.2,
+        "S1.rendererHeapMiB": 17.7,
+        "S2.header": 61,
+        "S2.ready": 257,
+        "S3.header": [
+          13,
+          17,
+          19,
+          14,
+          15
+        ],
+        "S3.ready": [
+          14,
+          19,
+          21,
+          16,
+          17
+        ],
+        "S4.diff": 61,
+        "S5.first": 101,
+        "S5.settled": 124
+      },
+      "errors": {}
+    },
+    {
+      "run": 11,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 958,
+        "S1.shell": 1437,
+        "S1.usable": 1533,
+        "S1.statusFirst": 2375,
+        "S1.statusComplete": 2467,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 190,
+        "S1.backendRssMiB": 259.7,
+        "S1.rendererHeapMiB": 23.4,
+        "S2.header": 56,
+        "S2.ready": 255,
+        "S3.header": [
+          8,
+          8,
+          11,
+          8,
+          9
+        ],
+        "S3.ready": [
+          111,
+          94,
+          125,
+          96,
+          108
+        ],
+        "S4.diff": 60,
+        "S5.first": 77,
+        "S5.settled": 249
+      },
+      "errors": {}
+    },
+    {
+      "run": 12,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 969,
+        "S1.shell": 1468,
+        "S1.usable": 1563,
+        "S1.statusFirst": 2408,
+        "S1.statusComplete": 2509,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 186,
+        "S1.backendRssMiB": 257.9,
+        "S1.rendererHeapMiB": 18.6,
+        "S2.header": 53,
+        "S2.ready": 265,
+        "S3.header": [
+          12,
+          10,
+          9,
+          10,
+          10
+        ],
+        "S3.ready": [
+          134,
+          123,
+          129,
+          127,
+          124
+        ],
+        "S4.diff": 62,
+        "S5.first": 101,
+        "S5.settled": 303
+      },
+      "errors": {}
+    },
+    {
+      "run": 12,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1097,
+        "S1.shell": 1584,
+        "S1.usable": 1676,
+        "S1.statusFirst": 2292,
+        "S1.statusComplete": 2387,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 181,
+        "S1.backendRssMiB": 203.7,
+        "S1.rendererHeapMiB": 19.1,
+        "S2.header": 53,
+        "S2.ready": 248,
+        "S3.header": [
+          11,
+          11,
+          11,
+          17,
+          12
+        ],
+        "S3.ready": [
+          12,
+          13,
+          13,
+          19,
+          13
+        ],
+        "S4.diff": 64,
+        "S5.first": 117,
+        "S5.settled": 127
+      },
+      "errors": {}
+    },
+    {
+      "run": 13,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 921,
+        "S1.shell": 1400,
+        "S1.usable": 1503,
+        "S1.statusFirst": 2135,
+        "S1.statusComplete": 2225,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 181,
+        "S1.backendRssMiB": 202.2,
+        "S1.rendererHeapMiB": 23.5,
+        "S2.header": 61,
+        "S2.ready": 258,
+        "S3.header": [
+          9,
+          10,
+          11,
+          16,
+          21
+        ],
+        "S3.ready": [
+          11,
+          11,
+          13,
+          18,
+          23
+        ],
+        "S4.diff": 50,
+        "S5.first": 118,
+        "S5.settled": 133
+      },
+      "errors": {}
+    },
+    {
+      "run": 13,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 924,
+        "S1.shell": 1396,
+        "S1.usable": 1542,
+        "S1.statusFirst": 2335,
+        "S1.statusComplete": 2425,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 191,
+        "S1.backendRssMiB": 259.3,
+        "S1.rendererHeapMiB": 24,
+        "S2.header": 57,
+        "S2.ready": 257,
+        "S3.header": [
+          9,
+          9,
+          8,
+          9,
+          8
+        ],
+        "S3.ready": [
+          120,
+          102,
+          106,
+          99,
+          112
+        ],
+        "S4.diff": 63,
+        "S5.first": 97,
+        "S5.settled": 254
+      },
+      "errors": {}
+    },
+    {
+      "run": 14,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 938,
+        "S1.shell": 1388,
+        "S1.usable": 1492,
+        "S1.statusFirst": 2380,
+        "S1.statusComplete": 2468,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 175,
+        "S1.backendRssMiB": 259,
+        "S1.rendererHeapMiB": 23.3,
+        "S2.header": 56,
+        "S2.ready": 261,
+        "S3.header": [
+          11,
+          10,
+          13,
+          10,
+          10
+        ],
+        "S3.ready": [
+          121,
+          107,
+          123,
+          106,
+          108
+        ],
+        "S4.diff": 64,
+        "S5.first": 104,
+        "S5.settled": 245
+      },
+      "errors": {}
+    },
+    {
+      "run": 14,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 913,
+        "S1.shell": 1424,
+        "S1.usable": 1511,
+        "S1.statusFirst": 2125,
+        "S1.statusComplete": 2223,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 181,
+        "S1.backendRssMiB": 201.1,
+        "S1.rendererHeapMiB": 19.1,
+        "S2.header": 56,
+        "S2.ready": 243,
+        "S3.header": [
+          9,
+          12,
+          11,
+          11,
+          14
+        ],
+        "S3.ready": [
+          11,
+          14,
+          13,
+          13,
+          16
+        ],
+        "S4.diff": 61,
+        "S5.first": 98,
+        "S5.settled": 128
+      },
+      "errors": {}
+    },
+    {
+      "run": 15,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 935,
+        "S1.shell": 1501,
+        "S1.usable": 1624,
+        "S1.statusFirst": 2438,
+        "S1.statusComplete": 2556,
+        "S1.longTaskCount": 3,
+        "S1.longTaskMs": 238,
+        "S1.backendRssMiB": 202.9,
+        "S1.rendererHeapMiB": 23.8,
+        "S2.header": 75,
+        "S2.ready": 326,
+        "S3.header": [
+          13,
+          17,
+          22,
+          23,
+          22
+        ],
+        "S3.ready": [
+          15,
+          20,
+          25,
+          27,
+          24
+        ],
+        "S4.diff": 102,
+        "S5.first": 154,
+        "S5.settled": 170
+      },
+      "errors": {}
+    },
+    {
+      "run": 15,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1266,
+        "S1.shell": 1888,
+        "S1.usable": 2014,
+        "S1.statusFirst": 3063,
+        "S1.statusComplete": 3176,
+        "S1.longTaskCount": 4,
+        "S1.longTaskMs": 336,
+        "S1.backendRssMiB": 255.6,
+        "S1.rendererHeapMiB": 22.2,
+        "S2.header": 79,
+        "S2.ready": 305,
+        "S3.header": [
+          12,
+          12,
+          13,
+          11,
+          13
+        ],
+        "S3.ready": [
+          162,
+          128,
+          148,
+          145,
+          195
+        ],
+        "S4.diff": 60,
+        "S5.first": 98,
+        "S5.settled": 297
+      },
+      "errors": {}
+    },
+    {
+      "run": 16,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1104,
+        "S1.shell": 1686,
+        "S1.usable": 1908,
+        "S1.statusFirst": 2755,
+        "S1.statusComplete": 2861,
+        "S1.longTaskCount": 4,
+        "S1.longTaskMs": 370,
+        "S1.backendRssMiB": 256.6,
+        "S1.rendererHeapMiB": 22.2,
+        "S2.header": 60,
+        "S2.ready": 295,
+        "S3.header": [
+          10,
+          10,
+          10,
+          8,
+          9
+        ],
+        "S3.ready": [
+          141,
+          123,
+          133,
+          100,
+          118
+        ],
+        "S4.diff": 48,
+        "S5.first": 78,
+        "S5.settled": 258
+      },
+      "errors": {}
+    },
+    {
+      "run": 16,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 899,
+        "S1.shell": 1388,
+        "S1.usable": 1476,
+        "S1.statusFirst": 2097,
+        "S1.statusComplete": 2186,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 175,
+        "S1.backendRssMiB": 203,
+        "S1.rendererHeapMiB": 23.1,
+        "S2.header": 57,
+        "S2.ready": 242,
+        "S3.header": [
+          9,
+          10,
+          12,
+          10,
+          11
+        ],
+        "S3.ready": [
+          11,
+          12,
+          13,
+          12,
+          13
+        ],
+        "S4.diff": 61,
+        "S5.first": 115,
+        "S5.settled": 134
+      },
+      "errors": {}
+    },
+    {
+      "run": 17,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 908,
+        "S1.shell": 1394,
+        "S1.usable": 1483,
+        "S1.statusFirst": 2089,
+        "S1.statusComplete": 2186,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 176,
+        "S1.backendRssMiB": 201.9,
+        "S1.rendererHeapMiB": 19.1,
+        "S2.header": 55,
+        "S2.ready": 243,
+        "S3.header": [
+          11,
+          10,
+          10,
+          10,
+          14
+        ],
+        "S3.ready": [
+          13,
+          12,
+          11,
+          11,
+          17
+        ],
+        "S4.diff": 47,
+        "S5.first": 102,
+        "S5.settled": 127
+      },
+      "errors": {}
+    },
+    {
+      "run": 17,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 920,
+        "S1.shell": 1386,
+        "S1.usable": 1470,
+        "S1.statusFirst": 2312,
+        "S1.statusComplete": 2402,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 180,
+        "S1.backendRssMiB": 256.5,
+        "S1.rendererHeapMiB": 23.3,
+        "S2.header": 54,
+        "S2.ready": 250,
+        "S3.header": [
+          9,
+          8,
+          8,
+          9,
+          9
+        ],
+        "S3.ready": [
+          117,
+          93,
+          112,
+          98,
+          109
+        ],
+        "S4.diff": 57,
+        "S5.first": 96,
+        "S5.settled": 263
+      },
+      "errors": {}
+    },
+    {
+      "run": 18,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 908,
+        "S1.shell": 1380,
+        "S1.usable": 1464,
+        "S1.statusFirst": 2333,
+        "S1.statusComplete": 2427,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 178,
+        "S1.backendRssMiB": 255.6,
+        "S1.rendererHeapMiB": 18.7,
+        "S2.header": 52,
+        "S2.ready": 251,
+        "S3.header": [
+          9,
+          9,
+          9,
+          8,
+          8
+        ],
+        "S3.ready": [
+          120,
+          99,
+          116,
+          95,
+          108
+        ],
+        "S4.diff": 46,
+        "S5.first": 80,
+        "S5.settled": 257
+      },
+      "errors": {}
+    },
+    {
+      "run": 18,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 907,
+        "S1.shell": 1432,
+        "S1.usable": 1518,
+        "S1.statusFirst": 2135,
+        "S1.statusComplete": 2230,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 199,
+        "S1.backendRssMiB": 203.1,
+        "S1.rendererHeapMiB": 17.7,
+        "S2.header": 58,
+        "S2.ready": 238,
+        "S3.header": [
+          10,
+          12,
+          28,
+          14,
+          22
+        ],
+        "S3.ready": [
+          12,
+          14,
+          29,
+          15,
+          24
+        ],
+        "S4.diff": 60,
+        "S5.first": 117,
+        "S5.settled": 136
+      },
+      "errors": {}
+    },
+    {
+      "run": 19,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 946,
+        "S1.shell": 1543,
+        "S1.usable": 1668,
+        "S1.statusFirst": 2394,
+        "S1.statusComplete": 2492,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 220,
+        "S1.backendRssMiB": 203.3,
+        "S1.rendererHeapMiB": 17.7,
+        "S2.header": 59,
+        "S2.ready": 249,
+        "S3.header": [
+          12,
+          12,
+          21,
+          21,
+          15
+        ],
+        "S3.ready": [
+          13,
+          14,
+          22,
+          23,
+          17
+        ],
+        "S4.diff": 46,
+        "S5.first": 105,
+        "S5.settled": 130
+      },
+      "errors": {}
+    },
+    {
+      "run": 19,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 893,
+        "S1.shell": 1374,
+        "S1.usable": 1460,
+        "S1.statusFirst": 2305,
+        "S1.statusComplete": 2397,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 176,
+        "S1.backendRssMiB": 258.3,
+        "S1.rendererHeapMiB": 19.8,
+        "S2.header": 54,
+        "S2.ready": 261,
+        "S3.header": [
+          11,
+          8,
+          8,
+          10,
+          10
+        ],
+        "S3.ready": [
+          124,
+          106,
+          110,
+          110,
+          113
+        ],
+        "S4.diff": 63,
+        "S5.first": 76,
+        "S5.settled": 251
+      },
+      "errors": {}
+    },
+    {
+      "run": 20,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 917,
+        "S1.shell": 1400,
+        "S1.usable": 1601,
+        "S1.statusFirst": 2565,
+        "S1.statusComplete": 2684,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 183,
+        "S1.backendRssMiB": 258.5,
+        "S1.rendererHeapMiB": 23.3,
+        "S2.header": 83,
+        "S2.ready": 361,
+        "S3.header": [
+          15,
+          10,
+          11,
+          15,
+          17
+        ],
+        "S3.ready": [
+          172,
+          143,
+          158,
+          161,
+          165
+        ],
+        "S4.diff": 74,
+        "S5.first": 102,
+        "S5.settled": 322
+      },
+      "errors": {}
+    },
+    {
+      "run": 20,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1176,
+        "S1.shell": 1803,
+        "S1.usable": 1897,
+        "S1.statusFirst": 2634,
+        "S1.statusComplete": 2761,
+        "S1.longTaskCount": 2,
+        "S1.longTaskMs": 221,
+        "S1.backendRssMiB": 205,
+        "S1.rendererHeapMiB": 21.7,
+        "S2.header": 82,
+        "S2.ready": 314,
+        "S3.header": [
+          10,
+          22,
+          27,
+          12,
+          12
+        ],
+        "S3.ready": [
+          12,
+          24,
+          29,
+          14,
+          14
+        ],
+        "S4.diff": 65,
+        "S5.first": 114,
+        "S5.settled": 171
+      },
+      "errors": {}
+    },
+    {
+      "run": 21,
+      "app": "head",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1139,
+        "S1.shell": 1727,
+        "S1.usable": 1852,
+        "S1.statusFirst": 2536,
+        "S1.statusComplete": 2644,
+        "S1.longTaskCount": 3,
+        "S1.longTaskMs": 264,
+        "S1.backendRssMiB": 204.8,
+        "S1.rendererHeapMiB": 21.4,
+        "S2.header": 61,
+        "S2.ready": 304,
+        "S3.header": [
+          12,
+          12,
+          22,
+          19,
+          19
+        ],
+        "S3.ready": [
+          14,
+          14,
+          25,
+          21,
+          21
+        ],
+        "S4.diff": 65,
+        "S5.first": 117,
+        "S5.settled": 159
+      },
+      "errors": {}
+    },
+    {
+      "run": 21,
+      "app": "base",
+      "warmup": false,
+      "sample": {
+        "S1.backendReady": 1317,
+        "S1.shell": 2165,
+        "S1.usable": 2388,
+        "S1.statusFirst": 4217,
+        "S1.statusComplete": 4399,
+        "S1.longTaskCount": 6,
+        "S1.longTaskMs": 549,
+        "S1.backendRssMiB": 254,
+        "S1.rendererHeapMiB": 22.1,
+        "S2.header": 146,
+        "S2.ready": 718,
+        "S3.header": [
+          33,
+          62,
+          72,
+          28,
+          46
+        ],
+        "S3.ready": [
+          413,
+          419,
+          352,
+          348,
+          541
+        ],
+        "S4.diff": 194,
+        "S5.first": 351,
+        "S5.settled": 791
+      },
+      "errors": {}
+    }
+  ]
+}

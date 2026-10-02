@@ -1,4 +1,4 @@
-import { listRepositoryChanges } from './core/repository-changes.js';
+import { listRepositoryChangesWithFingerprint } from './core/repository-changes.js';
 import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
@@ -44,6 +44,7 @@ import {
   BRAND_NAME,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
+import { countRequest, installPerfCounters, resetPerfCounters, snapshotPerfCounters } from './core/perf-counters.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo, isValidProjectName } from './core/new-repo.js';
@@ -594,6 +595,20 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// Work counters for the performance rule checks in perf/. Off unless
+// CONTEXTSPACE_PERF_COUNTERS=1, so normal runs register nothing here.
+if (installPerfCounters()) {
+  app.use('/api/*', async (c, next) => {
+    if (c.req.path.startsWith('/api/perf/')) return next();
+    await countRequest(c.req.method, c.req.path, c.req.raw.signal, () => next());
+  });
+  app.get('/api/perf/counters', (c) => {
+    const snapshot = snapshotPerfCounters();
+    if (c.req.query('reset') === '1') resetPerfCounters();
+    return c.json(snapshot);
+  });
+}
+
 // Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
 // cross-site request forgery and browser form posts from untrusted web pages.
 app.use('/api/*', async (c, next) => {
@@ -1134,13 +1149,28 @@ function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
 
 // A paged status scan keeps one stable catalog and PM2 snapshot across requests.
 // The small bounded cache avoids rescanning every manifest for each page.
+// Many workspaces use the same repository in place, so one scan also runs
+// `git status` once per distinct repository and shares it across its pages;
+// the next scan (a new snapshot) reads fresh status.
 const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+type RepoStatusMemo = Map<string, ReturnType<typeof getRepoStatus>>;
 const statusSnapshots = new Map<string, {
   workspacesDir: string;
   workspaces: Feature[];
   pm2List: Promise<any[] | null>;
+  repoStatus: RepoStatusMemo;
   expiresAt: number;
 }>();
+
+function memoizedRepoStatus(memo: RepoStatusMemo, repoPath: string): ReturnType<typeof getRepoStatus> {
+  const key = path.resolve(repoPath);
+  let status = memo.get(key);
+  if (!status) {
+    status = getRepoStatus(key, { readOnly: true });
+    memo.set(key, status);
+  }
+  return status;
+}
 
 // 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
 // Git status is read-only; never fetch/rebase here.
@@ -1178,6 +1208,7 @@ app.get('/api/workspaces/status', async (c) => {
         workspacesDir: config.workspacesDir,
         workspaces,
         pm2List: workspaces.length ? readPm2List() : Promise.resolve([]),
+        repoStatus: new Map(),
         expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
       };
       snapshotId = randomUUID();
@@ -1185,6 +1216,7 @@ app.get('/api/workspaces/status', async (c) => {
       while (statusSnapshots.size > 16) statusSnapshots.delete(statusSnapshots.keys().next().value!);
     }
     const workspaces = snapshot?.workspaces ?? await listWorkspaces(config.workspacesDir);
+    const repoStatusMemo: RepoStatusMemo = snapshot?.repoStatus ?? new Map();
     const selected = paged ? workspaces.slice(offset, offset + limit) : workspaces;
 
     // Fetch the PM2 process list once for the whole overview instead of
@@ -1215,7 +1247,7 @@ app.get('/api/workspaces/status', async (c) => {
           // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
             const worktreePath = resolveFeatureRepoPath(ws, workspacePath, repoPath);
-            const repoStatus = await getRepoStatus(worktreePath);
+            const repoStatus = await memoizedRepoStatus(repoStatusMemo, worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
               status.changedFiles += repoStatus.changedFiles.length;
@@ -2279,6 +2311,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
     }
 
     const results: any[] = [];
+    const fingerprints: string[] = [];
 
     // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
@@ -2286,24 +2319,31 @@ app.get('/api/workspace/:id/changes', async (c) => {
       const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
-        const files = await listRepositoryChanges(worktreePath, c.req.query('include') === 'all');
+        const listing = await listRepositoryChangesWithFingerprint(worktreePath, c.req.query('include') === 'all');
+        fingerprints.push(listing.fingerprint);
 
         results.push({
           repoName,
           repoPath: worktreePath,
-          files,
+          files: listing.files,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fingerprints.push(`error:${message}`);
         results.push({
           repoName,
           repoPath: worktreePath,
           files: [],
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
       }
     }
 
-    return c.json({ changes: results });
+    // A poller that already holds this state gets a small reply instead of
+    // the full listing (100k entries for a large repository in Files mode).
+    const token = createHash('sha1').update(JSON.stringify([id, feature.repos, fingerprints])).digest('hex');
+    if (c.req.query('known') === token) return c.json({ unchanged: true, token });
+    return c.json({ changes: results, token });
   } catch (error) {
     return errorResponse(c, error);
   }
