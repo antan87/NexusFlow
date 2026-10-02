@@ -39,6 +39,19 @@ describe('openInEditor file launch', () => {
     expect(execa).not.toHaveBeenCalled();
   });
 
+  it('refuses a path cmd.exe would rewrite by expanding %NAME%, but not a lone percent sign', async () => {
+    stubPlatform('win32');
+
+    for (const filePath of ['a%PATH%b.ts', '%COMSPEC%.ts', 'x%USERPROFILE%']) {
+      await expect(openInEditor('code', '/ws', filePath), filePath).rejects.toThrow(/unsafe/);
+    }
+    expect(execa).not.toHaveBeenCalled();
+
+    await openInEditor('code', '/ws', '100% done.ts');
+    await openInEditor('code', '/ws', 'a% b %c.ts');
+    expect(execa).toHaveBeenCalledTimes(2);
+  });
+
   it('passes quotes through untouched where no shell is involved', async () => {
     stubPlatform('linux');
 

@@ -283,6 +283,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const loadDiff = useCallback(
     async (repoName: string, fileName: string, version: string, background = false) => {
       const cacheKey = cacheKeyFor(repoName, fileName);
+      const previous = fetchedFiles.current[cacheKey];
       fetchedFiles.current[cacheKey] = { repoName, file: fileName, version };
       // False once a newer request, or the file leaving the change list, took over.
       const isCurrent = () => fetchedFiles.current[cacheKey]?.version === version;
@@ -326,7 +327,14 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         }
       } catch (err: any) {
         if (!isCurrent()) return;
-        // Show the error alone: a diff that no longer matches its file is worse than none.
+        if (background && previous) {
+          // The diff on screen is out of date but was right when fetched. Keep it,
+          // and mark it stale again so the next change to the list retries.
+          fetchedFiles.current[cacheKey] = previous;
+          console.warn(`Could not refresh the diff for ${cacheKey}:`, err);
+          return;
+        }
+        // Opening a file: show the error alone, since there is no diff to keep.
         delete fetchedFiles.current[cacheKey];
         dropFileCaches(new Set([cacheKey]));
         setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));

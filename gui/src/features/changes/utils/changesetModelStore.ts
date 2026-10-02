@@ -112,17 +112,41 @@ export function getOrCreateTextModel(
 }
 
 /**
+ * The models a live editor still holds. Monaco reports an error when a model is
+ * disposed under an editor, so those are never disposed here: whoever holds one
+ * is using it (it may even be another workspace's viewer sharing the same URI).
+ */
+function modelsHeldByEditors(m: typeof monaco): Set<monaco.editor.ITextModel> {
+  const held = new Set<monaco.editor.ITextModel>();
+  try {
+    for (const diffEditor of m.editor.getDiffEditors?.() ?? []) {
+      const pair = diffEditor.getModel();
+      if (pair?.original) held.add(pair.original);
+      if (pair?.modified) held.add(pair.modified);
+    }
+    for (const editor of m.editor.getEditors?.() ?? []) {
+      const model = editor.getModel();
+      if (model) held.add(model);
+    }
+  } catch {
+    // If the editors cannot be listed there is nothing better to go on.
+  }
+  return held;
+}
+
+/**
  * Disposes the models of one file, for example once it has left the changeset.
- * A file with no models is not an error.
+ * A file with no models is not an error, and a model an editor still holds is left alone.
  */
 export function disposeChangesetModelsFor(repoName: string, filePath: string, monacoApi?: typeof monaco): void {
   const m = resolveMonaco(monacoApi);
   if (!m?.editor) return;
 
+  const held = modelsHeldByEditors(m);
   for (const uri of [getModifiedFileUri(repoName, filePath, m), getOriginalFileUri(repoName, filePath, m)]) {
     try {
       const model = m.editor.getModel(uri);
-      if (model && !model.isDisposed()) model.dispose();
+      if (model && !model.isDisposed() && !held.has(model)) model.dispose();
     } catch (err) {
       console.warn('[changesetModelStore] Error disposing model:', err);
     }
@@ -154,8 +178,9 @@ export function disposeAllChangesetModels(monacoApi?: typeof monaco): void {
   if (!m?.editor) return;
 
   try {
+    const held = modelsHeldByEditors(m);
     for (const model of m.editor.getModels()) {
-      if (model.uri.scheme === 'file' || model.uri.scheme === 'diff-original') {
+      if ((model.uri.scheme === 'file' || model.uri.scheme === 'diff-original') && !held.has(model)) {
         model.dispose();
       }
     }

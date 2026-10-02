@@ -19,6 +19,7 @@ class FakeModel {
 
 function fakeMonaco() {
   const registry = new Map<string, FakeModel>();
+  const diffEditors: Array<{ getModel(): { original: FakeModel; modified: FakeModel } | null }> = [];
   const parse = (text: string): FakeUri => ({
     scheme: text.slice(0, text.indexOf(':')),
     path: text.replace(/^[a-z-]+:\/\//, ''),
@@ -34,9 +35,11 @@ function fakeMonaco() {
         return model;
       },
       getModels: () => [...registry.values()],
+      getDiffEditors: () => diffEditors,
+      getEditors: () => [],
     },
   };
-  return { api: api as unknown as Api, registry };
+  return { api: api as unknown as Api, registry, diffEditors };
 }
 
 describe('changeset model disposal', () => {
@@ -95,6 +98,36 @@ describe('changeset model disposal', () => {
   it('does nothing, and does not throw, before any Monaco API is known', () => {
     expect(() => store.disposeChangesetModelsFor('app', 'src/a.ts')).not.toThrow();
     expect(() => store.disposeAllChangesetModels()).not.toThrow();
+  });
+
+  it('never disposes a model a live editor still holds, and still disposes the rest', () => {
+    const { api, diffEditors } = fakeMonaco();
+    const shown = openFile(api, 'app', 'src/a.ts');
+    const hidden = openFile(api, 'app', 'src/b.ts');
+    diffEditors.push({ getModel: () => ({ original: shown.original, modified: shown.modified }) });
+
+    store.disposeChangesetModelsFor('app', 'src/a.ts', api);
+    store.disposeChangesetModelsFor('app', 'src/b.ts', api);
+    store.disposeAllChangesetModels(api);
+
+    expect(shown.modified.disposed).toBe(false);
+    expect(shown.original.disposed).toBe(false);
+    expect(hidden.modified.disposed).toBe(true);
+    expect(hidden.original.disposed).toBe(true);
+  });
+
+  it('disposes the models once the editor that held them is gone', () => {
+    const { api, diffEditors } = fakeMonaco();
+    const file = openFile(api, 'app', 'src/a.ts');
+    diffEditors.push({ getModel: () => ({ original: file.original, modified: file.modified }) });
+    store.disposeChangesetModelsFor('app', 'src/a.ts', api);
+    expect(file.modified.disposed).toBe(false);
+
+    diffEditors.length = 0;
+    store.disposeChangesetModelsFor('app', 'src/a.ts', api);
+
+    expect(file.modified.disposed).toBe(true);
+    expect(file.original.disposed).toBe(true);
   });
 
   it('waits for the editors to release their models before disposing, as Monaco requires', () => {
