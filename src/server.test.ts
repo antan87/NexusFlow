@@ -436,6 +436,13 @@ describe('Server API Endpoints Unit Tests', () => {
       vi.spyOn(fs, 'stat').mockResolvedValue({
         isDirectory: () => true
       } as any);
+      // A launch target under devDir must resolve inside it and be a git repository.
+      vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      // Only `.git` exists: a blanket "exists" would also make the editor look for a .code-workspace file.
+      vi.spyOn(fs, 'access').mockImplementation(async (candidate) => {
+        if (path.basename(String(candidate)) === '.git') return undefined;
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      });
 
       vi.mocked(execa).mockImplementation((async (command: any, args?: readonly string[]): Promise<any> => ({
         exitCode: args?.[0] === '--version' && command === 'code' ? 0 : 1,

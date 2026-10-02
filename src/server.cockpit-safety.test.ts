@@ -103,6 +103,8 @@ describe('cockpit endpoints against a real repository', () => {
 
   describe('POST /api/open-editor with a filePath', () => {
     let repo: string;
+    // The launch uses the resolved path; a temp dir can sit behind a symlink (macOS).
+    let resolvedRepo: string;
 
     async function openFile(filePath: string) {
       return app.request('/api/open-editor', {
@@ -114,9 +116,10 @@ describe('cockpit endpoints against a real repository', () => {
 
     beforeEach(async () => {
       repo = path.join(devDir, 'repo');
-      await fs.mkdir(repo, { recursive: true });
+      await fs.mkdir(path.join(repo, '.git'), { recursive: true });
       await fs.writeFile(path.join(repo, 'real.ts'), 'export {};\n');
       await fs.writeFile(path.join(root, 'outside.ts'), 'export {};\n');
+      resolvedRepo = await fs.realpath(repo);
     });
 
     it('opens an existing regular file with its resolved absolute path', async () => {
@@ -125,10 +128,10 @@ describe('cockpit endpoints against a real repository', () => {
       expect(response.status).toBe(200);
       expect(launcher.launchWorkspaceTarget).toHaveBeenCalledWith(
         expect.any(String),
-        repo,
+        resolvedRepo,
         { kind: 'new-workspace' },
         process.platform,
-        path.join(repo, 'real.ts'),
+        path.join(resolvedRepo, 'real.ts'),
       );
     });
 
@@ -161,6 +164,62 @@ describe('cockpit endpoints against a real repository', () => {
       await fs.symlink(path.join(root, 'outside.ts'), path.join(repo, 'escape.ts'));
 
       const response = await openFile('escape.ts');
+
+      expect(response.status).toBe(400);
+      expect(launcher.launchWorkspaceTarget).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/open-editor for a folder under devDir', () => {
+    let resolvedRepo: string;
+
+    async function openFolder(workspacePath: string) {
+      return app.request('/api/open-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspacePath, command: 'code' }),
+      });
+    }
+
+    beforeEach(async () => {
+      await fs.mkdir(path.join(devDir, 'repo', '.git'), { recursive: true });
+      resolvedRepo = await fs.realpath(path.join(devDir, 'repo'));
+    });
+
+    it('opens a source repository, including a linked worktree whose .git is a file', async () => {
+      await fs.mkdir(path.join(devDir, 'worktree'));
+      await fs.writeFile(path.join(devDir, 'worktree', '.git'), 'gitdir: /elsewhere\n');
+
+      expect((await openFolder(path.join(devDir, 'repo'))).status).toBe(200);
+      expect((await openFolder(path.join(devDir, 'worktree'))).status).toBe(200);
+      expect(launcher.launchWorkspaceTarget).toHaveBeenNthCalledWith(1, expect.any(String), resolvedRepo, { kind: 'new-workspace' }, process.platform, undefined);
+    });
+
+    it('refuses a plain directory, and devDir itself, unless it is a repository', async () => {
+      await fs.mkdir(path.join(devDir, 'not-a-repo'));
+
+      for (const target of [path.join(devDir, 'not-a-repo'), devDir]) {
+        const response = await openFolder(target);
+        expect(response.status, target).toBe(404);
+      }
+      expect(launcher.launchWorkspaceTarget).not.toHaveBeenCalled();
+    });
+
+    it.skipIf(process.platform === 'win32')('refuses a link under devDir that leads outside it, even to a repository', async () => {
+      const outside = path.join(root, 'outside-repo');
+      await fs.mkdir(path.join(outside, '.git'), { recursive: true });
+      await fs.symlink(outside, path.join(devDir, 'escape'));
+
+      const response = await openFolder(path.join(devDir, 'escape'));
+
+      expect(response.status).toBe(404);
+      expect(launcher.launchWorkspaceTarget).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a path outside both devDir and the workspaces directory', async () => {
+      await fs.mkdir(path.join(root, 'elsewhere', '.git'), { recursive: true });
+
+      const response = await openFolder(path.join(root, 'elsewhere'));
 
       expect(response.status).toBe(400);
       expect(launcher.launchWorkspaceTarget).not.toHaveBeenCalled();

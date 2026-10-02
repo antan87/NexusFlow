@@ -472,6 +472,29 @@ async function resolveExactLaunchWorkspace(
   }
 }
 
+/**
+ * Resolve a launch path under devDir to a source repository: after links are
+ * resolved it must stay inside devDir and be a git repository itself. A parent
+ * folder, an unrelated project, or a link that leads out of devDir is refused.
+ */
+async function resolveSourceRepository(
+  devDir: string,
+  candidatePath: string,
+): Promise<string | null> {
+  try {
+    const [canonicalRoot, canonicalRepo] = await Promise.all([
+      fs.realpath(devDir),
+      fs.realpath(candidatePath),
+    ]);
+    const safeRepoPath = assertWithin(canonicalRoot, canonicalRepo);
+    // `.git` is a directory in a clone and a file in a linked worktree.
+    await fs.access(path.join(safeRepoPath, '.git'));
+    return safeRepoPath;
+  } catch {
+    return null;
+  }
+}
+
 /** Safe sub-repo path for a repo name, contained within the workspace. */
 export function resolveRepoPath(workspacePath: string, repoName: string): string {
   return assertWithin(workspacePath, path.join(workspacePath, repoName));
@@ -2042,10 +2065,13 @@ app.post('/api/open-editor', async (c) => {
         }
       }
     } else {
-      exactWorkspacePath = safeWorkspacePath;
+      // Under devDir the target must be a source repository reached without
+      // following a link out of devDir; continue with its resolved path.
+      exactWorkspacePath = await resolveSourceRepository(config.devDir, safeWorkspacePath);
+      if (exactWorkspacePath) safeWorkspacePath = exactWorkspacePath;
     }
     if (!exactWorkspacePath) {
-      return c.json({ error: 'Workspace configuration not found.' }, 404);
+      return c.json({ error: isDevDir ? 'Source repository not found.' : 'Workspace configuration not found.' }, 404);
     }
 
     let resolvedFilePath: string | undefined;
