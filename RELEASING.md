@@ -152,6 +152,11 @@ commit it verified. It refuses when:
 Anything it cannot read is a `NO-GO`, not a guess. Dispatch only the command it prints,
 and only with the owner's go-ahead for that release.
 
+The preflight is a check, not a lock: two dispatches in the same instant can both pass it.
+The pinned `expected_sha`, the single release lane and the idempotent tag step keep that
+safe, because both runs release the same commit. When it happens, keep the run that started
+first and cancel the one you dispatched, so the owner is asked to approve each gate once.
+
 The guard enforces two rules that do not depend on anyone checking first:
 
 - **Versions move forward.** A version lower than any existing `vX.Y.Z[-pre]` tag is
