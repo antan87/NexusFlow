@@ -59,6 +59,18 @@ export function getEditorUriScheme(defaultEditor?: string | null): string {
 }
 
 /**
+ * Percent-encodes each path segment. encodeURI leaves `#` and `?` alone, and in a
+ * URI those start a fragment or a query, so a file such as `notes/#1.md` would
+ * open as `notes/`. A Windows drive (`C:`) keeps its colon.
+ */
+function encodeUriPath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => (/^[a-zA-Z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
+    .join('/');
+}
+
+/**
  * Computes the desktop editor URI for opening a file at a specific line and column.
  */
 export function computeEditorUri(
@@ -83,10 +95,11 @@ export function computeEditorUri(
   // Ensure no leading slashes to prevent `file//path` double-slash issues in URI
   const cleanPath = fullPath.replace(/^\/+/, '');
   const scheme = getEditorUriScheme(defaultEditor);
-  return `${scheme}://file/${encodeURI(cleanPath)}:${line}:${col}`;
+  return `${scheme}://file/${encodeUriPath(cleanPath)}:${line}:${col}`;
 }
 
-export async function launchVsCodeDiff(
+/** Opens a file in the configured editor through the local server. Resolves false when that fails. */
+export async function openFileInEditor(
   repoPath: string,
   filePath: string,
   defaultEditor?: string | null,
