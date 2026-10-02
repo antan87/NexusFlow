@@ -118,6 +118,32 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
   // nothing becomes unreachable the way a fixed slice made it.
   const pickerVisible = pickerMatches.slice(0, pickerVisibleCount);
 
+  // Announced through a status region that exists before the first keystroke;
+  // the visible "No workspaces match" line alone is never read out.
+  const pickerAnnouncement = !pickerQueryTrimmed ? ''
+    : pickerMatches.length === 0 ? `No workspaces match "${pickerQueryTrimmed}"`
+    : `${pickerMatches.length} ${pickerMatches.length === 1 ? 'workspace matches' : 'workspaces match'}`;
+
+  // The picker unmounts what was just activated: choosing a workspace removes the
+  // whole empty state, and the last "Show N more" click removes its own button.
+  // Move focus to what replaced it so keyboard and screen-reader users are not
+  // dropped back on <body>.
+  const pickerListRef = useRef<HTMLDivElement>(null);
+  const focusOpenedTab = useRef<string | null>(null);
+  const focusRevealedIndex = useRef<number | null>(null);
+  useEffect(() => {
+    const branch = focusOpenedTab.current;
+    if (!branch || !openTabs.includes(branch)) return;
+    focusOpenedTab.current = null;
+    modalRef.current?.querySelector<HTMLElement>(`[role="tab"][title="${CSS.escape(branch)}"]`)?.focus();
+  }, [openTabs]);
+  useEffect(() => {
+    const index = focusRevealedIndex.current;
+    if (index === null) return;
+    focusRevealedIndex.current = null;
+    pickerListRef.current?.querySelectorAll<HTMLElement>('button')[index]?.focus();
+  }, [pickerVisibleCount]);
+
   // Handle Dragging
   const handleDragStart = useCallback((e: React.PointerEvent) => {
     // Only drag on left click and not on interactive buttons/tabs
@@ -455,22 +481,24 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                   onChange={(event) => { setPickerQuery(event.target.value); setPickerVisibleCount(12); }}
                   className="h-8 w-full rounded-md border border-input bg-card pl-8 pr-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
                 />
+                <p role="status" data-testid="cli-chat-picker-results" className="sr-only">{pickerAnnouncement}</p>
               </div>
             )}
             <div className="flex w-full max-w-sm flex-col gap-1.5">
               {workspaces.length === 0 ? (
                 <p className="py-2 text-xs text-muted-foreground">No workspaces yet.</p>
               ) : pickerMatches.length === 0 ? (
-                <p className="py-2 text-xs text-muted-foreground">No workspaces match "{pickerQueryTrimmed}"</p>
+                // The status region above already says this; hidden so it is not read twice.
+                <p aria-hidden="true" className="py-2 text-xs text-muted-foreground">No workspaces match "{pickerQueryTrimmed}"</p>
               ) : (
                 <>
-                  <div className="flex flex-col gap-1.5" role="group" aria-label="Workspaces available for CLI chat">
+                  <div ref={pickerListRef} className="flex flex-col gap-1.5" role="group" aria-label="Workspaces available for CLI chat">
                     {pickerVisible.map((ws) => (
                       <Button
                         key={ws.branchName}
                         variant="outline"
                         size="sm"
-                        onClick={() => { openCli(ws.branchName); setPickerQuery(''); }}
+                        onClick={() => { focusOpenedTab.current = ws.branchName; openCli(ws.branchName); setPickerQuery(''); }}
                         className="text-xs h-7 justify-start gap-1.5"
                       >
                         <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
@@ -480,7 +508,7 @@ export function FloatingChatModal({ workspaces }: FloatingChatModalProps) {
                     ))}
                   </div>
                   {pickerMatches.length > pickerVisible.length && (
-                    <Button variant="ghost" size="sm" onClick={() => setPickerVisibleCount(count => count + 24)}
+                    <Button variant="ghost" size="sm" onClick={() => { focusRevealedIndex.current = pickerVisible.length; setPickerVisibleCount(count => count + 24); }}
                       className="text-xs h-7">
                       Show {Math.min(24, pickerMatches.length - pickerVisible.length)} more of {pickerMatches.length}
                     </Button>

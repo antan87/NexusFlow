@@ -89,7 +89,8 @@ test('a search that matches nothing says so instead of listing everything', asyn
   const search = chat.getByRole('searchbox', { name: 'Search workspaces for CLI chat' });
   await search.pressSequentially('zzzz');
 
-  await expect(chat.getByText('No workspaces match "zzzz"')).toBeVisible();
+  // The on-screen copy; the status region carries the spoken one (tested below).
+  await expect(chat.locator('p:not([role="status"])', { hasText: 'No workspaces match "zzzz"' })).toBeVisible();
   await expect(workspaceButton(chat, 'alpha')).toHaveCount(0);
 });
 
@@ -159,4 +160,66 @@ test('arrow keys still reach the menu while the search field has focus', async (
   // highlight an item and the list could not be traversed from the keyboard.
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-highlighted', '');
+});
+
+/**
+ * The picker replaces itself as you use it: choosing a workspace unmounts the
+ * whole empty state, and the last "Show N more" click unmounts its own button.
+ * Without care, focus falls to <body> and a keyboard or screen-reader user is
+ * thrown back to the top of the page with no word about what happened.
+ */
+test('opening a workspace from the empty state keeps keyboard focus on its tab', async ({ page }) => {
+  const chat = await openEmptyCliChat(page);
+
+  await chat.getByRole('searchbox', { name: 'Search workspaces for CLI chat' }).pressSequentially('golf');
+  await page.keyboard.press('Tab');
+  await expect(workspaceButton(chat, 'golf')).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(chat.getByRole('tab', { name: 'Show golf in the left pane' })).toBeFocused();
+});
+
+test('filtering the picker is announced to screen readers', async ({ page }) => {
+  const chat = await openEmptyCliChat(page);
+  const status = chat.getByTestId('cli-chat-picker-results');
+
+  // The live region must exist, empty, before the first change: a region that
+  // appears together with its text is not reliably announced.
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect(status).toHaveText('');
+
+  const search = chat.getByRole('searchbox', { name: 'Search workspaces for CLI chat' });
+  await search.pressSequentially('golf');
+  await expect(status).toHaveText('1 workspace matches');
+
+  await search.fill('');
+  await search.pressSequentially('ha');
+  await expect(status).toHaveText('2 workspaces match');
+
+  await search.pressSequentially('zzz');
+  await expect(status).toHaveText('No workspaces match "hazzz"');
+});
+
+test.describe('with more workspaces than the first page shows', () => {
+  const many = Array.from({ length: 30 }, (_, index) => {
+    const branch = `ws-${String(index + 1).padStart(2, '0')}`;
+    return { ...workspaces[0], id: branch, branchName: branch, name: branch, description: `Workspace ${index + 1} of 30`, workspacePath: `/tmp/${branch}` };
+  });
+  test.use({ workspacesData: [many, { option: true }] });
+
+  test('revealing more workspaces moves focus to the first new one', async ({ page }) => {
+    const chat = await openEmptyCliChat(page);
+    const group = chat.getByRole('group', { name: 'Workspaces available for CLI chat' });
+    await expect(group.getByRole('button')).toHaveCount(12);
+
+    // Thirty workspaces: one click reveals the rest and removes the button
+    // that had focus, which is exactly the case that used to drop it.
+    const more = chat.getByRole('button', { name: 'Show 18 more of 30' });
+    await more.focus();
+    await page.keyboard.press('Enter');
+
+    await expect(group.getByRole('button')).toHaveCount(30);
+    await expect(more).toHaveCount(0);
+    await expect(workspaceButton(chat, 'ws-13')).toBeFocused();
+  });
 });
