@@ -48,21 +48,31 @@ git push origin HEAD
 
 After the PR is merged, wait until every required check (see [Publish gate](#publish-gate))
 has succeeded on the merge commit, then dispatch the release using the exact version
-in the merged `package.json`. You can trigger it either from GitHub Actions UI (**Actions** -> **Release** -> **Run workflow**, entering the version) or via `gh`:
+in the merged `package.json` and **pin the commit you verified** with `expected_sha`.
+Dispatch always loads the tip of `main`; if another PR merged after you verified, a
+pinned release fails instead of shipping a commit you did not check. You can trigger
+it either from GitHub Actions UI (**Actions** -> **Release** -> **Run workflow**,
+entering the version and the SHA) or via `gh`:
 
 ```bash
 VERSION=$(node -p "require('./package.json').version")
+SHA=$(git rev-parse origin/main)   # the commit whose checks you verified
 gh api "repos/antan87/NexusFlow/dispatches" \
   -f event_type=release \
-  -F "client_payload[version]=$VERSION"
+  -F "client_payload[version]=$VERSION" \
+  -F "client_payload[expected_sha]=$SHA"
 ```
 
 Or using `gh workflow run`:
 
 ```bash
 VERSION=$(node -p "require('./package.json').version")
-gh workflow run release.yml -f version=$VERSION
+SHA=$(git rev-parse origin/main)   # the commit whose checks you verified
+gh workflow run release.yml -f version=$VERSION -f expected_sha=$SHA
 ```
+
+`expected_sha` is optional so existing dispatch commands keep working, but an
+unpinned dispatch releases whatever `main` is at when the workflow starts.
 
 The `npm version` command runs the `version` lifecycle script
 (`sync-version.mjs && git add -A`), so all channel manifests are reviewed in the
@@ -72,9 +82,10 @@ it does not rely on a tag push triggering workflow code from an unreviewed ref.
 The [`release.yml`](./.github/workflows/release.yml) workflow then:
 
 1. **`guard`** — rejects any ref other than `main`, verifies the source is on `main`,
-   checks the requested version against `package.json`, runs the sync check, requires
-   every check in `.github/release-required-checks.json` to have succeeded on this exact
-   SHA, and only then creates the immutable tag.
+   checks the requested version against `package.json`, runs the sync check, checks the
+   pinned `expected_sha` (when given) and that the version is not lower than any existing
+   release tag, requires every check in `.github/release-required-checks.json` to have
+   succeeded on this exact SHA, and only then creates the immutable tag.
 2. **`npm` / `vscode` / `desktop`** run in parallel. npm and Marketplace skip versions
    that are already published; desktop rebuilds its installers and metadata on each
    run. Stable releases always package the VSIX. npm uses trusted OIDC publishing;
@@ -113,6 +124,29 @@ Check what the guard would decide, without publishing:
 GH_TOKEN=$(gh auth token) node scripts/release-guard.mjs checks \
   --sha "$(git rev-parse origin/main)" --repo antan87/NexusFlow
 ```
+
+### Several releases at once
+
+Only one release runs at a time (the `release` concurrency group), and a run that is
+waiting for approval in the `release` environment keeps the group. GitHub keeps at most
+one pending run per group, so a newer pending dispatch silently cancels an older one.
+Before bumping or dispatching, check what is already in flight and do not dispatch a
+version that already has a run:
+
+```bash
+gh run list --workflow release.yml --limit 5 \
+  --json databaseId,status,conclusion,headSha,createdAt \
+  --jq '.[] | "\(.createdAt) \(.status)/\(.conclusion) \(.headSha[0:7]) \(.databaseId)"'
+```
+
+The guard enforces two rules that do not depend on anyone checking first:
+
+- **Versions move forward.** A version lower than any existing `vX.Y.Z[-pre]` tag is
+  refused, so a stale bump cannot publish after a newer release and move npm's `latest`
+  back. The same version is allowed so a partial release can be re-run. There is no
+  override; releasing a lower version (a backport) needs a pipeline change first.
+- **The source is the commit you verified.** With `expected_sha`, a release fails when
+  `main` has moved past it. Verify the new head and dispatch again.
 
 ### Owner-applied repository settings
 

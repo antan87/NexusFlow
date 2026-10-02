@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,9 +10,14 @@ import { load } from 'js-yaml';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  compareVersions,
   evaluateDispatchRef,
+  evaluateExpectedSha,
   evaluateRequiredChecks,
+  evaluateVersionOrder,
   expectedCheckNames,
+  parseRemoteTags,
+  parseVersion,
 } from './release-guard-core.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -129,6 +135,112 @@ describe('evaluateRequiredChecks', () => {
   });
 });
 
+describe('version ordering', () => {
+  const order = (a: string, b: string) => Math.sign(compareVersions(parseVersion(a), parseVersion(b)));
+
+  it.each([
+    ['2.29.1', '2.29.0', 1],
+    ['2.30.0', '2.29.9', 1],
+    ['3.0.0', '2.99.99', 1],
+    ['2.29.1', '2.29.1', 0],
+    ['2.30.0', '2.30.0-rc.1', 1],
+    ['2.30.0-rc.1', '2.29.1', 1],
+    ['2.30.0-rc.2', '2.30.0-rc.1', 1],
+    ['2.30.0-rc.10', '2.30.0-rc.9', 1],
+    ['2.30.0-rc.1', '2.30.0-rc.1.1', -1],
+    ['2.30.0-1', '2.30.0-rc', -1],
+    ['2.30.0-alpha', '2.30.0-beta', -1],
+  ])('orders %s against %s as %i', (a, b, expected) => {
+    expect(order(a, b)).toBe(expected);
+    expect(order(b, a)).toBe(expected === 0 ? 0 : -expected);
+  });
+
+  it.each(['', '2.29', 'v2.29.1', '2.29.1-', '2.29.1+build', 'latest', '2.29.x'])('does not parse %j', (text) => {
+    expect(parseVersion(text)).toBeNull();
+  });
+
+  const tags = [
+    { sha: SHA, version: '2.29.0' },
+    { sha: SHA, version: '2.29.1' },
+    { sha: SHA, version: '2.30.0-rc.1' },
+  ];
+
+  it('allows a version above every release tag', () => {
+    expect(evaluateVersionOrder({ version: '2.30.0', tags }).ok).toBe(true);
+    expect(evaluateVersionOrder({ version: '2.30.0-rc.2', tags }).ok).toBe(true);
+  });
+
+  it('allows re-running the newest version so a partial release can finish', () => {
+    expect(evaluateVersionOrder({ version: '2.30.0-rc.1', tags }).ok).toBe(true);
+  });
+
+  it('allows the first release when no tag exists yet', () => {
+    expect(evaluateVersionOrder({ version: '0.1.0', tags: [] }).ok).toBe(true);
+  });
+
+  it('refuses a stale version and names the newest tag it would undo', () => {
+    const result = evaluateVersionOrder({ version: '2.29.1', tags });
+    expect(result.ok).toBe(false);
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]).toContain('v2.30.0-rc.1 is already tagged and is newer than 2.29.1');
+  });
+
+  it('treats a prerelease as older than its own release', () => {
+    const result = evaluateVersionOrder({ version: '2.30.0-rc.1', tags: [{ sha: SHA, version: '2.30.0' }] });
+    expect(result.ok).toBe(false);
+  });
+
+  it.each(['', 'latest', 'v2.30.0', '2.30'])('refuses %j as a version', (version) => {
+    expect(evaluateVersionOrder({ version, tags }).ok).toBe(false);
+  });
+});
+
+describe('parseRemoteTags', () => {
+  it('reads release tags and ignores anything that is not vX.Y.Z[-pre]', () => {
+    const output = [
+      `${SHA}\trefs/tags/v2.29.0`,
+      `${OTHER_SHA}\trefs/tags/v2.30.0-rc.1`,
+      `${SHA}\trefs/tags/v.18.0`,
+      `${SHA}\trefs/tags/nightly`,
+      `${SHA}\trefs/tags/v2.29`,
+      '',
+    ].join('\n');
+    expect(parseRemoteTags(output)).toEqual([
+      { sha: SHA, version: '2.29.0' },
+      { sha: OTHER_SHA, version: '2.30.0-rc.1' },
+    ]);
+  });
+
+  it('returns nothing for empty output', () => {
+    expect(parseRemoteTags('')).toEqual([]);
+    expect(parseRemoteTags(undefined)).toEqual([]);
+  });
+});
+
+describe('evaluateExpectedSha', () => {
+  it('does not require a pin', () => {
+    expect(evaluateExpectedSha({ expected: '', actual: SHA }).ok).toBe(true);
+    expect(evaluateExpectedSha({ expected: undefined, actual: SHA }).ok).toBe(true);
+  });
+
+  it('accepts the pinned commit, ignoring case', () => {
+    expect(evaluateExpectedSha({ expected: SHA.toUpperCase(), actual: SHA }).ok).toBe(true);
+  });
+
+  it('refuses when the default branch moved past the pinned commit', () => {
+    const result = evaluateExpectedSha({ expected: SHA, actual: OTHER_SHA });
+    expect(result.ok).toBe(false);
+    expect(result.problems[0]).toContain(`pinned to ${SHA}`);
+    expect(result.problems[0]).toContain(OTHER_SHA);
+  });
+
+  it.each(['abc1234', 'main', `${SHA}0`])('refuses %j, which is not a full SHA', (expected) => {
+    const result = evaluateExpectedSha({ expected, actual: SHA });
+    expect(result.ok).toBe(false);
+    expect(result.problems[0]).toContain('full 40-character');
+  });
+});
+
 describe('expectedCheckNames', () => {
   const derive = (jobs: Record<string, unknown>) => expectedCheckNames([{ path: 'wf.yml', workflow: { jobs } }]);
 
@@ -199,6 +311,26 @@ describe('release workflow wiring', () => {
     expect(checksCheck).toBeGreaterThan(refCheck);
     expect(tag).toBeGreaterThan(checksCheck);
     expect(jobs.guard.permissions).toMatchObject({ checks: 'read' });
+  });
+
+  it('pins the source and orders the version before checks and the tag', () => {
+    const pin = indexOfRun('release-guard.mjs pin');
+    const version = indexOfRun('release-guard.mjs version');
+    const checksCheck = indexOfRun('release-guard.mjs checks');
+    const tag = indexOfRun('git push origin "refs/tags/');
+    expect(pin).toBeGreaterThanOrEqual(0);
+    expect(version).toBeGreaterThanOrEqual(0);
+    expect(pin).toBeLessThan(checksCheck);
+    expect(version).toBeLessThan(checksCheck);
+    expect(version).toBeLessThan(tag);
+  });
+
+  it('keeps expected_sha optional so existing dispatch commands still work', () => {
+    const input = workflow.on.workflow_dispatch.inputs.expected_sha;
+    expect(input.required).toBe(false);
+    const pinStep = jobs.guard.steps.find((step: any) => String(step.run ?? '').includes('release-guard.mjs pin'));
+    expect(pinStep.env.EXPECTED_SHA).toContain('client_payload.expected_sha');
+    expect(pinStep.env.EXPECTED_SHA).toContain('inputs.expected_sha');
   });
 
   it.each(publishJobs)('%s depends on the guard and builds the guard-approved SHA', (name) => {
@@ -295,5 +427,57 @@ describe('release-guard CLI', () => {
   it('fails closed without a token', async () => {
     const result = await guard(['checks', '--sha', SHA, '--repo', 'o/r'], { GH_TOKEN: '' });
     expect(result.code).toBe(1);
+  });
+
+  describe('version and pin commands', () => {
+    function tagsFile(lines: string[]): { file: string; cleanup: () => void } {
+      const dir = mkdtempSync(path.join(tmpdir(), 'release-guard-'));
+      const file = path.join(dir, 'tags.txt');
+      writeFileSync(file, lines.join('\n'));
+      return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+    }
+
+    it('refuses a stale version with a non-zero exit', async () => {
+      const { file, cleanup } = tagsFile([`${SHA}\trefs/tags/v2.29.1`, `${SHA}\trefs/tags/v2.30.0`]);
+      try {
+        const result = await guard(['version', '--version', '2.29.2', '--tags-file', file]);
+        expect(result.code).toBe(1);
+        expect(result.out).toContain('v2.30.0 is already tagged and is newer than 2.29.2');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('accepts the next version', async () => {
+      const { file, cleanup } = tagsFile([`${SHA}\trefs/tags/v2.29.1`]);
+      try {
+        const result = await guard(['version', '--version', '2.30.0', '--tags-file', file]);
+        expect(result.code).toBe(0);
+        expect(result.out).toContain('verified');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('fails closed when the tag list cannot be read', async () => {
+      const result = await guard(['version', '--version', '2.30.0', '--tags-file', path.join(tmpdir(), 'missing-release-tags.txt')]);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain('Release guard could not complete');
+    });
+
+    it('fails closed without a tags file', async () => {
+      expect((await guard(['version', '--version', '2.30.0'])).code).toBe(1);
+    });
+
+    it('passes the pin check when no commit was pinned, as the workflow sends an empty value', async () => {
+      const result = await guard(['pin', '--expected', '', '--actual', SHA]);
+      expect(result.code).toBe(0);
+    });
+
+    it('rejects a release when the default branch moved past the pinned commit', async () => {
+      const result = await guard(['pin', '--expected', SHA, '--actual', OTHER_SHA]);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain('Verify the new head');
+    });
   });
 });

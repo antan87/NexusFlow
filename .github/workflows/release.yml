@@ -5,7 +5,8 @@ name: Release
 #
 #   npm version minor --no-git-tag-version  # bump + sync in a reviewed PR
 #   gh api repos/OWNER/REPO/dispatches \
-#     -f event_type=release -F client_payload[version]=X.Y.Z
+#     -f event_type=release -F client_payload[version]=X.Y.Z \
+#     -F client_payload[expected_sha]=<verified commit SHA>
 #
 # The repository_dispatch event always loads this workflow from the default
 # branch; workflow_dispatch is rejected unless it targets the default branch. The
@@ -26,6 +27,10 @@ on:
       version:
         description: 'Version to release (must match package.json, e.g. 2.12.1)'
         required: true
+        type: string
+      expected_sha:
+        description: 'Optional: the full commit SHA you verified. The release fails if the default branch has moved past it.'
+        required: false
         type: string
 
 concurrency:
@@ -96,6 +101,23 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Dispatch always loads the tip of the default branch. When the dispatcher
+      # pinned the commit it verified (client_payload.expected_sha or the
+      # expected_sha input), refuse to release anything else.
+      - name: Require the pinned source commit, when one was given
+        env:
+          EXPECTED_SHA: ${{ github.event.client_payload.expected_sha || inputs.expected_sha }}
+        run: node scripts/release-guard.mjs pin --expected "$EXPECTED_SHA" --actual "$GITHUB_SHA"
+
+      # Several agents can prepare releases at once. A stale version must not
+      # publish after a newer one, which would move npm's `latest` backwards.
+      - name: Require a version that moves forward from every release tag
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          git ls-remote --tags --refs origin > "$RUNNER_TEMP/release-tags.txt"
+          node scripts/release-guard.mjs version --version "$VERSION" --tags-file "$RUNNER_TEMP/release-tags.txt"
 
       - name: Require successful checks for the exact source SHA
         env:
