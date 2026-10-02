@@ -570,3 +570,78 @@ test.describe('assistant terminal lifecycle', () => {
     await expect(pane.getByTestId('terminal-state-help')).toContainText('sign in or finish setup');
   });
 });
+
+test.describe('documents in folders of the workspace root', () => {
+  test.use({ workspacesData: [{ ...workspace, repos: ['C:/ws/feature-x/repo'] }] });
+
+  test('opens from terminal output', async ({ page }) => {
+    const markdown = (name: string, content: string) => ({ name, kind: 'markdown', content });
+    // Folders are not in the root listing, so these documents are reachable by link only.
+    await page.route('**/api/workspace/feature-x/documents', route => route.fulfill({ json: { documents: [] } }));
+    await page.route('**/api/workspace/feature-x/documents/preview?*', route => {
+      const name = new URL(route.request().url()).searchParams.get('name');
+      if (name === 'docs/report.md') return route.fulfill({ json: markdown(name, '# Quarterly report\n\nSee the [summary](q3/summary.md).') });
+      if (name === 'docs/q3/summary.md') return route.fulfill({ json: markdown(name, '# Summary') });
+      // The server would open this one, so only the repository rule keeps it out of the document viewer.
+      if (name === 'repo/docs/guide.md') return route.fulfill({ json: markdown(name, '# Repository guide') });
+      // `docs/guide.md` exists in the repository, not under the workspace root.
+      return route.fulfill({ status: 400, json: { error: 'ENOENT: no such file or directory, open' } });
+    });
+    await page.route('**/api/workspace/feature-x/changes?include=all', route => route.fulfill({ json: { changes: [{ repoName: 'repo', repoPath: 'C:/ws/feature-x/repo', files: [{ file: 'docs/guide.md', type: 'unchanged' }] }] } }));
+    await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: '# Guide\n' } }));
+    await page.routeWebSocket('**/ws/terminal', socket => {
+      socket.onMessage(message => {
+        if (JSON.parse(String(message)).type !== 'attach') return;
+        socket.send(JSON.stringify({ type: 'ready', terminal, truncated: false }));
+        // The workspace root is C:/ws/feature-x: the second line is the same folder spelled the way Windows tools do.
+        socket.send(JSON.stringify({ type: 'output', data: 'docs/report.md\r\nc:\\ws\\Feature-X\\docs\\q3\\summary.md\r\ndocs/guide.md\r\nrepo/docs/guide.md\r\n' }));
+        socket.send(JSON.stringify({ type: 'replayed' }));
+      });
+    });
+    await page.goto('/#/workspaces/feature-x/sessions');
+    await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+    const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+    const pane = chat.getByTestId('terminal-pane');
+    await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+    await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
+
+    const screen = pane.locator('.xterm-screen');
+    const clickOutputRow = async (index: number) => {
+      const cell = await screen.evaluate((element, rowIndex) => {
+        const bounds = element.getBoundingClientRect();
+        const firstRow = element.querySelector('.xterm-rows')?.firstElementChild?.getBoundingClientRect();
+        const rowHeight = firstRow?.height ?? 17;
+        return { x: bounds.x + 35, y: (firstRow?.y ?? bounds.y) + rowHeight * (rowIndex + 0.5) };
+      }, index);
+      await page.mouse.move(cell.x, cell.y);
+      await page.mouse.click(cell.x, cell.y);
+    };
+
+    await clickOutputRow(0);
+    const documents = chat.getByRole('region', { name: 'Workspace documents' });
+    await expect(documents.getByRole('heading', { name: 'Quarterly report' })).toBeVisible();
+    await expect(chat.getByRole('region', { name: 'Workspace code' })).toHaveCount(0);
+
+    // A relative link in the opened document follows to its sibling, and Back returns.
+    await documents.getByRole('link', { name: 'summary' }).click();
+    await expect(documents.getByRole('heading', { name: 'Summary', exact: true })).toBeVisible();
+    await documents.getByRole('button', { name: 'Back to report.md' }).click();
+    await expect(documents.getByRole('heading', { name: 'Quarterly report' })).toBeVisible();
+
+    // An absolute Windows path in different letter case still names the same document.
+    await clickOutputRow(1);
+    await expect(documents.getByRole('heading', { name: 'Summary', exact: true })).toBeVisible();
+
+    // A repo-relative path has the same shape but is not under the workspace root, so it stays in the code panel.
+    await clickOutputRow(2);
+    const code = chat.getByRole('region', { name: 'Workspace code' });
+    await expect(code.getByText('repo/docs/guide.md')).toBeVisible();
+
+    // A path through a repository under the workspace root is code too, even though the server could open it.
+    await clickOutputRow(0);
+    await expect(documents.getByRole('heading', { name: 'Quarterly report' })).toBeVisible();
+    await clickOutputRow(3);
+    await expect(code.getByText('repo/docs/guide.md')).toBeVisible();
+    await expect(documents).toHaveCount(0);
+  });
+});
