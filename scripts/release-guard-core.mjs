@@ -17,6 +17,103 @@ export function evaluateDispatchRef({ ref, defaultBranch }) {
   return { ok: true, problems: [] };
 }
 
+const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const FULL_SHA = /^[0-9a-f]{40}$/i;
+
+/** Parse `X.Y.Z[-pre]` (no leading `v`); null when it is not a release version. */
+export function parseVersion(text) {
+  const match = SEMVER.exec(String(text ?? ''));
+  if (!match) return null;
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    pre: match[4] === undefined ? [] : match[4].split('.'),
+  };
+}
+
+/** Semver precedence: negative when a < b, 0 when equal, positive when a > b. */
+export function compareVersions(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if (a.core[i] !== b.core[i]) return a.core[i] < b.core[i] ? -1 : 1;
+  }
+  // A version without a prerelease outranks the same core with one.
+  if (a.pre.length === 0 || b.pre.length === 0) return b.pre.length - a.pre.length;
+  const length = Math.max(a.pre.length, b.pre.length);
+  for (let i = 0; i < length; i += 1) {
+    const left = a.pre[i];
+    const right = b.pre[i];
+    if (left === undefined) return -1;
+    if (right === undefined) return 1;
+    if (left === right) continue;
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) return Number(left) < Number(right) ? -1 : 1;
+    if (leftNumeric) return -1;
+    if (rightNumeric) return 1;
+    return left < right ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Read the release tags from `git ls-remote --tags --refs` output. Tags that are
+ * not `vX.Y.Z[-pre]` are ignored, so a stray tag cannot block or unblock a release.
+ */
+export function parseRemoteTags(text) {
+  const tags = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const match = /^([0-9a-f]{40})\s+refs\/tags\/v(\S+)$/i.exec(line.trim());
+    if (match && parseVersion(match[2])) tags.push({ sha: match[1], version: match[2] });
+  }
+  return tags;
+}
+
+/**
+ * Releases must move forward: refuse a version lower than any existing release
+ * tag. Several agents can prepare releases at once, and a stale one publishing
+ * after a newer release would move npm's `latest` back. The same version is
+ * allowed so a partially published release can be re-run; the tag step refuses
+ * to move an existing tag.
+ */
+export function evaluateVersionOrder({ version, tags }) {
+  const requested = parseVersion(version);
+  if (!requested) {
+    return { ok: false, problems: [`"${version ?? ''}" is not a release version (expected X.Y.Z or X.Y.Z-prerelease).`] };
+  }
+  const newer = tags
+    .filter((tag) => compareVersions(requested, parseVersion(tag.version)) < 0)
+    .sort((a, b) => compareVersions(parseVersion(b.version), parseVersion(a.version)));
+  if (newer.length === 0) return { ok: true, problems: [] };
+  return {
+    ok: false,
+    problems: [
+      `v${newer[0].version} is already tagged and is newer than ${version}; releases must move forward. `
+        + 'Bump the version above every existing release tag and dispatch that instead.',
+    ],
+  };
+}
+
+/**
+ * The dispatch loads the tip of the default branch. When the dispatcher pinned
+ * the commit it verified, refuse to release a different one: another merge may
+ * have landed in between.
+ */
+export function evaluateExpectedSha({ expected, actual }) {
+  if (!expected) return { ok: true, problems: [] };
+  if (!FULL_SHA.test(expected)) {
+    return { ok: false, problems: ['expected_sha must be a full 40-character commit SHA.'] };
+  }
+  if (String(actual ?? '').toLowerCase() !== expected.toLowerCase()) {
+    return {
+      ok: false,
+      problems: [
+        `The release was pinned to ${expected} but the default branch is at ${actual || '(unknown)'}. `
+          + 'Verify the new head and dispatch again.',
+      ],
+    };
+  }
+  return { ok: true, problems: [] };
+}
+
 /**
  * Decide whether every required check succeeded on exactly `sha`.
  *
