@@ -113,6 +113,12 @@
   --color-sunset-hibiscus: var(--brand-last);
   --color-sunset-indigo: var(--brand-depth);
 
+  --color-state-needs: var(--state-needs);
+  --color-state-ai: var(--state-ai);
+  --color-state-done: var(--state-done);
+  --color-state-reopened: var(--state-reopened);
+  --color-state-now: var(--state-now);
+
   --radius-sm: 0.25rem;
   --radius-md: 0.3125rem;
   --radius-lg: var(--radius);
@@ -298,6 +304,36 @@
   --brand-last: #f43f5e;
   --brand-depth: #6366f1;
 }
+
+/* Progress and state colours for the Context Ring. States are semantic, so they do not change with the
+   palette. Ring arcs take the palette's own brand gradient, darkened on light surfaces until they reach 3:1.
+   The dark values are the last block of this file so they win over every palette's light block. */
+:root {
+  --state-needs: #ad370a;
+  --state-ai: #4f46e5;
+  --state-done: #15803d;
+  --state-reopened: #be123c;
+  --state-now: #b8770b;
+  --ring-a: color-mix(in srgb, var(--brand-first) 55%, #1c1410);
+  --ring-b: color-mix(in srgb, var(--brand-middle) 55%, #1c1410);
+  --ring-c: color-mix(in srgb, var(--brand-last) 55%, #1c1410);
+  --ring-dim: color-mix(in srgb, var(--foreground) 12%, var(--card));
+  --ring-t0: var(--ring-a);
+  --ring-t1: color-mix(in srgb, var(--ring-b) 33.3%, var(--ring-a));
+  --ring-t2: color-mix(in srgb, var(--ring-b) 66.7%, var(--ring-a));
+  --ring-t3: var(--ring-b);
+  --ring-t4: color-mix(in srgb, var(--ring-c) 33.3%, var(--ring-b));
+  --ring-t5: color-mix(in srgb, var(--ring-c) 66.7%, var(--ring-b));
+  --ring-t6: var(--ring-c);
+}
+/* On light surfaces the sunset gradient reads better in amber, orange and rose than in a darkened gold.
+   The amber is the lightest that still reaches 3:1 on every light palette surface. */
+:root[data-color-theme="sunset"],
+:root[data-color-theme="dusk"] {
+  --ring-a: #b8770b;
+  --ring-b: #ea580c;
+  --ring-c: #e11d48;
+}
 :root[data-color-theme="aurora"] {
   --brand-first: #5eead4;
   --brand-middle: #22d3ee;
@@ -482,6 +518,52 @@
   --running: #0ea5e9;
   --running-foreground: #7dd3fc;
 }
+:root[data-color-theme="dusk"] {
+  --brand-first: #fde047;
+  --brand-middle: #fb923c;
+  --brand-last: #f43f5e;
+  --brand-depth: #6366f1;
+  --background: #f5f3fa;
+  --foreground: #17122b;
+  --card: #ffffff;
+  --card-foreground: #17122b;
+  --popover: #ffffff;
+  --popover-foreground: #17122b;
+  --primary: #ad370a;
+  --primary-foreground: #ffffff;
+  --secondary: #ebe7f5;
+  --secondary-foreground: #17122b;
+  --muted: #efecf7;
+  --muted-foreground: #605a7b;
+  --accent: #ece7f7;
+  --accent-foreground: #9a3412;
+  --border: #d6d0e6;
+  --input: #c4bcd8;
+  --ring: #ad370a;
+  --running: #4f46e5;
+  --running-foreground: #ffffff;
+}
+:root.dark[data-color-theme="dusk"] {
+  --background: #0a0812;
+  --foreground: #f0edf9;
+  --card: #14101f;
+  --card-foreground: #f0edf9;
+  --popover: #1b1729;
+  --popover-foreground: #f0edf9;
+  --primary: #fb923c;
+  --primary-foreground: #1d1006;
+  --secondary: #1b1729;
+  --secondary-foreground: #f0edf9;
+  --muted: #14101f;
+  --muted-foreground: #8f89aa;
+  --accent: #262039;
+  --accent-foreground: #fdba74;
+  --border: #2a2442;
+  --input: #352e50;
+  --ring: #fb923c;
+  --running: #8b92f8;
+  --running-foreground: #a5abff;
+}
 .dark .context-hero-accent {
   background-image: linear-gradient(100deg, var(--brand-first), var(--brand-middle) 45%, var(--brand-last));
 }
@@ -502,4 +584,34 @@
   0%, 100% { transform: rotate(0deg) scale(1); }
   40% { transform: rotate(-5deg) scale(0.96); }
   70% { transform: rotate(2deg) scale(1); }
+}
+
+/* Context Ring: the logo's open C as a progress meter. Colours are the --ring-* and --state-* tokens. */
+.context-ring { display: block; }
+.context-ring .ring-arc { fill: none; stroke-width: 40; stroke-linecap: butt; }
+.context-ring .ring-ahead { stroke: var(--ring-dim); }
+.context-ring .ring-tone-0 { stroke: var(--ring-t0); }
+.context-ring .ring-tone-1 { stroke: var(--ring-t1); }
+.context-ring .ring-tone-2 { stroke: var(--ring-t2); }
+.context-ring .ring-tone-3 { stroke: var(--ring-t3); }
+.context-ring .ring-tone-4 { stroke: var(--ring-t4); }
+.context-ring .ring-tone-5 { stroke: var(--ring-t5); }
+.context-ring .ring-tone-6 { stroke: var(--ring-t6); }
+/* Being worked on, extent unknown: the arc's colour at reduced strength, never a made-up fraction. */
+.context-ring .ring-active { opacity: 0.68; }
+.context-ring .ring-reopened { stroke: var(--state-reopened); stroke-dasharray: 9 5; }
+.context-ring .ring-blocked { stroke: var(--muted-foreground); stroke-dasharray: 2 6; }
+.context-ring .ring-sun { fill: var(--state-now); stroke: var(--background); stroke-width: 6; }
+
+/* Dark values for the progress tokens. Last on purpose: this block must win over every palette's light
+   block of equal specificity (the sunset and dusk ring colours above). */
+:root.dark {
+  --state-needs: #fb923c;
+  --state-ai: #8b92f8;
+  --state-done: #4ade80;
+  --state-reopened: #fb7185;
+  --state-now: #fde047;
+  --ring-a: var(--brand-first);
+  --ring-b: var(--brand-middle);
+  --ring-c: var(--brand-last);
 }

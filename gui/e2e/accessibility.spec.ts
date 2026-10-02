@@ -88,6 +88,51 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
+// The Dusk palette has its own surfaces, so axe checks them in both themes. Its tokens are also
+// checked against WCAG ratios in src/features/progress/paletteContrast.test.ts.
+for (const colorScheme of ['light', 'dark'] as const) {
+  test.describe(`dusk palette, ${colorScheme} theme`, () => {
+    test.use({
+      colorScheme,
+      workspacesData: [workspace],
+      workspacesStatusData: { demo: { id: 'demo', branchName: 'demo', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 } },
+      reposData: { data: [{ name: 'api', path: '/dev/api', defaultBranch: 'main' }] },
+    });
+
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript(() => {
+        try { localStorage.setItem('contextspace-color-theme', 'dusk'); } catch { /* Storage can be unavailable. */ }
+      });
+    });
+
+    test('is applied before first paint and keeps the app icon', async ({ page }) => {
+      await page.goto('/#/overview');
+      await expect(page.getByRole('main')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.dataset.colorTheme)).toBe('dusk');
+      expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(colorScheme === 'dark');
+      expect(await page.evaluate(() => document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.getAttribute('href'))).toBe('/favicon.svg');
+    });
+
+    test('overview and new work', async ({ page }) => {
+      await page.goto('/#/overview');
+      await expect(page.getByRole('main')).toBeVisible();
+      await expectNoSeriousViolations(page, `dusk ${colorScheme} overview`);
+      await page.goto('/#/new');
+      await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+      await expectNoSeriousViolations(page, `dusk ${colorScheme} new work`);
+    });
+
+    test('workspace destinations', async ({ page }) => {
+      await mockWorkspace(page);
+      for (const section of ['overview', 'plan', 'changes']) {
+        await page.goto(`/#/workspaces/demo/${section}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
+        await expectNoSeriousViolations(page, `dusk ${colorScheme} workspace ${section}`);
+      }
+    });
+  });
+}
+
 test.describe('constrained windows', () => {
   test.use({ workspacesData: [workspace], viewport: { width: 900, height: 800 } });
 
