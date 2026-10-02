@@ -15,14 +15,14 @@ import {
 import { BRAND_CONFIG, ENGINE_NPM_PACKAGE } from './constants.js';
 
 let home: string;
-let bin: string;
 let calls: Array<{ file: string; args: string[] }>;
+/** Which agent CLIs this test pretends are installed. No real executables are involved. */
+let installed: Set<string>;
 
 beforeEach(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-agent-mcp-'));
-  bin = path.join(home, 'fake-bin');
-  await fs.mkdir(bin, { recursive: true });
   calls = [];
+  installed = new Set();
 });
 
 afterEach(async () => {
@@ -30,11 +30,7 @@ afterEach(async () => {
 });
 
 async function install(...names: string[]) {
-  for (const name of names) {
-    const file = path.join(bin, name);
-    await fs.writeFile(file, '#!/bin/sh\nexit 0\n', 'utf8');
-    await fs.chmod(file, 0o755);
-  }
+  for (const name of names) installed.add(name);
 }
 
 const read = (file: string) => fs.readFile(path.join(home, file), 'utf8');
@@ -46,8 +42,8 @@ async function write(file: string, content: string) {
 }
 const exists = (file: string) => fs.access(path.join(home, file)).then(() => true, () => false);
 
-/** Env for the code under test: only the fake bin dir is searched, and the home is isolated. */
-const envWith = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({ PATH: bin, ...extra });
+/** Env for the code under test. Agents are located through `installed`, not through PATH. */
+const envWith = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({ PATH: '', ...extra });
 
 /**
  * Behaves like the real CLIs, as observed: Claude refuses a duplicate name with
@@ -90,8 +86,14 @@ function fakeCli(env: NodeJS.ProcessEnv): CommandRunner {
   };
 }
 
-const options = (extra: Partial<AgentMcpOptions> = {}, env: NodeJS.ProcessEnv = envWith()): AgentMcpOptions =>
-  ({ env, home, platform: 'linux', run: fakeCli(env), ...extra });
+const options = (extra: Partial<AgentMcpOptions> = {}, env: NodeJS.ProcessEnv = envWith()): AgentMcpOptions => ({
+  env,
+  home,
+  platform: 'linux',
+  run: fakeCli(env),
+  findBinary: (name) => (installed.has(name) ? `/fake/bin/${name}` : null),
+  ...extra,
+});
 
 const byId = <T extends { id: string }>(items: T[], id: string) => items.find((item) => item.id === id)!;
 

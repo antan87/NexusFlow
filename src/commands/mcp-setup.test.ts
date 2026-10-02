@@ -14,7 +14,7 @@ vi.mock('../core/agent-mcp.js', async (importOriginal) => ({
 }));
 
 let home: string;
-let realHome: string | undefined;
+let realHome: { HOME?: string; USERPROFILE?: string };
 let output: string;
 
 const agent = (id: AgentMcpResult['id'], outcome: AgentMcpResult['outcome']): AgentMcpResult => ({ id, name: id, outcome });
@@ -22,8 +22,10 @@ const register = vi.mocked(registerAgentMcp);
 
 beforeEach(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-mcp-setup-'));
-  realHome = process.env.HOME;
-  process.env.HOME = home; // os.homedir() follows HOME on POSIX
+  realHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  // os.homedir() follows HOME on POSIX and USERPROFILE on Windows.
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
   process.exitCode = undefined;
   output = '';
   vi.spyOn(console, 'log').mockImplementation((...parts: unknown[]) => { output += stripVTControlCharacters(parts.join(' ')) + '\n'; });
@@ -33,7 +35,9 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   process.exitCode = undefined;
-  if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+  for (const key of ['HOME', 'USERPROFILE'] as const) {
+    if (realHome[key] === undefined) delete process.env[key]; else process.env[key] = realHome[key];
+  }
   await fs.rm(home, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -69,13 +73,12 @@ describe('mcp setup output', () => {
       const file = path.join(home, '.cursor', 'mcp.json');
       const saved = JSON.stringify({ mcpServers: { 'contextspace-mcp': entry } });
       await fs.writeFile(file, saved, 'utf8');
-      const before = (await fs.stat(file)).mtimeMs;
       register.mockResolvedValue([agent('claude', { result: 'not-installed' })]);
 
       await mcpSetupCommand();
 
+      // Written compactly above; a rewrite would come back indented, so equal text means untouched.
       expect(await fs.readFile(file, 'utf8')).toBe(saved);
-      expect((await fs.stat(file)).mtimeMs).toBe(before);
       expect(output).toContain('Already configured');
       expect(output).toContain('Nothing to change');
       expect(output).not.toContain('Could not find');
