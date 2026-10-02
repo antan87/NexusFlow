@@ -387,7 +387,12 @@ An ad-hoc `nexusflow mcp run` with no `--role` fails closed to the `readonly` to
 | `get_service_logs` | Tail a running service's logs |
 | `get_work_context` | Read the assignment, document IDs, milestones, and edit revisions |
 | `update_milestone_plan` | Create, edit, reorder, or remove feature-specific milestones; an empty list disables them |
-| `request_user_input` | Flag the CLI chat of an agent that is blocked on the user, so a user with many chats open can see which one is waiting. The agent still asks its full question in the chat and ends its turn; the user replies there |
+| `request_user_input` | Flag the CLI chat of an agent that is blocked on the user, so a user with many chats open can see which one is waiting. The agent still asks its full question in the chat and ends its turn; the user replies there. Optional `options` become answer buttons that fill the prompt; the user still presses Enter |
+| `show_in_reader` | Open a document, a file at a line, or a diff in the reader beside the user's chat. Show-only: the file must exist inside the workspace, nothing is edited, and a repeat within a minute is ignored |
+| `annotate_document` | Leave a question, risk or to-do note on one line of a file, shown in the reader as a margin note labelled as the AI's |
+| `suggest_next` | Offer the user one next move with its reason, shown as a Next button in the progress strip |
+| `set_milestone` | Start a milestone or block it with a reason. Reopening and completing are only proposals: the user decides, and a finished milestone must pass its own check |
+| `get_screen_context` | Ask what the user is looking at. Answers only when the user has switched sharing on in the app; it is off by default and switching it off deletes what was stored |
 | `update_work_assignment` | Set work type, size, stage, objective, expected output, stopping point, and scope |
 | `add_work_document` | Attach original text or a document link with role, status, and scope |
 | `update_work_document` | Edit source labels and scope while preserving original content |

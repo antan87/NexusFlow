@@ -803,6 +803,9 @@ export interface LifecycleStep {
   reopenedBy?: 'user' | 'agent';
   /** How many times this milestone has been reopened. Survives completion. */
   reopenCount?: number;
+  /** Set while the milestone is blocked on something outside the work itself. Cleared when it is started again. */
+  blockedReason?: string;
+  blockedAt?: string;
 }
 
 /** Information about sister branches and collaborator commits tracked in the workspace. */

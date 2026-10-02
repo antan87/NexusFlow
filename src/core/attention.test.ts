@@ -327,3 +327,34 @@ describe('acknowledgeInputRequests', () => {
     expect((await listOpenInputRequests(dir, NOW)).map((r) => r.id)).toEqual(['later']);
   });
 });
+
+describe('answer options on a request', () => {
+  it('are returned with the request, cleaned, cut to length and without blanks or repeats', async () => {
+    const { dir, ledger } = await workspace();
+    await fs.writeFile(ledger, line(request({
+      options: ['Remove it', '  Keep it \n', '', 'Remove it', 42, null, '\u0007Both', 'x'.repeat(200)],
+    })), 'utf8');
+    const found = await latestInputRequest(dir, NOW);
+    expect(found?.options).toEqual(['Remove it', 'Keep it', 'Both', 'x'.repeat(80)]);
+  });
+
+  it('are limited to six', async () => {
+    const { dir, ledger } = await workspace();
+    await fs.writeFile(ledger, line(request({ options: Array.from({ length: 12 }, (_, i) => `Option ${i}`) })), 'utf8');
+    expect((await latestInputRequest(dir, NOW))?.options).toEqual(['Option 0', 'Option 1', 'Option 2', 'Option 3', 'Option 4', 'Option 5']);
+  });
+
+  it('are left out entirely when the ledger holds anything but a usable list', async () => {
+    const { dir, ledger } = await workspace();
+    for (const options of ['Remove it', {}, [], ['  ', '\n'], null]) {
+      await fs.writeFile(ledger, line(request({ options })), 'utf8');
+      expect(await latestInputRequest(dir, NOW)).not.toHaveProperty('options');
+    }
+  });
+
+  it('come back from the open list as well as from the alert', async () => {
+    const { dir, ledger } = await workspace();
+    await fs.writeFile(ledger, line(request({ id: 'a', options: ['Yes', 'No'] })), 'utf8');
+    expect((await listOpenInputRequests(dir, NOW))[0]).toMatchObject({ id: 'a', options: ['Yes', 'No'] });
+  });
+});

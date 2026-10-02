@@ -295,6 +295,16 @@ describe('buildContextContent', () => {
       expect(mentions[0]).toContain('No MCP');
     });
 
+    it('points agents at the screen tools in one line, saying they only show things, with a fallback when MCP is absent', async () => {
+      const content = await buildContextContent(ctxFor({}));
+
+      const mentions = content.split('\n').filter((line) => line.includes('show_in_reader'));
+      expect(mentions).toHaveLength(1);
+      for (const tool of ['annotate_document', 'suggest_next', 'set_milestone']) expect(mentions[0]).toContain(tool);
+      expect(mentions[0]).toContain('only show things');
+      expect(mentions[0]).toContain('No MCP');
+    });
+
     it('says nothing about relationships or ordering when there are none', async () => {
       // An empty "needs: none" column and a start hint that asserts a
       // non-existent dependency would both be worse than silence.
@@ -313,10 +323,10 @@ describe('buildContextContent', () => {
       const content = await buildContextContent(relatedCtx());
 
       expect(content.split('\n').length).toBeLessThan(40);
-      // 1600 until the request_user_input pointer was added. Agents that load MCP
-      // tools on demand need it to know the tool exists, so it is the one line
-      // allowed past the old cap.
-      expect(content.length).toBeLessThan(1800);
+      // 1600 until the request_user_input pointer was added, then 1800 until the
+      // screen-tool pointer. Agents that load MCP tools on demand need a line like
+      // each to know the tools exist; these are the two lines allowed past the old cap.
+      expect(content.length).toBeLessThan(2000);
     });
   });
 

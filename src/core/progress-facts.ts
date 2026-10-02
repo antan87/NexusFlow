@@ -36,6 +36,8 @@ export interface MilestoneFact {
   /** Milestones it depends on that are not finished. */
   waitingOn: string[];
   unblockCondition?: string;
+  /** Why the milestone is blocked, in the words of whoever said so. Present only while it is blocked. */
+  blockedReason?: string;
 }
 
 export interface MilestoneCounts {
@@ -109,6 +111,7 @@ export function deriveMilestoneFacts(steps: readonly LifecycleStep[]): Milestone
       reopenCount: step.reopenCount ?? 0,
       waitingOn: state === 'done' ? [] : (step.dependsOn ?? []).filter((id) => !finished.has(id)),
       ...(step.unblockCondition ? { unblockCondition: step.unblockCondition } : {}),
+      ...(state === 'blocked' && step.blockedReason ? { blockedReason: step.blockedReason } : {}),
     };
   });
 }

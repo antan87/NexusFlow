@@ -249,6 +249,9 @@ export async function advanceLifecycleStep(
     Object.assign(currentStep, step);
     if (action === 'start') {
       currentStep.status = 'in_progress';
+      // Starting again ends a block.
+      delete currentStep.blockedReason;
+      delete currentStep.blockedAt;
       lifecycle.currentStepId = step.id;
     } else if (action === 'complete' && !gateFailed) {
       currentStep.status = 'completed';
@@ -258,7 +261,8 @@ export async function advanceLifecycleStep(
       delete currentStep.reopenReason;
       delete currentStep.reopenedBy;
       for (const nextStep of lifecycle.steps) {
-        if (nextStep.status === 'blocked' && dependenciesAreComplete(lifecycle.steps, nextStep)) {
+        // A block with a reason was set deliberately; only starting the milestone again ends it.
+        if (nextStep.status === 'blocked' && !nextStep.blockedReason && dependenciesAreComplete(lifecycle.steps, nextStep)) {
           nextStep.status = 'pending';
         }
       }
@@ -284,7 +288,7 @@ export async function advanceLifecycleStep(
 
 /** A reopen request that cannot be carried out, with a code the server maps to an HTTP status. */
 export class LifecycleStepError extends Error {
-  constructor(message: string, readonly code: 'not_found' | 'not_reopenable' | 'conflict') {
+  constructor(message: string, readonly code: 'not_found' | 'not_reopenable' | 'not_blockable' | 'conflict') {
     super(message);
     this.name = 'LifecycleStepError';
   }
@@ -293,14 +297,23 @@ export class LifecycleStepError extends Error {
 /** Longest reason kept with a reopened milestone. */
 export const REOPEN_REASON_MAX_LENGTH = 500;
 
+/**
+ * A reason typed by a person or an agent, made safe to store and to print in the plan: control characters
+ * (which could reshape a terminal or a toast) are removed and whitespace is collapsed (so a reason cannot
+ * break the milestone plan's list formatting) before the length check.
+ */
+function reasonText(emptyMessage: string) {
+  return z.string()
+    // eslint-disable-next-line no-control-regex
+    .transform((value) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(1, emptyMessage).max(REOPEN_REASON_MAX_LENGTH, `Keep the reason to ${REOPEN_REASON_MAX_LENGTH} characters or fewer.`));
+}
+
 const reopenSchema = z.object({
-  // Control characters could reshape a terminal or a toast, so they are removed before the length check.
-  // eslint-disable-next-line no-control-regex
-  // Whitespace is collapsed so a reason cannot break the milestone plan's list formatting.
-  reason: z.string().transform((value) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim())
-    .pipe(z.string().min(1, 'Say why the milestone is being reopened.').max(REOPEN_REASON_MAX_LENGTH, `Keep the reason to ${REOPEN_REASON_MAX_LENGTH} characters or fewer.`)),
+  reason: reasonText('Say why the milestone is being reopened.'),
   by: z.enum(['user', 'agent']),
 });
+const blockSchema = z.object({ reason: reasonText('Say what the milestone is blocked on.') });
 
 /**
  * Sends a finished milestone back for rework and records why. Work loops back,
@@ -340,6 +353,41 @@ export async function reopenLifecycleStep(
     currentStep.reopenedBy = by;
     currentStep.reopenCount = (currentStep.reopenCount ?? 0) + 1;
     current.currentStepId = currentStep.id;
+    current.revision = (current.revision ?? 0) + 1;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+}
+
+/**
+ * Marks a milestone as blocked on something outside the work itself, with the reason. Anyone may say so,
+ * including the AI: it only changes what is shown, never what is finished. Finished work cannot be blocked.
+ * Starting the milestone again ends the block.
+ */
+export async function blockLifecycleStep(
+  workspacePath: string,
+  stepId: string,
+  input: { reason: string },
+): Promise<WorkspaceLifecycle> {
+  const { reason } = blockSchema.parse(input);
+  const lifecycle = await loadWorkspaceLifecycle(workspacePath, { includeFleet: false });
+  const step = lifecycle.steps.find((candidate) => candidate.id === stepId);
+  if (!step) throw new LifecycleStepError(`Step "${stepId}" not found in workspace lifecycle.`, 'not_found');
+  if (step.status === 'completed') {
+    throw new LifecycleStepError(`Step "${stepId}" is already completed, so it cannot be blocked.`, 'not_blockable');
+  }
+  const originalStep = JSON.stringify(step);
+
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const current = state.lifecycle;
+    const currentStep = current?.steps.find((candidate) => candidate.id === stepId);
+    if (!current || !currentStep || JSON.stringify(currentStep) !== originalStep) {
+      throw new LifecycleStepError(`Step "${stepId}" changed during this operation. Reload the flow and retry.`, 'conflict');
+    }
+    currentStep.status = 'blocked';
+    currentStep.blockedReason = reason;
+    // Saying it again with a new reason keeps when it first became blocked.
+    currentStep.blockedAt ??= new Date().toISOString();
     current.revision = (current.revision ?? 0) + 1;
     current.updatedAt = new Date().toISOString();
     return current;
@@ -436,6 +484,7 @@ export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true):
   for (const [index, step] of lifecycle.steps.entries()) {
     const reopened = live && Boolean(step.reopenedAt) && step.status !== 'completed';
     lines.push(`${index + 1}. **${step.title}**${live ? ` — ${reopened ? 'reopened, in progress' : step.status.replaceAll('_', ' ')}` : ''}`);
+    if (live && step.status === 'blocked' && step.blockedReason) lines.push(`   Blocked: ${step.blockedReason}`);
     if (reopened) lines.push(`   Reopened${step.reopenedBy ? ` by ${step.reopenedBy === 'user' ? 'the user' : 'an agent'}` : ''}: ${step.reopenReason ?? 'no reason recorded'}`);
     if (step.description) lines.push(`   ${step.description}`);
     if (step.dependsOn?.length) lines.push(`   Depends on: ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}`);

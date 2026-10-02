@@ -1,5 +1,6 @@
 import { readPlanningNotes } from '../core/planning-notes.js';
 import { planningTools } from './planning-tools.js';
+import { screenTools } from './screen-tools.js';
 /**
  * @module mcp/tools
  * Registry of MCP tools NexusFlow exposes to AI assistants. Each tool declares
@@ -46,6 +47,9 @@ import { loadPinnedWorkroomClientForWorkspace } from '../workrooms/manager.js';
 import {
   INPUT_REQUEST_DISPLAY_LIMIT,
   INPUT_REQUEST_HARNESS_LIMIT,
+  INPUT_REQUEST_OPTIONS_MAX,
+  INPUT_REQUEST_OPTION_LIMIT,
+  cleanInputOptions,
   cleanInputRequestText,
   latestInputRequest,
 } from '../core/attention.js';
@@ -181,6 +185,7 @@ async function requireWorkspace(ctx: ToolContext): Promise<void> {
 
 export const tools: NexusFlowTool[] = [
   ...planningTools,
+  ...screenTools,
   {
     name: 'get_planning_notes',
     description: 'Read the authored delivery plan, questions with owner/status, existing work evidence, and deferred decisions. Refresh preserves this document.',
@@ -1193,7 +1198,7 @@ export const tools: NexusFlowTool[] = [
   {
     name: 'request_user_input',
     description:
-      `Alert the user that you are blocked and need their answer, decision, approval or review before you can continue. ${BRAND_NAME} marks this workspace's CLI chat as needing attention and shows your question, so a user with many chats open can tell which one is waiting on them. Call it when you would otherwise end your turn with a question for the user. Then write the full question in the chat as usual and end your turn; the user replies there. Do not use it for progress updates (use post_workroom_handoff) or for questions you can settle yourself.`,
+      `Alert the user that you are blocked and need their answer, decision, approval or review before you can continue. ${BRAND_NAME} marks this workspace's CLI chat as needing attention and shows your question, so a user with many chats open can tell which one is waiting on them. Call it when you would otherwise end your turn with a question for the user. Then write the full question in the chat as usual and end your turn; the user replies there. Do not use it for progress updates (use post_workroom_handoff) or for questions you can settle yourself. When the answer is a choice, add options: each becomes a button that fills the user's prompt with that answer, and they still press Enter, so nothing is sent for them.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1203,6 +1208,12 @@ export const tools: NexusFlowTool[] = [
           minLength: 1,
           maxLength: INPUT_REQUEST_MAX_LENGTH,
           description: `The question or decision you need from the user, as plain text of at most ${INPUT_REQUEST_MAX_LENGTH} characters. Put longer context in the chat itself.`,
+        },
+        options: {
+          type: 'array',
+          maxItems: INPUT_REQUEST_OPTIONS_MAX,
+          items: { type: 'string', minLength: 1, maxLength: INPUT_REQUEST_OPTION_LIMIT },
+          description: `Optional short answers the user can pick, at most ${INPUT_REQUEST_OPTIONS_MAX} of ${INPUT_REQUEST_OPTION_LIMIT} characters each. Use them only when the answer really is a choice.`,
         },
         harness: { type: 'string', description: 'Optional originating harness name (e.g. "antigravity", "claude", "codex", "pi").' },
         ...workspaceIdProp,
@@ -1223,6 +1234,8 @@ export const tools: NexusFlowTool[] = [
           );
         }
         const harness = cleanInputRequestText(args.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent';
+        if (args.options !== undefined && !Array.isArray(args.options)) return errorResult('options must be a list of short answers.');
+        const options = cleanInputOptions(args.options);
 
         // This server can be started below the workspace root; the ledger lives at the root.
         const root = (await findWorkspaceRoot(ctx.workspacePath)) ?? ctx.workspacePath;
@@ -1235,6 +1248,7 @@ export const tools: NexusFlowTool[] = [
           const repeat = latest
             && latest.harness === harness
             && latest.message === message
+            && JSON.stringify(latest.options ?? []) === JSON.stringify(options ?? [])
             && now - Date.parse(latest.timestamp) < INPUT_REQUEST_REPEAT_WINDOW_MS
             ? latest
             : null;
@@ -1257,6 +1271,7 @@ export const tools: NexusFlowTool[] = [
             author: 'agent',
             kind: 'input_request',
             message,
+            ...(options ? { options } : {}),
           };
           await fs.appendFile(ledger.chatPath, JSON.stringify(entry) + '\n', 'utf8');
           return json({

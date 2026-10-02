@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { resolveWorkspaceChatLedger } from './constants.js';
+import { readLedgerTail } from './ledger-tail.js';
 
 /** Longest request message handed to the app, whatever the ledger holds. */
 export const INPUT_REQUEST_DISPLAY_LIMIT = 500;
@@ -26,11 +27,18 @@ const CLOCK_SKEW_MS = 5 * 60_000;
  */
 const TAIL_STEPS = [64 * 1024, 512 * 1024];
 
+/** Most answer options a request can offer. */
+export const INPUT_REQUEST_OPTIONS_MAX = 6;
+/** Longest answer option, in characters. */
+export const INPUT_REQUEST_OPTION_LIMIT = 80;
+
 export interface InputRequest {
   id: string;
   timestamp: string;
   harness: string;
   message: string;
+  /** Short answers the agent suggests. A button fills the prompt with one; the user still presses Enter. */
+  options?: string[];
 }
 
 /**
@@ -44,35 +52,55 @@ export function cleanInputRequestText(value: unknown): string {
   return value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim();
 }
 
-interface Tail {
-  lines: string[];
-  /** The whole file was read, so reading more finds nothing new. */
-  complete: boolean;
-}
-
-async function readTail(file: string, sinceMs: number, bytes: number): Promise<Tail> {
-  let handle: fs.FileHandle | undefined;
-  try {
-    handle = await fs.open(file, 'r');
-    const stat = await handle.stat();
-    // A ledger untouched since the cutoff cannot hold a request newer than it.
-    if (!stat.isFile() || stat.mtimeMs < sinceMs) return { lines: [], complete: true };
-    const start = Math.max(0, stat.size - bytes);
-    const buffer = Buffer.alloc(stat.size - start);
-    // A short read (the file shrank meanwhile) must not leave padding in the last line.
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
-    const lines = buffer.subarray(0, bytesRead).toString('utf8').split('\n');
-    // Reading from mid-file starts inside a line; drop that fragment.
-    if (start > 0) lines.shift();
-    return { lines, complete: start === 0 };
-  } catch {
-    return { lines: [], complete: true };
-  } finally {
-    await handle?.close().catch(() => {});
+/**
+ * Answer options from an agent or a ledger, made safe to show: cleaned like any
+ * ledger text, cut to length, without blanks or repeats, and at most
+ * {@link INPUT_REQUEST_OPTIONS_MAX}. Returns undefined when nothing usable is left.
+ */
+export function cleanInputOptions(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const item of value) {
+    const option = cleanInputRequestText(item).replace(/\s+/g, ' ').slice(0, INPUT_REQUEST_OPTION_LIMIT).trim();
+    if (!option || seen.has(option)) continue;
+    seen.add(option);
+    options.push(option);
+    if (options.length === INPUT_REQUEST_OPTIONS_MAX) break;
   }
+  return options.length ? options : undefined;
 }
 
 type Candidate = InputRequest & { time: number };
+
+/** When a ledger entry says it was written, or null when that is missing, invalid or implausibly far ahead. */
+export function ledgerEntryTime(entry: any, now: number): number | null {
+  const time = typeof entry?.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
+  // A timestamp from the future would stay "newest" and pin its alert.
+  return Number.isFinite(time) && time <= now + CLOCK_SKEW_MS ? time : null;
+}
+
+/** The input request a ledger entry holds, or null when it is not one, is stale, or has no message. */
+export function parseInputRequestEntry(entry: any, sinceMs: number, now: number): Candidate | null {
+  if (!entry || typeof entry !== 'object' || entry.kind !== 'input_request') return null;
+  const time = ledgerEntryTime(entry, now);
+  const message = cleanInputRequestText(entry.message).slice(0, INPUT_REQUEST_DISPLAY_LIMIT);
+  if (time === null || time < sinceMs || !message) return null;
+  const options = cleanInputOptions(entry.options);
+  return {
+    id: typeof entry.id === 'string' && entry.id ? entry.id : `${entry.timestamp}`,
+    timestamp: entry.timestamp,
+    harness: cleanInputRequestText(entry.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent',
+    message,
+    ...(options ? { options } : {}),
+    time,
+  };
+}
+
+/** When an acknowledgement entry was written, or null when the entry is not one. */
+export function parseInputAckEntry(entry: any, now: number): number | null {
+  return entry && typeof entry === 'object' && entry.kind === 'input_ack' ? ledgerEntryTime(entry, now) : null;
+}
 
 interface LedgerScan {
   /** Valid input requests in file order. */
@@ -93,24 +121,13 @@ function scanLedger(lines: readonly string[], sinceMs: number, now: number): Led
     } catch {
       continue;
     }
-    if (!entry || typeof entry !== 'object') continue;
-    const time = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
-    // A timestamp from the future would stay "newest" and pin its alert.
-    if (!Number.isFinite(time) || time > now + CLOCK_SKEW_MS) continue;
-    if (entry.kind === 'input_ack') {
-      ackTime = Math.max(ackTime, time);
+    const ack = parseInputAckEntry(entry, now);
+    if (ack !== null) {
+      ackTime = Math.max(ackTime, ack);
       continue;
     }
-    if (entry.kind !== 'input_request') continue;
-    const message = cleanInputRequestText(entry.message).slice(0, INPUT_REQUEST_DISPLAY_LIMIT);
-    if (time < sinceMs || !message) continue;
-    requests.push({
-      id: typeof entry.id === 'string' && entry.id ? entry.id : `${entry.timestamp}`,
-      timestamp: entry.timestamp,
-      harness: cleanInputRequestText(entry.harness).slice(0, INPUT_REQUEST_HARNESS_LIMIT) || 'agent',
-      message,
-      time,
-    });
+    const request = parseInputRequestEntry(entry, sinceMs, now);
+    if (request) requests.push(request);
   }
   return { requests, ackTime };
 }
@@ -141,7 +158,7 @@ export async function latestInputRequest(
 
   for (const file of ledger.readPaths) {
     for (const bytes of TAIL_STEPS) {
-      const tail = await readTail(file, sinceMs, bytes);
+      const tail = await readLedgerTail(file, sinceMs, bytes);
       const scan = scanLedger(tail.lines, sinceMs, now);
       const found = newestOf(scan.requests);
       ackTime = Math.max(ackTime, scan.ackTime);
@@ -174,7 +191,7 @@ export async function listOpenInputRequests(
   let ackTime = 0;
 
   for (const file of ledger.readPaths) {
-    const tail = await readTail(file, sinceMs, TAIL_STEPS[TAIL_STEPS.length - 1]!);
+    const tail = await readLedgerTail(file, sinceMs, TAIL_STEPS[TAIL_STEPS.length - 1]!);
     const scan = scanLedger(tail.lines, sinceMs, now);
     ackTime = Math.max(ackTime, scan.ackTime);
     for (const request of scan.requests) byId.set(request.id, request);
