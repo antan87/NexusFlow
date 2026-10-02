@@ -1281,7 +1281,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {visitedSections.has('documents') && <div hidden={subTab !== 'documents'}>
                 <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
               </div>}
-              {subTab === 'changes' && <ChangesViewer ws={selected} {...changesProps} />}
+              {subTab === 'changes' && <ChangesViewer key={selected.branchName} ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} readOnly={archived} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">

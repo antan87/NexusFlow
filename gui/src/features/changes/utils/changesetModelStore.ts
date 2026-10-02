@@ -4,12 +4,21 @@
  */
 import type * as monaco from 'monaco-editor';
 
+// The Monaco API last handed to this store. The app bundles Monaco as a module
+// and never sets window.monaco, and importing it here would pull the whole
+// editor out of its lazy chunk, so disposal reaches Monaco through this.
+let knownMonaco: typeof monaco | undefined;
+
 /**
  * Resolves the active Monaco API instance safely, preferring explicitly passed API,
- * falling back to window.monaco if it contains editor, and finally defaulting to the imported module.
+ * then the one this store has already been given, then window.monaco if it contains editor.
  */
 function resolveMonaco(monacoApi?: typeof monaco): typeof monaco | undefined {
-  if (monacoApi?.editor) return monacoApi;
+  if (monacoApi?.editor) {
+    knownMonaco = monacoApi;
+    return monacoApi;
+  }
+  if (knownMonaco?.editor) return knownMonaco;
   if (typeof window !== 'undefined' && (window as any).monaco?.editor) {
     return (window as any).monaco;
   }
@@ -100,6 +109,41 @@ export function getOrCreateTextModel(
       return null as any;
     }
   }
+}
+
+/**
+ * Disposes the models of one file, for example once it has left the changeset.
+ * A file with no models is not an error.
+ */
+export function disposeChangesetModelsFor(repoName: string, filePath: string, monacoApi?: typeof monaco): void {
+  const m = resolveMonaco(monacoApi);
+  if (!m?.editor) return;
+
+  for (const uri of [getModifiedFileUri(repoName, filePath, m), getOriginalFileUri(repoName, filePath, m)]) {
+    try {
+      const model = m.editor.getModel(uri);
+      if (model && !model.isDisposed()) model.dispose();
+    } catch (err) {
+      console.warn('[changesetModelStore] Error disposing model:', err);
+    }
+  }
+}
+
+/**
+ * Disposes the models of several files once the current cleanup pass is over.
+ * Monaco reports an error when a model is disposed while a diff editor still
+ * holds it, and the editors that unmount together with their owner only release
+ * their models after the owner's own cleanup has run.
+ */
+export function disposeChangesetModelsAfterEditors(
+  files: ReadonlyArray<{ repoName: string; file: string }>,
+  monacoApi?: typeof monaco,
+): void {
+  if (files.length === 0) return;
+  const owned = files.map(({ repoName, file }) => ({ repoName, file }));
+  setTimeout(() => {
+    for (const { repoName, file } of owned) disposeChangesetModelsFor(repoName, file, monacoApi);
+  }, 0);
 }
 
 /**

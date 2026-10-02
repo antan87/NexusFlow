@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 
 import {
   FolderGit2,
@@ -33,11 +33,29 @@ import {
   type RawAstSymbol,
 } from './utils/changesetSymbolIndex.js';
 import { parseUnifiedDiff } from './utils/diffParser.js';
+import { cacheKeyFor, changeVersion, diffCacheDelta, type FetchedFile } from './utils/changeVersion.js';
+import { findChangedFileIndex, isAbsoluteReference, repoDirName } from './utils/changesetNavigation.js';
+import { disposeChangesetModelsAfterEditors } from './utils/changesetModelStore.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { useConfig } from '../../lib/api/queries.js';
 import { useCockpitStore } from '../cockpit/cockpitStore.js';
 import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { floatingChatStore } from '../chat/floatingChatStore.js';
+
+/** Store `value` under `key`, or remove the key when there is nothing to store. */
+function setOrClear<T>(
+  setter: React.Dispatch<React.SetStateAction<Record<string, T>>>,
+  key: string,
+  value: T | null | undefined | '',
+): void {
+  setter((prev) => {
+    if (value) return { ...prev, [key]: value };
+    if (!(key in prev)) return prev;
+    const next = { ...prev };
+    delete next[key];
+    return next;
+  });
+}
 
 interface ChangesViewerProps {
   ws: Feature;
@@ -89,6 +107,9 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [targetLineMap, setTargetLineMap] = useState<Record<string, number>>({});
   const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
+  // What was fetched for each file, and at which version. Bookkeeping only:
+  // nothing renders from it, so it lives in a ref.
+  const fetchedFiles = useRef<Record<string, FetchedFile>>({});
 
   const config = useConfig().data?.config;
   const cockpit = useCockpitStore();
@@ -110,8 +131,17 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setExpandedFiles({});
     setDiffErrors({});
     setTargetLineMap({});
+    fetchedFiles.current = {};
     globalChangesetSymbolIndex.clear();
   }, [ws.branchName]);
+
+  // Leaving the Changes tab (or switching workspace, which remounts this) drops
+  // every cached diff, so release the editor models those diffs created too.
+  useEffect(() => () => {
+    const files = Object.values(fetchedFiles.current);
+    fetchedFiles.current = {};
+    disposeChangesetModelsAfterEditors(files);
+  }, []);
 
   // Load symbols across all modified workspace files in a single fast batch call
   useEffect(() => {
@@ -226,58 +256,135 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setExpandedFiles({});
   };
 
-  const toggleFileExpansion = useCallback(
-    async (repoName: string, fileName: string) => {
-      const cacheKey = `${repoName}/${fileName}`;
-      const newExpanded = !expandedFiles[cacheKey];
-      setExpandedFiles((prev) => ({ ...prev, [cacheKey]: newExpanded }));
+  /** The version of a file's change as the current change list describes it. */
+  const versionOf = useCallback(
+    (repoName: string, fileName: string): string => {
+      const entry = gitChanges
+        .find((repo) => repo.repoName === repoName)
+        ?.files?.find((file: { file: string }) => file.file === fileName);
+      return entry ? changeVersion(entry) : '';
+    },
+    [gitChanges],
+  );
 
-      if (newExpanded && !diffCache[cacheKey]) {
+  const dropFileCaches = useCallback((keys: ReadonlySet<string>) => {
+    const without = <T,>(prev: Record<string, T>): Record<string, T> =>
+      Object.fromEntries(Object.entries(prev).filter(([key]) => !keys.has(key)));
+    setDiffCache(without);
+    setFileContentCache(without);
+    setOriginalContentCache(without);
+    setSymbolsCache(without);
+    setDiffErrors(without);
+  }, []);
+
+  // `background` refreshes a diff that is already on screen: the viewer keeps
+  // showing the old one until the new one arrives, rather than unmounting
+  // behind a spinner and rebuilding the editor.
+  const loadDiff = useCallback(
+    async (repoName: string, fileName: string, version: string, background = false) => {
+      const cacheKey = cacheKeyFor(repoName, fileName);
+      fetchedFiles.current[cacheKey] = { repoName, file: fileName, version };
+      // False once a newer request, or the file leaving the change list, took over.
+      const isCurrent = () => fetchedFiles.current[cacheKey]?.version === version;
+
+      if (!background) {
         setDiffLoading((prev) => ({ ...prev, [cacheKey]: true }));
         setDiffErrors((prev) => ({ ...prev, [cacheKey]: '' }));
-        try {
-          const encodedId = encodeURIComponent(ws.branchName);
-          const encodedRepo = encodeURIComponent(repoName);
-          const encodedFile = encodeURIComponent(fileName);
-          const res = await fetch(
-            `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
+      }
+      try {
+        const encodedId = encodeURIComponent(ws.branchName);
+        const encodedRepo = encodeURIComponent(repoName);
+        const encodedFile = encodeURIComponent(fileName);
+        const res = await fetch(
+          `${API_BASE}/api/workspace/${encodedId}/changes/diff?repo=${encodedRepo}&file=${encodedFile}`
+        );
+        if (!res.ok) {
+          throw new Error(`Failed to load diff: ${res.statusText}`);
+        }
+        const data = await res.json();
+        if (!isCurrent()) return;
+
+        setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
+        perfMark('cs:diff-ready', { panel: 'changes', repo: repoName, file: fileName });
+        // Set or clear, never skip: a refresh of a file that became empty must not keep its old content.
+        setOrClear(setFileContentCache, cacheKey, data.fileContent);
+        setOrClear(setOriginalContentCache, cacheKey, data.originalContent);
+        setOrClear(setSymbolsCache, cacheKey, data.symbols);
+        setOrClear(setDiffErrors, cacheKey, '');
+        if (data.diff) {
+          const parsed = parseUnifiedDiff(data.diff);
+          const contentToIndex = data.fileContent || parsed.modifiedContent;
+          const repoObj = gitChanges.find((r) => r.repoName === repoName);
+          globalChangesetSymbolIndex.indexFile(
+            repoName,
+            fileName,
+            contentToIndex,
+            parsed.hunks,
+            repoObj?.repoPath,
+            data.symbols
           );
-          if (!res.ok) {
-            throw new Error(`Failed to load diff: ${res.statusText}`);
-          }
-          const data = await res.json();
-          setDiffCache((prev) => ({ ...prev, [cacheKey]: data.diff || '' }));
-          perfMark('cs:diff-ready', { panel: 'changes', repo: repoName, file: fileName });
-          if (data.fileContent) {
-            setFileContentCache((prev) => ({ ...prev, [cacheKey]: data.fileContent }));
-          }
-          if (data.originalContent) {
-            setOriginalContentCache((prev) => ({ ...prev, [cacheKey]: data.originalContent }));
-          }
-          if (data.symbols) {
-            setSymbolsCache((prev) => ({ ...prev, [cacheKey]: data.symbols }));
-          }
-          if (data.diff) {
-            const parsed = parseUnifiedDiff(data.diff);
-            const contentToIndex = data.fileContent || parsed.modifiedContent;
-            const repoObj = gitChanges.find((r) => r.repoName === repoName);
-            globalChangesetSymbolIndex.indexFile(
-              repoName,
-              fileName,
-              contentToIndex,
-              parsed.hunks,
-              repoObj?.repoPath,
-              data.symbols
-            );
-          }
-        } catch (err: any) {
-          setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
-        } finally {
+        }
+      } catch (err: any) {
+        if (!isCurrent()) return;
+        // Show the error alone: a diff that no longer matches its file is worse than none.
+        delete fetchedFiles.current[cacheKey];
+        dropFileCaches(new Set([cacheKey]));
+        setDiffErrors((prev) => ({ ...prev, [cacheKey]: err.message || 'Unknown error' }));
+      } finally {
+        // A newer request owns the loading flag while it is in flight.
+        if (isCurrent() || !fetchedFiles.current[cacheKey]) {
           setDiffLoading((prev) => ({ ...prev, [cacheKey]: false }));
         }
       }
     },
-    [expandedFiles, diffCache, ws.branchName, gitChanges]
+    [ws.branchName, gitChanges, dropFileCaches]
+  );
+
+  // Keep cached diffs honest as the working tree moves: refresh a changed file
+  // that is open, drop a changed one that is closed, and forget files that left
+  // the change list (committed, reverted, deleted) together with their editor models.
+  useEffect(() => {
+    const { stale, removed } = diffCacheDelta(fetchedFiles.current, gitChanges ?? []);
+    if (stale.length === 0 && removed.length === 0) return;
+
+    const drop = new Set<string>(removed);
+    const gonePaths: FetchedFile[] = [];
+    for (const key of removed) {
+      const entry = fetchedFiles.current[key];
+      delete fetchedFiles.current[key];
+      if (entry) gonePaths.push(entry);
+    }
+    disposeChangesetModelsAfterEditors(gonePaths);
+    for (const key of stale) {
+      const entry = fetchedFiles.current[key];
+      if (!entry) continue;
+      if (expandedFiles[key]) {
+        void loadDiff(entry.repoName, entry.file, versionOf(entry.repoName, entry.file), true);
+      } else {
+        delete fetchedFiles.current[key];
+        drop.add(key);
+      }
+    }
+    if (drop.size === 0) return;
+    dropFileCaches(drop);
+    // A file that left the list must not come back already "expanded" with nothing loaded.
+    if (removed.length > 0) {
+      const gone = new Set(removed);
+      setExpandedFiles((prev) => Object.fromEntries(Object.entries(prev).filter(([key]) => !gone.has(key))));
+    }
+  }, [gitChanges, expandedFiles, loadDiff, versionOf, dropFileCaches]);
+
+  const toggleFileExpansion = useCallback(
+    async (repoName: string, fileName: string) => {
+      const cacheKey = cacheKeyFor(repoName, fileName);
+      const newExpanded = !expandedFiles[cacheKey];
+      setExpandedFiles((prev) => ({ ...prev, [cacheKey]: newExpanded }));
+
+      if (newExpanded && !diffCache[cacheKey]) {
+        await loadDiff(repoName, fileName, versionOf(repoName, fileName));
+      }
+    },
+    [expandedFiles, diffCache, loadDiff, versionOf]
   );
 
   // Jump to a specific file in the changeset and optionally reveal a line
@@ -318,21 +425,22 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
   const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
-    const cleanTarget = targetFile.replace(/\\/g, '/').replace(/^\//, '');
-    const index = allFiles.findIndex((f) => {
-      const cleanF = f.file.replace(/\\/g, '/').replace(/^\//, '');
-      const repoMatches = f.repoName === targetRepo || targetRepo === 'workspace' || !targetRepo;
-      return repoMatches && (cleanF === cleanTarget || cleanF.endsWith(cleanTarget) || cleanTarget.endsWith(cleanF));
-    });
+    const index = findChangedFileIndex(allFiles, targetRepo, targetFile);
 
     if (index !== -1) {
       void jumpToFile(index, line);
       showToast?.(`Navigated to ${targetFile}${line ? `:${line}` : ''}`, 'info');
     } else {
-      showToast?.(`Opening ${targetFile}${line ? `:${line}` : ''} in ${editorLabel}`, 'info');
       const matchedRepo = gitChanges.find((r) => r.repoName === targetRepo);
-      const targetRepoPath = matchedRepo?.repoPath || (ws.repos && ws.repos.find((p: string) => p.endsWith(targetRepo))) || targetRepo;
-      openInVsCodeAtLine(targetRepoPath, targetFile, line || 1, 1, defaultEditor);
+      const targetRepoPath = matchedRepo?.repoPath
+        || ws.repos?.find((p: string) => repoDirName(p) === targetRepo);
+      // Without a repository to anchor it, a relative path would build a URI to nowhere.
+      if (!targetRepoPath && !isAbsoluteReference(targetFile)) {
+        showToast?.(`Could not locate ${targetFile} in this workspace`, 'error');
+        return;
+      }
+      showToast?.(`Opening ${targetFile}${line ? `:${line}` : ''} in ${editorLabel}`, 'info');
+      openInVsCodeAtLine(targetRepoPath ?? '', targetFile, line || 1, 1, defaultEditor);
     }
   };
 
