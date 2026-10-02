@@ -44,7 +44,10 @@ describe('diffCacheDelta', () => {
 
   it('reports a file edited again after its diff was fetched', () => {
     const fetched = Object.fromEntries([fetchedAt('app', 'src/a.ts', 'modified:1:0:10:0')]);
-    expect(diffCacheDelta(fetched, repos)).toEqual({ stale: ['app/src/a.ts'], removed: [] });
+    expect(diffCacheDelta(fetched, repos)).toEqual({
+      stale: [{ key: 'app/src/a.ts', version: changeVersion(repos[0]!.files[0]!) }],
+      removed: [],
+    });
   });
 
   it('reports a file that left the change list, for example after a commit', () => {
@@ -72,6 +75,9 @@ describe('diffCacheDelta', () => {
       fetchedAt('one', 'x.ts', changeVersion(twin[0]!.files[0]!)),
       fetchedAt('two', 'x.ts', changeVersion(twin[0]!.files[0]!)),
     ]);
-    expect(diffCacheDelta(fetched, twin)).toEqual({ stale: ['two/x.ts'], removed: [] });
+    expect(diffCacheDelta(fetched, twin)).toEqual({
+      stale: [{ key: 'two/x.ts', version: changeVersion(twin[1]!.files[0]!) }],
+      removed: [],
+    });
   });
 });

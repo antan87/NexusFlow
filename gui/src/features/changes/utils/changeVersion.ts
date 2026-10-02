@@ -22,6 +22,8 @@ export interface VersionedRepo {
 /** What a viewer fetched for one file, and the version it was fetched at. */
 export interface FetchedFile {
   repoName: string;
+  /** The worktree path, which scopes the file's editor models to its workspace. */
+  repoPath?: string;
   file: string;
   version: string;
 }
@@ -34,9 +36,15 @@ export function changeVersion(file: Omit<VersionedFile, 'file'>): string {
   return [file.type, file.additions, file.deletions, file.size, file.mtimeMs].join(':');
 }
 
+export interface StaleFile {
+  key: string;
+  /** The version the file has now, so a refetch does not have to look it up again. */
+  version: string;
+}
+
 export interface CacheDelta {
   /** Still changed, but no longer at the version that was fetched. */
-  stale: string[];
+  stale: StaleFile[];
   /** No longer in the change list at all (committed, reverted or deleted). */
   removed: string[];
 }
@@ -54,7 +62,7 @@ export function diffCacheDelta(
     }
   }
 
-  const stale: string[] = [];
+  const stale: StaleFile[] = [];
   const removed: string[] = [];
   for (const [key, entry] of Object.entries(fetched)) {
     // A repository that failed to list (a git lock, say) reports no files. That
@@ -62,7 +70,7 @@ export function diffCacheDelta(
     if (unlistable.has(entry.repoName)) continue;
     const version = current.get(key);
     if (version === undefined) removed.push(key);
-    else if (version !== entry.version) stale.push(key);
+    else if (version !== entry.version) stale.push({ key, version });
   }
   return { stale, removed };
 }

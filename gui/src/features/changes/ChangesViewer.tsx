@@ -284,7 +284,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     async (repoName: string, fileName: string, version: string, background = false) => {
       const cacheKey = cacheKeyFor(repoName, fileName);
       const previous = fetchedFiles.current[cacheKey];
-      fetchedFiles.current[cacheKey] = { repoName, file: fileName, version };
+      const repoPath = gitChanges.find((r) => r.repoName === repoName)?.repoPath;
+      fetchedFiles.current[cacheKey] = { repoName, repoPath, file: fileName, version };
       // False once a newer request, or the file leaving the change list, took over.
       const isCurrent = () => fetchedFiles.current[cacheKey]?.version === version;
 
@@ -363,11 +364,11 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       if (entry) gonePaths.push(entry);
     }
     disposeChangesetModelsAfterEditors(gonePaths);
-    for (const key of stale) {
+    for (const { key, version } of stale) {
       const entry = fetchedFiles.current[key];
       if (!entry) continue;
       if (expandedFiles[key]) {
-        void loadDiff(entry.repoName, entry.file, versionOf(entry.repoName, entry.file), true);
+        void loadDiff(entry.repoName, entry.file, version, true);
       } else {
         delete fetchedFiles.current[key];
         drop.add(key);
@@ -380,7 +381,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       const gone = new Set(removed);
       setExpandedFiles((prev) => Object.fromEntries(Object.entries(prev).filter(([key]) => !gone.has(key))));
     }
-  }, [gitChanges, expandedFiles, loadDiff, versionOf, dropFileCaches]);
+  }, [gitChanges, expandedFiles, loadDiff, dropFileCaches]);
 
   const toggleFileExpansion = useCallback(
     async (repoName: string, fileName: string) => {

@@ -654,7 +654,7 @@ export function registerLightweightNavigationProviders(
           if (matches.length === 0) return null;
 
           return matches.map((item) => ({
-            uri: getModifiedFileUri(item.repoName, item.filePath, m),
+            uri: getModifiedFileUri(item.repoName, item.filePath, m, item.repoPath),
             range: {
               startLineNumber: item.lineNumber,
               startColumn: item.column,
