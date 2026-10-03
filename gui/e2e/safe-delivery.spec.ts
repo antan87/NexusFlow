@@ -147,6 +147,7 @@ test('prepare for editing previews path, branch and base before creating anythin
     await route.fulfill({ json: request.dryRun ? plan : { success: true, ...plan } });
   });
   await page.goto('/#/workspaces/deliver/changes');
+  await page.getByRole('button', { name: /^Show repositories and branches for/ }).click();
   await page.getByRole('button', { name: 'Prepare docs for editing', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Prepare docs for editing' });
   await expect(dialog.getByTestId('prepare-plan')).toContainText('/ws/deliver/docs');
@@ -168,6 +169,7 @@ test('a path collision is shown and cannot be confirmed', async ({ page }) => {
     alreadyIsolated: false, conflicts: ['A folder already exists at /ws/deliver/docs. Move or remove it first.'],
   } }));
   await page.goto('/#/workspaces/deliver/changes');
+  await page.getByRole('button', { name: /^Show repositories and branches for/ }).click();
   await page.getByRole('button', { name: 'Prepare docs for editing', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Prepare docs for editing' });
   await expect(dialog.getByRole('alert')).toContainText('A folder already exists');

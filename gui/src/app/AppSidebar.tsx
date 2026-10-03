@@ -33,12 +33,12 @@ import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
-import { WorktreePicker } from '../features/worktrees/WorktreePicker.js';
+import { RepositoriesList } from '../features/worktrees/RepositoriesList.js';
+import { hasUnpreparedRepo } from '../features/worktrees/normalizeWorktrees.js';
 import { normalizeWorktreeGroups } from '../features/worktrees/normalizeWorktrees.js';
 import { PrepareRepoDialog } from '../features/worktrees/PrepareRepoDialog.js';
 import { useWorkspaceRepositories } from '../lib/api/queries.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
-import { useCockpitStore } from '../features/cockpit/cockpitStore.js';
 
 export type WorkspaceSortOption =
   | 'created-desc'
@@ -94,7 +94,7 @@ function SidebarContents({
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
-  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved, customTitles, updateTitle } = useWorktreeNavigationState();
+  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved } = useWorktreeNavigationState();
   // In a narrow window (split screen, 200% zoom) the rail is the default so the
   // task keeps the room; expanding it there is temporary and leaves the saved choice alone.
   const narrow = useMediaQuery('(min-width: 768px) and (max-width: 999px)');
@@ -105,7 +105,6 @@ function SidebarContents({
     else toggleSaved();
   }, [narrow, toggleSaved]);
   useEffect(() => { setNarrowExpanded(false); }, [pathname]);
-  const cockpit = useCockpitStore();
 
   // Detect if on a workspace route
   const workspaceRouteMatch = pathname.match(/\/workspaces\/([^/]+)/);
@@ -119,18 +118,16 @@ function SidebarContents({
 
   const liveRepositories = useWorkspaceRepositories(activeWorkspace?.branchName ?? null);
   const [preparingRepo, setPreparingRepo] = useState<string | null>(null);
-  // The active workspace's repositories and branches are folded away until asked for, with one exception: a
-  // repository that has to be prepared before it can be edited. That is the only place to do it, so it opens by
-  // itself then (null means "no choice made yet"), and a choice, once made, is respected.
-  const [repositoriesChoice, setRepositoriesChoice] = useState<boolean | null>(null);
+  // The active workspace's repositories are folded away until asked for. Nothing opens them by itself: when one needs
+  // preparing for editing, the icon says so with a dot.
+  const [repositoriesOpen, setRepositoriesOpen] = useState(false);
   const activeBranch = activeWorkspace?.branchName;
-  useEffect(() => { setRepositoriesChoice(null); }, [activeBranch]);
+  useEffect(() => { setRepositoriesOpen(false); }, [activeBranch]);
   const repoGroups = useMemo(() => {
     if (!activeWorkspace) return [];
     return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName], liveRepositories.data);
   }, [activeWorkspace, workspaceStatuses, liveRepositories.data]);
-  const needsPreparing = !activeWorkspace?.archivedAt && repoGroups.some((group) => group.worktrees.some((worktree) => worktree.isHostReadOnly));
-  const repositoriesOpen = repositoriesChoice ?? needsPreparing;
+  const needsPreparing = !activeWorkspace?.archivedAt && hasUnpreparedRepo(repoGroups);
 
   // Keyboard shortcut for toggling rail (Z or [)
   useEffect(() => {
@@ -413,10 +410,10 @@ function SidebarContents({
                           {isSelected && activeWorkspace && (
                             <button
                               type="button"
-                              onClick={() => setRepositoriesChoice(!repositoriesOpen)}
+                              onClick={() => setRepositoriesOpen((open) => !open)}
                               aria-expanded={repositoriesOpen}
                               className="relative p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
-                              title={needsPreparing ? 'Repositories and branches: one needs preparing before it can be edited' : 'Repositories and branches'}
+                              title={needsPreparing ? 'Repositories and branches: one is still your own checkout and needs preparing before it can be edited' : 'Repositories and branches'}
                               aria-label={`${repositoriesOpen ? 'Hide' : 'Show'} repositories and branches for ${w.branchName}`}
                             >
                               <GitBranch size={12} aria-hidden="true" />
@@ -444,15 +441,9 @@ function SidebarContents({
                       </div>
                       {showRepositories && activeWorkspace && (
                         <div className="mt-1 mb-1 ml-2 border-l border-border/60 pl-2">
-                          <WorktreePicker
-                            repoGroups={repoGroups}
-                            activeWorktreeId={cockpit.activeWorktreeId}
-                            onSelectWorktree={(wt) => cockpit.selectWorktree(wt.id)}
-                            customTitles={customTitles}
-                            onUpdateWorktreeTitle={(wtId, title, intent) => {
-                              updateTitle(wtId, title, intent);
-                            }}
-                            onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
+                          <RepositoriesList
+                            groups={repoGroups}
+                            onPrepare={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
                           />
                         </div>
                       )}

@@ -32,7 +32,7 @@ test('the workspace list stays on a workspace page, with the active one marked',
   await expect(row(page, 'beta')).not.toHaveAttribute('aria-current', 'page');
   // There is nothing to go back out of.
   await expect(sidebar(page).getByRole('button', { name: 'All workspaces' })).toHaveCount(0);
-  await expect(sidebar(page).getByRole('textbox', { name: /worktrees/i })).toHaveCount(0);
+  await expect(sidebar(page).getByRole('list', { name: 'Repositories' })).toHaveCount(0);
 });
 
 test('moving to another workspace is one click, and the list is still there afterwards', async ({ page }) => {
@@ -47,7 +47,7 @@ test('moving to another workspace is one click, and the list is still there afte
 
 test('repositories and branches are folded away until asked for, and only on the active workspace', async ({ page }) => {
   await page.goto('/#/workspaces/alpha');
-  await expect(sidebar(page).getByRole('textbox', { name: /Filter worktrees/i })).toHaveCount(0);
+  await expect(sidebar(page).getByRole('list', { name: 'Repositories' })).toHaveCount(0);
   // Only the workspace you are in has the disclosure.
   await expect(sidebar(page).getByRole('button', { name: /repositories and branches for (beta|gamma)/ })).toHaveCount(0);
 
@@ -55,12 +55,12 @@ test('repositories and branches are folded away until asked for, and only on the
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await expect(sidebar(page).getByRole('button', { name: 'Hide repositories and branches for alpha' })).toHaveAttribute('aria-expanded', 'true');
-  await expect(sidebar(page).getByPlaceholder('Filter worktrees...')).toBeVisible();
+  await expect(sidebar(page).getByRole('list', { name: 'Repositories' })).toBeVisible();
   // The list is still all there while they are open.
   await expect(row(page, 'beta')).toBeVisible();
 
   await sidebar(page).getByRole('button', { name: 'Hide repositories and branches for alpha' }).click();
-  await expect(sidebar(page).getByPlaceholder('Filter worktrees...')).toHaveCount(0);
+  await expect(sidebar(page).getByRole('list', { name: 'Repositories' })).toHaveCount(0);
 });
 
 test('the workspace list is the same on pages outside a workspace', async ({ page }) => {
@@ -82,31 +82,39 @@ test.describe('a repository that has to be prepared before it can be edited', ()
     head: 'abc1234', changedFiles: [],
   });
 
-  test('opens the repositories by itself, with a dot, because the sidebar is the only place to prepare it', async ({ page }) => {
+  test('is marked with a dot, and offers its preparation once the repositories are opened', async ({ page }) => {
     await page.route('**/api/workspace/alpha/repositories', (route) => route.fulfill({ json: { repositories: [repository('repo', true)] } }));
     await page.goto('/#/workspaces/alpha');
-    await expect(sidebar(page).getByRole('button', { name: 'Prepare repo for editing', exact: true })).toBeVisible();
-    const toggle = sidebar(page).getByRole('button', { name: 'Hide repositories and branches for alpha' });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const toggle = sidebar(page).getByRole('button', { name: 'Show repositories and branches for alpha' });
+    // Nothing opens by itself: the list stays a list of workspaces.
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).toHaveAttribute('title', /needs preparing/);
-    // The workspace list is still all there around it.
+    await expect(sidebar(page).getByRole('button', { name: 'Prepare repo for editing', exact: true })).toHaveCount(0);
+
+    await toggle.click();
+    await expect(sidebar(page).getByRole('button', { name: 'Prepare repo for editing', exact: true })).toBeVisible();
+    await expect(sidebar(page).getByRole('list', { name: 'Repositories' })).toContainText('read-only');
     await expect(row(page, 'beta')).toBeVisible();
   });
 
-  test('can still be folded away, and stays folded for that workspace', async ({ page }) => {
-    await page.route('**/api/workspace/alpha/repositories', (route) => route.fulfill({ json: { repositories: [repository('repo', true)] } }));
+  test('shows a plain line per repository, with no tree, filter or cards', async ({ page }) => {
+    await page.route('**/api/workspace/alpha/repositories', (route) => route.fulfill({ json: { repositories: [repository('repo', false)] } }));
     await page.goto('/#/workspaces/alpha');
-    await sidebar(page).getByRole('button', { name: 'Hide repositories and branches for alpha' }).click();
-    await expect(sidebar(page).getByRole('button', { name: 'Prepare repo for editing', exact: true })).toHaveCount(0);
-    await page.goto('/#/workspaces/alpha/plan');
-    await expect(sidebar(page).getByRole('button', { name: 'Show repositories and branches for alpha' })).toHaveAttribute('aria-expanded', 'false');
+    await sidebar(page).getByRole('button', { name: 'Show repositories and branches for alpha' }).click();
+    const list = sidebar(page).getByRole('list', { name: 'Repositories' });
+    await expect(list.getByRole('listitem')).toHaveCount(1);
+    await expect(list).toContainText('repo');
+    await expect(list).toContainText('main');
+    await expect(sidebar(page).getByPlaceholder('Filter worktrees...')).toHaveCount(0);
+    await expect(sidebar(page).getByText('HOST: RO')).toHaveCount(0);
   });
 
-  test('does nothing of the kind when every repository is already editable', async ({ page }) => {
+  test('has no dot, and no preparation to offer, when every repository is already editable', async ({ page }) => {
     await page.route('**/api/workspace/alpha/repositories', (route) => route.fulfill({ json: { repositories: [repository('repo', false)] } }));
     await page.goto('/#/workspaces/alpha');
     const toggle = sidebar(page).getByRole('button', { name: 'Show repositories and branches for alpha' });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).not.toHaveAttribute('title', /needs preparing/);
+    await toggle.click();
+    await expect(sidebar(page).getByRole('button', { name: /Prepare .* for editing/ })).toHaveCount(0);
   });
 });
