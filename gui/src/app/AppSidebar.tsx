@@ -18,13 +18,13 @@ import {
   History,
   PanelLeftClose,
   PanelLeftOpen,
-  ArrowLeft,
+  GitBranch,
   type LucideIcon,
 } from 'lucide-react';
 import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { BRAND_NAME } from '../brand.js';
 import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
@@ -83,7 +83,6 @@ function SidebarContents({
   onSelectWorkspace,
 }: AppSidebarProps) {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { openCli } = useFloatingChat();
   const [search, setSearch] = useState('');
@@ -120,10 +119,18 @@ function SidebarContents({
 
   const liveRepositories = useWorkspaceRepositories(activeWorkspace?.branchName ?? null);
   const [preparingRepo, setPreparingRepo] = useState<string | null>(null);
+  // The active workspace's repositories and branches are folded away until asked for, with one exception: a
+  // repository that has to be prepared before it can be edited. That is the only place to do it, so it opens by
+  // itself then (null means "no choice made yet"), and a choice, once made, is respected.
+  const [repositoriesChoice, setRepositoriesChoice] = useState<boolean | null>(null);
+  const activeBranch = activeWorkspace?.branchName;
+  useEffect(() => { setRepositoriesChoice(null); }, [activeBranch]);
   const repoGroups = useMemo(() => {
     if (!activeWorkspace) return [];
     return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName], liveRepositories.data);
   }, [activeWorkspace, workspaceStatuses, liveRepositories.data]);
+  const needsPreparing = !activeWorkspace?.archivedAt && repoGroups.some((group) => group.worktrees.some((worktree) => worktree.isHostReadOnly));
+  const repositoriesOpen = repositoriesChoice ?? needsPreparing;
 
   // Keyboard shortcut for toggling rail (Z or [)
   useEffect(() => {
@@ -286,36 +293,11 @@ function SidebarContents({
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 flex flex-col gap-2">
-        {isWorkspaceRoute && activeWorkspace ? (
-          /* ─── WORKSPACE-IN-CONTEXT DRILL-DOWN (R1) ─────────────────────── */
-          <div className="flex flex-col gap-3 min-w-0">
-            {/* Back to all workspaces link */}
-            <button
-              type="button"
-              onClick={() => navigate('/overview')}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60 px-2 py-1 rounded transition-colors cursor-pointer"
-            >
-              <ArrowLeft size={12} />
-              <span>All workspaces</span>
-            </button>
-
-            {/* The workspace header names the workspace; here only the repository picker. */}
-            <div className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Repositories</div>
-            {/* Worktree Hierarchy Picker */}
-            <WorktreePicker
-              repoGroups={repoGroups}
-              activeWorktreeId={cockpit.activeWorktreeId}
-              onSelectWorktree={(wt) => cockpit.selectWorktree(wt.id)}
-              customTitles={customTitles}
-              onUpdateWorktreeTitle={(wtId, title, intent) => {
-                updateTitle(wtId, title, intent);
-              }}
-              onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
-            />
-            <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
-          </div>
-        ) : (
-          /* ─── GLOBAL WORKSPACE SWITCHER LIST ───────────────────────────── */
+        {(
+          /* ─── WORKSPACE LIST ─────────────────────────────────────────────
+             Always shown, on a workspace page too, so moving between workspaces never
+             means going back first. The active one is marked, and its repositories and
+             branches are one disclosure away instead of replacing the list. */
           <div className="flex flex-col gap-2 min-w-0">
             {/* QuickSwitch */}
             <QuickSwitch workspaces={workspaces} />
@@ -389,10 +371,11 @@ function SidebarContents({
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
+                    const showRepositories = isSelected && repositoriesOpen && Boolean(activeWorkspace);
 
                     return (
+                      <div key={w.id}>
                       <div
-                        key={w.id}
                         className={cn(
                           'group flex items-start gap-1 rounded-md px-2.5 py-1.5 text-xs transition-colors border',
                           isSelected
@@ -403,6 +386,7 @@ function SidebarContents({
                         <Link
                           to={`/workspaces/${encodeURIComponent(w.branchName)}`}
                           onClick={() => onSelectWorkspace?.(w.branchName)}
+                          aria-current={isSelected ? 'page' : undefined}
                           className="flex min-w-0 flex-1 flex-col gap-0.5"
                         >
                           <span className="truncate font-medium text-foreground" title={w.name || w.branchName}>
@@ -426,6 +410,19 @@ function SidebarContents({
                               ))}
                             </div>
                           )}
+                          {isSelected && activeWorkspace && (
+                            <button
+                              type="button"
+                              onClick={() => setRepositoriesChoice(!repositoriesOpen)}
+                              aria-expanded={repositoriesOpen}
+                              className="relative p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                              title={needsPreparing ? 'Repositories and branches: one needs preparing before it can be edited' : 'Repositories and branches'}
+                              aria-label={`${repositoriesOpen ? 'Hide' : 'Show'} repositories and branches for ${w.branchName}`}
+                            >
+                              <GitBranch size={12} aria-hidden="true" />
+                              {needsPreparing && <span aria-hidden="true" className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-500" />}
+                            </button>
+                          )}
                           {!w.archivedAt && (
                             <button
                               type="button"
@@ -444,6 +441,21 @@ function SidebarContents({
                             )}
                           />
                         </div>
+                      </div>
+                      {showRepositories && activeWorkspace && (
+                        <div className="mt-1 mb-1 ml-2 border-l border-border/60 pl-2">
+                          <WorktreePicker
+                            repoGroups={repoGroups}
+                            activeWorktreeId={cockpit.activeWorktreeId}
+                            onSelectWorktree={(wt) => cockpit.selectWorktree(wt.id)}
+                            customTitles={customTitles}
+                            onUpdateWorktreeTitle={(wtId, title, intent) => {
+                              updateTitle(wtId, title, intent);
+                            }}
+                            onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
+                          />
+                        </div>
+                      )}
                       </div>
                     );
                   })
@@ -468,6 +480,8 @@ function SidebarContents({
             </div>
           </div>
         )}
+
+        {activeWorkspace && <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />}
 
         <div className="border-t border-border/60 pt-2">
           <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Reusable setup</p>

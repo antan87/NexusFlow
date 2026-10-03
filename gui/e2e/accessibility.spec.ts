@@ -215,7 +215,7 @@ test.describe('constrained windows', () => {
     // The rail still expands on request, by keyboard.
     await page.getByRole('button', { name: /Expand/ }).focus();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('button', { name: 'All workspaces' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Collapse/ })).toBeVisible();
   });
 
   test('keep the full sidebar in a 1024-wide window', async ({ page }) => {
