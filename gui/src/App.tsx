@@ -12,6 +12,7 @@ import { SetupPage } from './features/setup/SetupPage.js';
 import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
 import { ChatDock } from './features/chat/ChatDock.js';
+import { ChatHome } from './features/chat/ChatHome.js';
 import { ChatAttentionCards } from './features/chat/ChatAttentionCards.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
@@ -1291,7 +1292,7 @@ Core Instructions:
               }
             >
               <Routes>
-                <Route path="/" element={dashboardPage} />
+                <Route path="/" element={<ChatHome workspaces={activeWorkspaces} loading={workspacesLoading} ready={Boolean(config)} fallback={dashboardPage} />} />
                 <Route path="/overview" element={dashboardPage} />
                 <Route path="/dashboard" element={dashboardPage} />
                 <Route path="/guide" element={guidePage} />
