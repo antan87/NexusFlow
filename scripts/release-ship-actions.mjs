@@ -72,11 +72,23 @@ async function commitsSince(ctx, latestTag) {
   });
 }
 
+// Commit statuses report SUCCESS, FAILURE or ERROR once they have a result, and PENDING or EXPECTED before.
+const COMMIT_STATUS_STATES = ['SUCCESS', 'FAILURE', 'ERROR', 'PENDING', 'EXPECTED'];
+
 function rollupOf(pr) {
-  return (pr.statusCheckRollup ?? []).map((check) => ({
-    status: check.status ?? (check.state ? 'COMPLETED' : 'IN_PROGRESS'),
-    conclusion: check.conclusion ?? check.state ?? '',
-  }));
+  return (pr.statusCheckRollup ?? []).map((check) => {
+    // A check run has `status` and `conclusion`.
+    if (check.status) return { status: check.status, conclusion: check.conclusion ?? '' };
+    // A legacy commit status has only `state`. PENDING, and EXPECTED (a required status that has
+    // not reported yet), mean it is still running; only SUCCESS, FAILURE and ERROR are results.
+    if (check.state) {
+      if (!COMMIT_STATUS_STATES.includes(check.state)) throw new Error(`Unrecognized commit status state ${JSON.stringify(check.state)} on PR #${pr.number}.`);
+      const reported = !['PENDING', 'EXPECTED'].includes(check.state);
+      return { status: reported ? 'COMPLETED' : 'IN_PROGRESS', conclusion: reported ? check.state : '' };
+    }
+    // Anything else is unreadable. Guessing would either wait forever or call it a failure.
+    throw new Error(`Unrecognized entry in the status checks of PR #${pr.number}: ${JSON.stringify(check)}`);
+  });
 }
 
 async function readReleasePr(ctx) {
@@ -99,7 +111,7 @@ async function readReleasePr(ctx) {
     title: pr.title,
     version,
     files,
-    diffVersionOnly: isVersionOnlyDiff(patch),
+    diffVersionOnly: isVersionOnlyDiff(patch, version || undefined),
     state: classifyPullRequest({
       mergeStateStatus: pr.mergeStateStatus,
       mergeable: pr.mergeable,
@@ -191,7 +203,7 @@ export async function createReleasePr(ctx, step, facts) {
     if (stray.length > 0 || !files.includes('package.json')) {
       throw new Error(`The version bump changed unexpected files (${stray.join(', ') || 'no package.json'}). Nothing was pushed.`);
     }
-    if (!isVersionOnlyDiff(await ctx.git(['diff', '--cached'], { cwd: dir }))) {
+    if (!isVersionOnlyDiff(await ctx.git(['diff', '--cached'], { cwd: dir }), step.version)) {
       throw new Error('The version bump changed more than version lines. Nothing was pushed.');
     }
 
@@ -232,13 +244,30 @@ export async function closeReleasePr(ctx, step) {
   ctx.log(`Closed release PR #${step.number}: ${step.reason}`);
 }
 
-async function findDispatchedRun(ctx, since) {
+async function listDispatchedRuns(ctx) {
+  return JSON.parse(await ctx.gh([
+    'run', 'list', '--repo', ctx.repo, '--workflow', 'release.yml', '--event', 'workflow_dispatch', '--limit', '10', '--json', 'databaseId,status',
+  ]));
+}
+
+/**
+ * The run this command started is the one that was not there before it dispatched. Run ids only
+ * grow, so anything above the newest id seen beforehand was created afterwards, even if that
+ * listing was short or stale. Comparing GitHub's createdAt with the local clock would miss the
+ * run whenever the two clocks differ by more than the allowance, and would take another agent's
+ * run that began moments earlier for ours.
+ *
+ * If several appear at once someone else dispatched too, and the list cannot say whose is whose:
+ * it carries no inputs. The workflow queues its runs in one concurrency group, and verifyRelease
+ * checks what was actually published, so following the first is safe; it is logged.
+ */
+async function findDispatchedRun(ctx, newestBefore) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const runs = JSON.parse(await ctx.gh([
-      'run', 'list', '--repo', ctx.repo, '--workflow', 'release.yml', '--event', 'workflow_dispatch', '--limit', '10', '--json', 'databaseId,status,createdAt',
-    ]));
-    const mine = runs.filter((run) => Date.parse(run.createdAt) >= since - 10_000).sort((a, b) => a.databaseId - b.databaseId);
-    if (mine.length > 0) return mine[0];
+    const fresh = (await listDispatchedRuns(ctx))
+      .filter((run) => run.databaseId > newestBefore)
+      .sort((a, b) => a.databaseId - b.databaseId);
+    if (fresh.length > 1) ctx.log(`Several release runs appeared at once (${fresh.map((run) => run.databaseId).join(', ')}); following the first.`);
+    if (fresh.length > 0) return fresh[0];
     await ctx.sleep(5000);
   }
   throw new Error('The dispatched release run did not appear. Check the Actions tab; do not dispatch again until you have.');
@@ -250,9 +279,11 @@ async function findDispatchedRun(ctx, since) {
  */
 export async function dispatchAndWatch(ctx, step, { timeoutMs, pollMs }) {
   const startedAt = ctx.now();
+  // Taken before dispatching, so the new run can be told apart from every earlier one.
+  const newestBefore = Math.max(0, ...(await listDispatchedRuns(ctx)).map((run) => run.databaseId));
   await ctx.gh(['workflow', 'run', 'release.yml', '--repo', ctx.repo, '-f', `version=${step.version}`, '-f', `expected_sha=${step.tipSha}`]);
   ctx.log(`Dispatched release.yml for v${step.version} pinned to ${step.tipSha.slice(0, 7)}.`);
-  const run = await findDispatchedRun(ctx, startedAt);
+  const run = await findDispatchedRun(ctx, newestBefore);
 
   let announcedGate = false;
   for (;;) {

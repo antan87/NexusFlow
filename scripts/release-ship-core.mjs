@@ -61,16 +61,34 @@ export function nextVersion(current, bump) {
  * True when a unified diff changes nothing but `"version"` lines. A release PR that
  * does anything else is not a release bump and must not be merged automatically.
  */
-export function isVersionOnlyDiff(patch) {
-  let changed = 0;
+export function isVersionOnlyDiff(patch, expectedVersion) {
+  const removed = [];
+  const added = [];
+  let inHunk = false;
   for (const line of String(patch ?? '').split('\n')) {
-    if (/^(\+\+\+|---|diff |index |@@|\\ )/.test(line)) continue;
-    if (line[0] === '+' || line[0] === '-') {
-      changed += 1;
-      if (!/^[+-]\s*"version": "[^"]+",?\s*$/.test(line)) return false;
+    // Inside a hunk every line carries a one-character prefix, so a line that starts with
+    // `diff ` or `@@` is always structure, and one that starts with `---` or `+++` is a changed
+    // line whose text begins with `--` or `++`. Only before a file's first hunk are those headers.
+    if (line.startsWith('diff ')) { inHunk = false; continue; }
+    if (line.startsWith('@@')) { inHunk = true; continue; }
+    if (!inHunk) {
+      // Part of a file's header. A version bump has no mode change, rename, copy or binary patch.
+      if (/^(old mode|new mode|new file mode|deleted file mode|similarity index|dissimilarity index|rename |copy |Binary files|GIT binary patch)/.test(line)) return false;
+      continue;
     }
+    // Context lines, the no-newline marker, and a context line a tool stripped to nothing.
+    if (line === '' || line[0] === ' ' || line.startsWith('\\ ')) continue;
+    // Anything else that is not a changed line is structure this does not understand.
+    if (line[0] !== '+' && line[0] !== '-') return false;
+    const match = /^([+-])\s*"version": "([^"]+)",?\s*$/.exec(line);
+    if (!match) return false;
+    (match[1] === '-' ? removed : added).push(match[2]);
   }
-  return changed > 0;
+  // A bump replaces version lines with version lines: they pair up, and they all say the same new
+  // version. Deleting one, adding an extra one, or moving a dependency's version is not a bump.
+  if (added.length === 0 || added.length !== removed.length) return false;
+  if (!added.every((version) => version === added[0])) return false;
+  return expectedVersion === undefined || added[0] === expectedVersion;
 }
 
 /**
