@@ -95,6 +95,7 @@ import { repoName } from '../lib/status.js';
 import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
+import { IconButton } from '../components/ui/icon-button.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChatDockSlot } from '../features/chat/ChatDockSlot.js';
 import { useChatAttention } from '../features/chat/useChatAttention.js';
@@ -598,19 +599,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           actions={<>
               {primaryEditor && !archived && (
                 availableEditors.length > 1 ? (
-                  <div className="inline-flex h-7 items-center rounded-md border border-border bg-secondary/80 text-xs">
+                  <div className="inline-flex h-7 items-center rounded-md text-xs">
                     <button
                       type="button"
                       disabled={Boolean(openingEditor)}
                       onClick={() => void handleOpenEditor(primaryEditor.id)}
                       title={`Open in ${primaryEditor.name}`}
-                      className="inline-flex h-full items-center gap-1.5 px-2.5 font-medium text-foreground hover:bg-secondary transition-colors cursor-pointer rounded-l-md"
+                      aria-label={`Open in ${primaryEditor.name}`}
+                      className="inline-flex h-full items-center px-1.5 text-foreground hover:bg-accent transition-colors cursor-pointer rounded-l-md disabled:opacity-50"
                     >
-                      {openingEditor === primaryEditor.id ? <Spinner className="size-3" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
-                      <span>{primaryEditor.name}</span>
+                      {openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
                     </button>
                     <Menu>
-                      <MenuTrigger aria-label="Choose editor" className="inline-flex h-full w-6 items-center justify-center text-muted-foreground hover:text-foreground border-l border-border transition-colors cursor-pointer rounded-r-md">
+                      <MenuTrigger aria-label="Choose editor" className="inline-flex h-full w-6 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer rounded-r-md">
                         <ChevronDown size={11} />
                       </MenuTrigger>
                       <MenuPopup align="end" className="w-52">
@@ -637,32 +638,20 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     </Menu>
                   </div>
                 ) : (
-                  <Button
-                    variant="outline"
-                    size="xs"
+                  <IconButton
+                    size="sm"
+                    label={`Open in ${primaryEditor.name}`}
                     disabled={Boolean(openingEditor)}
                     onClick={() => void handleOpenEditor(primaryEditor.id)}
-                    className="h-7 text-xs gap-1.5 border-border cursor-pointer"
-                  >
-                    {openingEditor === primaryEditor.id ? <Spinner className="size-3" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
-                    <span>{primaryEditor.name}</span>
-                  </Button>
+                    icon={openingEditor === primaryEditor.id ? <Spinner className="size-3.5" /> : renderEditorIcon(primaryEditor.id, primaryEditor.name)}
+                  />
                 )
               )}
 
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={() => handleCopyPrompt(selected)}
-                title="Copy Context prompt for external LLM"
-                className="h-7 gap-1 text-xs border-border text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <Copy size={11} />
-                <span className="hidden sm:inline">Copy Context</span>
-              </Button>
+              <IconButton size="sm" label="Copy Context" icon={<Copy />} onClick={() => handleCopyPrompt(selected)} className="text-muted-foreground hover:text-foreground" />
 
               <Menu>
-                <MenuTrigger aria-label="Workspace actions" className="grid size-7 place-items-center rounded-md border border-border bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                <MenuTrigger aria-label="Workspace actions" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer">
                   <MoreVertical size={13} />
                 </MenuTrigger>
                 <MenuPopup align="end" className="w-48">
@@ -1270,10 +1259,10 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                       </p>
                     </div>
                     <Button
-                      variant="default"
-                      size="sm"
+                      variant="outline"
+                      size="xs"
                       onClick={() => openChat(selected.branchName)}
-                      className="text-xs h-8 gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
+                      className="shrink-0 cursor-pointer self-start sm:self-auto"
                       title="Open CLI chat for this workspace"
                     >
                       <MessagesSquare className="size-3.5" />

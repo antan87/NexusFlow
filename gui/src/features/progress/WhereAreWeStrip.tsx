@@ -53,12 +53,12 @@ export function WhereAreWeBar({ facts, guidance, action, expanded, panelId, noti
       </button>
       {action && (
         <Button
-          size="sm" variant="outline" className="max-w-full min-w-0" title={action.reason}
+          size="xs" variant="outline" className="max-w-full min-w-0" title={action.reason}
           aria-label={`Next: ${action.label}. ${action.reason}`}
           onClick={() => onNext(action)}
         >
           <span className="truncate">{action.label}</span>
-          <ArrowRight aria-hidden="true" />
+          <ArrowRight aria-hidden="true" className="text-primary" />
         </Button>
       )}
       {/* Always present, so a screen reader hears the notice when it appears. Visible only while there is one. */}

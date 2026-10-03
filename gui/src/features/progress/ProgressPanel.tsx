@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Check, CircleHelp, CornerDownLeft, RotateCcw, X } from 'lucide-react';
 
 import { Button } from '../../components/ui/button.js';
+import { IconButton } from '../../components/ui/icon-button.js';
 import { Input } from '../../components/ui/input.js';
 import type { MilestoneFact, MilestoneState, ProgressFacts, RepoChangeListing, WorkGuidance } from '../../types.js';
 import { checkIsFailing, formatAge, verificationLine, type ActiveProposal, type StripTone } from './progressView.js';
@@ -14,8 +16,11 @@ const STATE_WORD: Record<MilestoneState, string> = { done: 'Done', in_progress: 
 const STATE_TONE: Record<MilestoneState, StripTone> = { done: 'done', in_progress: 'ai', reopened: 'reopened', blocked: 'needs', upcoming: 'idle' };
 const MINUS = '−';
 
-const Heading = ({ id, children }: { id: string; children: string }) => (
-  <h3 id={id} className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>
+const Heading = ({ id, children, action }: { id: string; children: string; action?: ReactNode }) => (
+  <div className="mb-1.5 flex min-h-6 items-center justify-between gap-2">
+    <h3 id={id} className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>
+    {action}
+  </div>
 );
 
 export interface ReopenFormProps {
@@ -127,7 +132,12 @@ export function ProgressPanel(props: ProgressPanelProps) {
       {/* Two columns so neither leaves a gap under a short section. What needs the developer comes first, which also puts it on top when they stack. */}
       <div className="space-y-4">
         <section aria-labelledby={`${id}-open`} ref={openSection}>
-          <Heading id={`${id}-open`}>Waiting on you</Heading>
+          <Heading
+            id={`${id}-open`}
+            action={questions.length > 0 ? (
+              <IconButton label="I answered in the chat" icon={<Check />} disabled={props.acknowledging} onClick={props.onAcknowledge} />
+            ) : undefined}
+          >Waiting on you</Heading>
           {!waiting && <p className="text-muted-foreground">Nothing is waiting on you.</p>}
           <ul className="space-y-2">
             {questions.map((question) => (
@@ -145,11 +155,6 @@ export function ProgressPanel(props: ProgressPanelProps) {
               <li key={milestone.id}><span className="state-chip" data-tone="needs">Blocked</span> &ldquo;{milestone.title}&rdquo;: {milestone.blockedReason ?? milestone.unblockCondition ?? 'no reason given'}</li>
             ))}
           </ul>
-          {questions.length > 0 && (
-            <Button className="mt-2" size="xs" variant="ghost" disabled={props.acknowledging} title="Replies typed into the chat are not seen here, so say when you have answered." onClick={props.onAcknowledge}>
-              I answered in the chat
-            </Button>
-          )}
           {verification && (
             <p className={`mt-2 ${verification.tone === 'bad' ? 'text-[var(--state-needs)]' : verification.tone === 'ok' ? 'text-[var(--state-done)]' : 'text-muted-foreground'}`}>{verification.text}</p>
           )}
@@ -174,7 +179,7 @@ export function ProgressPanel(props: ProgressPanelProps) {
           {reopened && (
             <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 p-2">
               <span>&ldquo;{reopened.title}&rdquo; is reopened.</span>
-              <Button size="xs" variant="outline" onClick={() => onFill(`Milestone "${reopened.title}" was reopened: ${reopened.reason}. Please redo it.`)}>Tell the AI</Button>
+              <IconButton label="Tell the AI" icon={<CornerDownLeft />} onClick={() => onFill(`Milestone "${reopened.title}" was reopened: ${reopened.reason}. Please redo it.`)} />
             </div>
           )}
           {facts.milestones.length === 0 && <p className="text-muted-foreground">No milestones are planned yet.</p>}
@@ -191,17 +196,17 @@ export function ProgressPanel(props: ProgressPanelProps) {
                       {notes.map((note) => <p key={note} className="break-words text-muted-foreground">{note}</p>)}
                     </div>
                     {milestone.state === 'done' && !(reopening?.stepId === milestone.id) && (
-                      <Button size="xs" variant="ghost" aria-label={`Reopen "${milestone.title}"`} onClick={() => startReopen(milestone.id)}>Reopen</Button>
+                      <IconButton label={`Reopen "${milestone.title}"`} icon={<RotateCcw />} onClick={() => startReopen(milestone.id)} />
                     )}
                   </div>
                   {proposal && reopening?.stepId !== milestone.id && (
-                    <div className="ml-26 mt-1.5 rounded-md border border-border bg-muted/30 p-2">
-                      <p><span className="font-medium">{proposal.event.payload.proposal === 'reopen' ? 'The AI suggests reopening this' : 'The AI thinks this is done'}:</span> {proposal.event.payload.reason}</p>
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <div className="ml-26 mt-1.5 flex items-start gap-1 rounded-md border border-border bg-muted/30 py-1.5 pl-2 pr-1">
+                      <p className="min-w-0 flex-1 pt-0.5"><span className="font-medium">{proposal.event.payload.proposal === 'reopen' ? 'The AI suggests reopening this' : 'The AI thinks this is done'}:</span> {proposal.event.payload.reason}</p>
+                      <div className="flex shrink-0 items-center">
                         {proposal.event.payload.proposal === 'reopen'
-                          ? <Button size="xs" variant="outline" onClick={() => startReopen(milestone.id, proposal.event.payload.reason)}>Reopen with this reason</Button>
-                          : <Button size="xs" variant="outline" title="Adds this to the chat prompt. You press Enter." onClick={() => onFill(`What shows that "${milestone.title}" is done? Show me.`)}>Ask for proof</Button>}
-                        <Button size="xs" variant="ghost" onClick={() => props.onDismissProposal(proposal.event.id)}>Dismiss</Button>
+                          ? <IconButton label="Reopen with this reason" icon={<RotateCcw />} onClick={() => startReopen(milestone.id, proposal.event.payload.reason)} />
+                          : <IconButton label="Ask for proof" icon={<CircleHelp />} onClick={() => onFill(`What shows that "${milestone.title}" is done? Show me.`)} />}
+                        <IconButton label="Dismiss" icon={<X />} onClick={() => props.onDismissProposal(proposal.event.id)} />
                       </div>
                     </div>
                   )}

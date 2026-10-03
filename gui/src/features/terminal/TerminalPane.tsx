@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../components/ui/button.js';
+import { IconButton } from '../../components/ui/icon-button.js';
 import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { Select, SelectTrigger, SelectPopup, SelectItem } from '../../components/ui/select.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
@@ -425,7 +426,12 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
     <SelectTrigger aria-label="CLI harness" size="sm" className="w-auto min-w-40 text-xs">{target ? <span className="flex items-center gap-2"><HarnessIcon harness={target} />{harnessName(target)}</span> : 'Choose a CLI tool'}</SelectTrigger>
     <SelectPopup popupClassName="w-60 max-w-[calc(100vw-2rem)]">{(status?.targets ?? []).map(item => <SelectItem key={item.id} value={item.id} disabled={!item.available} title={item.reason || undefined}><span className="flex min-w-0 items-center gap-2"><HarnessIcon harness={item.id} /><span className="truncate">{harnessName(item.id)}</span>{!item.available && <span className="text-[10px] text-muted-foreground">· Unavailable<span className="sr-only">: {item.reason || 'Not installed'}</span></span>}</span></SelectItem>)}</SelectPopup>
   </Select>;
-  const startButton = <Button size="xs" onClick={() => void start({ id: crypto.randomUUID(), target })} disabled={!canStart} title={live ? 'Start another terminal; the current one keeps running' : undefined}><Plus className="size-3" />{busy ? 'Starting…' : live ? 'Start another' : 'Start session'}</Button>;
+  const startNew = () => void start({ id: crypto.randomUUID(), target });
+  // The first start is the way into the chat, so it says what it does. Starting another is a small extra beside a
+  // running one, so it is only an icon with its name in a tooltip.
+  const startButton = live
+    ? <IconButton label="Start another terminal" icon={<Plus />} onClick={startNew} disabled={!canStart} />
+    : <Button size="xs" onClick={startNew} disabled={!canStart}><Plus className="size-3" />{busy ? 'Starting…' : 'Start session'}</Button>;
   const disconnected = shownState.kind === 'disconnected';
   const exited = shownState.kind === 'exited' || shownState.kind === 'ended';
   const running = shownState.kind === 'running';

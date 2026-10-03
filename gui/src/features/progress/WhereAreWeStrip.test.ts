@@ -96,8 +96,10 @@ describe('WhereAreWeBar', () => {
 describe('ProgressPanel', () => {
   it('offers Reopen only for finished milestones', () => {
     const html = panel(facts([milestone('a', 'done'), milestone('b', 'in_progress'), milestone('c', 'upcoming'), milestone('d', 'blocked'), milestone('e', 'reopened')]));
-    expect(count(html, '>Reopen</button>')).toBe(1);
+    // One quiet icon button, named for what it reopens, on the finished milestone only.
+    expect(count(html, 'aria-label="Reopen &quot;')).toBe(1);
     expect(html).toContain('aria-label="Reopen &quot;Title a&quot;"');
+    expect(html).not.toContain('>Reopen</button>');
   });
 
   it('writes every state as a word, so colour is never the only signal', () => {
@@ -134,7 +136,9 @@ describe('ProgressPanel', () => {
     expect(html).toContain('>Redis</button>');
     expect(html).toContain('>In memory</button>');
     expect(html).toContain('Adds this to the chat prompt. You press Enter.');
-    expect(html).toContain('I answered in the chat');
+    // Said once, as an icon at the heading's edge, not as a block under the list.
+    expect(html).toContain('aria-label="I answered in the chat"');
+    expect(count(html, 'I answered in the chat')).toBe(1);
     expect(html).not.toContain('Nothing is waiting on you.');
   });
 
@@ -157,15 +161,19 @@ describe('ProgressPanel', () => {
     const html = panel(f, { proposals: activeProposals([proposalEvent('a', 'reopen', 'The edge case is not covered')], f) });
     expect(html).toContain('The AI suggests reopening this');
     expect(html).toContain('The edge case is not covered');
-    expect(html).toContain('Reopen with this reason');
-    expect(html).toContain('>Dismiss</button>');
+    // The two things to do about it are icons, named for the action, beside the AI's words.
+    expect(html).toContain('aria-label="Reopen with this reason"');
+    expect(html).toContain('aria-label="Dismiss"');
+    expect(html).not.toContain('>Dismiss</button>');
+    expect(html).not.toContain('>Reopen with this reason</button>');
   });
 
   it('shows a completion proposal with a way to ask for proof, and no way to complete it', () => {
     const f = facts([milestone('b', 'in_progress')]);
     const html = panel(f, { proposals: activeProposals([proposalEvent('b', 'complete', 'All tests pass')], f) });
     expect(html).toContain('The AI thinks this is done');
-    expect(html).toContain('Ask for proof');
+    expect(html).toContain('aria-label="Ask for proof"');
+    expect(html).toContain('aria-label="Dismiss"');
     expect(html).not.toMatch(/>Complete/);
   });
 
