@@ -20,9 +20,10 @@ class FakeModel {
 function fakeMonaco() {
   const registry = new Map<string, FakeModel>();
   const diffEditors: Array<{ getModel(): { original: FakeModel; modified: FakeModel } | null }> = [];
+  const openers: Array<{ openCodeEditor(source: unknown, resource: FakeUri, position: unknown): boolean }> = [];
   const parse = (text: string): FakeUri => ({
     scheme: text.slice(0, text.indexOf(':')),
-    path: text.replace(/^[a-z-]+:\/\//, ''),
+    path: text.replace(/^[a-z-]+:\/\/[^/]*/, ''),
     toString: () => text,
   });
   const api = {
@@ -37,26 +38,31 @@ function fakeMonaco() {
       getModels: () => [...registry.values()],
       getDiffEditors: () => diffEditors,
       getEditors: () => [],
+      registerEditorOpener: (opener: { openCodeEditor(source: unknown, resource: FakeUri, position: unknown): boolean }) => {
+        openers.push(opener);
+        return { dispose: () => {} };
+      },
     },
   };
-  return { api: api as unknown as Api, registry, diffEditors };
+  return { api: api as unknown as Api, registry, diffEditors, openers };
+}
+
+let store: StoreModule;
+
+beforeEach(async () => {
+  // The store remembers the Monaco API it was given, so each test starts clean.
+  vi.resetModules();
+  store = await import('./changesetModelStore.js');
+});
+
+/** Opens a file's two models the way the diff adapter does. */
+function openFile(api: Api, repo: string, file: string, scope?: string) {
+  const modified = store.getOrCreateTextModel(store.getModifiedFileUri(repo, file, api, scope), 'new', 'typescript', api);
+  const original = store.getOrCreateTextModel(store.getOriginalFileUri(repo, file, api, scope), 'old', 'typescript', api);
+  return { modified: modified as unknown as FakeModel, original: original as unknown as FakeModel };
 }
 
 describe('changeset model disposal', () => {
-  let store: StoreModule;
-
-  beforeEach(async () => {
-    // The store remembers the Monaco API it was given, so each test starts clean.
-    vi.resetModules();
-    store = await import('./changesetModelStore.js');
-  });
-
-  function openFile(api: Api, repo: string, file: string) {
-    const modified = store.getOrCreateTextModel(store.getModifiedFileUri(repo, file, api), 'new', 'typescript', api);
-    const original = store.getOrCreateTextModel(store.getOriginalFileUri(repo, file, api), 'old', 'typescript', api);
-    return { modified: modified as unknown as FakeModel, original: original as unknown as FakeModel };
-  }
-
   it('disposes both models of one file and leaves other files alone', () => {
     const { api } = fakeMonaco();
     const target = openFile(api, 'app', 'src/a.ts');
@@ -168,5 +174,76 @@ describe('changeset model disposal', () => {
     expect(again.modified).not.toBe(first.modified);
     expect(again.modified.disposed).toBe(false);
     expect(again.modified.getValue()).toBe('new');
+  });
+});
+
+describe('workspace-scoped model URIs', () => {
+  const uri = (repo: string, file: string, scope?: string) => store.getModifiedFileUri(repo, file, undefined, scope).toString();
+
+  it('leaves the URI as it was when there is no scope', () => {
+    expect(uri('app', 'src/a.ts')).toBe('file:///app/src/a.ts');
+    expect(store.getOriginalFileUri('app', 'src/a.ts').toString()).toBe('diff-original:///app/src/a.ts');
+  });
+
+  it('gives the same repository and file a different URI in each workspace, with the path intact', () => {
+    const one = uri('app', 'src/a.ts', '/ws/one/app');
+    const two = uri('app', 'src/a.ts', '/ws/two/app');
+
+    expect(one).not.toBe(two);
+    expect(one).toMatch(/^file:\/\/[0-9a-f]{16}\/app\/src\/a\.ts$/);
+    expect(two).toMatch(/^file:\/\/[0-9a-f]{16}\/app\/src\/a\.ts$/);
+  });
+
+  it('treats one worktree path as one scope however it is spelled', () => {
+    const reference = uri('app', 'a.ts', 'C:/Work/ws/app');
+    expect(uri('app', 'a.ts', 'C:\\Work\\ws\\app')).toBe(reference);
+    expect(uri('app', 'a.ts', 'c:/work/ws/app/')).toBe(reference);
+    expect(uri('app', 'a.ts', '/Work/ws/app')).not.toBe(uri('app', 'a.ts', '/work/ws/app'));
+  });
+
+  it('keeps each workspace its own model, so content and disposal do not leak across', () => {
+    const { api } = fakeMonaco();
+    const make = (scope: string, text: string) => {
+      const model = store.getOrCreateTextModel(store.getModifiedFileUri('app', 'src/a.ts', api, scope), text, 'typescript', api) as unknown as FakeModel;
+      return model;
+    };
+    const one = make('/ws/one/app', 'from workspace one');
+    const two = make('/ws/two/app', 'from workspace two');
+
+    expect(one).not.toBe(two);
+    expect(one.getValue()).toBe('from workspace one');
+    expect(two.getValue()).toBe('from workspace two');
+
+    store.disposeChangesetModelsFor('app', 'src/a.ts', api, '/ws/one/app');
+    expect(one.disposed).toBe(true);
+    expect(two.disposed).toBe(false);
+  });
+
+  it('still reads the repository and file out of a scoped URI when Monaco opens it', () => {
+    const { api, openers } = fakeMonaco();
+    const opened: Array<[string, string, number | undefined]> = [];
+    store.registerCrossFileEditorOpener((repo, file, line) => opened.push([repo, file, line]), api);
+
+    const scoped = store.getModifiedFileUri('app', 'src/deep/a.ts', api, '/ws/one/app');
+    expect(openers[0]!.openCodeEditor(null, scoped as unknown as FakeUri, { lineNumber: 7 })).toBe(true);
+
+    expect(opened).toEqual([['app', 'src/deep/a.ts', 7]]);
+  });
+
+  it('disposes the scoped models after the editors when asked to, using each file\'s own scope', () => {
+    vi.useFakeTimers();
+    try {
+      const { api } = fakeMonaco();
+      const one = openFile(api, 'app', 'src/a.ts', '/ws/one/app');
+      const two = openFile(api, 'app', 'src/a.ts', '/ws/two/app');
+
+      store.disposeChangesetModelsAfterEditors([{ repoName: 'app', file: 'src/a.ts', repoPath: '/ws/one/app' }], api);
+      vi.runAllTimers();
+
+      expect(one.modified.disposed).toBe(true);
+      expect(two.modified.disposed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

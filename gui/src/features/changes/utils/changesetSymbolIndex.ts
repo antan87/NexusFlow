@@ -345,7 +345,9 @@ export class ChangesetSymbolIndex {
   ): ChangesetSymbol[] {
     const cleanPath = filePath.replace(/\\/g, '/').replace(/^\//, '');
     const cleanRepo = repoName.replace(/\\/g, '/').replace(/^\//, '').replace(/\/$/, '');
-    const uriString = `file:///${cleanRepo}/${cleanPath}`;
+    // The URI of this file's editor model, which the outline provider matches on. It carries the
+    // workspace scope, so it has to be built the way the adapter builds the model's URI.
+    const uriString = getModifiedFileUri(repoName, filePath, undefined, repoPath).toString();
 
     // Remove any previously indexed symbols for this specific file
     const remainingSymbols = this.symbols.filter(
@@ -654,7 +656,7 @@ export function registerLightweightNavigationProviders(
           if (matches.length === 0) return null;
 
           return matches.map((item) => ({
-            uri: getModifiedFileUri(item.repoName, item.filePath, m),
+            uri: getModifiedFileUri(item.repoName, item.filePath, m, item.repoPath),
             range: {
               startLineNumber: item.lineNumber,
               startColumn: item.column,

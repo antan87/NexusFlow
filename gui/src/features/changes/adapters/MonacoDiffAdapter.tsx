@@ -48,6 +48,7 @@ export interface MonacoDiffAdapterProps extends DiffAdapterRenderProps {
 export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
   filePath,
   repoName = 'workspace',
+  repoPath,
   originalContent,
   modifiedContent,
   viewMode,
@@ -141,8 +142,8 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     const language = getLanguageFromPath(filePath);
 
     // Create models with file:// and diff-original:// URIs for cross-file navigation
-    const originalUri = getOriginalFileUri(repoName, filePath, monaco);
-    const modifiedUri = getModifiedFileUri(repoName, filePath, monaco);
+    const originalUri = getOriginalFileUri(repoName, filePath, monaco, repoPath);
+    const modifiedUri = getModifiedFileUri(repoName, filePath, monaco, repoPath);
 
     const originalModel =
       getOrCreateTextModel(originalUri, originalContent, language, monaco) ||
@@ -233,7 +234,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       diffEditor?.dispose();
       editorInstanceRef.current = null;
     };
-  }, [filePath, repoName]);
+  }, [filePath, repoName, repoPath]);
 
   return (
     <div
