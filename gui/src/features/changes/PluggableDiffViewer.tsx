@@ -22,7 +22,7 @@ import { cn } from '../../lib/utils.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
 import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
-import { launchVsCodeDiff, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
+import { openFileInEditor, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
 import {
   globalChangesetSymbolIndex,
@@ -374,20 +374,20 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             <span>{engine === 'monaco' ? 'Monaco' : 'Fallback'}</span>
           </button>
 
-          {/* External Launcher: Open in Desktop Editor Diff */}
+          {/* External Launcher: open the file in the desktop editor (it shows the file, not a diff) */}
           <button
             type="button"
             onClick={async () => {
-              const ok = await launchVsCodeDiff(repoPath, filePath, defaultEditor);
+              const ok = await openFileInEditor(repoPath, filePath, defaultEditor);
               if (ok) {
-                showToast?.(`Opened ${filePath} in ${editorLabel} diff`, 'success');
+                showToast?.(`Opened ${filePath} in ${editorLabel}`, 'success');
               } else {
                 openInVsCodeAtLine(repoPath, filePath, 1, 1, defaultEditor);
                 showToast?.(`Opened ${filePath} in ${editorLabel}`, 'info');
               }
             }}
             className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title={`Open file in desktop ${editorLabel} Diff`}
+            title={`Open file in ${editorLabel}`}
           >
             <ExternalLink size={12} />
             <span className="hidden sm:inline">{editorLabel}</span>

@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   ChangesetSymbolIndex,
+  globalChangesetSymbolIndex,
   MonacoSymbolKind,
   registerLightweightNavigationProviders,
 } from './changesetSymbolIndex.ts';
@@ -481,5 +482,42 @@ test('mapRealLineToSnippetLine correctly maps real line to snippet line or null'
   assert.equal(mapRealLineToSnippetLine(22, mockHunks), 3);
   assert.equal(mapRealLineToSnippetLine(5, mockHunks), null);
   assert.equal(mapRealLineToSnippetLine(99, mockHunks), null);
+});
+
+test('the outline provider finds the symbols of a workspace-scoped model, and only that workspace\'s', () => {
+  const outlineProviders: Array<{ provideDocumentSymbols(model: unknown): Array<{ name: string }> }> = [];
+  const noop = () => ({ dispose() {} });
+  const fakeMonaco = {
+    Uri: { parse: (text: string) => ({ toString: () => text }) },
+    editor: { getModels: () => [] },
+    languages: {
+      registerDefinitionProvider: noop,
+      registerReferenceProvider: noop,
+      registerDocumentSymbolProvider: (_language: string, provider: (typeof outlineProviders)[number]) => {
+        outlineProviders.push(provider);
+        return { dispose() {} };
+      },
+    },
+  };
+  const registration = registerLightweightNavigationProviders(fakeMonaco as never);
+  globalChangesetSymbolIndex.clear();
+  try {
+    const modelOf = (scope?: string) => ({ uri: getModifiedFileUri('app', 'src/a.ts', fakeMonaco as never, scope) });
+    const outline = (model: unknown) => outlineProviders[0]!.provideDocumentSymbols(model).map((symbol) => symbol.name);
+
+    globalChangesetSymbolIndex.indexFile('app', 'src/a.ts', 'export function inOne() {}\n', [], '/ws/one/app');
+
+    assert.deepEqual(outline(modelOf('/ws/one/app')), ['inOne']);
+    assert.deepEqual(outline(modelOf('/ws/two/app')), []);
+    assert.deepEqual(outline(modelOf()), []);
+
+    // A symbol indexed without a repository path still belongs to the unscoped model.
+    globalChangesetSymbolIndex.clear();
+    globalChangesetSymbolIndex.indexFile('app', 'src/a.ts', 'export function plain() {}\n');
+    assert.deepEqual(outline(modelOf()), ['plain']);
+  } finally {
+    registration.dispose();
+    globalChangesetSymbolIndex.clear();
+  }
 });
 

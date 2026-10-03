@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { Parser, Language, type Node as SyntaxNode } from 'web-tree-sitter';
+import { Parser, Language, type Node as SyntaxNode, type Tree } from 'web-tree-sitter';
 
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -156,6 +156,11 @@ export async function extractAstSymbols(
     return [];
   }
 
+  // Parser and Tree live in WASM memory that garbage collection never reclaims,
+  // so both must be deleted on every exit path or a long-running server leaks
+  // roughly the size of each parsed file per call.
+  let parser: Parser | null = null;
+  let tree: Tree | null = null;
   try {
     await ensureParserInitialized();
     const lang = await getLanguage(langInfo.wasmFile);
@@ -163,9 +168,9 @@ export async function extractAstSymbols(
       return [];
     }
 
-    const parser = new Parser();
+    parser = new Parser();
     parser.setLanguage(lang);
-    const tree = parser.parse(content);
+    tree = parser.parse(content);
     if (!tree) {
       return [];
     }
@@ -733,5 +738,9 @@ export async function extractAstSymbols(
   } catch (err) {
     console.error(`Error extracting AST symbols for ${filePath}:`, err);
     return [];
+  } finally {
+    // `symbols` holds plain strings and numbers, so nothing reads the tree after this.
+    tree?.delete();
+    parser?.delete();
   }
 }

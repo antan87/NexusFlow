@@ -20,6 +20,7 @@ import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
 import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
+import { changesFromResponse } from './features/changes/utils/changesResponse.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -547,8 +548,10 @@ function AppInner() {
       const data = await res.json();
       perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: isCurrent() });
       if (!isCurrent()) return;
-      setGitChanges(data.changes || []);
-      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes: data.changes || [] });
+      // A failed reply keeps the list on screen; it must not read as "no changes".
+      const changes = changesFromResponse<any>(res, data);
+      setGitChanges(changes);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes });
     } catch (e) {
       if (isCurrent()) console.error(e);
     } finally {
