@@ -4,6 +4,7 @@ import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js'
 import { Button } from '../../components/ui/button.js';
 import { attentionStore } from './chatAttention.js';
 import { useFloatingChat } from './floatingChatStore.js';
+import { useChatVisible } from './chatDockSlot.js';
 import { useChatAttention } from './useChatAttention.js';
 
 const MAX_CARDS = 4;
@@ -14,12 +15,13 @@ const MAX_CARDS = 4;
  * times out would vanish while the user is in another window, which is the
  * moment they most need it.
  *
- * Shown only while the chat window is closed or minimized. With the window open
- * the cards would sit on its header and hide its tabs and controls; there the
- * amber tabs and the "waiting" chip in its header carry the signal.
+ * Shown only while the chat is off screen. With the chat in view the cards would
+ * sit on its tabs and hide them; there the amber tabs and the "waiting" chip
+ * above them carry the signal.
  */
 export function ChatAttentionCards() {
-  const { isOpen, isMinimized, openCli } = useFloatingChat();
+  const { openCli } = useFloatingChat();
+  const chatVisible = useChatVisible();
   const { pending } = useChatAttention();
 
   // The count in the window title shows in a taskbar or tab strip, whatever is open.
@@ -34,7 +36,7 @@ export function ChatAttentionCards() {
     };
   }, [pending.length]);
 
-  if (pending.length === 0 || (isOpen && !isMinimized)) return null;
+  if (pending.length === 0 || chatVisible) return null;
   const shown = pending.slice(0, MAX_CARDS);
   const hidden = pending.length - shown.length;
 

@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 
 /**
- * Workspace discovery in the floating CLI chat.
+ * Workspace discovery in the docked CLI chat.
  *
  * Two independent defects used to hide workspaces from anyone picking one to
  * start a CLI session:
@@ -49,11 +49,12 @@ function workspaceButton(chat: import('@playwright/test').Locator, branch: strin
   return chat.getByRole('button', { name: new RegExp(`^${branch}\\b`) });
 }
 
-/** Open the floating CLI chat with no workspace tabs, so the empty state shows. */
-async function openEmptyCliChat(page: import('@playwright/test').Page) {
-  await page.goto('/#/overview');
-  await page.getByRole('button', { name: 'Open CLI Chat launcher' }).click();
+/** Open the CLI chat on a workspace and close its only tab, so the empty state shows. */
+async function openEmptyCliChat(page: import('@playwright/test').Page, first = 'alpha') {
+  await page.goto(`/#/workspaces/${first}/chat`);
   const chat = page.getByRole('region', { name: 'CLI Chat' });
+  await chat.getByRole('tab', { name: `Show ${first} in the left pane` }).focus();
+  await page.keyboard.press('Delete');
   await expect(chat.getByRole('heading', { name: 'Choose a workspace for CLI chat' })).toBeVisible();
   return chat;
 }
@@ -208,7 +209,7 @@ test.describe('with more workspaces than the first page shows', () => {
   test.use({ workspacesData: [many, { option: true }] });
 
   test('revealing more workspaces moves focus to the first new one', async ({ page }) => {
-    const chat = await openEmptyCliChat(page);
+    const chat = await openEmptyCliChat(page, many[0]!.branchName);
     const group = chat.getByRole('group', { name: 'Workspaces available for CLI chat' });
     await expect(group.getByRole('button')).toHaveCount(12);
 

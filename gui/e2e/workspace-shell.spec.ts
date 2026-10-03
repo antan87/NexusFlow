@@ -26,7 +26,8 @@ const workspaceNav = (page: Page) => page.getByRole('navigation', { name: 'Works
 
 test('one header shows where the task stands and links to where to act', async ({ page }) => {
   await mockWorkspace(page);
-  await page.goto('/#/workspaces/demo');
+  // A workspace opens on its chat, whose header is short. The full header with where the task stands is on the other destinations.
+  await page.goto('/#/workspaces/demo/overview');
   await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
   await expect(page.getByText('Make invoice totals load under a second').first()).toBeVisible();
   const status = page.getByRole('group', { name: 'Task status' });
@@ -39,7 +40,7 @@ test('one header shows where the task stands and links to where to act', async (
   await expect(page.getByRole('button', { name: 'Diff Review' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Process DAG' })).toHaveCount(0);
 
-  await expect(workspaceNav(page).getByRole('link')).toHaveText(['Overview', 'Plan & Context', 'Changes3', 'Run']);
+  await expect(workspaceNav(page).getByRole('link')).toHaveText(['Chat', 'Overview', 'Plan & Context', 'Changes3', 'Run']);
   await status.getByRole('link', { name: /Changes/ }).click();
   await expect(page).toHaveURL(/#\/workspaces\/demo\/changes$/);
   await expect(workspaceNav(page).getByRole('link', { name: /Changes/ })).toHaveAttribute('aria-current', 'page');

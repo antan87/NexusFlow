@@ -51,7 +51,7 @@ test.describe('Redesigned ContextSpace shell', () => {
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
     // Deep link selects a workspace and shows the detail tabs.
-    await page.goto('/#/workspaces/feature-x');
+    await page.goto('/#/workspaces/feature-x/overview');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Test feature workspace', { exact: true }).first()).toBeVisible();

@@ -65,15 +65,9 @@ async function mockChatStrip(page: Page) {
 }
 
 /**
- * Opens the chat on the demo workspace, then the strip's panel, and checks both states with axe.
- *
- * Only the strip is checked, not the whole chat window. The window's own tab buttons have role="tab"
- * with no tablist around them (an existing defect in FloatingChatModal, found when this test first
- * opened the chat), and that chrome is replaced by the docked workspace milestone. Checking the whole
- * page here would fail on markup this change does not touch.
+ * Opens the chat on the demo workspace, then the strip's panel, and checks the whole page with axe in both
+ * states: the docked chat with its tabs and the strip above the terminal, then the strip's panel open.
  */
-const STRIP = 'section[aria-label="Where are we"]';
-
 async function checkChatStrip(page: Page, label: string) {
   await mockWorkspace(page);
   await mockChatStrip(page);
@@ -82,12 +76,12 @@ async function checkChatStrip(page: Page, label: string) {
   const strip = page.getByRole('region', { name: 'Where are we', exact: true });
   await expect(strip).toContainText('Needs you');
   await expect(strip.getByRole('button', { name: /^Next: / })).toBeVisible();
-  await expectNoSeriousViolations(page, `${label} strip`, STRIP);
+  await expectNoSeriousViolations(page, `${label} strip`);
   await strip.getByRole('button', { expanded: false }).click();
   const detail = strip.getByRole('region', { name: 'Progress details' });
   await expect(detail.getByText('The AI suggests reopening this')).toBeVisible();
   await expect(detail.getByText('Waiting for an API key').first()).toBeVisible();
-  await expectNoSeriousViolations(page, `${label} strip panel`, STRIP);
+  await expectNoSeriousViolations(page, `${label} strip panel`);
 }
 
 async function expectNoSeriousViolations(page: Page, label: string, scope?: string) {

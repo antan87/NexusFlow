@@ -28,10 +28,11 @@ test('workspace actions open the selected CLI chat without starting a session', 
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
-  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
   await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
 
-  await chat.getByRole('button', { name: 'Close floating chat' }).click();
+  // Leaving the chat hides it. Its sessions keep running, and the sidebar brings it back.
+  await page.goto('/#/overview');
+  await expect(chat).toBeHidden();
 
   await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for beta' }).click();
   await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toHaveAttribute('aria-selected', 'true');
@@ -49,19 +50,21 @@ test('creation from chat returns to the new workspace in CLI mode', async ({ pag
     body: `event: progress\ndata: ${JSON.stringify({ status: 'completed', steps: [], workspacePath: beta.workspacePath, feature: beta })}\n\n`,
   }));
 
-  await page.goto('/#/overview');
-  await page.getByRole('button', { name: 'Open CLI Chat launcher' }).click();
+  // With every tab closed the chat offers the workspaces to choose from.
+  await page.goto('/#/workspaces/alpha/chat');
   const picker = page.getByRole('region', { name: 'CLI Chat' });
+  await picker.getByRole('tab', { name: 'Show alpha in the left pane' }).focus();
+  await page.keyboard.press('Delete');
   await expect(picker.getByRole('heading', { name: 'Choose a workspace for CLI chat' })).toBeVisible();
   await picker.getByRole('button', { name: 'Create workspace for CLI chat' }).click();
   await expect(page).toHaveURL(/#\/new\?from=chat$/);
 
   await page.goto('/#/new?from=chat&job=create-beta');
-  await expect(page).toHaveURL(/#\/workspaces\/beta$/);
+  // The new workspace opens on its chat.
+  await expect(page).toHaveURL(/#\/workspaces\/beta(\/chat)?$/);
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toHaveAttribute('aria-selected', 'true');
-  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
   await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
   await expect(chat.getByRole('button', { name: 'Start session' })).toBeDisabled();
 });

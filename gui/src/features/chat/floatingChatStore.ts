@@ -2,22 +2,14 @@ import type { TerminalLaunch } from '../terminal/client.js';
 import { useSyncExternalStore } from 'react';
 import { FLOATING_CHAT_STORAGE_KEY, LEGACY_FLOATING_CHAT_STORAGE_KEY } from '../../brand';
 
-export type FloatingChatSize = { width: number; height: number };
-
 /**
- * Single source of truth for the floating chat window geometry.
- *
- * These values used to be duplicated across the persisted-state loader, the
- * size setter and the modal's own drag/resize handlers, which let the clamps
- * drift apart. `compactBreakpointPx` and `defaultWidth` are deliberately close
- * together: the previous 720px breakpoint sat above the 560px default width,
- * so the inspector split could never render without manual resizing.
+ * Layout numbers for the docked chat, in one place so the persisted-state loader,
+ * the split setter and the dock itself cannot drift apart. `compactBreakpointPx`
+ * is the pane width below which the reader opens as a sheet over the terminal.
+ * `splitBreakpointPx` is the dock width at which a second workspace fits beside
+ * the first.
  */
 export const CHAT_GEOMETRY = {
-  minWidth: 380,
-  minHeight: 420,
-  defaultWidth: 760,
-  defaultHeight: 680,
   compactBreakpointPx: 520,
   splitBreakpointPx: 900,
   /** Pane width at which a second docked workspace becomes usable. */
@@ -25,44 +17,37 @@ export const CHAT_GEOMETRY = {
   splitMaxRatio: 75,
 } as const;
 
-export const clampChatSize = (size: FloatingChatSize): FloatingChatSize => ({
-  width: Math.max(CHAT_GEOMETRY.minWidth, Math.min(size.width, window.innerWidth || 1200)),
-  height: Math.max(CHAT_GEOMETRY.minHeight, Math.min(size.height, window.innerHeight || 900)),
-});
-
 export const clampSplitRatio = (ratio: number): number =>
   Math.max(CHAT_GEOMETRY.splitMinRatio, Math.min(CHAT_GEOMETRY.splitMaxRatio, ratio));
 
 export interface FloatingChatState {
-  isOpen: boolean;
-  isMinimized: boolean;
-  isMaximized: boolean;
+  /** The workspaces whose chats are alive, in tab order. Every one stays mounted while it is open. */
   openTabs: string[];
   activeTab: string | null;
   splitTab: string | null;
   splitRatio: number;
-  position: { x: number; y: number } | null;
-  size: FloatingChatSize;
   modes: Record<string, 'cli' | 'chat'>;
   harnesses: Record<string, string>;
   terminalLaunches: Record<string, TerminalLaunch>;
   drafts: Record<string, { id: string; text: string }>;
+  /**
+   * Goes up each time something asks to see a chat. The dock answers by going to
+   * that workspace's chat, so a call from anywhere in the app lands on the screen.
+   * Never saved: a reload must not navigate.
+   */
+  focusRequest: number;
 }
 
 const DEFAULT_STATE: FloatingChatState = {
-  isOpen: false,
-  isMinimized: false,
-  isMaximized: false,
   openTabs: [],
   activeTab: null,
   splitTab: null,
   splitRatio: 50,
-  position: null,
-  size: { width: CHAT_GEOMETRY.defaultWidth, height: CHAT_GEOMETRY.defaultHeight },
   drafts: {},
   modes: {},
   harnesses: {},
   terminalLaunches: {},
+  focusRequest: 0,
 };
 
 function loadState(): FloatingChatState {
@@ -70,25 +55,18 @@ function loadState(): FloatingChatState {
     const raw = localStorage.getItem(FLOATING_CHAT_STORAGE_KEY) ?? localStorage.getItem(LEGACY_FLOATING_CHAT_STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw);
+    // Saved state from the floating window also holds its position, size and open flags. They are ignored.
     return {
       drafts: {},
       harnesses: Object.fromEntries(Object.entries(parsed.harnesses ?? {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>,
       terminalLaunches: {},
       modes: Object.fromEntries(Object.entries(parsed.modes ?? {}).filter(([, mode]) => mode === 'cli' || mode === 'chat')) as Record<string, 'cli' | 'chat'>,
-      isOpen: typeof parsed.isOpen === 'boolean' ? parsed.isOpen : DEFAULT_STATE.isOpen,
-      isMinimized: typeof parsed.isMinimized === 'boolean' ? parsed.isMinimized : DEFAULT_STATE.isMinimized,
-      isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : DEFAULT_STATE.isMaximized,
-      openTabs: Array.isArray(parsed.openTabs) ? parsed.openTabs.filter((t: unknown) => typeof t === 'string') : [],
+      openTabs: Array.isArray(parsed.openTabs) ? [...new Set<string>(parsed.openTabs.filter((t: unknown): t is string => typeof t === 'string'))] : [],
       activeTab: typeof parsed.activeTab === 'string' ? parsed.activeTab : null,
       splitTab: typeof parsed.splitTab === 'string' && parsed.splitTab !== parsed.activeTab ? parsed.splitTab : null,
       splitRatio: typeof parsed.splitRatio === 'number' && Number.isFinite(parsed.splitRatio)
         ? clampSplitRatio(parsed.splitRatio) : 50,
-      position: parsed.position && typeof parsed.position.x === 'number' && typeof parsed.position.y === 'number'
-        ? { x: parsed.position.x, y: parsed.position.y }
-        : null,
-      size: parsed.size && typeof parsed.size.width === 'number' && typeof parsed.size.height === 'number'
-        ? clampChatSize({ width: parsed.size.width, height: parsed.size.height })
-        : DEFAULT_STATE.size,
+      focusRequest: 0,
     };
   } catch {
     return DEFAULT_STATE;
@@ -100,7 +78,7 @@ const listeners = new Set<() => void>();
 
 function notify() {
   try {
-    localStorage.setItem(FLOATING_CHAT_STORAGE_KEY, JSON.stringify({ ...currentState, terminalLaunches: {}, drafts: {} }));
+    localStorage.setItem(FLOATING_CHAT_STORAGE_KEY, JSON.stringify({ ...currentState, terminalLaunches: {}, drafts: {}, focusRequest: 0 }));
   } catch {
     // Non-fatal if localStorage is unavailable
   }
@@ -110,9 +88,15 @@ function notify() {
 }
 
 function updateState(updater: (prev: FloatingChatState) => FloatingChatState) {
-  currentState = updater(currentState);
+  const next = updater(currentState);
+  // An update that changed nothing is not saved and wakes nobody.
+  if (next === currentState) return;
+  currentState = next;
   notify();
 }
+
+/** The same state with one more request to look at the chat. */
+const focused = (state: FloatingChatState): FloatingChatState => ({ ...state, focusRequest: state.focusRequest + 1 });
 
 export const floatingChatStore = {
   getState: () => currentState,
@@ -138,8 +122,8 @@ export const floatingChatStore = {
       return { ...prev, terminalLaunches };
     });
   },
-  setMode: (branchName: string, mode: 'cli' | 'chat') => updateState(prev => ({ ...prev, modes: { ...prev.modes, [branchName]: mode } })),
-  setHarness: (branchName: string, harness: string) => updateState(prev => ({ ...prev, harnesses: { ...prev.harnesses, [branchName]: harness } })),
+  setMode: (branchName: string, mode: 'cli' | 'chat') => updateState(prev => (prev.modes[branchName] === mode ? prev : { ...prev, modes: { ...prev.modes, [branchName]: mode } })),
+  setHarness: (branchName: string, harness: string) => updateState(prev => (prev.harnesses[branchName] === harness ? prev : { ...prev, harnesses: { ...prev.harnesses, [branchName]: harness } })),
   openDraft: (branchName: string, text: string) => {
     floatingChatStore.open(branchName);
     floatingChatStore.setMode(branchName, 'chat');
@@ -160,6 +144,7 @@ export const floatingChatStore = {
 
   openCli: (branchName: string) => floatingChatStore.open(branchName, 'cli'),
 
+  /** Opens a workspace's chat as a tab, makes it the active one and asks to see it. */
   open: (branchName?: string, mode?: 'cli' | 'chat') => {
     updateState((prev) => {
       const openTabs = [...prev.openTabs];
@@ -174,89 +159,67 @@ export const floatingChatStore = {
         activeTab = openTabs[0];
       }
 
-      return {
+      return focused({
         ...prev,
-        isOpen: true,
-        isMinimized: false,
         openTabs,
         activeTab,
         modes: branchName && mode ? { ...prev.modes, [branchName]: mode } : prev.modes,
         splitTab: activeTab === prev.splitTab ? prev.activeTab : prev.splitTab,
-      };
+      });
     });
   },
 
-  close: () => {
-    updateState((prev) => ({
-      ...prev,
-      isOpen: false,
-      isMinimized: false,
-    }));
-  },
-
-  minimize: () => {
-    updateState((prev) => ({
-      ...prev,
-      isMinimized: true,
-    }));
-  },
-
-  restore: () => {
-    updateState((prev) => ({
-      ...prev,
-      isOpen: true,
-      isMinimized: false,
-    }));
-  },
-
-  toggleMaximize: () => {
-    updateState((prev) => ({
-      ...prev,
-      isMaximized: !prev.isMaximized,
-      isMinimized: false,
-    }));
-  },
-
-  addTab: (branchName: string) => {
+  /**
+   * Makes a workspace the active tab because the address says so, adding the tab
+   * if it is missing. It does not ask to see the chat: the user is already there.
+   */
+  reveal: (branchName: string) => {
     updateState((prev) => {
-      const openTabs = prev.openTabs.includes(branchName)
-        ? prev.openTabs
-        : [...prev.openTabs, branchName];
+      const present = prev.openTabs.includes(branchName);
+      if (present && prev.activeTab === branchName) return prev;
       return {
         ...prev,
-        isOpen: true,
-        isMinimized: false,
-        openTabs,
+        openTabs: present ? prev.openTabs : [...prev.openTabs, branchName],
         activeTab: branchName,
         splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
       };
     });
   },
 
+  addTab: (branchName: string) => {
+    updateState((prev) => focused({
+      ...prev,
+      openTabs: prev.openTabs.includes(branchName) ? prev.openTabs : [...prev.openTabs, branchName],
+      activeTab: branchName,
+      splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
+    }));
+  },
+
+  /** Closes a tab. When it was the one on screen, the next tab takes its place and is asked for. */
   removeTab: (branchName: string) => {
     updateState((prev) => {
+      if (!prev.openTabs.includes(branchName)) return prev;
       const openTabs = prev.openTabs.filter((t) => t !== branchName);
       let activeTab = prev.activeTab;
       if (activeTab === branchName) activeTab = openTabs.find(tab => tab !== prev.splitTab) ?? openTabs[0] ?? null;
-      return {
+      const next = {
         ...prev,
         openTabs,
         activeTab,
         splitTab: branchName === prev.splitTab || activeTab === prev.splitTab ? null : prev.splitTab,
-        isOpen: openTabs.length > 0 ? prev.isOpen : false,
       };
+      return activeTab !== prev.activeTab && activeTab !== null ? focused(next) : next;
     });
   },
 
   setActiveTab: (branchName: string) => {
     updateState((prev) => {
       if (!prev.openTabs.includes(branchName)) return prev;
-      return {
+      return focused({
         ...prev,
         activeTab: branchName,
         splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
-        isMinimized: false,
-      };
+      });
     });
   },
 
@@ -264,25 +227,11 @@ export const floatingChatStore = {
     updateState(prev => {
       if (branchName === prev.activeTab) return prev;
       const openTabs = branchName && !prev.openTabs.includes(branchName) ? [...prev.openTabs, branchName] : prev.openTabs;
-      return { ...prev, openTabs, splitTab: branchName, isMaximized: branchName ? true : prev.isMaximized };
+      return { ...prev, openTabs, splitTab: branchName };
     });
   },
 
   setSplitRatio: (ratio: number) => updateState(prev => ({ ...prev, splitRatio: clampSplitRatio(ratio) })),
-
-  setPosition: (position: { x: number; y: number } | null) => {
-    updateState((prev) => ({
-      ...prev,
-      position,
-    }));
-  },
-
-  setSize: (size: FloatingChatSize) => {
-    updateState((prev) => ({
-      ...prev,
-      size: clampChatSize(size),
-    }));
-  },
 };
 
 export function useFloatingChat(): FloatingChatState & typeof floatingChatStore {

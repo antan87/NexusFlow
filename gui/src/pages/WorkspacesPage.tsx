@@ -96,6 +96,8 @@ import { apiFetch } from '../lib/api/client.js';
 import { cn } from '../lib/utils.js';
 import { SessionHistory } from '../features/sessions/SessionHistory.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
+import { ChatDockSlot } from '../features/chat/ChatDockSlot.js';
+import { useChatAttention } from '../features/chat/useChatAttention.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
@@ -184,7 +186,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     if (selectedBranch) perfMark('cs:ws-header', { id: selectedBranch, tab: subTab });
   }, [selectedBranch, subTab]);
   const selectedMode = selected?.mode ?? 'worktree';
-  const { open: openFloatingChat } = useFloatingChat();
+  const { open: openChat } = useFloatingChat();
+  // Chats waiting for the developer, shown on the Chat destination while they are elsewhere.
+  const { waiting: waitingChats } = useChatAttention();
 
   const [isLegacy, setIsLegacy] = useState(false);
   const [migrating, setMigrating] = useState(false);
@@ -578,8 +582,9 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     const totalChangedFiles = st?.changedFiles ?? 0;
 
     return (
-      <div className="flex flex-col min-w-0 pb-12 w-full">
+      <div className={cn('flex min-w-0 flex-col w-full', subTab === 'chat' ? 'h-full' : 'pb-12')}>
         <WorkspaceHeader
+          compact={subTab === 'chat'}
           workspaceId={selected.branchName}
           title={selected.name || selected.branchName}
           branchName={selected.name ? selected.branchName : undefined}
@@ -694,11 +699,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           section={subTab}
           lastVisited={lastVisited}
           archived={archived}
-          badges={{ changes: totalChangedFiles, skills: activeSkills.length }}
+          badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : waitingChats.size }}
         />
 
         {/* Tab Navigation & Content Container */}
-        <div className="px-6 pt-5">
+        <div className={subTab === 'chat' ? 'hidden' : 'px-6 pt-5'}>
           {/* Legacy Migration Alert Banner */}
           {isLegacy && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent p-3 backdrop-blur-md shadow-xs">
@@ -1267,7 +1272,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => openFloatingChat(selected.branchName)}
+                      onClick={() => openChat(selected.branchName)}
                       className="text-xs h-8 gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
                       title="Open CLI chat for this workspace"
                     >
@@ -1294,6 +1299,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'services' && <ServiceConsole ws={selected} />}
           </div>
         </div>
+        {/* The chat fills the rest of the screen. It is not rendered here: it lives above the router and sits over this box. */}
+        {subTab === 'chat' && <div className="min-h-0 flex-1"><ChatDockSlot /></div>}
       </div>
     );
   };

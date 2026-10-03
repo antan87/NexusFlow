@@ -27,14 +27,17 @@ async function nextPoll() {
   await expect.poll(() => polls, { timeout: 12_000 }).toBeGreaterThan(before);
 }
 
-/** Starts every load of the page with the floating chat in this state. */
-async function chatState(page: Page, state: { isOpen: boolean; isMinimized?: boolean; tabs?: string[] }) {
+/** Starts every load of the page with these chats open. Whether the chat is on screen depends on the address. */
+async function chatState(page: Page, state: { tabs?: string[] } = {}) {
   const tabs = state.tabs ?? ['alpha', 'beta'];
   await page.addInitScript(([key, value]) => localStorage.setItem(key as string, value as string), [CHAT_KEY, JSON.stringify({
-    isOpen: state.isOpen, isMinimized: state.isMinimized ?? false, openTabs: tabs, activeTab: tabs[0],
+    openTabs: tabs, activeTab: tabs[0],
     modes: Object.fromEntries(tabs.map(tab => [tab, 'cli'])),
   })]);
 }
+
+/** Where the docked chat is on screen, with alpha in front. */
+const CHAT_PAGE = '/#/workspaces/alpha/chat';
 
 test.beforeEach(async ({ page }) => {
   requests = [];
@@ -55,7 +58,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript((key) => {
     if (!localStorage.getItem(key)) {
       localStorage.setItem(key, JSON.stringify({
-        isOpen: true, isMinimized: false, openTabs: ['alpha', 'beta'], activeTab: 'alpha', modes: { alpha: 'cli', beta: 'cli' },
+        openTabs: ['alpha', 'beta'], activeTab: 'alpha', modes: { alpha: 'cli', beta: 'cli' },
       }));
     }
   }, CHAT_KEY);
@@ -65,9 +68,9 @@ const chatOf = (page: Page) => page.getByRole('region', { name: 'CLI Chat' });
 const alertsOf = (page: Page) => page.getByRole('status', { name: 'Chats waiting for you' });
 const chipOf = (page: Page) => chatOf(page).getByRole('button', { name: /chats? waiting for you\. Show/ });
 
-test.describe('chat window open', () => {
+test.describe('chat on screen', () => {
   test('flags the waiting chat, and the header chip jumps to it', async ({ page }) => {
-    await page.goto('/#/overview');
+    await page.goto(CHAT_PAGE);
     const chat = chatOf(page);
     await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toBeVisible();
     await expect(chipOf(page)).toHaveCount(0);
@@ -93,7 +96,7 @@ test.describe('chat window open', () => {
   });
 
   test('does not alert for the chat the user is already looking at', async ({ page }) => {
-    await page.goto('/#/overview');
+    await page.goto(CHAT_PAGE);
     await page.bringToFront();
     const chat = chatOf(page);
     await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
@@ -113,7 +116,7 @@ test.describe('chat window open', () => {
       (window as any).__focused = false;
       document.hasFocus = () => (window as any).__focused === true;
     });
-    await page.goto('/#/overview');
+    await page.goto(CHAT_PAGE);
     await expect(chatOf(page).getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
 
     requests.push(ask('alpha', 'Approve the schema change?'));
@@ -131,14 +134,15 @@ test.describe('chat window open', () => {
   });
 
   test('keeps showing the waiting chat while opening another tab waits on the server', async ({ page }) => {
-    await page.goto('/#/overview');
+    await page.goto(CHAT_PAGE);
     requests.push(ask('beta', 'Which database should the migration target?'));
     await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
 
     // Opening a tab changes which chats are asked about; make the answer slow so a gap would show.
     answerDelayMs = 3000;
     const slowRequest = page.waitForRequest(request => /workspaces=[^&]*gamma/.test(decodeURIComponent(request.url())));
-    await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for gamma' }).click();
+    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
+    await page.getByRole('menuitem', { name: /gamma/ }).click();
     await slowRequest;
     await page.waitForTimeout(500);
 
@@ -148,8 +152,8 @@ test.describe('chat window open', () => {
   });
 
   test('counts every waiting chat in the chip', async ({ page }) => {
-    await chatState(page, { isOpen: true, tabs: ['alpha', 'beta', 'gamma', 'delta'] });
-    await page.goto('/#/overview');
+    await chatState(page, { tabs: ['alpha', 'beta', 'gamma', 'delta'] });
+    await page.goto(CHAT_PAGE);
     requests.push(ask('beta', 'Question from beta'), ask('delta', 'Question from delta'));
 
     await expect(chipOf(page)).toHaveAccessibleName(/^2 chats waiting for you\. Show /, { timeout: 12_000 });
@@ -157,9 +161,9 @@ test.describe('chat window open', () => {
   });
 });
 
-test.describe('chat window closed or minimized', () => {
+test.describe('chat off screen', () => {
   test('shows a card with the question, and Open chat opens that chat', async ({ page }) => {
-    await chatState(page, { isOpen: false });
+    await chatState(page);
     await page.goto('/#/overview');
     await expect(chatOf(page)).toBeHidden();
 
@@ -181,7 +185,7 @@ test.describe('chat window closed or minimized', () => {
   });
 
   test('puts back only a window title it set itself', async ({ page }) => {
-    await chatState(page, { isOpen: false });
+    await chatState(page);
     await page.goto('/#/overview');
     requests.push(ask('beta', 'Ready?'));
     await expect(page).toHaveTitle(/^\(1\) /, { timeout: 12_000 });
@@ -195,7 +199,7 @@ test.describe('chat window closed or minimized', () => {
   });
 
   test('a dismissed alert stays dismissed after a reload, and a new question raises it again', async ({ page }) => {
-    await chatState(page, { isOpen: false });
+    await chatState(page);
     await page.goto('/#/overview');
     requests.push(ask('beta', 'First question?', 'q1'));
     await expect(alertsOf(page)).toContainText('beta is waiting for you', { timeout: 12_000 });
@@ -205,7 +209,7 @@ test.describe('chat window closed or minimized', () => {
 
     await page.reload();
     await nextPoll();
-    await expect(page.getByRole('button', { name: 'Open CLI Chat launcher' })).toBeVisible();
+    await expect(chatOf(page)).toBeHidden();
     await expect(alertsOf(page)).toHaveCount(0);
 
     requests = [ask('beta', 'Second question?', 'q2')];
@@ -213,7 +217,7 @@ test.describe('chat window closed or minimized', () => {
   });
 
   test('shows the agent text as plain text', async ({ page }) => {
-    await chatState(page, { isOpen: false });
+    await chatState(page);
     await page.goto('/#/overview');
     requests.push(ask('beta', '<img src=x onerror="window.__pwned=1"> **not bold** <script>window.__pwned=2</script>'));
 
@@ -224,26 +228,27 @@ test.describe('chat window closed or minimized', () => {
     expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   });
 
-  test('names the waiting chats on the minimized pill', async ({ page }) => {
-    await chatState(page, { isOpen: true, isMinimized: true });
-    await page.goto('/#/overview');
-    requests.push(ask('beta', 'Ready for review?'));
+  test('puts the waiting count on the Chat destination while the chat is elsewhere', async ({ page }) => {
+    await chatState(page);
+    await page.goto('/#/workspaces/alpha/plan');
+    const chatLink = page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Chat/ });
+    await expect(chatLink).not.toContainText(/\d/);
 
-    await expect(page.getByTitle('Restore floating CLI chat')).toContainText('1 waiting for you', { timeout: 12_000 });
-    await expect(alertsOf(page)).toContainText('beta is waiting for you');
-  });
-
-  test('puts a count on the launcher', async ({ page }) => {
-    await chatState(page, { isOpen: false });
-    await page.goto('/#/overview');
     requests.push(ask('beta', 'Ready for review?'), ask('alpha', 'And this one?'));
 
-    await expect(page.getByRole('button', { name: 'Open CLI Chat launcher, 2 waiting for you' })).toBeVisible({ timeout: 12_000 });
+    await expect(chatLink).toContainText('2', { timeout: 12_000 });
     await expect(alertsOf(page).getByRole('button', { name: 'Open chat' })).toHaveCount(2);
   });
 
+  test('shows no count on the Chat destination while the chat is on screen', async ({ page }) => {
+    await page.goto(CHAT_PAGE);
+    requests.push(ask('beta', 'Ready for review?'));
+    await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Chat/ })).not.toContainText(/\d/);
+  });
+
   test('lists at most four cards and says how many more are waiting', async ({ page }) => {
-    await chatState(page, { isOpen: false, tabs: names });
+    await chatState(page, { tabs: names });
     await page.goto('/#/overview');
     requests.push(...names.map(name => ask(name, `Question from ${name}`)));
 

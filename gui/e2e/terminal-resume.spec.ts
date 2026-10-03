@@ -37,7 +37,9 @@ test('overview and sidebar reopen the existing workspace CLI tab', async ({ page
   await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
   await expect(chat.getByRole('button', { name: 'Continue a conversation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
-  await chat.getByRole('button', { name: 'Close floating chat' }).click();
+  // Leaving the chat hides it without ending anything.
+  await page.goto('/#/overview');
+  await expect(chat).toBeHidden();
 
   await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
   await expect(chat).toBeVisible();
@@ -150,14 +152,16 @@ test('selecting an already running CLI session reuses its terminal', async ({ pa
     // settle on either test id: a terminal is attached to the pane either way.
     const attached = chat.locator('[data-testid="terminal-state"], [data-testid="terminal-disconnected"]');
     await expect.poll(() => launches).toBe(1);
-    await chat.getByRole('button', { name: 'Close floating chat' }).click();
+    await page.goto('/#/overview');
+    await expect(chat).toBeHidden();
     await session.click();
     await expect(chat).toBeVisible();
     await page.waitForTimeout(150);
     expect(launches).toBe(1);
     releaseCreate();
     await expect(attached).toBeVisible();
-    await chat.getByRole('button', { name: 'Close floating chat' }).click();
+    await page.goto('/#/overview');
+    await expect(chat).toBeHidden();
     await session.click();
     await expect(chat).toBeVisible();
     await expect(attached).toBeVisible();
@@ -177,9 +181,12 @@ test.describe('workspace tab selection', () => {
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
     await page.getByRole('article').filter({ hasText: 'Harness resume' }).getByRole('button', { name: 'View all CLI sessions for feature-x' }).click();
     await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
+    // The sidebar lists every workspace on pages outside a workspace; inside one it shows that workspace's worktrees.
+    await page.goto('/#/overview');
     await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-y' }).click();
     await expect(chat.getByRole('tab', { name: 'Show feature-y in the left pane' })).toHaveAttribute('aria-selected', 'true');
 
+    await page.goto('/#/overview');
     await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
     await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveAttribute('aria-selected', 'true');
     await expect(chat.getByRole('tab')).toHaveCount(2);
@@ -245,7 +252,8 @@ test('unavailable tools explain why start is disabled and a selected tool stays 
   await expect(page.getByRole('option', { name: /Codex.*not installed/i })).toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('option', { name: 'Claude Code' }).click();
   await expect(chat.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
-  await chat.getByRole('button', { name: 'Close floating chat' }).click();
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await expect(chat).toBeHidden();
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   await expect(chat.getByRole('combobox', { name: 'CLI harness' })).toContainText('Claude Code');
 });

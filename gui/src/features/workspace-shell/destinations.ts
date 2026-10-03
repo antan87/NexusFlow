@@ -1,12 +1,13 @@
 /**
- * The workspace navigation model: four destinations, each with one purpose.
+ * The workspace navigation model: five destinations, each with one purpose.
  * Existing section ids stay the URL segment (`/workspaces/:id/:section`), so
- * every deep link from before the shell redesign still resolves.
+ * every deep link from before the shell redesign still resolves. A workspace
+ * with no section in its URL opens on the chat, which is where most work happens.
  */
-export type WorkspaceSection = 'overview' | 'plan' | 'documents' | 'knowledge' | 'skills' | 'changes' | 'sessions' | 'services';
+export type WorkspaceSection = 'chat' | 'overview' | 'plan' | 'documents' | 'knowledge' | 'skills' | 'changes' | 'sessions' | 'services';
 
 export interface WorkspaceDestination {
-  id: 'overview' | 'context' | 'changes' | 'run';
+  id: 'chat' | 'overview' | 'context' | 'changes' | 'run';
   label: string;
   /** What the destination is for, shown as its description. */
   purpose: string;
@@ -14,6 +15,7 @@ export interface WorkspaceDestination {
 }
 
 export const WORKSPACE_DESTINATIONS: WorkspaceDestination[] = [
+  { id: 'chat', label: 'Chat', purpose: 'Work with the assistant, with progress above and documents and code beside it', sections: ['chat'] },
   { id: 'overview', label: 'Overview', purpose: 'Where the task stands and what to do next', sections: ['overview'] },
   { id: 'context', label: 'Plan & Context', purpose: 'Brief, milestones, documents and what the assistant knows', sections: ['plan', 'documents', 'knowledge', 'skills'] },
   { id: 'changes', label: 'Changes', purpose: 'Review, commit and finish the work', sections: ['changes'] },
@@ -21,6 +23,7 @@ export const WORKSPACE_DESTINATIONS: WorkspaceDestination[] = [
 ];
 
 export const SECTION_LABELS: Record<WorkspaceSection, string> = {
+  chat: 'Chat',
   overview: 'Overview',
   plan: 'Plan',
   documents: 'Documents',
@@ -33,9 +36,13 @@ export const SECTION_LABELS: Record<WorkspaceSection, string> = {
 
 const ALL_SECTIONS = new Set<string>(WORKSPACE_DESTINATIONS.flatMap((destination) => destination.sections));
 
-/** Unknown or missing segments fall back to the overview instead of a blank page. */
+/**
+ * No segment opens the chat. An unknown one (an old or mistyped link) falls back
+ * to the overview instead of a blank page.
+ */
 export function parseSection(segment: string | undefined | null): WorkspaceSection {
-  return segment && ALL_SECTIONS.has(segment) ? segment as WorkspaceSection : 'overview';
+  if (!segment) return 'chat';
+  return ALL_SECTIONS.has(segment) ? segment as WorkspaceSection : 'overview';
 }
 
 export function destinationOf(section: WorkspaceSection): WorkspaceDestination {

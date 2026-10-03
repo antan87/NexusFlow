@@ -11,8 +11,7 @@ import { VsCodeShell } from './app/VsCodeShell.js';
 import { SetupPage } from './features/setup/SetupPage.js';
 import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
-import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
-import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
+import { ChatDock } from './features/chat/ChatDock.js';
 import { ChatAttentionCards } from './features/chat/ChatAttentionCards.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
@@ -21,6 +20,7 @@ import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
 import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
 import { changesFromResponse } from './features/changes/utils/changesResponse.js';
+import { parseSection, type WorkspaceSection } from './features/workspace-shell/destinations.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -212,7 +212,7 @@ function AppInner() {
   const statusesComplete = !statusesQuery.isLoading && !statusesQuery.hasNextPage && !statusesQuery.isError;
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<WorkspaceSection>('chat');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -805,9 +805,8 @@ function AppInner() {
     if (p.startsWith('/workspaces')) {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
-      const tab = parts[2];
-      const valid = ['overview', 'plan', 'documents', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
-      setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
+      // One list of sections, shared with the workspace navigation: no section opens the chat.
+      setSubTab(parseSection(parts[2]));
     } else {
       setActiveWsId(null);
     }
@@ -1354,8 +1353,7 @@ Core Instructions:
         onArchived={handleArchived}
       />
 
-      <FloatingChatModal workspaces={activeWorkspaces} />
-      <FloatingChatLauncher />
+      <ChatDock workspaces={activeWorkspaces} />
       <ChatAttentionCards />
 
       <ToastStack

@@ -68,7 +68,8 @@ const workspaceNav = (page: Page) => page.getByRole('navigation', { name: 'Works
 test('archive previews what happens, parks unmerged work on request, and restores the workspace', async ({ page }) => {
   const calls = await mockArchiveBackend(page);
   await page.goto('/#/workspaces/demo');
-  await expect(workspaceNav(page).getByRole('link')).toHaveCount(4);
+  // Chat, Overview, Plan & Context, Changes and Run.
+  await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
 
   await page.getByRole('button', { name: 'Workspace actions' }).click();
   await page.getByRole('menuitem', { name: 'Archive workspace…' }).click();
@@ -131,7 +132,8 @@ test('archive previews what happens, parks unmerged work on request, and restore
 
   await page.getByRole('button', { name: 'Restore workspace' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Archived on' })).toHaveCount(0);
-  await expect(workspaceNav(page).getByRole('link')).toHaveCount(4);
+  // Chat, Overview, Plan & Context, Changes and Run.
+  await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
   await expect(page.getByLabel('Current objective')).toBeEnabled();
   expect(calls.at(-1)?.path).toBe('unarchive');
 });

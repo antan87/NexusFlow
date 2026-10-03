@@ -5,7 +5,7 @@ describe('workspace destinations', () => {
   it('place every section in exactly one destination', () => {
     const sections = WORKSPACE_DESTINATIONS.flatMap((destination) => destination.sections);
     expect(new Set(sections).size).toBe(sections.length);
-    expect(sections.sort()).toEqual(['changes', 'documents', 'knowledge', 'overview', 'plan', 'services', 'sessions', 'skills']);
+    expect(sections.sort()).toEqual(['changes', 'chat', 'documents', 'knowledge', 'overview', 'plan', 'services', 'sessions', 'skills']);
   });
 
   it('keep old tab URLs working', () => {
@@ -14,8 +14,18 @@ describe('workspace destinations', () => {
     }
     expect(destinationOf('knowledge').id).toBe('context');
     expect(destinationOf('services').id).toBe('run');
+    // An unknown segment lands on the overview. No segment at all opens the chat.
     expect(parseSection('diff')).toBe('overview');
-    expect(parseSection(undefined)).toBe('overview');
+    expect(parseSection(undefined)).toBe('chat');
+    expect(parseSection(null)).toBe('chat');
+    expect(parseSection('')).toBe('chat');
+    expect(parseSection('chat')).toBe('chat');
+  });
+
+  it('lead with the chat, which has a destination of its own', () => {
+    expect(WORKSPACE_DESTINATIONS[0]).toMatchObject({ id: 'chat', label: 'Chat', sections: ['chat'] });
+    expect(destinationOf('chat').id).toBe('chat');
+    expect(entrySection(WORKSPACE_DESTINATIONS[0]!, {})).toBe('chat');
   });
 
   it('reopen the section last used in a destination', () => {
@@ -34,6 +44,10 @@ describe('workspace destinations', () => {
     // A deep link to a working section of an archived workspace lands on its overview.
     expect(visibleSection('changes', true)).toBe('overview');
     expect(visibleSection('sessions', true)).toBe('overview');
+    // An archived workspace has no chat: a link with no section, or one to the chat, shows its record.
+    expect(visibleSection(parseSection(undefined), true)).toBe('overview');
+    expect(visibleSection('chat', true)).toBe('overview');
+    expect(visibleSection('chat', false)).toBe('chat');
     expect(visibleSection('knowledge', true)).toBe('knowledge');
     expect(visibleSection('changes', false)).toBe('changes');
     // A remembered working section is not reopened in an archived workspace.
