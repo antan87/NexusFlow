@@ -53,7 +53,7 @@ export function WhereAreWeBar({ facts, guidance, action, expanded, panelId, noti
       </button>
       {action && (
         <Button
-          size="xs" variant="outline" className="max-w-full min-w-0" title={action.reason}
+          size="xs" variant="ghost" className="max-w-full min-w-0 text-foreground" title={action.reason}
           aria-label={`Next: ${action.label}. ${action.reason}`}
           onClick={() => onNext(action)}
         >

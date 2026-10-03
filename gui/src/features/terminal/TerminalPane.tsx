@@ -443,8 +443,8 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   // usage heuristic can pick a sibling's conversation once the list is empty.
   const resumableId = terminal && terminal.target !== 'shell' ? terminal.sessionId : undefined;
   const resumeButton = gone && terminal && (resumableId
-    ? <Button size="xs" variant="outline" disabled={busy} onClick={() => void resume({ id: crypto.randomUUID(), target: terminal.target, sessionId: resumableId })}><History className="size-3" />Resume conversation</Button>
-    : terminal.target !== 'shell' && <Button size="xs" variant="outline" onClick={() => setShowHistory(true)}><History className="size-3" />Continue a conversation</Button>);
+    ? <Button size="xs" variant="ghost" disabled={busy} onClick={() => void resume({ id: crypto.randomUUID(), target: terminal.target, sessionId: resumableId })}><History className="size-3" />Resume conversation</Button>
+    : terminal.target !== 'shell' && <Button size="xs" variant="ghost" onClick={() => setShowHistory(true)}><History className="size-3" />Continue a conversation</Button>);
   const stateDotClass = running ? 'bg-emerald-500' : exited ? 'bg-muted-foreground' : disconnected ? 'bg-warning' : 'bg-amber-500';
   const usageSummary = useMemo(() => {
     if (usageHistory.isPending) return 'Checking session usage…';
@@ -454,11 +454,15 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   }, [usageHistory.isPending, usageHistory.isError, usageSession]);
   const [paneMenuOpen, setPaneMenuOpen] = useState(false);
   return <div className="flex h-full min-h-0 flex-col" data-testid="terminal-pane">
-    {!terminal && <div className="border-b border-border px-3 py-3">
-      <p className="mb-2 text-xs font-semibold text-foreground">What would you like to do in {workspace}?</p>
-      <div role="group" aria-label="Choose a CLI chat path" className="flex flex-wrap gap-2">
-        <Button size="sm" variant={showHistory ? 'secondary' : 'outline'} aria-pressed={showHistory} onClick={() => setShowHistory(true)}><History className="size-3.5" />Continue a conversation</Button>
-        <Button size="sm" variant={!showHistory ? 'secondary' : 'outline'} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}><Plus className="size-3.5" />Start new session</Button>
+    {!terminal && <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+      <p className="min-w-0 truncate text-xs text-muted-foreground">Chat in <span className="font-medium text-foreground">{workspace}</span></p>
+      <div role="group" aria-label="Choose a CLI chat path" className="inline-flex shrink-0 rounded-md border border-border/70 p-0.5">
+        {([[true, 'Continue a conversation', 'Continue', History], [false, 'Start new session', 'New', Plus]] as const).map(([history, name, shown, Icon]) => (
+          <button
+            key={name} type="button" aria-label={name} aria-pressed={showHistory === history} onClick={() => setShowHistory(history)}
+            className={`inline-flex h-6 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring ${showHistory === history ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          ><Icon className="size-3" aria-hidden="true" />{shown}</button>
+        ))}
       </div>
     </div>}
     {/* One toolbar for the pane. Session history, saved usage and the terminal
