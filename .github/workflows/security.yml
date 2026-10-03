@@ -53,14 +53,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Audit Root Dependencies
-        run: npm audit --audit-level=low
-
-      - name: Audit GUI Dependencies
-        run: npm audit --prefix gui --audit-level=low
-
-      - name: Audit Desktop Dependencies
-        run: npm audit --prefix desktop --audit-level=low
-
-      - name: Audit Extension Dependencies
-        run: npm audit --prefix extension --audit-level=low
+      # Same strictness as `npm audit --audit-level=low`: any advisory fails, except the few listed
+      # in .github/audit-exceptions.json, each with a reason and an expiry date (see
+      # scripts/audit-gate.mjs). All four packages are checked in one run so a failure in the first
+      # cannot hide one in the rest.
+      - name: Audit dependencies (root, gui, desktop, extension)
+        run: node scripts/audit-gate.mjs . gui desktop extension
