@@ -45,10 +45,19 @@ const tab = (page: Page, name: string) => chatOf(page).getByRole('tab', { name: 
  * Closes a chat's tab the accessible way: the Delete key on the focused tab. A terminal takes focus once it has
  * attached, and a key pressed then belongs to the terminal, so wait for the one in front to settle first.
  */
+const settled = (page: Page) => expect(chatOf(page).locator('[data-testid="terminal-state"]:visible')).toHaveText('Running', { timeout: 20_000 });
 const closeTab = async (page: Page, name: string) => {
-  await expect(chatOf(page).locator('[data-testid="terminal-state"]:visible')).toHaveText('Running', { timeout: 20_000 });
+  await settled(page);
   await tab(page, name).focus();
   await page.keyboard.press('Delete');
+};
+/**
+ * Closes a chat's tab with its cross. Its status icons arrive a moment after the terminal does and move the cross,
+ * so wait for the tab to settle before aiming at it.
+ */
+const clickCross = async (page: Page, name: string) => {
+  await settled(page);
+  await tab(page, name).locator('[data-close-tab]').click();
 };
 
 test.describe('the chat is the centre of a workspace', () => {
@@ -154,7 +163,7 @@ test.describe('the address says which chat is showing', () => {
     await page.getByRole('menuitem', { name: /gamma/ }).click();
     await expect(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
 
-    await tab(page, 'gamma').locator('[data-close-tab]').click();
+    await clickCross(page, 'gamma');
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
     await expect(chatOf(page).getByRole('tab')).toHaveCount(2);
 
@@ -268,7 +277,7 @@ test.describe('on a slow machine', () => {
     await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
     await page.getByRole('menuitem', { name: /gamma/ }).click();
     await slow(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
-    await tab(page, 'gamma').locator('[data-close-tab]').click();
+    await clickCross(page, 'gamma');
 
     await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/, { timeout: 15_000 });
     await page.waitForTimeout(2000);

@@ -76,7 +76,10 @@ test('switching sections keeps an unsaved brief and reopens the last section use
   await expect(page.getByLabel('Current objective')).toHaveValue('Cache invoice lookups per customer');
 
   await sections.getByRole('link', { name: 'Documents' }).click();
+  // The last section used is remembered when Documents is rendered, so leave only once it is on screen.
+  await expect(page.getByRole('region', { name: 'Documents', exact: true })).toBeVisible();
   await workspaceNav(page).getByRole('link', { name: 'Overview' }).click();
+  await expect(workspaceNav(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   await workspaceNav(page).getByRole('link', { name: 'Plan & Context' }).click();
   await expect(page).toHaveURL(/\/documents$/);
 });
