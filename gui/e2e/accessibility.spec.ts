@@ -68,6 +68,27 @@ async function mockChatStrip(page: Page) {
  * Opens the chat on the demo workspace, then the strip's panel, and checks the whole page with axe in both
  * states: the docked chat with its tabs and the strip above the terminal, then the strip's panel open.
  */
+/** The chat in the centre with a part open beside it: the header row, the chat's tabs and strip, the divider and the panel. */
+async function checkChatBeside(page: Page, label: string) {
+  // Beside, over the specs' default of hidden, once per tab.
+  await page.addInitScript(() => {
+    try {
+      if (!sessionStorage.getItem('layout-seeded')) { localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 62 })); sessionStorage.setItem('layout-seeded', '1'); }
+    } catch { /* Storage can be unavailable. */ }
+  });
+  await mockWorkspace(page);
+  await mockChatStrip(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/#/workspaces/demo/plan');
+  await expect(page.getByRole('region', { name: 'Where are we', exact: true })).toContainText('Needs you');
+  await expect(page.getByRole('separator', { name: 'Resize the chat' })).toBeVisible();
+  await expect(page.getByLabel('Current objective')).toBeVisible();
+  await expectNoSeriousViolations(page, `${label} chat beside the plan`);
+  await page.goto('/#/workspaces/demo/changes');
+  await expect(page.getByRole('separator', { name: 'Resize the chat' })).toBeVisible();
+  await expectNoSeriousViolations(page, `${label} chat beside the changes`);
+}
+
 async function checkChatStrip(page: Page, label: string) {
   await mockWorkspace(page);
   await mockChatStrip(page);
@@ -146,6 +167,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
     test('chat with the Where Are We strip', async ({ page }) => {
       await checkChatStrip(page, `${colorScheme} chat`);
     });
+
+    test('chat with a part open beside it', async ({ page }) => {
+      await checkChatBeside(page, `${colorScheme}`);
+    });
   });
 }
 
@@ -194,6 +219,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     test('chat with the Where Are We strip', async ({ page }) => {
       await checkChatStrip(page, `dusk ${colorScheme} chat`);
+    });
+
+    test('chat with a part open beside it', async ({ page }) => {
+      await checkChatBeside(page, `dusk ${colorScheme}`);
     });
   });
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { chatDockSlot } from './chatDockSlot.js';
-import { goToChat, judgeDockLanding, type DockLanding } from './chatRoute.js';
+import { goToWorkspace, judgeDockLanding, type DockLanding } from './chatRoute.js';
 import { floatingChatStore } from './floatingChatStore.js';
 
 /**
@@ -22,7 +22,7 @@ import { floatingChatStore } from './floatingChatStore.js';
 export function ChatDockSlot() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { workspaceId } = useParams();
+  const { workspaceId, tab } = useParams();
   // A landing is judged once. The verdict is kept so that running the effect again for the same landing
   // (as development mode does on mount) reaches the same answer instead of seeing it as already taken.
   const judged = useRef<{ key: string; landing: DockLanding } | null>(null);
@@ -33,11 +33,12 @@ export function ChatDockSlot() {
     if (landing === 'stale') return;
     const { openTabs, activeTab } = floatingChatStore.getState();
     if (landing === 'current' && !openTabs.includes(workspaceId)) {
-      if (activeTab && activeTab !== workspaceId) goToChat(navigate, activeTab, { replace: true });
+      // The part open beside the chat stays open for the chat the user is on.
+      if (activeTab && activeTab !== workspaceId) goToWorkspace(navigate, activeTab, tab ?? 'chat', { replace: true });
       return;
     }
     floatingChatStore.reveal(workspaceId);
-  }, [workspaceId, location.key, location.state, navigate]);
+  }, [workspaceId, tab, location.key, location.state, navigate]);
   // Stable, so React does not detach and reattach the slot on every render, which would hide the dock for a moment.
   const attach = useCallback((element: HTMLDivElement | null) => { chatDockSlot.set(element); }, []);
   return <div ref={attach} data-testid="chat-dock-slot" className="h-full min-h-0 w-full" />;

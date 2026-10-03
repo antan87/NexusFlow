@@ -19,7 +19,7 @@ import { useFloatingChat, floatingChatStore, CHAT_GEOMETRY } from './floatingCha
 import { attentionStore } from './chatAttention.js';
 import { useChatAttention, useWindowAttentive } from './useChatAttention.js';
 import { useChatDockSlot, useDockRect } from './chatDockSlot.js';
-import { browserPath, goToChat, showsChatOf } from './chatRoute.js';
+import { browserPath, goToWorkspace, parseWorkspacePath, showsChatFor } from './chatRoute.js';
 
 interface ChatDockProps {
   workspaces: Feature[];
@@ -52,6 +52,9 @@ export function ChatDock({ workspaces }: ChatDockProps) {
   const slot = useChatDockSlot();
   const rect = useDockRect(slot);
   const onScreen = rect !== null;
+  // The effects below run on events, and need to know whether the chat is on screen as of that moment.
+  const onScreenRef = useRef(onScreen);
+  useEffect(() => { onScreenRef.current = onScreen; }, [onScreen]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [pickerQuery, setPickerQuery] = useState('');
@@ -73,7 +76,11 @@ export function ChatDock({ workspaces }: ChatDockProps) {
     seenFocus.current = focusRequest;
     if (!activeTab) return;
     // Compared with the browser's address, which is already where the user is going, not the page's older copy.
-    if (!showsChatOf(browserPath(), activeTab)) goToChat(navigate, activeTab);
+    // The part open beside the chat stays open for the workspace that takes its place, so choosing another workspace
+    // while reading the plan shows its plan beside its chat.
+    const here = browserPath();
+    if (showsChatFor(here, activeTab, onScreenRef.current)) return;
+    goToWorkspace(navigate, activeTab, onScreenRef.current ? parseWorkspacePath(here)?.section ?? 'chat' : 'chat');
   }, [focusRequest, activeTab, navigate]);
 
   useEffect(() => {
@@ -156,7 +163,7 @@ export function ChatDock({ workspaces }: ChatDockProps) {
     const branch = focusOpenedTab.current;
     if (!branch || !openTabs.includes(branch)) return;
     focusOpenedTab.current = null;
-    dockRef.current?.querySelector<HTMLElement>(`[role="tab"][title="${CSS.escape(branch)}"]`)?.focus();
+    dockRef.current?.querySelector<HTMLElement>(`[role="tab"][data-branch="${CSS.escape(branch)}"]`)?.focus();
   }, [openTabs]);
   useEffect(() => {
     const index = focusRevealedIndex.current;
@@ -179,7 +186,7 @@ export function ChatDock({ workspaces }: ChatDockProps) {
         {pending.length > 0 && (
           <button
             type="button"
-            onClick={() => goToChat(navigate, pending[0]!.workspaceId)}
+            onClick={() => goToWorkspace(navigate, pending[0]!.workspaceId, 'chat')}
             title={pending.map((request) => `${request.workspaceId}: ${request.message}`).join('\n')}
             aria-label={`${pending.length} ${pending.length === 1 ? 'chat' : 'chats'} waiting for you. Show ${pending[0]!.workspaceId}.`}
             className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-amber-500/70 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-foreground transition-colors hover:bg-amber-500/20"
@@ -193,6 +200,8 @@ export function ChatDock({ workspaces }: ChatDockProps) {
           <div role="tablist" aria-label="Open chats" className="flex min-w-0 items-center gap-1 overflow-x-auto no-scrollbar">
             {openTabs.map((branchName) => {
               const isActive = branchName === activeTab;
+              // A workspace is known by its name. The branch is a detail, shown when hovering.
+              const label = workspaceMap.get(branchName)?.name || branchName;
               return (
                 <div
                   key={branchName}
@@ -206,15 +215,15 @@ export function ChatDock({ workspaces }: ChatDockProps) {
                 >
                   {/* A tab holds nothing focusable, so the tab strip is a valid tab list. The Delete key closes the focused tab;
                       the cross is the same action for the mouse, and is not announced separately. */}
-                  <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-keyshortcuts="Delete" aria-label={`Show ${branchName} in the left pane${waiting.has(branchName) ? ', waiting for your input' : ''}`} title={branchName}
-                    className="flex min-w-0 items-center gap-1.5" onClick={() => goToChat(navigate, branchName)}
+                  <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-keyshortcuts="Delete" aria-label={`Show ${label} in the left pane${waiting.has(branchName) ? ', waiting for your input' : ''}`} title={label === branchName ? branchName : `${label} (${branchName})`} data-branch={branchName}
+                    className="flex min-w-0 items-center gap-1.5" onClick={() => goToWorkspace(navigate, branchName, parseWorkspacePath(browserPath())?.section ?? 'chat')}
                     onKeyDown={(event) => {
                       if (event.key !== 'Delete') return;
                       event.preventDefault();
                       closeTab(branchName);
                     }}>
                     <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{branchName}</span>
+                    <span className="truncate">{label}</span>
                     {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
                     {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
                     {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
@@ -278,7 +287,7 @@ export function ChatDock({ workspaces }: ChatDockProps) {
                       >
                         <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
                         <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate font-medium text-foreground">{ws.branchName}</span>
+                          <span className="truncate font-medium text-foreground">{ws.name || ws.branchName}</span>
                           {ws.description && (
                             <span className="truncate text-[10px] text-muted-foreground">{ws.description}</span>
                           )}

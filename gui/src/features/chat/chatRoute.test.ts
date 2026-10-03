@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { chatPath, showsChatOf } from './chatRoute';
+import { chatPath, parseWorkspacePath, showsChatFor, showsChatOf } from './chatRoute';
 
 describe('chatPath', () => {
   it('names the chat section of a workspace, encoding its name', () => {
@@ -112,5 +112,43 @@ describe('browserPath', () => {
     expect(showsChatOf(browserPath('#/workspaces/alpha'), 'alpha')).toBe(true);
     expect(showsChatOf(browserPath('#/workspaces/alpha/chat'), 'alpha')).toBe(true);
     expect(showsChatOf(browserPath('#/workspaces/beta/chat'), 'alpha')).toBe(false);
+  });
+});
+
+describe('parseWorkspacePath', () => {
+  it('names the workspace and the section, and a missing section is the chat', () => {
+    expect(parseWorkspacePath('/workspaces/alpha')).toEqual({ workspace: 'alpha', section: 'chat' });
+    expect(parseWorkspacePath('/workspaces/alpha/')).toEqual({ workspace: 'alpha', section: 'chat' });
+    expect(parseWorkspacePath('/workspaces/alpha/plan')).toEqual({ workspace: 'alpha', section: 'plan' });
+    expect(parseWorkspacePath('/workspaces/feature%2Fx%20y/changes')).toEqual({ workspace: 'feature/x y', section: 'changes' });
+  });
+
+  it('is null for any other address, and for one that cannot be decoded', () => {
+    for (const path of ['', '/', '/overview', '/workspaces', '/workspaces/', '/workspaces/a/b/c', '/new?from=chat', '/workspaces/%E0%A4%A']) {
+      expect(parseWorkspacePath(path), path).toBeNull();
+    }
+  });
+});
+
+describe('showsChatFor', () => {
+  it('is true for the workspace\'s own chat, whether or not the chat is known to be on screen', () => {
+    expect(showsChatFor('/workspaces/alpha/chat', 'alpha', false)).toBe(true);
+    expect(showsChatFor('/workspaces/alpha', 'alpha', false)).toBe(true);
+  });
+
+  it('is true for another part of the same workspace only while the chat is showing beside it', () => {
+    expect(showsChatFor('/workspaces/alpha/plan', 'alpha', true)).toBe(true);
+    expect(showsChatFor('/workspaces/alpha/plan', 'alpha', false)).toBe(false);
+  });
+
+  it('is false for any other workspace or page, even when the chat is on screen', () => {
+    expect(showsChatFor('/workspaces/beta/plan', 'alpha', true)).toBe(false);
+    expect(showsChatFor('/workspaces/beta/chat', 'alpha', true)).toBe(false);
+    expect(showsChatFor('/overview', 'alpha', true)).toBe(false);
+  });
+
+  it('agrees with showsChatOf about the chat section itself', () => {
+    expect(showsChatOf('/workspaces/alpha/plan', 'alpha')).toBe(false);
+    expect(showsChatOf('/workspaces/alpha', 'alpha')).toBe(true);
   });
 });

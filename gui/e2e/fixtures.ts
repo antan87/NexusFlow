@@ -153,6 +153,14 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     // Nothing is waiting by default; a spec that exercises alerts registers its own route.
     await page.route('**/api/attention?*', json({ requests: [] }));
 
+    // The chat sits beside Plan, Changes and the other parts when there is room. Specs about those parts are about
+    // the parts, so they start with the chat hidden there; a spec about the layout sets its own.
+    await page.addInitScript(() => {
+      try {
+        if (!localStorage.getItem('contextspace_chat_layout_v1')) localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: true, percent: 62 }));
+      } catch { /* Storage can be unavailable. */ }
+    });
+
     await use();
   }, { auto: true }],
 });
