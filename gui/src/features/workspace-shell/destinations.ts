@@ -72,6 +72,18 @@ export function destinationsFor(archived: boolean): WorkspaceDestination[] {
     .filter((destination) => destination.sections.length > 0);
 }
 
+/**
+ * What can open beside the chat, in the rail's order. Overview and Sessions keep their addresses, so old links still
+ * work, but have no place on the rail: the progress strip above the chat says where the work stands, and saved
+ * conversations open from the chat itself.
+ */
+export const RAIL_SECTIONS: readonly WorkspaceSection[] = ['plan', 'changes', 'documents', 'knowledge', 'skills', 'services'];
+
+/** The rail of an archived workspace is its record and what it knew. */
+export function railSectionsFor(archived: boolean): readonly WorkspaceSection[] {
+  return archived ? ARCHIVED_SECTIONS : RAIL_SECTIONS;
+}
+
 /** The section to render: an archived workspace falls back to its overview. */
 export function visibleSection(section: WorkspaceSection, archived: boolean): WorkspaceSection {
   return archived && !ARCHIVED_SECTIONS.includes(section) ? 'overview' : section;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WORKSPACE_DESTINATIONS, destinationOf, destinationsFor, entrySection, parseSection, visibleSection } from './destinations.js';
+import { WORKSPACE_DESTINATIONS, destinationOf, destinationsFor, entrySection, parseSection, railSectionsFor, visibleSection } from './destinations.js';
 
 describe('workspace destinations', () => {
   it('place every section in exactly one destination', () => {
@@ -52,5 +52,20 @@ describe('workspace destinations', () => {
     expect(visibleSection('changes', false)).toBe('changes');
     // A remembered working section is not reopened in an archived workspace.
     expect(entrySection(archived[1]!, { context: 'skills' })).toBe('plan');
+  });
+});
+
+describe('railSectionsFor', () => {
+  it('offers what can open beside the chat, and no place for the chat, the overview or the session history', () => {
+    expect(railSectionsFor(false)).toEqual(['plan', 'changes', 'documents', 'knowledge', 'skills', 'services']);
+    for (const gone of ['chat', 'overview', 'sessions'] as const) expect(railSectionsFor(false)).not.toContain(gone);
+  });
+
+  it('keeps old addresses working: every section still parses to itself', () => {
+    for (const section of ['overview', 'sessions', 'services', 'plan'] as const) expect(parseSection(section)).toBe(section);
+  });
+
+  it('shows an archived workspace its record and what it knew, and nothing to act on', () => {
+    expect(railSectionsFor(true)).toEqual(['overview', 'plan', 'documents', 'knowledge']);
   });
 });

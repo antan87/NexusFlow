@@ -63,13 +63,13 @@ const clickCross = async (page: Page, name: string) => {
 };
 
 test.describe('the chat is the centre of a workspace', () => {
-  test('a workspace opens on its chat, with the Chat destination first and current', async ({ page }) => {
+  test('a workspace opens on its chat, with nothing open beside it', async ({ page }) => {
     await page.goto('/#/workspaces/alpha');
     await expect(chatOf(page)).toBeVisible();
     await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    const links = workspaceNav(page).getByRole('link');
-    await expect(links.first()).toHaveText(/^Chat/);
-    await expect(workspaceNav(page).getByRole('link', { name: /^Chat/ })).toHaveAttribute('aria-current', 'page');
+    // The rail offers what can open beside the chat; the chat is the page, so it has no item and none is current.
+    await expect(workspaceNav(page).getByRole('link')).toHaveCount(6);
+    await expect(workspaceNav(page).locator('[aria-current="page"]')).toHaveCount(0);
     // The address is left as it was given: no section is the chat.
     await expect(page).toHaveURL(/#\/workspaces\/alpha$/);
   });
@@ -90,7 +90,7 @@ test.describe('the chat is the centre of a workspace', () => {
       await page.goto(`/#/workspaces/alpha/${section}`);
       await expect(chatOf(page)).toBeHidden();
     }
-    await workspaceNav(page).getByRole('link', { name: /^Chat/ }).click();
+    await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
     await expect(chatOf(page)).toBeVisible();
   });
 
@@ -99,10 +99,11 @@ test.describe('the chat is the centre of a workspace', () => {
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
     expect(attaches.alpha).toBe(1);
 
-    await workspaceNav(page).getByRole('link', { name: 'Plan & Context' }).click();
+    await workspaceNav(page).getByRole('link', { name: 'Plan' }).click();
     await expect(chatOf(page)).toBeHidden();
-    await workspaceNav(page).getByRole('link', { name: 'Changes' }).click();
-    await workspaceNav(page).getByRole('link', { name: /^Chat/ }).click();
+    await workspaceNav(page).getByRole('link', { name: /^Changes/ }).click();
+    await expect(page).toHaveURL(/\/changes$/);
+    await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
 
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
     // Still one connection: the terminal was never torn down and reattached.
@@ -232,13 +233,14 @@ test.describe('the address says which chat is showing', () => {
     await expect(workspaceNav(page).getByRole('link', { name: /^Chat/ })).toHaveCount(0);
     await page.goto('/#/workspaces/old');
     await expect(chatOf(page)).toBeHidden();
-    await expect(workspaceNav(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+    await expect(workspaceNav(page).getByRole('link', { name: 'Record' })).toHaveAttribute('aria-current', 'page');
   });
 
   test('an old link to a section that no longer exists lands on the overview, not the chat', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/diff');
     await expect(chatOf(page)).toBeHidden();
-    await expect(workspaceNav(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: 'Overview', exact: true })).toBeVisible();
+    await expect(workspaceNav(page).locator('[aria-current="page"]')).toHaveCount(0);
   });
 });
 
@@ -314,15 +316,17 @@ test.describe('the dock sits exactly over its slot', () => {
     return { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) };
   };
 
-  test('fills the space under the header and navigation, and follows the window and the sidebar', async ({ page }) => {
+  test('fills the space under the header and beside the rail, and follows the window and the sidebar', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
     await expect(chatOf(page)).toBeVisible();
     const slot = page.getByTestId('chat-dock-slot');
 
-    const nav = await workspaceNav(page).boundingBox();
+    const header = await page.locator('header').first().boundingBox();
+    const rail = await workspaceNav(page).boundingBox();
     const first = await box(chatOf(page));
-    // Right under the navigation, not over it.
-    expect(first.y).toBeGreaterThanOrEqual(Math.round(nav!.y + nav!.height) - 1);
+    // Right under the header and left of the rail, over neither.
+    expect(first.y).toBeGreaterThanOrEqual(Math.round(header!.y + header!.height) - 1);
+    expect(first.x + first.width).toBeLessThanOrEqual(Math.round(rail!.x) + 1);
     expect(first).toEqual(await box(slot));
 
     await page.setViewportSize({ width: 1100, height: 760 });

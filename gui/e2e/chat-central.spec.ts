@@ -52,6 +52,8 @@ const boxOf = async (locator: ReturnType<typeof chatOf>) => {
   return box;
 };
 const BODY_LEFT = 256;
+/** The workspace rail along the right edge. */
+const RAIL = 64;
 
 test.describe('the app opens on the chat', () => {
   test('on the chat you were last in', async ({ page }) => {
@@ -103,18 +105,20 @@ test.describe('the chat is central, with other parts beside it', () => {
     await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
     await expect.poll(async () => (await boxOf(chatOf(page))).width).toBeGreaterThan(beside.width + 100);
-    expect((await boxOf(chatOf(page))).width).toBeGreaterThan(1440 - BODY_LEFT - 4);
+    // All of it, except the rail at the edge.
+    expect((await boxOf(chatOf(page))).width).toBeGreaterThan(1440 - BODY_LEFT - RAIL - 4);
     await expect(page.getByRole('separator', { name: 'Resize the chat' })).toHaveCount(0);
   });
 
-  test('opens another part from the header without the chat leaving', async ({ page }) => {
+  test('opens another part from the rail without the chat leaving', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: 'Changes' }).click();
+    await destinations(page).getByRole('link', { name: /^Changes/ }).click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/changes$/);
     await expect(chatOf(page)).toBeVisible();
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: 'Plan & Context' }).click();
+    await destinations(page).getByRole('link', { name: 'Knowledge' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/knowledge$/);
     await expect(chatOf(page)).toBeVisible();
   });
 
@@ -131,20 +135,23 @@ test.describe('the chat is central, with other parts beside it', () => {
     });
     await page.goto('/#/workspaces/alpha/plan');
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: 'Changes' }).click();
-    await destinations(page).getByRole('link', { name: 'Run' }).click();
-    await destinations(page).getByRole('link', { name: 'Chat' }).click();
+    await destinations(page).getByRole('link', { name: /^Changes/ }).click();
+    await destinations(page).getByRole('link', { name: 'Services' }).click();
+    await expect(destinations(page).getByRole('link', { name: 'Services' })).toHaveAttribute('aria-current', 'page');
+    // Choosing the open part again closes it.
+    await destinations(page).getByRole('link', { name: 'Services' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
     expect(attaches).toBe(1);
   });
 
-  test('has no room for both on a narrow window, so the part gets the screen and Chat brings the chat back', async ({ page }) => {
+  test('has no room for both on a narrow window, so the part gets the screen and the cross brings the chat back', async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto('/#/workspaces/alpha/plan');
     await expect(page.getByLabel('Current objective')).toBeVisible();
     await expect(chatOf(page)).toBeHidden();
     await expect(page.getByRole('separator', { name: 'Resize the chat' })).toHaveCount(0);
-    await destinations(page).getByRole('link', { name: 'Chat' }).click();
+    await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
     await expect(chatOf(page)).toBeVisible();
   });
 
@@ -214,24 +221,36 @@ test.describe('workspaces are switched from inside the chat', () => {
   });
 });
 
-test.describe('the header carries the destinations, so there is one bar, not two', () => {
-  test('puts the title, the destinations and the actions on one row while the chat shows', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/plan');
-    await expect(chatOf(page)).toBeVisible();
+test.describe('the rail beside the panel opens the parts, and the header is one quiet row', () => {
+  test('keeps the header to the title and actions, and puts the rail at the right edge', async ({ page }) => {
+    await page.goto('/#/workspaces/alpha/chat');
     const header = page.locator('header').first();
     await expect(header.getByRole('heading', { level: 1 })).toBeVisible();
-    await expect(header.getByRole('navigation', { name: 'Workspace' })).toBeVisible();
-    const title = await boxOf(header.getByRole('heading', { level: 1 }));
-    const nav = await boxOf(header.getByRole('navigation', { name: 'Workspace' }));
-    expect(Math.abs((title.y + title.height / 2) - (nav.y + nav.height / 2))).toBeLessThan(12);
+    await expect(header.getByRole('navigation')).toHaveCount(0);
+    const rail = await boxOf(destinations(page));
+    expect(rail.x + rail.width).toBeGreaterThan(1440 - 2);
+    expect(rail.width).toBeLessThanOrEqual(RAIL + 1);
+    // What can open beside the chat; the chat itself, the overview and the session history have no place on it.
+    await expect(destinations(page).getByRole('link')).toHaveText(['Plan', 'Changes', 'Docs', 'Knowledge', 'Skills', 'Services']);
   });
 
-  test('puts the sections of the open part at the top of its panel', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/documents');
-    const sections = page.getByRole('navigation', { name: 'Plan & Context sections' });
-    await expect(sections).toBeVisible();
-    await expect(page.locator('header').first().getByRole('navigation', { name: 'Plan & Context sections' })).toHaveCount(0);
-    await sections.getByRole('link', { name: 'Plan' }).click();
-    await expect(page).toHaveURL(/#\/workspaces\/alpha\/plan$/);
+  test('marks the part that is open, names it above the panel, and closes it when chosen again', async ({ page }) => {
+    await page.goto('/#/workspaces/alpha/chat');
+    await destinations(page).getByRole('link', { name: 'Docs' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/documents$/);
+    await expect(destinations(page).getByRole('link', { name: 'Docs' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: 'Documents', exact: true })).toBeVisible();
+    const rail = await boxOf(destinations(page));
+    const panel = await boxOf(page.getByRole('region', { name: 'Documents', exact: true }));
+    expect(panel.x + panel.width).toBeLessThanOrEqual(rail.x + 1);
+    await destinations(page).getByRole('link', { name: 'Docs' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
+    await expect(destinations(page).getByRole('link', { name: 'Docs' })).not.toHaveAttribute('aria-current', 'page');
+  });
+
+  test('still opens an old address that has no place on the rail', async ({ page }) => {
+    await page.goto('/#/workspaces/alpha/sessions');
+    await expect(page.getByRole('region', { name: 'Sessions', exact: true })).toBeVisible();
+    await expect(destinations(page).locator('[aria-current="page"]')).toHaveCount(0);
   });
 });

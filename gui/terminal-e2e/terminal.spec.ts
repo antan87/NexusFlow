@@ -26,7 +26,12 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const openPaneOptions = () => pane.getByRole('button', { name: 'Pane options' }).click();
   // Code and Docs are inline toolbar buttons, so toggle them directly.
-  const toggleInspector = async (name: 'Code' | 'Docs') => { await chat.getByRole('button', { name, exact: true }).click(); };
+  // Code is a toolbar button; documents have their place on the workspace rail, and beside the terminal they open
+  // from the CLI's output or with Ctrl+Shift+D.
+  const toggleInspector = async (name: 'Code' | 'Docs') => {
+    if (name === 'Code') await chat.getByRole('button', { name, exact: true }).click();
+    else { await pane.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Control+Shift+D'); }
+  };
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/terminal-compact.png' });
   // The shell is a session tab of its own; the tab is named after the tool.

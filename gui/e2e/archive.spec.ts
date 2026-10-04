@@ -68,8 +68,8 @@ const workspaceNav = (page: Page) => page.getByRole('navigation', { name: 'Works
 test('archive previews what happens, parks unmerged work on request, and restores the workspace', async ({ page }) => {
   const calls = await mockArchiveBackend(page);
   await page.goto('/#/workspaces/demo');
-  // Chat, Overview, Plan & Context, Changes and Run.
-  await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
+  // Plan, Changes, Docs, Knowledge, Skills and Services.
+  await expect(workspaceNav(page).getByRole('link')).toHaveCount(6);
 
   await page.getByRole('button', { name: 'Workspace actions' }).click();
   await page.getByRole('menuitem', { name: 'Archive workspace…' }).click();
@@ -100,7 +100,8 @@ test('archive previews what happens, parks unmerged work on request, and restore
 
   // The record is read-only and shows what archive kept.
   await expect(page.getByRole('status').filter({ hasText: 'Archived on' })).toBeVisible();
-  await expect(workspaceNav(page).getByRole('link')).toHaveText(['Overview', 'Plan & Context']);
+  // The record and what it knew; nothing to act on.
+  await expect(workspaceNav(page).getByRole('link')).toHaveText(['Record', 'Plan', 'Docs', 'Knowledge']);
   const record = page.getByRole('table');
   await expect(record).toContainText('feat/speed');
   await expect(record).toContainText('1234567890');
@@ -132,8 +133,8 @@ test('archive previews what happens, parks unmerged work on request, and restore
 
   await page.getByRole('button', { name: 'Restore workspace' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Archived on' })).toHaveCount(0);
-  // Chat, Overview, Plan & Context, Changes and Run.
-  await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
+  // Plan, Changes, Docs, Knowledge, Skills and Services.
+  await expect(workspaceNav(page).getByRole('link')).toHaveCount(6);
   await expect(page.getByLabel('Current objective')).toBeEnabled();
   expect(calls.at(-1)?.path).toBe('unarchive');
 });

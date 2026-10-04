@@ -9,6 +9,10 @@ const root = await mkdtemp(path.join(tmpdir(), 'contextspace-terminal-e2e-'));
 // where a pre-existing runner environment can otherwise make the config
 // resolver fall back to the user's real home directory.
 const configHome = path.resolve(root, 'config');
+// The shell's own start-up files come from HOME. A developer's line editor (ble.sh and the like) can take the test's
+// fast typing for a paste and wait for more lines, so the shells here start from an empty home instead.
+process.env.HOME = root;
+process.env.USERPROFILE = root;
 process.env.CONTEXTSPACE_HOME = configHome;
 process.env.NEXUSFLOW_HOME = configHome;
 const workspace = path.join(root, 'workspaces', 'terminal-test');

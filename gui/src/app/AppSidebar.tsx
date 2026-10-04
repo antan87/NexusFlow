@@ -440,7 +440,7 @@ function SidebarContents({
                               </>
                             )}
                             {w.archivedAt && <span className="font-semibold">archived</span>}
-                            {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
+                            {hasChanges && <span className="shrink-0 whitespace-nowrap text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
                           {live && <span className="sr-only">{liveText(live, liveNow)}</span>}
                         </Link>

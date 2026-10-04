@@ -36,7 +36,7 @@ import { perfMark } from '../lib/perfMarks.js';
 import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { WorkspaceHeader } from '../features/workspace-shell/WorkspaceHeader.js';
-import { WorkspaceNav, WorkspaceSections } from '../features/workspace-shell/WorkspaceNav.js';
+import { WorkspaceRail } from '../features/workspace-shell/WorkspaceRail.js';
 import { SECTION_LABELS, destinationOf, visibleSection, type WorkspaceDestination, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
 import { ArchivedNotice, ArchivedWorkspaceView } from '../features/workspace-shell/ArchivedWorkspaceView.js';
 import { useCockpitStore, cockpitStore, upcastWorkspaceToCockpit } from '../features/cockpit/cockpitStore.js';
@@ -100,7 +100,6 @@ import { SessionHistory } from '../features/sessions/SessionHistory.js';
 import { IconButton } from '../components/ui/icon-button.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChatDockSlot } from '../features/chat/ChatDockSlot.js';
-import { useChatAttention } from '../features/chat/useChatAttention.js';
 import { CHAT_LAYOUT, chatLayout, hasRoomBeside, useChatLayout } from '../features/chat/chatLayout.js';
 import { useElementWidth } from '../lib/useElementWidth.js';
 import { ChangesViewer } from '../features/changes/ChangesViewer.js';
@@ -192,9 +191,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   }, [selectedBranch, subTab]);
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openChat } = useFloatingChat();
-  // Chats waiting for the developer, shown on the Chat destination while they are elsewhere.
-  // Alerts the user has not seen yet; a question already seen is shown on its tab and in its chat until answered.
-  const { pending: unseenQuestions } = useChatAttention();
   // The chat is the centre of the screen. Other parts open as a panel beside it when there is room, and by themselves when not.
   const layout = useChatLayout();
   const [body, setBody] = useState<HTMLDivElement | null>(null);
@@ -616,16 +612,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
       <div className="flex h-full min-w-0 flex-col w-full">
         <WorkspaceHeader
           compact={showChat}
-          nav={showChat ? (
-            <WorkspaceNav
-          workspaceId={selected.branchName}
-            section={subTab}
-            lastVisited={lastVisited}
-            archived={archived}
-            badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : unseenQuestions.length }}
-              inline
-            />
-          ) : undefined}
           workspaceId={selected.branchName}
           title={selected.name || selected.branchName}
           branchName={selected.name ? selected.branchName : undefined}
@@ -723,16 +709,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               </Menu>
           </>}
         />
-        {!showChat && (
-          <WorkspaceNav
-          workspaceId={selected.branchName}
-          section={subTab}
-          lastVisited={lastVisited}
-          archived={archived}
-          badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : unseenQuestions.length }}
-          />
-        )}
-
         {/* Tab Navigation & Content Container */}
         <div ref={setBody} className="flex min-h-0 flex-1">
           {showChat && (
@@ -758,17 +734,19 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           )}
           {showPanel && (
           <div className="relative min-w-0 flex-1 overflow-y-auto">
-            {roomBeside && !archived && (
-              <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5">
+            {/* What is open, and the way back to the chat, which is always one click: the cross, or the rail item again. */}
+            <div className="sticky top-0 z-10 flex items-center gap-0.5 border-b border-border/60 bg-background/95 px-6 py-1.5 backdrop-blur">
+              {/* A label, not a heading: the part below names itself, and its region carries the same name. */}
+              <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{SECTION_LABELS[subTab]}</p>
+              {roomBeside && !archived && (
                 <IconButton
                   label={layout.hidden ? 'Show the chat beside this' : 'Hide the chat and give this the whole width'}
                   icon={layout.hidden ? <PanelLeftOpen /> : <PanelLeftClose />}
                   onClick={() => chatLayout.toggleHidden()}
                 />
-                {showChat && <IconButton label="Close this panel and give the chat the whole screen" icon={<X />} onClick={() => onSelectTab(selected.branchName, 'chat')} />}
-              </div>
-            )}
-        {showChat && <WorkspaceSections className="px-6 pt-3" workspaceId={selected.branchName} section={subTab} archived={archived} badges={{ skills: activeSkills.length }} />}
+              )}
+              {!archived && <IconButton label="Close this panel and give the chat the whole screen" icon={<X />} onClick={() => onSelectTab(selected.branchName, 'chat')} />}
+            </div>
         <div className="px-6 pb-12 pt-5">
           {/* Legacy Migration Alert Banner */}
           {isLegacy && (
@@ -1367,6 +1345,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         </div>
           </div>
           )}
+          <WorkspaceRail workspaceId={selected.branchName} section={subTab} archived={archived} badges={{ changes: totalChangedFiles, skills: activeSkills.length }} />
         </div>
       </div>
     );

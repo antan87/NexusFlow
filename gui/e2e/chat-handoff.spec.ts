@@ -83,11 +83,9 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       });
     });
 
-    await page.goto('/#/workspaces/feature-x');
+    // The full session history opens beside the chat from its saved conversations, and keeps its own address.
+    await page.goto('/#/workspaces/feature-x/sessions');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
-
-    // Sessions are the first section of Run
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
@@ -133,8 +131,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       });
     });
 
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
+    await page.goto('/#/workspaces/feature-x/sessions');
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();

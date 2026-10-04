@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
-import { FileText, ListTree, Maximize2, Minimize2 } from 'lucide-react';
+import { ListTree, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { CHAT_GEOMETRY } from '../chat/floatingChatStore.js';
@@ -128,8 +128,9 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
   const documentsPanel = <WorkspaceDocumentsInspector workspace={props.workspace} workspacePath={workspacePath} active={props.active} openDocument={openDocument} />;
   const mod = modifierLabel();
   const codeShortcut = `${mod}+Shift+E`;
-  const docsShortcut = `${mod}+Shift+D`;
 
+  // Documents have their place on the workspace rail; a document the CLI names in its output still opens here, beside
+  // the terminal, and Ctrl/Cmd+Shift+D still toggles it, so there is no second Docs button.
   // The inspector controls live in the pane toolbar rather than in a bar of
   // their own, so the chat window shows one toolbar instead of two stacked
   // rows that each held a fragment of the same job.
@@ -140,9 +141,6 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
   const inspectorControls = [
     <Button key="code" size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} aria-keyshortcuts="Control+Shift+E Meta+Shift+E" title={`Toggle the code panel (${codeShortcut})`} onClick={() => setInspector(value => value === 'code' ? null : 'code')}>
       <ListTree className="size-3" />Code
-    </Button>,
-    <Button key="documents" size="xs" variant={inspector === 'documents' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'documents'} aria-keyshortcuts="Control+Shift+D Meta+Shift+D" title={`Toggle the documents panel (${docsShortcut})`} onClick={() => setInspector(value => value === 'documents' ? null : 'documents')}>
-      <FileText className="size-3" />Docs
     </Button>,
   ];
   const inspectorExpandControl = inspector && !compact

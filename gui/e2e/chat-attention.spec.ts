@@ -234,25 +234,6 @@ test.describe('chat off screen', () => {
     expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   });
 
-  test('puts the waiting count on the Chat destination while the chat is elsewhere', async ({ page }) => {
-    await chatState(page);
-    await page.goto('/#/workspaces/alpha/plan');
-    const chatLink = page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Chat/ });
-    await expect(chatLink).not.toContainText(/\d/);
-
-    requests.push(ask('beta', 'Ready for review?'), ask('alpha', 'And this one?'));
-
-    await expect(chatLink).toContainText('2', { timeout: 12_000 });
-    await expect(alertsOf(page).getByRole('button', { name: 'Open chat' })).toHaveCount(2);
-  });
-
-  test('shows no count on the Chat destination while the chat is on screen', async ({ page }) => {
-    await page.goto(CHAT_PAGE);
-    requests.push(ask('beta', 'Ready for review?'));
-    await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
-    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Chat/ })).not.toContainText(/\d/);
-  });
-
   test('lists at most four cards and says how many more are waiting', async ({ page }) => {
     await chatState(page, { tabs: names });
     await page.goto('/#/overview');

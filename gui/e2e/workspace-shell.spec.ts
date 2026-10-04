@@ -40,46 +40,43 @@ test('one header shows where the task stands and links to where to act', async (
   await expect(page.getByRole('button', { name: 'Diff Review' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Process DAG' })).toHaveCount(0);
 
-  await expect(workspaceNav(page).getByRole('link')).toHaveText(['Chat', 'Overview', 'Plan & Context', 'Changes3', 'Run']);
+  // The rail beside the panel: what can open beside the chat, with the changed files counted.
+  await expect(workspaceNav(page).getByRole('link')).toHaveText([/^Plan$/, /^Changes3$/, /^Docs$/, /^Knowledge$/, /^Skills/, /^Services$/]);
   await status.getByRole('link', { name: /Changes/ }).click();
   await expect(page).toHaveURL(/#\/workspaces\/demo\/changes$/);
   await expect(workspaceNav(page).getByRole('link', { name: /Changes/ })).toHaveAttribute('aria-current', 'page');
 });
 
-test('old section links still open, grouped under their destination, and back navigation works', async ({ page }) => {
+test('old section links still open, each marked on the rail when it has a place there, and back navigation works', async ({ page }) => {
   await mockWorkspace(page);
-  for (const [section, destination] of [['knowledge', 'Plan & Context'], ['documents', 'Plan & Context'], ['services', 'Run'], ['sessions', 'Run']] as const) {
+  for (const [section, item] of [['knowledge', 'Knowledge'], ['documents', 'Docs'], ['services', 'Services'], ['plan', 'Plan']] as const) {
     await page.goto(`/#/workspaces/demo/${section}`);
-    await expect(workspaceNav(page).getByRole('link', { name: destination })).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByRole('navigation', { name: `${destination} sections` }).getByRole('link', { name: new RegExp(`^${section}`, 'i') })).toHaveAttribute('aria-current', 'page');
+    await expect(workspaceNav(page).getByRole('link', { name: item })).toHaveAttribute('aria-current', 'page');
+  }
+  // The overview and the session history keep their addresses, with nothing marked on the rail.
+  for (const [section, region] of [['overview', 'Overview'], ['sessions', 'Sessions']] as const) {
+    await page.goto(`/#/workspaces/demo/${section}`);
+    await expect(page.getByRole('region', { name: region, exact: true })).toBeVisible();
+    await expect(workspaceNav(page).locator('[aria-current="page"]')).toHaveCount(0);
   }
   await page.goto('/#/workspaces/demo/overview');
-  await workspaceNav(page).getByRole('link', { name: 'Run' }).click();
-  await expect(page).toHaveURL(/\/sessions$/);
+  await workspaceNav(page).getByRole('link', { name: 'Services' }).click();
+  await expect(page).toHaveURL(/\/services$/);
   await page.goBack();
   await expect(page).toHaveURL(/\/overview$/);
-  await expect(workspaceNav(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('region', { name: 'Overview', exact: true })).toBeVisible();
 });
 
-test('switching sections keeps an unsaved brief and reopens the last section used', async ({ page }) => {
+test('switching parts keeps an unsaved brief', async ({ page }) => {
   await mockWorkspace(page);
   await page.goto('/#/workspaces/demo/plan');
   const objective = page.getByLabel('Current objective');
   await expect(objective).toHaveValue('Find the bottleneck');
   await objective.fill('Cache invoice lookups per customer');
 
-  const sections = page.getByRole('navigation', { name: 'Plan & Context sections' });
-  await sections.getByRole('link', { name: 'Documents' }).click();
+  await workspaceNav(page).getByRole('link', { name: 'Docs' }).click();
   await expect(page.getByRole('region', { name: 'Documents', exact: true })).toBeVisible();
-  await sections.getByRole('link', { name: 'Plan' }).click();
+  await workspaceNav(page).getByRole('link', { name: 'Plan' }).click();
   // The draft was not saved, and it was not lost.
   await expect(page.getByLabel('Current objective')).toHaveValue('Cache invoice lookups per customer');
-
-  await sections.getByRole('link', { name: 'Documents' }).click();
-  // The last section used is remembered when Documents is rendered, so leave only once it is on screen.
-  await expect(page.getByRole('region', { name: 'Documents', exact: true })).toBeVisible();
-  await workspaceNav(page).getByRole('link', { name: 'Overview' }).click();
-  await expect(workspaceNav(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
-  await workspaceNav(page).getByRole('link', { name: 'Plan & Context' }).click();
-  await expect(page).toHaveURL(/\/documents$/);
 });

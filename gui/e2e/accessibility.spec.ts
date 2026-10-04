@@ -284,7 +284,7 @@ test.describe('constrained windows', () => {
     const main = await page.getByRole('main').boundingBox();
     expect(main!.width).toBeGreaterThanOrEqual(800);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
-    for (const name of ['Overview', 'Plan & Context', 'Changes', 'Run']) {
+    for (const name of ['Plan', 'Changes', 'Docs', 'Knowledge', 'Skills', 'Services']) {
       await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: new RegExp(`^${name}`) })).toBeInViewport();
     }
     // The rail still expands on request, by keyboard.
@@ -308,9 +308,9 @@ test.describe('constrained windows', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(720);
     const nav = page.getByRole('navigation', { name: 'Workspace' });
-    await nav.getByRole('link', { name: 'Run' }).focus();
+    await nav.getByRole('link', { name: 'Services' }).focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(/\/sessions$/);
+    await expect(page).toHaveURL(/\/services$/);
     await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
   });
 });

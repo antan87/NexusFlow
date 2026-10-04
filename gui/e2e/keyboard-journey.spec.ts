@@ -99,8 +99,8 @@ test.describe('keyboard-only primary journey', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
     const destinations = page.getByRole('navigation', { name: 'Workspace' });
 
-    // Brief: reach Plan & Context, edit the objective, save.
-    await activate(page, destinations.getByRole('link', { name: 'Plan & Context' }));
+    // Brief: reach the plan, edit the objective, save.
+    await activate(page, destinations.getByRole('link', { name: 'Plan' }));
     await expect(page).toHaveURL(/\/plan$/);
     const objective = page.getByLabel('Current objective');
     await tabTo(page, objective);
