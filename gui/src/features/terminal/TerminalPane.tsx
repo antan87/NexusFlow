@@ -226,7 +226,12 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         if (!term.options.disableStdin) term.paste(richText);
       } else if ([...clipboard.items].some(item => item.type.startsWith('image/')) || [...clipboard.files].some(file => file.type.startsWith('image/'))) {
         event.preventDefault(); event.stopPropagation();
-        setError('The clipboard contains an image but no text. Copy text and paste again.');
+        // Claude Code and Codex paste an image by reading the clipboard themselves when they get Ctrl+V. The CLI runs on
+        // this machine, so it sees the same clipboard; the key is only sent for an image, never with text, so it cannot
+        // paste twice. A plain shell has nothing to do with an image.
+        if (targetRef.current && targetRef.current !== 'shell') {
+          if (!term.options.disableStdin) send({ type: 'input', data: '\x16' });
+        } else setError('The clipboard contains an image but no text. Copy text and paste again.');
       }
     };
     terminalHost.addEventListener('paste', onPaste, true);
