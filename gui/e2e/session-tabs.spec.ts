@@ -14,7 +14,7 @@ const TARGETS = ['claude', 'codex', 'shell'].map((id) => ({ id, name: id, availa
 
 interface Server { terminals: Terminal[]; created: string[]; stopped: string[]; attached: string[] }
 
-async function mockServer(page: Page, initial: Terminal[], { failStatus = false } = {}): Promise<Server> {
+async function mockServer(page: Page, initial: Terminal[], { failStatus = false, failStop = false } = {}): Promise<Server> {
   const server: Server = { terminals: [...initial], created: [], stopped: [], attached: [] };
   await page.addInitScript(() => {
     try { if (!localStorage.getItem('contextspace_floating_chat_state_v1')) localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({ openTabs: ['feature-x'], activeTab: 'feature-x', modes: {} })); } catch { /* Storage can be unavailable. */ }
@@ -31,6 +31,7 @@ async function mockServer(page: Page, initial: Terminal[], { failStatus = false 
   });
   await page.route('**/api/terminals/feature-x/*/stop', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/')[4]!;
+    if (failStop) return route.fulfill({ status: 500, json: { error: 'The terminal did not stop' } });
     server.stopped.push(id);
     server.terminals = server.terminals.map((entry) => (entry.id === id ? { ...entry, state: 'exited' } : entry));
     await route.fulfill({ json: {} });
@@ -119,6 +120,18 @@ test('closing a running session asks first and ends only that one; saying no kee
   await expect(sessionTabs(page)).toHaveCount(1);
   expect(server.stopped).toEqual(['t-codex']);
   await expect(sessionTabs(page).nth(0)).toHaveAccessibleName(/^Claude Code, /);
+});
+
+test('a session that cannot be ended keeps its tab and says why, instead of coming back later', async ({ page }) => {
+  const server = await mockServer(page, [terminal('t-claude', 'claude', 'Claude Code'), terminal('t-codex', 'codex', 'Codex')], { failStop: true });
+  await page.goto('/#/workspaces/feature-x/chat');
+  await expect(sessionTabs(page)).toHaveCount(2);
+  page.once('dialog', (dialog) => void dialog.accept());
+  await sessionTabs(page).nth(1).focus();
+  await page.keyboard.press('Delete');
+  await expect(chatOf(page).getByRole('alert')).toContainText('Codex could not be ended, so it is still running: The terminal did not stop');
+  await expect(sessionTabs(page)).toHaveCount(2);
+  expect(server.stopped).toEqual([]);
 });
 
 test('a workspace whose terminals cannot be listed says so and does not wait forever', async ({ page }) => {

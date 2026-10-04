@@ -36,6 +36,8 @@ interface Deck { slots: readonly Slot[]; active: string; split: string | null }
  * session never stops because another one is on screen. The strip above types into, and hears replies from, the tab
  * on screen.
  */
+const CLOSE_PROBLEM_MS = 8000;
+
 export function SessionDeck({ workspace, active, launch, consumeLaunch, fillPromptRef, onReply, onStatusChange, onBackgroundOutput, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl }: SessionDeckProps) {
   const queryClient = useQueryClient();
   const [deck, setDeck] = useState<Deck>(() => ({ slots: [firstSlot()], active: 'main', split: null }));
@@ -98,14 +100,27 @@ export function SessionDeck({ workspace, active, launch, consumeLaunch, fillProm
     const id = crypto.randomUUID();
     add({ key: `slot-${id}`, terminalId: null, launch: { id, target } });
   };
+  // Why the last close did not happen. A tab whose terminal still runs comes back with the next list, so it stays.
+  const [closeProblem, setCloseProblem] = useState('');
+  useEffect(() => {
+    if (!closeProblem) return;
+    const timer = setTimeout(() => setCloseProblem(''), CLOSE_PROBLEM_MS);
+    return () => clearTimeout(timer);
+  }, [closeProblem]);
   const close = async (key: string) => {
+    const label = labels.get(key) ?? 'this session';
+    if (starting.has(key)) { setCloseProblem(`${label} is still starting. Close it once it runs.`); return; }
     const terminal = infos[key];
     if (terminal && terminal.state === 'running') {
-      if (!window.confirm(`End ${labels.get(key) ?? 'this session'}? Its running commands stop.`)) return;
+      if (!window.confirm(`End ${label}? Its running commands stop.`)) return;
       try { await terminalRequest(workspace, `${terminal.id}/stop`); }
-      catch { /* Closing the tab still hides it; the server stops an unwatched terminal after a few minutes. */ }
+      catch (error) {
+        setCloseProblem(`${label} could not be ended, so it is still running: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
       void queryClient.invalidateQueries({ queryKey: RUNNING_TERMINALS_KEY });
     }
+    setCloseProblem('');
     setDeck((current) => closeSlot(current.slots, key, current.active, current.split));
     setInfos((current) => { const rest = { ...current }; delete rest[key]; return rest; });
     setStarting((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
@@ -173,6 +188,7 @@ export function SessionDeck({ workspace, active, launch, consumeLaunch, fillProm
           );
         })}
       </div>
+      {closeProblem && <span role="alert" title={closeProblem} className="min-w-0 max-w-[16rem] truncate px-1 text-[11px] text-destructive">{closeProblem}</span>}
       <Menu>
         <MenuTrigger aria-label="Start another CLI" title="Start another CLI in this workspace" className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground">
           <Plus className="size-3.5" aria-hidden="true" />
