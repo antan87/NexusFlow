@@ -22,6 +22,8 @@ export interface KnowledgeDocument {
   goal: string;
   /** Newest first. */
   entries: KnowledgeEntry[];
+  /** Writing under a `##` section that is not an entry, such as notes written by hand, in file order. */
+  sections: { title: string; text: string }[];
 }
 
 const HEADING = /^###\s+(?:(\d{4}-\d{2}-\d{2})\s+[—–-]\s+)?(.+?)\s*$/;
@@ -36,6 +38,7 @@ const plainScope = (value: string) => value.replace(/`/g, '').replace(/^(path|re
 export function parseKnowledge(markdown: string): KnowledgeDocument {
   const entries: KnowledgeEntry[] = [];
   const goal: string[] = [];
+  const prose = new Map<string, string[]>();
   let section = '';
   let current: KnowledgeEntry | null = null;
   const flush = () => {
@@ -62,14 +65,16 @@ export function parseKnowledge(markdown: string): KnowledgeDocument {
       } else if (line.trim()) current.text = `${current.text}\n${line.trim()}`;
       continue;
     }
-    if (/^feature goal$/i.test(section) && line.trim()) goal.push(line.trim());
+    if (/^feature goal$/i.test(section)) { if (line.trim()) goal.push(line.trim()); }
+    else if (section) prose.set(section, [...(prose.get(section) ?? []), line]);
   }
   flush();
   // Newest first; entries of the same day keep the order they were written in.
   const ordered = entries.map((entry, index) => ({ entry, index }))
     .sort((a, b) => (b.entry.date ?? '').localeCompare(a.entry.date ?? '') || b.index - a.index)
     .map(({ entry }) => entry);
-  return { goal: goal.join('\n'), entries: ordered };
+  const sections = [...prose].map(([title, lines]) => ({ title, text: lines.join('\n').trim() })).filter((part) => part.text);
+  return { goal: goal.join('\n'), entries: ordered, sections };
 }
 
 /** "chat-first-workspace-layout" reads as "Chat first workspace layout"; a title that is already words is kept. */

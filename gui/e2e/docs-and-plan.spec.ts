@@ -12,6 +12,14 @@ const KNOWLEDGE = `# Workspace Knowledge — demo
 
 > Append with \`ctxspace knowledge add\`.
 
+## Feature Goal
+
+Invoices should load in under a second.
+
+## Team notes
+
+Ask before changing the cache keys.
+
 ## Architecture Decisions
 
 ### 2026-10-02 — cache-invoice-lookups
@@ -63,6 +71,9 @@ test.describe('Docs', () => {
     await expect(entries.first()).toContainText('Totals differ after midnight');
     await expect(entries.first()).toContainText('commit abc1234');
     await expect(entries.last()).toContainText('Applies to api/src/invoices');
+    // The goal and what was written by hand are there too, not only the entries.
+    await expect(docs(page).getByRole('region', { name: 'Feature goal' })).toContainText('Invoices should load in under a second.');
+    await expect(docs(page).getByRole('region', { name: 'Team notes' })).toContainText('Ask before changing the cache keys.');
     await docs(page).getByRole('button', { name: /^Decisions/ }).click();
     await expect(entries).toHaveCount(1);
     await expect(entries.first()).toContainText('Cache invoice lookups');

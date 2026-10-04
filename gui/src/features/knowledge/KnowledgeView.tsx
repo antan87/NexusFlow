@@ -22,8 +22,16 @@ export function KnowledgeView({ markdown }: { markdown: string }) {
 
   const counts = { decision: knowledge.entries.filter((entry) => entry.kind === 'decision').length, gotcha: knowledge.entries.filter((entry) => entry.kind === 'gotcha').length };
   const shown = knowledge.entries.filter((entry) => (filter === 'all' || entry.kind === filter) && matchesKnowledge(entry, query));
+  const needle = query.trim().toLowerCase();
+  const sections = filter === 'all' ? knowledge.sections.filter((part) => !needle || `${part.title}\n${part.text}`.toLowerCase().includes(needle)) : [];
   return (
     <div className="space-y-3">
+      {knowledge.goal && (
+        <section aria-label="Feature goal" className="rounded-lg border border-border bg-muted/40 px-3.5 py-2.5">
+          <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Feature goal</h3>
+          <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/90" title={knowledge.goal}>{knowledge.goal}</p>
+        </section>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-40 flex-1">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -38,7 +46,7 @@ export function KnowledgeView({ markdown }: { markdown: string }) {
           ))}
         </div>
       </div>
-      {shown.length === 0 ? <p role="status" className="py-4 text-sm text-muted-foreground">Nothing matches.</p> : (
+      {shown.length === 0 && sections.length === 0 ? <p role="status" className="py-4 text-sm text-muted-foreground">Nothing matches.</p> : shown.length > 0 && (
         <ol aria-label="Knowledge entries" className="space-y-2">
           {shown.map((entry) => (
             <li key={entry.id}>
@@ -60,6 +68,12 @@ export function KnowledgeView({ markdown }: { markdown: string }) {
           ))}
         </ol>
       )}
+      {sections.map((part) => (
+        <section key={part.title} aria-label={part.title} className="border-t border-border pt-3">
+          <h3 className="mb-1 text-sm font-semibold text-foreground">{part.title}</h3>
+          <ChatMarkdown content={part.text} />
+        </section>
+      ))}
     </div>
   );
 }

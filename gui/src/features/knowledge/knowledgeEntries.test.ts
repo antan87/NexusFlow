@@ -25,6 +25,11 @@ It replaces the header menu.
 **Scope:** \`path:NexusFlow/gui/src/features/workspace-shell/WorkspaceRail.tsx\`
 **Evidence:** commit 9b73c92
 
+## Team notes
+
+We pair on the terminal work.
+Ask before touching the release scripts.
+
 ## Known Gotchas
 
 ### 2026-10-03 — tablist-may-hold-only-tabs
@@ -59,9 +64,13 @@ describe('parseKnowledge', () => {
     expect(parsed.entries.some((entry) => entry.text.includes('Accumulated'))).toBe(false);
   });
 
+  it('keeps writing under other sections that is not an entry, so nothing in the file goes unseen', () => {
+    expect(parsed.sections).toEqual([{ title: 'Team notes', text: 'We pair on the terminal work.\nAsk before touching the release scripts.' }]);
+  });
+
   it('reads a file with no entries, or none at all, as empty', () => {
     expect(parseKnowledge('# Just a title\n\nSome prose.').entries).toEqual([]);
-    expect(parseKnowledge('')).toEqual({ goal: '', entries: [] });
+    expect(parseKnowledge('')).toEqual({ goal: '', entries: [], sections: [] });
   });
 });
 
