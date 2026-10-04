@@ -426,7 +426,9 @@ export function ChatDock({ workspaces }: ChatDockProps) {
             </div>
           </div>
         ) : (
-          openTabs.map((branchName) => {
+          // The terminals stay in one fixed order, whatever order the tabs are in, so bringing a tab to the front never
+          // moves a running terminal in the page.
+          [...openTabs].sort().map((branchName) => {
             const ws = workspaceMap.get(branchName);
             const isPrimary = branchName === activeTab;
             const isSecondary = showSplit && branchName === splitTab;

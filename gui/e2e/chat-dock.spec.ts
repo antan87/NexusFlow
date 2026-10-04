@@ -167,11 +167,12 @@ test.describe('the address says which chat is showing', () => {
     await expect(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
 
     await clickCross(page, 'gamma');
-    await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
+    // The chat used just before it comes to the front.
+    await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
     await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
 
-    await closeTab(page, 'beta');
-    await expect(tab(page, 'beta')).toHaveCount(0);
+    await closeTab(page, 'alpha');
+    await expect(tab(page, 'alpha')).toHaveCount(0);
     await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
   });
 
@@ -273,7 +274,7 @@ test.describe('on a slow machine', () => {
     await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
   });
 
-  test('opening two chats quickly and closing the one in front lands on the other, not on one that was only passed through', async ({ page }) => {
+  test('opening two chats quickly and closing the one in front lands on the one used before it, and stays there', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
     await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
     await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
@@ -283,13 +284,14 @@ test.describe('on a slow machine', () => {
     await slow(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
     await clickCross(page, 'gamma');
 
-    await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/, { timeout: 15_000 });
+    await slow(page).toHaveURL(/#\/workspaces\/beta\/chat$/, { timeout: 15_000 });
+    // A late landing from the quick opens must neither bring gamma back nor move the screen away.
     await page.waitForTimeout(2000);
-    await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    // Beta was passed through on the way; it is still open, and it is not the one in front.
+    await slow(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
+    await slow(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
     await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
-    await slow(tab(page, 'beta')).toHaveAttribute('aria-selected', 'false');
+    await slow(tab(page, 'gamma')).toHaveCount(0);
+    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'false');
   });
 
   test('choosing a tab and then closing it does not bring it back', async ({ page }) => {
@@ -338,7 +340,8 @@ test.describe('the dock sits exactly over its slot', () => {
     // The sidebar collapsing gives the chat its room. (The `z` shortcut would type into the terminal, which has focus.)
     await page.getByRole('button', { name: /^Collapse/ }).click();
     await expect.poll(async () => (await box(chatOf(page))).width).toBeGreaterThan(narrower.width);
-    expect(await box(chatOf(page))).toEqual(await box(slot));
+    // The sidebar slides; the chat follows it to the end.
+    await expect.poll(async () => JSON.stringify(await box(chatOf(page))) === JSON.stringify(await box(slot))).toBe(true);
   });
 
   test('reaches the bottom of the window with no page scroll of its own', async ({ page }) => {

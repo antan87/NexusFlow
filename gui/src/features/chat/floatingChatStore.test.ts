@@ -74,7 +74,7 @@ describe('revealing a chat because the address says so', () => {
     store.reveal('alpha');
     expect(store.getState()).toMatchObject({ openTabs: ['alpha'], activeTab: 'alpha', focusRequest: 0 });
     store.reveal('beta');
-    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'beta', focusRequest: 0 });
+    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: 0 });
   });
 
   it('leaves everything alone, and wakes nobody, when that chat is already the active one', async () => {
@@ -117,12 +117,28 @@ describe('switching and closing tabs', () => {
     expect(store.getState()).toMatchObject({ openTabs: ['beta'], activeTab: 'beta', focusRequest: before });
   });
 
-  it('closing the tab on screen brings the next one up and asks to see it', async () => {
+  it('closing the tab on screen brings up the one used before it and asks to see it', async () => {
     const { floatingChatStore: store } = await load();
     store.open('alpha'); store.open('beta'); store.open('gamma');
     const before = store.getState().focusRequest;
     store.removeTab('gamma');
-    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'alpha', focusRequest: before + 1 });
+    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: before + 1 });
+  });
+
+  it('keeps the chat on screen first and the others in the order they were last used', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta'); store.open('gamma');
+    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
+    // However a chat comes to the front: chosen, revealed by its address, or added again.
+    store.setActiveTab('alpha');
+    expect(store.getState().openTabs).toEqual(['alpha', 'gamma', 'beta']);
+    store.reveal('beta');
+    expect(store.getState().openTabs).toEqual(['beta', 'alpha', 'gamma']);
+    store.addTab('gamma');
+    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
+    // A chat that is not open is not brought anywhere.
+    store.setActiveTab('delta');
+    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
   });
 
   it('closing the last tab leaves no chat to show and asks for nothing', async () => {
@@ -208,7 +224,7 @@ describe('saved state', () => {
     store.openTerminal('alpha', 'claude', 's1');
     store.openDraft('beta', 'text');
     const saved = JSON.parse(storage.data.get(FLOATING_CHAT_STORAGE_KEY)!);
-    expect(saved.openTabs).toEqual(['alpha', 'beta']);
+    expect(saved.openTabs).toEqual(['beta', 'alpha']);
     expect(saved.focusRequest).toBe(0);
     expect(saved.terminalLaunches).toEqual({});
     expect(saved.drafts).toEqual({});
@@ -218,7 +234,7 @@ describe('saved state', () => {
     const first = await load();
     first.floatingChatStore.open('alpha'); first.floatingChatStore.open('beta');
     const second = await load({ [FLOATING_CHAT_STORAGE_KEY]: first.storage.data.get(FLOATING_CHAT_STORAGE_KEY)! });
-    expect(second.floatingChatStore.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'beta', focusRequest: 0 });
+    expect(second.floatingChatStore.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: 0 });
   });
 
   it('ignores what the floating window saved, and cleans up what it reads', async () => {
