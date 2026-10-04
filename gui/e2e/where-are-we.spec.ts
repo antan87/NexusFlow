@@ -268,6 +268,8 @@ test.describe('when the AI waits for an answer', () => {
     let calls = 0;
     await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => {
       calls++;
+      // The failure comes back slowly, as on a busy machine: a reply sent before it is back is not a retry.
+      if (calls === 1) await new Promise((resolve) => setTimeout(resolve, 600));
       await (calls === 1 ? route.fulfill({ status: 500, json: { error: 'disk full' } }) : route.fulfill({ json: { acknowledged: 1 } }));
     });
     await openChat(page, { facts: () => factsBody({ question: calls < 2 }), target: 'claude' });
@@ -275,6 +277,8 @@ test.describe('when the AI waits for an answer', () => {
     await page.keyboard.type('Redis');
     await page.keyboard.press('Enter');
     await expect.poll(() => calls).toBe(1);
+    // Says so once the failure is back, and only then is the question open to the next reply.
+    await expect(strip(page)).toContainText('Your reply could not be recorded as the answer. Your next reply tries again.');
     await expect(answerBar(page)).toBeVisible();
     await page.keyboard.type('Redis, please');
     await page.keyboard.press('Enter');

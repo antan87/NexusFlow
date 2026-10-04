@@ -173,7 +173,10 @@ export function WhereAreWeStrip({ workspace, active, fillPrompt, replyRef, openF
       acknowledgeMutate(undefined, {
         onSuccess: () => setNotice('Your reply answered the question.'),
         // Still open, so the next line the developer sends tries again.
-        onError: () => { if (openQuestions.current.length === 0) openQuestions.current = open; },
+        onError: () => {
+          if (openQuestions.current.length === 0) openQuestions.current = open;
+          setNotice('Your reply could not be recorded as the answer. Your next reply tries again.');
+        },
       });
     };
     return () => { replyRef.current = null; };
