@@ -98,7 +98,9 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
     </header>
     {listError && <div role="alert" className="text-sm text-destructive">{listError} <Button variant="outline" onClick={() => setRevision((value) => value + 1)}>Retry documents</Button></div>}
     <div className="grid gap-4 @3xl:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
-      <aside className={cn('rounded-xl border border-border bg-card p-3 space-y-3', selected && 'hidden @3xl:block')}>
+      {/* The list always stays, so the next document is one click away. Beside the chat, with a document open, it is
+          compact: names only, in a short scrolling box above the document. */}
+      <aside aria-label="Documents to open" className={cn('rounded-xl border border-border bg-card p-3 space-y-3', selected && 'max-h-60 overflow-y-auto @3xl:max-h-none @3xl:overflow-visible')}>
         <Input aria-label="Filter documents" placeholder="Filter documents…" value={query} onChange={(event) => setQuery(event.target.value)} />
         {pinned.length > 0 && <div className="space-y-1">
           <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">ContextSpace</h3>
@@ -107,7 +109,7 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
             return <li key={doc.name}>
               <button type="button" aria-pressed={selected === doc.name} title={doc.name} className={`w-full rounded-lg p-2 text-left text-sm hover:bg-accent ${selected === doc.name ? 'bg-accent text-accent-foreground' : ''}`} onClick={() => { setKnowledgeAsFile(false); choose(doc.name); }}>
                 <span className="flex gap-2 items-start"><Icon size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-primary" /><span className="font-medium">{doc.label}</span></span>
-                <span className="block pl-6 text-xs text-muted-foreground">{doc.purpose}</span>
+                <span className={cn('block pl-6 text-xs text-muted-foreground', selected && 'hidden @3xl:block')}>{doc.purpose}</span>
               </button>
             </li>;
           })}</ul>
@@ -117,13 +119,12 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
         <ul className="max-h-[65vh] overflow-y-auto space-y-1">{visible.map((doc) => <li key={doc.name}>
           <button type="button" aria-pressed={selected === doc.name} className={`w-full rounded-lg p-2 text-left text-sm hover:bg-accent ${selected === doc.name ? 'bg-accent text-accent-foreground' : ''}`} onClick={() => choose(doc.name)}>
             <span className="flex gap-2 items-start"><FileText size={15} className="mt-0.5 shrink-0" /><span className="break-all">{doc.name}</span></span>
-            <span className="block pl-6 text-xs text-muted-foreground">{Math.max(1, Math.ceil(doc.size / 1024))} KB · {new Date(doc.modifiedAt).toLocaleDateString()}</span>
+            <span className={cn('block pl-6 text-xs text-muted-foreground', selected && 'hidden @3xl:block')}>{Math.max(1, Math.ceil(doc.size / 1024))} KB · {new Date(doc.modifiedAt).toLocaleDateString()}</span>
           </button>
         </li>)}</ul>
       </aside>
       <article aria-label="Document preview" className={cn('min-w-0 rounded-xl border border-border bg-card p-4 space-y-4', !selected && 'hidden @3xl:block')}>
         {!selected ? <p className="text-sm text-muted-foreground">Select a document to open it here.</p> : <>
-          <Button size="sm" variant="ghost" className="-ml-2 @3xl:hidden" onClick={() => choose(null)}><ArrowLeft size={14} />All documents</Button>
           {back && <Button size="sm" variant="ghost" className="-ml-2" onClick={() => { setTrail((previous) => previous.slice(0, -1)); setSelected(back); }}>
             <ArrowLeft size={14} />Back to {back.split('/').pop()}
           </Button>}
