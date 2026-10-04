@@ -68,7 +68,7 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
 
 interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
   /** The developer sent a line to an assistant (not a plain shell): their reply to whatever it asked. */
-  onReply?: () => void;
+  onReply?: (target: string) => void;
   /** The terminal this pane shows, chosen by its session tab: null for none yet, undefined while the tab still looks.
    * The pane never picks a running one by itself. */
   boundTerminalId?: string | null;
@@ -301,8 +301,9 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--;
         send({ type: 'input', data: data.slice(at, end) }); at = end;
       }
-      // Enter sends the line. To an assistant, the line the developer sends is their reply to what it asked.
-      if (data.includes('\r') && targetRef.current && targetRef.current !== 'shell') replyRef.current?.();
+      // Enter, typed on its own, sends the line: to an assistant, it is the developer's reply to what it asked. A paste
+      // that holds a line break is not.
+      if (data === '\r' && targetRef.current && targetRef.current !== 'shell') replyRef.current?.(targetRef.current);
     });
     term.options.disableStdin = true;
     const resize = term.onResize(({ cols, rows }) => { if (!term.options.disableStdin) send({ type: 'resize', cols: Math.min(cols, 500), rows: Math.min(rows, 300) }); });

@@ -28,7 +28,7 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
   // How the strip above the chat types a suggestion into the prompt. The pane fills it in once connected.
   const fillPromptRef = useRef<((text: string) => boolean) | null>(null);
   // How the strip hears that the developer replied in the chat, so it can close the question the AI asked.
-  const replyRef = useRef<(() => void) | null>(null);
+  const replyRef = useRef<((target: string) => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -159,7 +159,7 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
           breakpoint the inspector becomes a sheet over it, so opening Code or
           Docs no longer renames the control to "Back to CLI" and no longer
           costs the user their prompt. */}
-      <div className="min-h-0 min-w-0 flex-1"><SessionDeck {...props} fillPromptRef={fillPromptRef} onReply={() => replyRef.current?.()} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
+      <div className="min-h-0 min-w-0 flex-1"><SessionDeck {...props} fillPromptRef={fillPromptRef} onReply={target => replyRef.current?.(target)} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
         {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? INSPECTOR_MAX_PERCENT : splitPercent}
           aria-valuemin={INSPECTOR_MIN_PERCENT} aria-valuemax={INSPECTOR_MAX_PERCENT} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}

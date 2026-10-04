@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { MilestoneFact, ProgressFacts, ScreenEvent, WorkGuidance } from '../../types';
 import {
+  answersQuestion,
+  freshReveals,
   activeProposals, checkIsFailing, currentMilestoneIndex, factsLine, formatAge, goalLine, latestNext, nextAction, ringMilestones, stripState, verificationLine,
  headline } from './progressView';
 
@@ -155,6 +157,54 @@ describe('goalLine', () => {
     const plan = facts([milestone('a', 'in_progress')], { currentMilestoneId: 'a' });
     expect(goalLine(partial, plan)).toEqual({ text: 'Title a' });
     expect(goalLine({ ...guidance(''), assignment: undefined } as unknown as WorkGuidance, undefined)).toEqual({ text: '' });
+  });
+});
+
+describe('answersQuestion', () => {
+  it('is answered by the CLI that asked, under its terminal name too', () => {
+    expect(answersQuestion('claude', [{ harness: 'claude' }])).toBe(true);
+    expect(answersQuestion('antigravity-cli', [{ harness: 'Antigravity' }])).toBe(true);
+  });
+
+  it('waits for the assistant it names, and is never answered from a plain shell', () => {
+    expect(answersQuestion('codex', [{ harness: 'claude' }])).toBe(false);
+    expect(answersQuestion('shell', [{ harness: 'agent' }])).toBe(false);
+    expect(answersQuestion('claude', [])).toBe(false);
+  });
+
+  it('takes a reply from any CLI when the question names no assistant it knows', () => {
+    expect(answersQuestion('codex', [{ harness: 'agent' }])).toBe(true);
+    expect(answersQuestion('codex', [{ harness: 'claude' }, { harness: 'my-bot' }])).toBe(true);
+  });
+});
+
+describe('freshReveals', () => {
+  const show = (id: string, timestamp: string, payload: Record<string, unknown>): ScreenEvent =>
+    ({ id, timestamp, harness: 'claude', event: 'show', payload: { view: 'file', ...payload } }) as ScreenEvent;
+  const note = (id: string, timestamp: string, payload: Record<string, unknown>): ScreenEvent =>
+    ({ id, timestamp, harness: 'claude', event: 'annotate', payload: { line: 1, text: 'why?', tag: 'question', ...payload } }) as ScreenEvent;
+  const since = Date.parse('2026-10-02T10:00:00.000Z');
+
+  it('opens what was shown or noted since the strip started, oldest first, in its repository and at its line', () => {
+    const events = [
+      note('b', '2026-10-02T10:02:00.000Z', { path: 'src/a.ts', repo: 'api', line: 7 }),
+      show('a', '2026-10-02T10:01:00.000Z', { path: 'notes.md' }),
+    ];
+    expect(freshReveals(events, since, new Set())).toEqual([
+      { id: 'a', target: { path: 'notes.md' } },
+      { id: 'b', target: { path: 'api/src/a.ts', line: 7 } },
+    ]);
+  });
+
+  it('leaves out the replay from before, what is already open, changes with no file, suggestions and bad times', () => {
+    const events = [
+      show('old', '2026-10-02T09:59:59.000Z', { path: 'old.md' }),
+      show('done', '2026-10-02T10:01:00.000Z', { path: 'done.md' }),
+      show('diff', '2026-10-02T10:01:00.000Z', { view: 'diff', repo: 'api' }),
+      show('garbled', 'not a time', { path: 'x.md' }),
+      next('a suggestion', '2026-10-02T10:01:00.000Z', { path: 'y.md' }),
+    ];
+    expect(freshReveals(events, since, new Set(['done']))).toEqual([]);
   });
 });
 

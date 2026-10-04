@@ -40,9 +40,9 @@ const nextFrame = (title: string, extra: Record<string, unknown> = {}) =>
 interface Chat { typed: string[]; messages: unknown[] }
 
 /** Opens the CLI chat on a workspace whose terminal is connected, recording everything the page types into it. */
-async function openChat(page: Page, options: { facts?: ReturnType<typeof factsBody> | (() => ReturnType<typeof factsBody>); events?: string; target?: 'shell' | 'claude' } = {}): Promise<Chat> {
+async function openChat(page: Page, options: { facts?: ReturnType<typeof factsBody> | (() => ReturnType<typeof factsBody>); events?: string; target?: 'shell' | 'claude' | 'codex' } = {}): Promise<Chat> {
   const chat: Chat = { typed: [], messages: [] };
-  const session = { ...terminal, target: options.target ?? 'shell', label: options.target === 'claude' ? 'Claude Code' : 'bash' };
+  const session = { ...terminal, target: options.target ?? 'shell', label: { shell: 'bash', claude: 'Claude Code', codex: 'Codex' }[options.target ?? 'shell'] };
   await page.route('**/api/terminals/bootstrap', (route) => route.fulfill({ json: { token: 'test-token', expiresAt: Date.now() + 300_000 } }));
   await page.route('**/api/terminals/feature-x/status', (route) => route.fulfill({ json: { available: true, sessions: [session], targets: [{ id: session.target, name: session.label, available: true, reason: null }] } }));
   await page.route('**/api/workspace/feature-x/progress-facts', (route) => route.fulfill({ json: typeof options.facts === 'function' ? options.facts() : options.facts ?? factsBody() }));
@@ -168,6 +168,24 @@ test('opens the file a suggestion points at', async ({ page }) => {
   await expect.poll(() => chat.typed).toEqual(['Go ahead: Cover the cache']);
 });
 
+test('opens what the AI shows as it arrives, but not what it showed before the chat was opened', async ({ page }) => {
+  const listing = { changes: [{ repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/cache.ts', type: 'modified', additions: 1, deletions: 0 }] }] };
+  await page.route('**/api/workspace/feature-x/changes?include=all', (route) => route.fulfill({ json: listing }));
+  await page.route('**/api/workspace/feature-x/changes', (route) => route.fulfill({ json: listing }));
+  const opened: string[] = [];
+  await page.route('**/api/workspace/feature-x/changes/diff?*', (route) => {
+    opened.push(new URL(route.request().url()).searchParams.get('file') ?? '');
+    return route.fulfill({ json: { diff: '', fileContent: 'export const cache = 1;\n', originalContent: '' } });
+  });
+  const show = (id: string, timestamp: string, file: string) =>
+    frame('screen', { event: { id, timestamp, harness: 'claude', event: 'show', payload: { view: 'file', path: file, repo: 'repo', line: 1 } } }, timestamp);
+  const fresh = new Date(Date.now() + 60_000).toISOString();
+  await openChat(page, { events: show('old', '2026-10-02T11:30:00.000Z', 'src/old.ts') + show('new', fresh, 'src/cache.ts') });
+  await expect(page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('region', { name: 'Workspace code' })).toBeVisible();
+  await expect.poll(() => opened).toContain('src/cache.ts');
+  expect(opened).not.toContain('src/old.ts');
+});
+
 test('puts the answer to a question into the prompt when its option is chosen', async ({ page }) => {
   const chat = await openChat(page, { facts: factsBody({ question: true }) });
   // The question comes first, ahead of anything the AI suggested.
@@ -231,6 +249,37 @@ test.describe('when the AI waits for an answer', () => {
     await page.waitForTimeout(800);
     expect(acknowledged).toBe(0);
     await expect(answerBar(page)).toBeVisible();
+  });
+
+  test('a line sent to another assistant leaves the question for the one that asked', async ({ page }) => {
+    let acknowledged = 0;
+    await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => { acknowledged++; await route.fulfill({ json: { acknowledged: 1 } }); });
+    await openChat(page, { facts: factsBody({ question: true }), target: 'codex' });
+    await expect(answerBar(page)).toBeVisible();
+    await page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane').click();
+    await page.keyboard.type('status?');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    expect(acknowledged).toBe(0);
+    await expect(answerBar(page)).toBeVisible();
+  });
+
+  test('when the answer cannot be recorded, the next line tries again', async ({ page }) => {
+    let calls = 0;
+    await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => {
+      calls++;
+      await (calls === 1 ? route.fulfill({ status: 500, json: { error: 'disk full' } }) : route.fulfill({ json: { acknowledged: 1 } }));
+    });
+    await openChat(page, { facts: () => factsBody({ question: calls < 2 }), target: 'claude' });
+    await page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane').click();
+    await page.keyboard.type('Redis');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => calls).toBe(1);
+    await expect(answerBar(page)).toBeVisible();
+    await page.keyboard.type('Redis, please');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => calls).toBe(2);
+    await expect(answerBar(page)).toHaveCount(0);
   });
 
   test('the check marks it answered when the answer was given some other way', async ({ page }) => {

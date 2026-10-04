@@ -161,7 +161,7 @@ export const screenTools: NexusFlowTool[] = [
 
   screenTool(
     'annotate_document',
-    `Leave a note on one line of a file or document. The user sees it as a margin note labelled as yours, in the reader. Use tag question for something you need decided, risk for a concern, todo for something left to do. A note only appears in the reader: it never changes the file. The file and line must exist.`,
+    `Leave a note on one line of a file or document. The file opens at that line beside the user's chat, and the note is kept with it, labelled as yours; margin notes are not drawn yet, so also say the note in the chat. Use tag question for something you need decided, risk for a concern, todo for something left to do. It never changes the file. The file and line must exist.`,
     annotateSchema,
     async (input, { root, workspacePath }) => {
       const resolved = await resolveScreenTarget(workspacePath, { path: input.path, repo: input.repo });
@@ -173,7 +173,7 @@ export const screenTools: NexusFlowTool[] = [
         event: 'annotate',
         payload: { path: resolved.path, repo: resolved.repo, line: input.line, text: input.text, tag: input.tag ?? 'question' },
       });
-      return { status, path: resolved.path, ...(resolved.repo ? { repo: resolved.repo } : {}), line: input.line, message: status === 'shown' ? 'The note is on the line the user sees in the reader.' : 'The user already has this note.', eventId: event.id };
+      return { status, path: resolved.path, ...(resolved.repo ? { repo: resolved.repo } : {}), line: input.line, message: status === 'shown' ? 'The file is open at that line beside the user\'s chat. The note itself is not drawn there yet, so say it in the chat too.' : 'The user already has this note.', eventId: event.id };
     },
   ),
 

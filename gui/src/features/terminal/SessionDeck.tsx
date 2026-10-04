@@ -19,7 +19,7 @@ interface SessionDeckProps {
   launch?: TerminalLaunch;
   consumeLaunch: (id: string) => void;
   fillPromptRef: { current: ((text: string) => boolean) | null };
-  onReply: () => void;
+  onReply: (target: string) => void;
   onStatusChange?: (status: PaneStatus) => void;
   onBackgroundOutput?: () => void;
   onOpenFileReference?: (reference: { path: string; line?: number }) => void;

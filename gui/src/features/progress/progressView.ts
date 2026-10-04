@@ -5,7 +5,7 @@
  * shown are its own suggestions and questions, labelled as such by the caller.
  */
 
-import type { MilestoneFact, ProgressFacts, ScreenEvent, WorkGuidance } from '../../types';
+import type { AIAssistant, MilestoneFact, OpenQuestion, ProgressFacts, ScreenEvent, WorkGuidance } from '../../types';
 import type { RingMilestone } from './ringGeometry';
 
 export type NextEvent = Extract<ScreenEvent, { event: 'next' }>;
@@ -104,6 +104,22 @@ export function goalLine(guidance: WorkGuidance | undefined, facts: ProgressFact
   return current ? { text: current.title } : { text: '' };
 }
 
+// ─── Replies ────────────────────────────────────────────────────────────────
+
+const ASSISTANTS: readonly AIAssistant[] = ['claude', 'antigravity', 'codex', 'copilot', 'cursor'];
+
+/**
+ * Whether a line sent to the CLI running `target` (claude, codex, antigravity-cli...) answers an open question. A
+ * question that names another assistant waits for that one; one that names none, or an unknown one, any CLI answers.
+ */
+export function answersQuestion(target: string, questions: readonly Pick<OpenQuestion, 'harness'>[]): boolean {
+  if (target === 'shell') return false;
+  return questions.some(({ harness }) => {
+    const name = harness.trim().toLowerCase();
+    return !ASSISTANTS.includes(name as AIAssistant) || target === name || target.startsWith(`${name}-`);
+  });
+}
+
 // ─── Next ───────────────────────────────────────────────────────────────────
 
 export type NextAction =
@@ -116,6 +132,22 @@ const at = (timestamp: string) => {
   const time = Date.parse(timestamp);
   return Number.isFinite(time) ? time : undefined;
 };
+
+/**
+ * The files the AI asked to put in front of the developer (show, or a note on a line) since `since`, oldest first, and
+ * not yet opened. Older ones come back in the replay when a stream opens; opening them again would steal the panel.
+ */
+export function freshReveals(events: readonly ScreenEvent[], since: number, opened: ReadonlySet<string>): { id: string; target: { path: string; line?: number } }[] {
+  const out: { id: string; time: number; target: { path: string; line?: number } }[] = [];
+  for (const event of events) {
+    if ((event.event !== 'show' && event.event !== 'annotate') || opened.has(event.id) || !event.payload.path) continue;
+    const time = at(event.timestamp);
+    if (time === undefined || time < since) continue;
+    const { path, repo, line } = event.payload;
+    out.push({ id: event.id, time, target: { path: repo ? `${repo}/${path}` : path, ...(line !== undefined ? { line } : {}) } });
+  }
+  return out.sort((a, b) => a.time - b.time).map(({ id, target }) => ({ id, target }));
+}
 
 /** The AI's most recent suggestion for what to do next, or undefined when it has made none. */
 export function latestNext(events: readonly ScreenEvent[]): NextEvent | undefined {

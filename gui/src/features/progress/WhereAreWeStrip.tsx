@@ -9,7 +9,7 @@ import { useAcknowledgeQuestions, useProgressFacts, useReopenMilestone, useWorkG
 import { cn } from '../../lib/utils.js';
 import type { OpenQuestion, ProgressFacts, WorkGuidance } from '../../types.js';
 import { ProgressPanel } from './ProgressPanel.js';
-import { activeProposals, currentMilestoneIndex, factsLine, goalLine, latestNext, nextAction, ringMilestones, stripState, type NextAction } from './progressView.js';
+import { activeProposals, answersQuestion, currentMilestoneIndex, factsLine, freshReveals, goalLine, latestNext, nextAction, ringMilestones, stripState, type NextAction } from './progressView.js';
 import { useScreenFeed } from './useScreenFeed.js';
 
 const NOTICE_MS = 6000;
@@ -121,8 +121,8 @@ export interface WhereAreWeStripProps {
   active: boolean;
   /** Types text into the chat prompt without sending it. False when the chat is not connected. */
   fillPrompt: (text: string) => boolean;
-  /** Set by the strip: called when the developer sends a line to the assistant in this chat. */
-  replyRef?: { current: (() => void) | null };
+  /** Set by the strip: called with the CLI's target when the developer sends a line to it in this chat. */
+  replyRef?: { current: ((target: string) => void) | null };
   openFile: (reference: { path: string; line?: number }) => void;
 }
 
@@ -158,21 +158,39 @@ export function WhereAreWeStrip({ workspace, active, fillPrompt, replyRef, openF
   useEffect(() => { if (expanded) void refetchGuidance(); }, [expanded, refetchGuidance]);
 
   // The questions still open, oldest first, unless they could not be read.
-  const questions = facts && !facts.unavailable.some((entry) => entry.source === 'questions') ? facts.openQuestions : [];
+  const questions = useMemo(() => (facts && !facts.unavailable.some((entry) => entry.source === 'questions') ? facts.openQuestions : []), [facts]);
   // A line the developer sends to the assistant is their reply, so it closes what the AI asked. Read through refs:
   // the terminal calls this from its key handler, long after this render.
-  const openCount = useRef(0);
-  useEffect(() => { openCount.current = questions.length; }, [questions.length]);
+  const openQuestions = useRef<readonly OpenQuestion[]>([]);
+  useEffect(() => { openQuestions.current = questions; }, [questions]);
   const acknowledgeMutate = acknowledge.mutate;
   useEffect(() => {
     if (!replyRef) return;
-    replyRef.current = () => {
-      if (openCount.current === 0) return;
-      openCount.current = 0;
-      acknowledgeMutate(undefined, { onSuccess: () => setNotice('Your reply answered the question.') });
+    replyRef.current = (target) => {
+      const open = openQuestions.current;
+      if (!answersQuestion(target, open)) return;
+      openQuestions.current = [];
+      acknowledgeMutate(undefined, {
+        onSuccess: () => setNotice('Your reply answered the question.'),
+        // Still open, so the next line the developer sends tries again.
+        onError: () => { if (openQuestions.current.length === 0) openQuestions.current = open; },
+      });
     };
     return () => { replyRef.current = null; };
   }, [replyRef, acknowledgeMutate]);
+
+  // What the AI shows, or notes on a line, opens beside the chat as it arrives; what the stream replays from before does not.
+  const revealSince = useRef(0);
+  const revealed = useRef(new Set<string>());
+  const openFileRef = useRef(openFile);
+  useEffect(() => { openFileRef.current = openFile; });
+  useEffect(() => { revealSince.current = Date.now(); revealed.current = new Set(); }, [workspace, active]);
+  useEffect(() => {
+    for (const reveal of freshReveals(feed.events, revealSince.current, revealed.current)) {
+      revealed.current.add(reveal.id);
+      openFileRef.current(reveal.target);
+    }
+  }, [feed.events]);
 
   const action = useMemo(() => (facts ? nextAction(facts, latestNext(feed.events)) : null), [facts, feed.events]);
   const proposals = useMemo(() => (facts ? activeProposals(feed.events, facts, dismissed) : []), [facts, feed.events, dismissed]);
