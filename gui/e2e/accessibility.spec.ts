@@ -92,11 +92,23 @@ async function checkChatBeside(page: Page, label: string) {
 async function checkChatStrip(page: Page, label: string) {
   await mockWorkspace(page);
   await mockChatStrip(page);
+  // The AI in the demo chat waits on a question, so the sidebar shows it in amber, which is checked too.
+  await page.route('**/api/attention?*', (route) => route.fulfill({ json: { requests: [
+    { workspaceId: 'demo', id: 'q1', timestamp: '2026-10-02T11:00:00.000Z', harness: 'claude', message: 'Which cache backend should we use?', options: ['Redis', 'In memory'] },
+  ] } }));
+  // A CLI at work, so the sidebar's Running now group and its marker are checked too.
+  await page.route('**/api/terminals/running', (route) => route.fulfill({ json: { sessions: [{
+    id: 't1', workspace: 'demo', target: 'claude', label: 'Claude Code', cwd: '/dev/demo', state: 'running', attached: true,
+    startedAt: new Date(Date.now() - 60_000).toISOString(), lastOutputAt: new Date().toISOString(),
+  }] } }));
   await page.goto('/#/workspaces/demo/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const strip = page.getByRole('region', { name: 'Where are we', exact: true });
   await expect(strip).toContainText('Needs you');
   await expect(strip.getByRole('button', { name: /^Next: / })).toBeVisible();
+  await expect(strip.getByRole('group', { name: 'The AI is waiting for your answer' })).toBeVisible();
+  await expect(page.locator('aside.context-sidebar').getByText('Running now', { exact: true })).toBeVisible();
+  await expect(page.locator('aside.context-sidebar').getByText('Which cache backend should we use?')).toBeVisible();
   await expectNoSeriousViolations(page, `${label} strip`);
   await strip.getByRole('button', { expanded: false }).click();
   const detail = strip.getByRole('region', { name: 'Progress details' });
@@ -107,7 +119,7 @@ async function checkChatStrip(page: Page, label: string) {
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'All chats', exact: true }).click();
   const list = page.getByRole('dialog');
-  await expect(list.locator('li[data-branch="demo"] .state-chip')).toHaveText('Needs you');
+  await expect(list.locator('li[data-branch="demo"] .state-chip')).toHaveText('Waiting for you');
   await list.locator('li[data-branch="demo"]').hover();
   await expectNoSeriousViolations(page, `${label} list of chats`);
 }

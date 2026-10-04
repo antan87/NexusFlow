@@ -15,7 +15,7 @@ const INSPECTOR_MIN_PERCENT = 28;
 const INSPECTOR_MAX_PERCENT = 80;
 const clampPercent = (value: number) => Math.max(INSPECTOR_MIN_PERCENT, Math.min(INSPECTOR_MAX_PERCENT, value));
 
-export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<ComponentProps<typeof TerminalPane>, 'fillPromptRef'> & { workspacePath: string; repoPaths?: string[] }) {
+export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<ComponentProps<typeof TerminalPane>, 'fillPromptRef' | 'onReply'> & { workspacePath: string; repoPaths?: string[] }) {
   const [inspector, setInspector] = useState<'code' | 'documents' | null>(null);
   const [openReference, setOpenReference] = useState<{ path: string; line?: number; id: number } | null>(null);
   const [openDocument, setOpenDocument] = useState<{ name: string; id: number } | null>(null);
@@ -27,6 +27,8 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<C
   const referenceRequest = useRef(0);
   // How the strip above the chat types a suggestion into the prompt. The pane fills it in once connected.
   const fillPromptRef = useRef<((text: string) => boolean) | null>(null);
+  // How the strip hears that the developer replied in the chat, so it can close the question the AI asked.
+  const replyRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -153,13 +155,13 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<C
     : null;
 
   return <div className="flex h-full min-h-0 flex-col">
-    <WhereAreWeStrip workspace={props.workspace} active={props.active} fillPrompt={text => fillPromptRef.current?.(text) ?? false} openFile={reference => { void openFile(reference); }} />
+    <WhereAreWeStrip workspace={props.workspace} active={props.active} fillPrompt={text => fillPromptRef.current?.(text) ?? false} replyRef={replyRef} openFile={reference => { void openFile(reference); }} />
     <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-row">
       {/* The terminal stays mounted at every width. Below the compact
           breakpoint the inspector becomes a sheet over it, so opening Code or
           Docs no longer renames the control to "Back to CLI" and no longer
           costs the user their prompt. */}
-      <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} active={props.active} fillPromptRef={fillPromptRef} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
+      <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} active={props.active} fillPromptRef={fillPromptRef} onReply={() => replyRef.current?.()} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
         {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? INSPECTOR_MAX_PERCENT : splitPercent}
           aria-valuemin={INSPECTOR_MIN_PERCENT} aria-valuemax={INSPECTOR_MAX_PERCENT} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}

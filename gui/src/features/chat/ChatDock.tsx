@@ -1,6 +1,7 @@
 import { TerminalWorkspace } from '../terminal/TerminalWorkspace.js';
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   BellRing,
   X,
@@ -23,6 +24,9 @@ import { useChatDockSlot, useDockRect } from './chatDockSlot.js';
 import { browserPath, goToWorkspace, parseWorkspacePath, showsChatFor } from './chatRoute.js';
 import { threadNote } from './chatThreads.js';
 import { useChatThreads } from './useChatThreads.js';
+import { RUNNING_TERMINALS_KEY, useLiveSessions } from './useLiveSessions.js';
+import { liveText } from './liveSessions.js';
+import { LiveDot } from './LiveMarker.js';
 import { ChatList } from './ChatList.js';
 
 interface ChatDockProps {
@@ -50,7 +54,7 @@ export function ChatDock({ workspaces }: ChatDockProps) {
     removeTab,
     setSplitTab,
     setSplitRatio,
-    terminalLaunches, consumeTerminalLaunch, harnesses,
+    terminalLaunches, consumeTerminalLaunch,
   } = useFloatingChat();
 
   const slot = useChatDockSlot();
@@ -104,6 +108,9 @@ export function ChatDock({ workspaces }: ChatDockProps) {
   const attentive = useWindowAttentive();
   // What each open chat is working on and how far it is, for its tab and for the list of chats.
   const chatData = useChatThreads(workspaces, onScreen);
+  // Which chats have a CLI running, read from the server, the same as the sidebar shows.
+  const { live, now: liveNow } = useLiveSessions();
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (!onScreen || !attentive) return;
     const shown = new Set([activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value)));
@@ -191,7 +198,8 @@ export function ChatDock({ workspaces }: ChatDockProps) {
         {openTabs.length > 0 && (
           <ChatList
             activeBranch={activeTab}
-            rows={openTabs.map((branch) => ({ branch, name: workspaceMap.get(branch)?.name || branch, summary: chatData.summaries.get(branch)!, facts: chatData.facts.get(branch), harness: harnesses[branch] }))}
+            rows={openTabs.map((branch) => ({ branch, name: workspaceMap.get(branch)?.name || branch, summary: chatData.summaries.get(branch)!, facts: chatData.facts.get(branch), live: live.get(branch) }))}
+            now={liveNow}
             onOpen={(branch) => goToWorkspace(navigate, branch, parseWorkspacePath(browserPath())?.section ?? 'chat')}
             onFinish={(branch) => goToWorkspace(navigate, branch, 'changes')}
             onClose={removeTab}
@@ -248,10 +256,13 @@ export function ChatDock({ workspaces }: ChatDockProps) {
                         {/* A running terminal is the normal case, so only one that stopped or lost its connection is marked. */}
                         {(terminalStates[branchName] === 'exited' || terminalStates[branchName] === 'disconnected') && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
                         {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
-                        {waiting.has(branchName) && <span title="Waiting for your input" className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />}
+                        {live.get(branchName)
+                          ? <LiveDot state={live.get(branchName)!.state} title={liveText(live.get(branchName)!, liveNow)} />
+                          : waiting.has(branchName) && <span title="Waiting for your input" className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />}
                       </span>
-                      {/* Every tab has the second line, so they line up: the goal, else the state, else an empty line while loading. */}
-                      <span aria-hidden="true" className="truncate text-[10.5px] font-normal leading-tight text-muted-foreground">{summary.goal || summary.label || '\u00a0'}</span>
+                      {/* Every tab has the second line, so they line up: what the AI asks while it waits, else the goal, else the state,
+                          else an empty line while loading. */}
+                      <span aria-hidden="true" className="truncate text-[10.5px] font-normal leading-tight text-muted-foreground">{summary.question || summary.goal || summary.label || '\u00a0'}</span>
                     </span>
                     <span id={noteId} className="sr-only">{threadNote(summary)}</span>
                     <span
@@ -434,7 +445,11 @@ export function ChatDock({ workspaces }: ChatDockProps) {
                 {!ws ? <div role="status" className="space-y-2 p-4 text-xs text-muted-foreground"><p>This workspace is unavailable. It may have been removed or is still loading.</p><Button size="xs" variant="outline" onClick={() => removeTab(branchName)}>Close unavailable tab</Button></div> : <>
                   <div className="min-h-0 flex-1">
                     <TerminalWorkspace workspace={branchName} workspacePath={ws.workspacePath} repoPaths={ws.repos} active={onScreen && shown} launch={terminalLaunches[branchName]} consumeLaunch={id => consumeTerminalLaunch(branchName, id)}
-                      onStatusChange={status => setTerminalStates(current => current[branchName] === status ? current : { ...current, [branchName]: status })}
+                      onStatusChange={status => {
+                        setTerminalStates(current => current[branchName] === status ? current : { ...current, [branchName]: status });
+                        // A CLI that starts or stops shows in the sidebar at once, not at the next read.
+                        void queryClient.invalidateQueries({ queryKey: RUNNING_TERMINALS_KEY });
+                      }}
                       onBackgroundOutput={() => setUnreadOutput(current => current[branchName] ? current : { ...current, [branchName]: true })} />
                   </div>
                 </>}

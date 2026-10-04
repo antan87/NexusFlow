@@ -21,7 +21,6 @@ import {
   GitBranch,
   type LucideIcon,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
@@ -33,6 +32,10 @@ import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { useChatThreads } from '../features/chat/useChatThreads.js';
+import { useChatAttention } from '../features/chat/useChatAttention.js';
+import { useLiveSessions } from '../features/chat/useLiveSessions.js';
+import { liveText, runningFirst } from '../features/chat/liveSessions.js';
+import { LiveMarker } from '../features/chat/LiveMarker.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { RepositoriesList } from '../features/worktrees/RepositoriesList.js';
 import { hasUnpreparedRepo } from '../features/worktrees/normalizeWorktrees.js';
@@ -88,6 +91,11 @@ function SidebarContents({
   const { openCli } = useFloatingChat();
   // Read by the chat while it is on screen; the sidebar shows what it last read and never reads on its own.
   const chatThreads = useChatThreads(workspaces, false);
+  // Where a CLI is running. Those workspaces come first, so one is never lost further down a long list.
+  const { live: liveSessions, now: liveNow } = useLiveSessions();
+  // What each AI is waiting for: the first line of its question, until it is answered.
+  const { open: openQuestions } = useChatAttention();
+  const questions = useMemo(() => new Map(openQuestions.map((request) => [request.workspaceId, request.message.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''] as const)), [openQuestions]);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
@@ -367,17 +375,25 @@ function SidebarContents({
                     {search.trim() ? 'No workspaces match' : showArchived ? 'No archived workspaces' : 'No active workspaces'}
                   </div>
                 ) : (
-                  filteredWorkspaces.slice(0, visibleWorkspaceCount).map((w) => {
+                  runningFirst(filteredWorkspaces, liveSessions).slice(0, visibleWorkspaceCount).map((w, index, shown) => {
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
+                    const live = liveSessions.get(w.branchName);
+                    const startsRunning = Boolean(live) && index === 0;
+                    const endsRunning = !live && index > 0 && liveSessions.has(shown[index - 1]!.branchName);
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
-                    // A workspace with an open chat says what the chat is working on, and when it needs you.
+                    // A workspace with an open chat or a running CLI says what the AI asks while it waits, else what the
+                    // chat is working on, and when it needs you.
                     const thread = chatThreads.summaries.get(w.branchName);
-                    const needsYou = thread?.tone === 'needs' ? thread.label : '';
+                    const question = questions.get(w.branchName);
+                    const needsYou = question !== undefined ? 'Waiting for you' : thread?.tone === 'needs' ? thread.label : '';
+                    const line = question || thread?.goal || '';
                     const showRepositories = isSelected && repositoriesOpen && Boolean(activeWorkspace);
 
                     return (
                       <div key={w.id}>
+                      {startsRunning && <p className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Running now</p>}
+                      {endsRunning && <div aria-hidden="true" className="mx-2.5 mb-2 mt-1 border-t border-border/70" />}
                       <div
                         className={cn(
                           'group flex items-start gap-1 rounded-md px-2.5 py-1.5 text-xs transition-colors border',
@@ -396,10 +412,13 @@ function SidebarContents({
                             {w.name || w.branchName}
                           </span>
                           <span className="flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
-                            {thread && (thread.goal || needsYou) ? (
+                            {question ? (
+                              // The dot beside the row already says it waits, so the room goes to what it asks.
+                              <span className="truncate font-medium text-[var(--state-needs)]" title={question}><span className="sr-only">Waiting for you: </span>{question}</span>
+                            ) : line || needsYou ? (
                               <>
                                 {needsYou && <span className="state-chip shrink-0" data-tone="needs">{needsYou}</span>}
-                                {thread.goal && <span className="truncate" title={thread.goal}>{thread.goal}</span>}
+                                {line && <span className="truncate" title={line}>{line}</span>}
                               </>
                             ) : (
                               <>
@@ -411,17 +430,9 @@ function SidebarContents({
                             {w.archivedAt && <span className="font-semibold">archived</span>}
                             {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
+                          {live && <span className="sr-only">{liveText(live, liveNow)}</span>}
                         </Link>
                         <div className="flex items-center gap-1 shrink-0">
-                          {st?.activeAssistants && st.activeAssistants.length > 0 && (
-                            <div className="flex items-center gap-1">
-                              {st.activeAssistants.map((ast) => (
-                                <span key={ast} title={harnessName(ast)} className="inline-flex size-3.5 opacity-75">
-                                  <HarnessIcon harness={ast} className="size-3" />
-                                </span>
-                              ))}
-                            </div>
-                          )}
                           {isSelected && activeWorkspace && (
                             <button
                               type="button"
@@ -446,12 +457,8 @@ function SidebarContents({
                               <History size={12} aria-hidden="true" />
                             </button>
                           )}
-                          <span
-                            className={cn(
-                              'size-1.5 rounded-full shrink-0',
-                              hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
-                            )}
-                          />
+                          {/* Only where a CLI runs. Uncommitted changes are the ± count beside the name. */}
+                          {live && <LiveMarker live={live} now={liveNow} />}
                         </div>
                       </div>
                       {showRepositories && activeWorkspace && (

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CircleCheckBig, LayoutList, X } from 'lucide-react';
 
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { ContextRing } from '../../components/ui/context-ring.js';
 import { IconButton } from '../../components/ui/icon-button.js';
 import { Popover, PopoverPopup, PopoverTrigger } from '../../components/ui/popover.js';
@@ -9,26 +8,30 @@ import { cn } from '../../lib/utils.js';
 import type { ProgressFacts } from '../../types.js';
 import { currentMilestoneIndex, ringMilestones } from '../progress/progressView.js';
 import { sortThreads, type ThreadSummary } from './chatThreads.js';
+import { liveText, type LiveSessions } from './liveSessions.js';
+import { LiveMarker } from './LiveMarker.js';
 
 export interface ChatListRow {
   branch: string;
   name: string;
   summary: ThreadSummary;
   facts?: ProgressFacts;
-  /** The assistant running in the chat, once one has started. */
-  harness?: string;
+  /** The CLI running in the chat, if one is. */
+  live?: LiveSessions;
 }
 
 interface ChatListProps {
   rows: readonly ChatListRow[];
+  /** When the running CLIs were read. */
+  now: number;
   activeBranch: string | null;
   onOpen: (branch: string) => void;
   onFinish: (branch: string) => void;
   onClose: (branch: string) => void;
 }
 
-function Row({ row, active, onOpen, onFinish, onClose }: { row: ChatListRow; active: boolean } & Pick<ChatListProps, 'onOpen' | 'onFinish' | 'onClose'>) {
-  const { branch, name, summary, facts, harness } = row;
+function Row({ row, active, now, onOpen, onFinish, onClose }: { row: ChatListRow; active: boolean } & Pick<ChatListProps, 'now' | 'onOpen' | 'onFinish' | 'onClose'>) {
+  const { branch, name, summary, facts, live } = row;
   return (
     <li className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted/60 focus-within:bg-muted/60" data-branch={branch}>
       <button
@@ -39,12 +42,14 @@ function Row({ row, active, onOpen, onFinish, onClose }: { row: ChatListRow; act
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className={cn('truncate text-[13px] leading-tight text-foreground', active ? 'font-semibold' : 'font-medium')} title={`${name} (${branch})`}>{name}</span>
-            {harness && <span title={harnessName(harness)} className="inline-flex shrink-0 text-muted-foreground"><HarnessIcon harness={harness} className="size-3" /></span>}
+            {live && <LiveMarker live={live} now={now} />}
             {summary.label && <span className="state-chip shrink-0" data-tone={summary.tone}>{summary.label}</span>}
           </span>
-          <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground" title={summary.goal || undefined}>
-            {summary.goal || 'No goal set yet'}
+          {/* While the AI waits, what it asked matters more than the goal. */}
+          <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground" title={summary.question || summary.goal || undefined}>
+            {summary.question || summary.goal || 'No goal set yet'}
           </span>
+          {live && <span className="sr-only">{liveText(live, now)}</span>}
         </span>
       </button>
       {/* Quiet until the row is pointed at or focused, except on finished work, where it is the next step. */}
@@ -65,7 +70,7 @@ function Row({ row, active, onOpen, onFinish, onClose }: { row: ChatListRow; act
  * first and finished work together at the end, where Review and finish is one click. The tabs keep the order the
  * chats were opened in, so they stay where the hand expects them; this list is ordered by attention instead.
  */
-export function ChatList({ rows, activeBranch, onOpen, onFinish, onClose }: ChatListProps) {
+export function ChatList({ rows, now, activeBranch, onOpen, onFinish, onClose }: ChatListProps) {
   const [open, setOpen] = useState(false);
   const sorted = sortThreads(rows.map((row) => ({ ...row, tone: row.summary.tone })));
   const working = sorted.filter((row) => !row.summary.finished);
@@ -105,7 +110,7 @@ export function ChatList({ rows, activeBranch, onOpen, onFinish, onClose }: Chat
             <>
               <h2 className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Open chats</h2>
               <ul aria-label="Open chats" className="flex max-h-[min(24rem,60vh)] flex-col gap-0.5 overflow-y-auto">
-                {working.map((row) => <Row key={row.branch} row={row} active={row.branch === activeBranch} onOpen={choose(onOpen)} onFinish={choose(onFinish)} onClose={closeRow} />)}
+                {working.map((row) => <Row key={row.branch} row={row} active={row.branch === activeBranch} now={now} onOpen={choose(onOpen)} onFinish={choose(onFinish)} onClose={closeRow} />)}
               </ul>
             </>
           )}
@@ -113,7 +118,7 @@ export function ChatList({ rows, activeBranch, onOpen, onFinish, onClose }: Chat
             <>
               <h2 className={cn('px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground', working.length > 0 && 'mt-1.5 border-t border-border')}>Ready to finish</h2>
               <ul aria-label="Ready to finish" className="flex flex-col gap-0.5">
-                {finished.map((row) => <Row key={row.branch} row={row} active={row.branch === activeBranch} onOpen={choose(onOpen)} onFinish={choose(onFinish)} onClose={closeRow} />)}
+                {finished.map((row) => <Row key={row.branch} row={row} active={row.branch === activeBranch} now={now} onOpen={choose(onOpen)} onFinish={choose(onFinish)} onClose={closeRow} />)}
               </ul>
             </>
           )}

@@ -152,6 +152,10 @@ export const test = base.extend<MockDataOptions & { setupMocks: void }>({
     );
     // Nothing is waiting by default; a spec that exercises alerts registers its own route.
     await page.route('**/api/attention?*', json({ requests: [] }));
+    // No CLI is running anywhere by default. The sidebar reads this on every page, so it gets a token too;
+    // a spec about terminals registers its own routes, which win over these.
+    await page.route('**/api/terminals/bootstrap', json({ token: 'test-token', expiresAt: Date.now() + 300_000 }));
+    await page.route('**/api/terminals/running', json({ sessions: [] }));
 
     // The chat sits beside Plan, Changes and the other parts when there is room. Specs about those parts are about
     // the parts, so they start with the chat hidden there; a spec about the layout sets its own.

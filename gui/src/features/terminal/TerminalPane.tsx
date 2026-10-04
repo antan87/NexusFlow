@@ -67,8 +67,10 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
   }
 };
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null } }
-export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput, fillPromptRef }: Props) {
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
+  /** The developer sent a line to an assistant (not a plain shell): their reply to whatever it asked. */
+  onReply?: () => void }
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput, fillPromptRef, onReply }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -117,6 +119,11 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
   useEffect(() => { statusChangeRef.current = onStatusChange; backgroundOutputRef.current = onBackgroundOutput; }, [onStatusChange, onBackgroundOutput]);
+  const replyRef = useRef(onReply);
+  useEffect(() => { replyRef.current = onReply; }, [onReply]);
+  // Read by the key handler, which is set up once per terminal.
+  const targetRef = useRef<string | undefined>(undefined);
+  useEffect(() => { targetRef.current = terminal?.target; }, [terminal]);
   useEffect(() => {
     statusChangeRef.current?.(paneStatusFor(shownKind));
   }, [shownKind]);
@@ -257,6 +264,8 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1])) end--;
         send({ type: 'input', data: data.slice(at, end) }); at = end;
       }
+      // Enter sends the line. To an assistant, the line the developer sends is their reply to what it asked.
+      if (data.includes('\r') && targetRef.current && targetRef.current !== 'shell') replyRef.current?.();
     });
     term.options.disableStdin = true;
     const resize = term.onResize(({ cols, rows }) => { if (!term.options.disableStdin) send({ type: 'resize', cols: Math.min(cols, 500), rows: Math.min(rows, 300) }); });

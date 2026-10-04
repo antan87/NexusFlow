@@ -2,17 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { useInputRequests } from '../../lib/api/queries.js';
 import type { InputRequest } from '../../types.js';
 import { useFloatingChat } from './floatingChatStore.js';
-import { pendingRequests, useSeenRequests } from './chatAttention.js';
+import { openRequests, pendingRequests, useSeenRequests } from './chatAttention.js';
+import { useRunningTerminals } from './useRunningTerminals.js';
 
-/** The CLI chats whose agents are waiting for the user, longest-waiting first. */
-export function useChatAttention(): { pending: InputRequest[]; waiting: ReadonlySet<string> } {
+/**
+ * The CLI chats whose agents asked the user something, in open chats and wherever a CLI still runs.
+ * - `open`: every question not answered yet, longest-waiting first. It stays until it is answered.
+ * - `waiting`: the workspaces those questions are in.
+ * - `pending`: the open questions the user has not seen yet, for alerts that should stop once seen.
+ */
+export function useChatAttention(): { open: InputRequest[]; waiting: ReadonlySet<string>; pending: InputRequest[] } {
   const { openTabs } = useFloatingChat();
-  const requests = useInputRequests(openTabs).data;
+  const running = useRunningTerminals().data;
+  const watched = useMemo(() => [...new Set([...openTabs, ...(running ?? []).map((terminal) => terminal.workspace)])], [openTabs, running]);
+  const requests = useInputRequests(watched).data;
   const seen = useSeenRequests();
   return useMemo(() => {
-    const pending = pendingRequests(requests ?? [], seen, openTabs);
-    return { pending, waiting: new Set(pending.map((request) => request.workspaceId)) };
-  }, [requests, seen, openTabs]);
+    const open = openRequests(requests ?? [], watched);
+    return { open, waiting: new Set(open.map((request) => request.workspaceId)), pending: pendingRequests(requests ?? [], seen, watched) };
+  }, [requests, seen, watched]);
 }
 
 /**

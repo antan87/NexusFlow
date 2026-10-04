@@ -19,6 +19,8 @@ export interface ThreadSummary {
   label: string;
   /** Every milestone is done and nothing needs the developer: time to review and finish. */
   finished: boolean;
+  /** What the AI asked and is waiting for, on one line. Empty when it is not waiting. */
+  question: string;
 }
 
 export interface ThreadInput {
@@ -29,6 +31,8 @@ export interface ThreadInput {
   description?: string;
   /** The AI has asked the developer something and is waiting in this chat. */
   waiting: boolean;
+  /** What it asked. */
+  question?: string;
 }
 
 const oneLine = (text: string) => {
@@ -36,12 +40,12 @@ const oneLine = (text: string) => {
   return line.length <= GOAL_LIMIT ? line : `${line.slice(0, GOAL_LIMIT - 3).trimEnd()}...`;
 };
 
-export function threadSummary({ branch, facts, guidance, description, waiting }: ThreadInput): ThreadSummary {
+export function threadSummary({ branch, facts, guidance, description, waiting, question }: ThreadInput): ThreadSummary {
   const goal = oneLine(goalLine(guidance, facts).text) || oneLine(description ?? '');
-  if (waiting) return { branch, goal, tone: 'needs', label: 'Waiting for you', finished: false };
-  if (!facts) return { branch, goal, tone: 'idle', label: '', finished: false };
+  if (waiting) return { branch, goal, tone: 'needs', label: 'Waiting for you', finished: false, question: oneLine(question ?? '') };
+  if (!facts) return { branch, goal, tone: 'idle', label: '', finished: false, question: '' };
   const state = stripState(facts);
-  return { branch, goal, tone: state.tone, label: state.label, finished: state.tone === 'done' };
+  return { branch, goal, tone: state.tone, label: state.label, finished: state.tone === 'done', question: '' };
 }
 
 /** What needs the developer comes first, finished work last. */
@@ -55,7 +59,8 @@ export function sortThreads<T extends { tone: StripTone }>(threads: readonly T[]
     .map(({ thread }) => thread);
 }
 
-/** One line for a screen reader or a tooltip: "Goal. State." with whichever parts exist. */
-export function threadNote(summary: Pick<ThreadSummary, 'goal' | 'label'>): string {
-  return [summary.goal, summary.label].filter(Boolean).join('. ');
+/** One line for a screen reader or a tooltip: "Goal. State." or "Goal. Waiting for you: question", with whichever parts exist. */
+export function threadNote(summary: Pick<ThreadSummary, 'goal' | 'label'> & { question?: string }): string {
+  const state = summary.question ? `${summary.label}: ${summary.question}` : summary.label;
+  return [summary.goal, state].filter(Boolean).join('. ');
 }

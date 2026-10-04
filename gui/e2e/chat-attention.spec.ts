@@ -90,9 +90,14 @@ test.describe('chat on screen', () => {
     await chipOf(page).click();
 
     await expect(chat.getByRole('tab', { name: /^Show beta in the left pane/ })).toHaveAttribute('aria-selected', 'true');
+    // Seen: the alerts stop. Not answered yet: the tab still says so.
     await expect(chipOf(page)).toHaveCount(0);
-    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toBeVisible();
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
+    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane, waiting for your input' })).toBeVisible();
+
+    // Answered (the server no longer lists it): the mark goes.
+    requests = [];
+    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toBeVisible({ timeout: 12_000 });
   });
 
   test('does not alert for the chat the user is already looking at', async ({ page }) => {
@@ -106,8 +111,9 @@ test.describe('chat on screen', () => {
     await nextPoll();
     await nextPoll();
 
+    // No alert for what the user is looking at, but the tab says the question is open until it is answered.
     await expect(chipOf(page)).toHaveCount(0);
-    await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toBeVisible();
+    await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane, waiting for your input' })).toBeVisible();
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
   });
 

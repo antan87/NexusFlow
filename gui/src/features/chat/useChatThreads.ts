@@ -13,12 +13,13 @@ export function useChatThreads(workspaces: readonly Feature[], read: boolean): {
   facts: ReadonlyMap<string, ProgressFacts | undefined>;
 } {
   const { openTabs } = useFloatingChat();
-  const { waiting } = useChatAttention();
+  const { open } = useChatAttention();
+  const questions = new Map(open.map((request) => [request.workspaceId, request.message] as const));
   const data = useOpenChatFacts(openTabs, read);
   const byBranch = new Map(workspaces.map((workspace) => [workspace.branchName, workspace]));
   const summaries = new Map(openTabs.map((branch) => [branch, threadSummary({
     branch, facts: data.facts.get(branch), guidance: data.guidance.get(branch),
-    description: byBranch.get(branch)?.description, waiting: waiting.has(branch),
+    description: byBranch.get(branch)?.description, waiting: questions.has(branch), question: questions.get(branch),
   })] as const));
   return { summaries, facts: data.facts };
 }

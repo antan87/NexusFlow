@@ -614,6 +614,14 @@
 .state-chip[data-tone="reopened"] { color: var(--state-reopened); }
 .state-chip[data-tone="idle"] { color: var(--muted-foreground); }
 
+/* Where a CLI runs: the same dot in the sidebar, on its chat tab and in the list of chats. */
+.live-dot { width: 0.5rem; height: 0.5rem; flex: none; border-radius: 9999px; background: var(--state-done); }
+.live-dot[data-state="working"] { animation: live-pulse 1.6s ease-in-out infinite; }
+.live-dot[data-state="waiting"] { background: var(--state-needs); animation: live-pulse 1.2s ease-in-out infinite; }
+.live-dot[data-state="closing"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
 /* Dark values for the progress tokens. Last on purpose: this block must win over every palette's light
    block of equal specificity (the sunset and dusk ring colours above). */
 :root.dark {

@@ -8,9 +8,12 @@ export type PtyProcess = Pick<IPty, 'pid' | 'write' | 'resize' | 'pause' | 'resu
 export type PtyFactory = (launch: LaunchSpec, cwd: string, cols: number, rows: number) => Promise<PtyProcess>;
 export interface TerminalClient { send(data: string): void; close(): void }
 export interface TerminalInfo { id: string; workspace: string; target: string; label: string; cwd: string; sessionId?: string; startedAt: string; state: 'running' | 'exited'; exitCode?: number; exitedAt?: string }
+/** A running terminal as the app-wide list shows it: where it is, whether a window shows it, when it last printed and, with no window, when it stops. */
+export interface RunningTerminal extends TerminalInfo { attached: boolean; lastOutputAt?: string; stopsAt?: string }
 interface Session extends TerminalInfo {
   owner: string; launchId: string; pty: PtyProcess; chunks: string[]; length: number; truncated: boolean; typed: boolean;
   client?: TerminalClient; unacked: number; paused: boolean; timer?: NodeJS.Timeout; stall?: NodeJS.Timeout;
+  lastOutputMs?: number; stopsAtMs?: number;
 }
 const MAX_REPLAY = 512 * 1024;
 const HIGH_WATER = 128 * 1024;
@@ -62,6 +65,15 @@ export class TerminalManager {
   }
   list(owner: string, workspace: string): TerminalInfo[] {
     return [...this.sessions.values()].filter(s => s.owner === owner && s.workspace === workspace).map(s => this.info(s));
+  }
+  /** Every running terminal of one owner, in every workspace, so the app can say where each CLI is without opening each workspace. */
+  running(owner: string): RunningTerminal[] {
+    return [...this.sessions.values()].filter(s => s.owner === owner && s.state === 'running').map(s => ({
+      ...this.info(s),
+      attached: Boolean(s.client),
+      lastOutputAt: s.lastOutputMs === undefined ? undefined : new Date(s.lastOutputMs).toISOString(),
+      stopsAt: s.client || s.stopsAtMs === undefined ? undefined : new Date(s.stopsAtMs).toISOString(),
+    }));
   }
   private owned(owner: string, workspace: string, id: string): Session {
     const s = this.sessions.get(id);
@@ -129,6 +141,7 @@ export class TerminalManager {
   }
   private expire(s: Session) {
     clearTimeout(s.timer);
+    s.stopsAtMs = Date.now() + this.graceMs;
     s.timer = setTimeout(() => {
       if (s.state === 'running') this.terminate(s.pty);
       clearTimeout(s.stall);
@@ -141,6 +154,7 @@ export class TerminalManager {
     try { s.client?.send(JSON.stringify(message)); } catch { if (s.client) this.detach(s.owner, s.workspace, s.id, s.client); }
   }
   private output(s: Session, data: string) {
+    s.lastOutputMs = Date.now();
     // Split large native events to bound WebSocket frame size and replay chunks.
     for (let at = 0; at < data.length; at += 16_384) {
       const chunk = data.slice(at, at + 16_384);
@@ -169,7 +183,7 @@ export class TerminalManager {
       this.detach(owner, workspace, id, previous);
       try { previous.close(); } catch { /* the stale connection is already gone */ }
     }
-    clearTimeout(s.timer); s.client = client; s.unacked = s.length;
+    clearTimeout(s.timer); s.stopsAtMs = undefined; s.client = client; s.unacked = s.length;
     this.send(s, { type: 'ready', terminal: this.info(s), truncated: s.truncated });
     for (const data of s.chunks) this.send(s, { type: 'output', data });
     this.send(s, { type: 'replayed' });

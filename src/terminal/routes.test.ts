@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, symlink, realpath } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { TerminalAccess, containedTerminalCwd, registerTerminalRoutes, trustedTerminalOrigin } from './routes.js';
+import { TerminalManager, type PtyProcess } from './manager.js';
 
 const dirs: string[] = [];
 afterEach(async () => { vi.useRealTimers(); await Promise.all(dirs.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
@@ -44,5 +45,28 @@ describe('terminal execution boundary', () => {
     expect((await app.request('http://localhost/api/terminals/workspace/status', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': token } })).status).toBe(403);
     expect((await app.request('http://localhost/api/terminals/workspace/status', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': 'fake', cookie } })).status).toBe(403);
     expect(resolve).not.toHaveBeenCalled();
+  });
+  it('lists running terminals across workspaces only for the browser that owns them', async () => {
+    const app = new Hono(); const resolve = vi.fn(async () => '/workspace');
+    const factory = vi.fn(async () => ({ pid: 1, write: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn(), kill: vi.fn(), onData: vi.fn(() => ({ dispose() {} })), onExit: vi.fn(() => ({ dispose() {} })) }) as unknown as PtyProcess);
+    const manager = new TerminalManager(factory, vi.fn());
+    registerTerminalRoutes(app, vi.fn() as any, resolve, manager);
+    const bootstrap = await app.request('http://localhost/api/terminals/bootstrap', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': 'bootstrap' } });
+    const { token } = await bootstrap.json(); const cookie = bootstrap.headers.get('set-cookie')!.split(';')[0]!;
+    const owner = cookie.split('=')[1]!;
+    const launch = { file: '/bin/sh', args: [], env: {}, label: 'Shell' };
+    await manager.create({ owner, workspace: 'alpha', cwd: '/alpha', target: 'shell', launchId: 'a', launch });
+    await manager.create({ owner, workspace: 'beta', cwd: '/beta', target: 'claude', launchId: 'b', launch });
+    await manager.create({ owner: 'someone-else', workspace: 'gamma', cwd: '/gamma', target: 'shell', launchId: 'c', launch });
+    const listed = await app.request('http://localhost/api/terminals/running', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': token, cookie } });
+    expect(listed.status).toBe(200);
+    const { sessions } = await listed.json() as { sessions: { workspace: string; attached: boolean }[] };
+    expect(sessions.map(session => session.workspace).sort()).toEqual(['alpha', 'beta']);
+    expect(sessions.every(session => session.attached === false)).toBe(true);
+    // Without this browser's token, or from another site, nothing is listed.
+    expect((await app.request('http://localhost/api/terminals/running', { method: 'POST', headers: { origin: 'http://localhost', 'x-contextspace-terminal': 'fake', cookie } })).status).toBe(403);
+    expect((await app.request('http://localhost/api/terminals/running', { method: 'POST', headers: { origin: 'http://evil.example', 'x-contextspace-terminal': token, cookie } })).status).toBe(403);
+    expect(resolve).not.toHaveBeenCalled();
+    manager.dispose();
   });
 });

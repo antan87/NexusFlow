@@ -107,8 +107,9 @@ test.describe('each tab says what its chat is working on', () => {
     await page.goto('/#/workspaces/alpha/chat');
     await expect(tab(page, 'Faster search')).toContainText('Make search answer in under 100 ms');
     await expect(tab(page, 'Faster search')).toHaveAccessibleDescription('Make search answer in under 100 ms. In progress');
-    await expect(tab(page, 'Importer')).toContainText('Write the importer');
-    await expect(tab(page, 'Importer')).toHaveAccessibleDescription('Write the importer. Waiting for you');
+    // While the AI waits, the tab shows what it asked; the goal is still in the description.
+    await expect(tab(page, 'Importer')).toContainText('Which file format?');
+    await expect(tab(page, 'Importer')).toHaveAccessibleDescription('Write the importer. Waiting for you: Which file format?');
     // Only the first line of a description, so a tab stays one short line.
     await expect(tab(page, 'gamma')).toContainText('Release notes for 2.32');
     await expect(tab(page, 'gamma')).not.toContainText('changelog');
@@ -163,7 +164,8 @@ test.describe('the sidebar', () => {
     const sidebar = page.locator('aside.context-sidebar');
     const importer = sidebar.getByRole('link', { name: /^Importer/ });
     await expect(importer).toContainText('Waiting for you');
-    await expect(importer).toContainText('Write the importer');
+    // What it asked, rather than the goal, while it waits.
+    await expect(importer).toContainText('Which file format?');
     await expect(sidebar.getByRole('link', { name: /^Faster search/ })).toContainText('Make search answer in under 100 ms');
     await expect(sidebar.getByRole('link', { name: /^Faster search/ })).not.toContainText('In progress');
     const login = sidebar.getByRole('link', { name: /^Login bug/ });
@@ -171,7 +173,7 @@ test.describe('the sidebar', () => {
     await expect(login).toContainText('0 repos');
     // It shows what the chat last read, and keeps showing it on a page without the chat.
     await page.goto('/#/guide');
-    await expect(importer).toContainText('Write the importer');
+    await expect(importer).toContainText('Which file format?');
   });
 });
 
@@ -217,7 +219,7 @@ test.describe('the list of chats', () => {
   test('closing a chat in the background closes its tab, keeps the list open and moves the keyboard to the next row', async ({ page }) => {
     await mockChats(page);
     await page.goto('/#/workspaces/alpha/chat');
-    await expect(tab(page, 'Importer')).toHaveAccessibleDescription(/Waiting for you$/);
+    await expect(tab(page, 'Importer')).toHaveAccessibleDescription(/Waiting for you: Which file format\?$/);
     await openList(page);
     await rowOf(page, 'beta').getByRole('button', { name: 'Close the chat of Importer' }).click();
     await expect(tab(page, 'Importer')).toHaveCount(0);

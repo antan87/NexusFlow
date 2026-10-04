@@ -1355,7 +1355,7 @@ Core Instructions:
       />
 
       <ChatDock workspaces={activeWorkspaces} />
-      <ChatAttentionCards />
+      <ChatAttentionCards workspaces={activeWorkspaces} />
 
       <ToastStack
         toasts={toasts}

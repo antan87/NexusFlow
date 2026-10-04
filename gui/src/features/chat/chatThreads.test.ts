@@ -41,9 +41,11 @@ describe('threadSummary', () => {
     expect(goal.endsWith('...')).toBe(true);
   });
 
-  it('says waiting for you when the AI has asked something, even when the plan says all done', () => {
+  it('says waiting for you when the AI has asked something, even when the plan says all done, and keeps the question to one line', () => {
     const done = facts({ milestones: [milestone('m1', 'done')], currentMilestoneId: undefined });
-    expect(threadSummary({ branch: 'a', facts: done, waiting: true })).toMatchObject({ tone: 'needs', label: 'Waiting for you', finished: false });
+    expect(threadSummary({ branch: 'a', facts: done, waiting: true, question: 'Which format?\nCSV or JSON' }))
+      .toMatchObject({ tone: 'needs', label: 'Waiting for you', finished: false, question: 'Which format?' });
+    expect(threadSummary({ branch: 'a', facts: done, waiting: false, question: 'Stale question' }).question).toBe('');
   });
 
   it('is finished only when every milestone is done and nothing needs the developer', () => {
@@ -82,5 +84,6 @@ describe('threadNote', () => {
     expect(threadNote({ goal: 'Make it central', label: 'In progress' })).toBe('Make it central. In progress');
     expect(threadNote({ goal: '', label: 'In progress' })).toBe('In progress');
     expect(threadNote({ goal: '', label: '' })).toBe('');
+    expect(threadNote({ goal: 'Import', label: 'Waiting for you', question: 'Which format?' })).toBe('Import. Waiting for you: Which format?');
   });
 });

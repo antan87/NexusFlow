@@ -193,7 +193,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const selectedMode = selected?.mode ?? 'worktree';
   const { open: openChat } = useFloatingChat();
   // Chats waiting for the developer, shown on the Chat destination while they are elsewhere.
-  const { waiting: waitingChats } = useChatAttention();
+  // Alerts the user has not seen yet; a question already seen is shown on its tab and in its chat until answered.
+  const { pending: unseenQuestions } = useChatAttention();
   // The chat is the centre of the screen. Other parts open as a panel beside it when there is room, and by themselves when not.
   const layout = useChatLayout();
   const [body, setBody] = useState<HTMLDivElement | null>(null);
@@ -621,7 +622,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             section={subTab}
             lastVisited={lastVisited}
             archived={archived}
-            badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : waitingChats.size }}
+            badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : unseenQuestions.length }}
               inline
             />
           ) : undefined}
@@ -728,7 +729,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           section={subTab}
           lastVisited={lastVisited}
           archived={archived}
-          badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : waitingChats.size }}
+          badges={{ changes: totalChangedFiles, skills: activeSkills.length, chat: subTab === 'chat' ? 0 : unseenQuestions.length }}
           />
         )}
 

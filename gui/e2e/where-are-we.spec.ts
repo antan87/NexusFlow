@@ -40,11 +40,12 @@ const nextFrame = (title: string, extra: Record<string, unknown> = {}) =>
 interface Chat { typed: string[]; messages: unknown[] }
 
 /** Opens the CLI chat on a workspace whose terminal is connected, recording everything the page types into it. */
-async function openChat(page: Page, options: { facts?: ReturnType<typeof factsBody>; events?: string } = {}): Promise<Chat> {
+async function openChat(page: Page, options: { facts?: ReturnType<typeof factsBody> | (() => ReturnType<typeof factsBody>); events?: string; target?: 'shell' | 'claude' } = {}): Promise<Chat> {
   const chat: Chat = { typed: [], messages: [] };
+  const session = { ...terminal, target: options.target ?? 'shell', label: options.target === 'claude' ? 'Claude Code' : 'bash' };
   await page.route('**/api/terminals/bootstrap', (route) => route.fulfill({ json: { token: 'test-token', expiresAt: Date.now() + 300_000 } }));
-  await page.route('**/api/terminals/feature-x/status', (route) => route.fulfill({ json: { available: true, sessions: [terminal], targets: [{ id: 'shell', name: 'Shell', available: true, reason: null }] } }));
-  await page.route('**/api/workspace/feature-x/progress-facts', (route) => route.fulfill({ json: options.facts ?? factsBody() }));
+  await page.route('**/api/terminals/feature-x/status', (route) => route.fulfill({ json: { available: true, sessions: [session], targets: [{ id: session.target, name: session.label, available: true, reason: null }] } }));
+  await page.route('**/api/workspace/feature-x/progress-facts', (route) => route.fulfill({ json: typeof options.facts === 'function' ? options.facts() : options.facts ?? factsBody() }));
   if (options.events) await page.route('**/api/workspace/feature-x/screen-events**', (route) => route.fulfill({ status: 200, contentType: 'text/event-stream', body: options.events }));
   await page.routeWebSocket('**/ws/terminal', (socket: WebSocketRoute) => {
     socket.onMessage((message) => {
@@ -52,7 +53,7 @@ async function openChat(page: Page, options: { facts?: ReturnType<typeof factsBo
       chat.messages.push(parsed);
       if (parsed.type === 'input') chat.typed.push(parsed.data);
       if (parsed.type !== 'attach') return;
-      socket.send(JSON.stringify({ type: 'ready', terminal, truncated: false }));
+      socket.send(JSON.stringify({ type: 'ready', terminal: session, truncated: false }));
       socket.send(JSON.stringify({ type: 'replayed' }));
     });
   });
@@ -178,13 +179,68 @@ test('puts the answer to a question into the prompt when its option is chosen', 
   await expect.poll(() => chat.typed).toEqual(['Redis']);
 });
 
-test('records that the questions were answered', async ({ page }) => {
+test('records that the questions were answered, from the panel', async ({ page }) => {
   let acknowledged = false;
   await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => { acknowledged = true; await route.fulfill({ json: { acknowledged: 1 } }); });
   await openChat(page, { facts: factsBody({ question: true }) });
   await strip(page).getByRole('button', { expanded: false }).click();
-  await strip(page).getByRole('button', { name: 'I answered in the chat' }).click();
+  await strip(page).getByRole('region', { name: 'Progress details' }).getByRole('button', { name: 'I answered in the chat' }).click();
   await expect.poll(() => acknowledged).toBe(true);
+});
+
+test.describe('when the AI waits for an answer', () => {
+  const answerBar = (page: Page) => strip(page).getByRole('group', { name: 'The AI is waiting for your answer' });
+
+  test('shows the question above the chat, with its suggested answers one click away', async ({ page }) => {
+    const chat = await openChat(page, { facts: factsBody({ question: true }), target: 'claude' });
+    await expect(answerBar(page)).toContainText('Which cache backend should we use?');
+    await expect(answerBar(page)).toContainText('Pick one and press Enter, or type your own answer in the chat.');
+    await answerBar(page).getByRole('group', { name: 'Suggested answers' }).getByRole('button', { name: 'Redis' }).click();
+    // Typed, not sent: the developer presses Enter.
+    await expect.poll(() => chat.typed).toEqual(['Redis']);
+    await expect(strip(page)).toContainText('Press Enter to send it.');
+  });
+
+  test('the line the developer sends to the assistant answers it, and the question goes away', async ({ page }) => {
+    let acknowledged = 0;
+    await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => { acknowledged++; await route.fulfill({ json: { acknowledged: 1 } }); });
+    const chat = await openChat(page, { facts: () => factsBody({ question: acknowledged === 0 }), target: 'claude' });
+    await expect(answerBar(page)).toBeVisible();
+    await page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane').click();
+    await page.keyboard.type('Redis');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => acknowledged).toBe(1);
+    await expect(answerBar(page)).toHaveCount(0);
+    await expect(strip(page)).toContainText('Your reply answered the question.');
+    expect(chat.typed.join('')).toBe('Redis\r');
+    // Another line with no question open records nothing more.
+    await page.keyboard.type('thanks');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+    expect(acknowledged).toBe(1);
+  });
+
+  test('a line typed into a plain shell is not taken as the answer', async ({ page }) => {
+    let acknowledged = 0;
+    await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => { acknowledged++; await route.fulfill({ json: { acknowledged: 1 } }); });
+    await openChat(page, { facts: factsBody({ question: true }), target: 'shell' });
+    await expect(answerBar(page)).toBeVisible();
+    await page.getByRole('region', { name: 'CLI Chat', exact: true }).getByTestId('terminal-pane').click();
+    await page.keyboard.type('ls');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    expect(acknowledged).toBe(0);
+    await expect(answerBar(page)).toBeVisible();
+  });
+
+  test('the check marks it answered when the answer was given some other way', async ({ page }) => {
+    let acknowledged = 0;
+    await page.route('**/api/workspace/feature-x/input-requests/acknowledge', async (route) => { acknowledged++; await route.fulfill({ json: { acknowledged: 1 } }); });
+    await openChat(page, { facts: () => factsBody({ question: acknowledged === 0 }) });
+    await answerBar(page).getByRole('button', { name: 'I answered in the chat' }).click();
+    await expect.poll(() => acknowledged).toBe(1);
+    await expect(answerBar(page)).toHaveCount(0);
+  });
 });
 
 test('says so when the facts cannot be loaded, and offers another try', async ({ page }) => {
