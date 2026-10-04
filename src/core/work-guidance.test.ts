@@ -51,6 +51,13 @@ describe('source documents and assignments', () => {
     await expect(fs.stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('gives a workspace with no description an empty objective, not a missing one', async () => {
+    await fs.writeFile(path.join(root, 'contextspace.json'), JSON.stringify({ id: 'test', branchName: 'test', repos: [], assistants: [], workspacePath: root }));
+    const guidance = await loadWorkGuidance(root);
+    expect(guidance.assignment.objective).toBe('');
+    expect(JSON.parse(JSON.stringify(guidance)).assignment).toHaveProperty('objective', '');
+  });
+
   it('preserves the source and defaults documents to draft', async () => {
     const guidance = await addWorkDocument(root, 0, source());
     expect(guidance.documents[0].status).toBe('draft');
