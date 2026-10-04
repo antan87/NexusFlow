@@ -13,20 +13,24 @@ export type SeenRequests = Readonly<Record<string, string>>;
 /** The newest-seen record is kept per workspace; this bounds how many workspaces are remembered. */
 export const MAX_REMEMBERED_WORKSPACES = 200;
 
+const time = (request: InputRequest) => Date.parse(request.timestamp) || 0;
+
 /**
- * Requests that still need the user, for chats that are open, longest-waiting first.
- * A request for a tab that is not open is not shown: there is no chat to take them to.
+ * Questions not answered yet, in the chats being watched (open ones, and those whose CLI still runs), longest-waiting
+ * first. A question in a workspace nobody watches is not shown: no chat of it is open and nothing runs there.
  */
+export function openRequests(requests: readonly InputRequest[], watched: readonly string[]): InputRequest[] {
+  const shown = new Set(watched);
+  return requests.filter((request) => shown.has(request.workspaceId)).sort((a, b) => time(a) - time(b));
+}
+
+/** The open questions the user has not seen yet, longest-waiting first: the ones worth an alert. */
 export function pendingRequests(
   requests: readonly InputRequest[],
   seen: SeenRequests,
-  openTabs: readonly string[],
+  watched: readonly string[],
 ): InputRequest[] {
-  const open = new Set(openTabs);
-  const time = (request: InputRequest) => Date.parse(request.timestamp) || 0;
-  return requests
-    .filter((request) => open.has(request.workspaceId) && seen[request.workspaceId] !== request.id)
-    .sort((a, b) => time(a) - time(b));
+  return openRequests(requests, watched).filter((request) => seen[request.workspaceId] !== request.id);
 }
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;

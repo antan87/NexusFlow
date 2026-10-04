@@ -7,7 +7,6 @@ import { API_BASE } from '../../lib/apiBase.js';
 import type { WorkDocument } from '../../types.js';
 import type { DocumentKind, DocumentPreviewData } from '../work-guidance/DocumentPreview.js';
 import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
-import { useFloatingChat } from '../chat/floatingChatStore.js';
 import { usePaneHotkey } from './usePaneHotkey.js';
 
 const DocumentViewer = lazy(() => import('../work-guidance/DocumentViewer.js').then(module => ({ default: module.DocumentViewer })));
@@ -15,7 +14,6 @@ type RootDocument = { name: string; kind: DocumentKind; modifiedAt: string };
 type SourceDocument = WorkDocument & { workspaceId?: string };
 
 export function WorkspaceDocumentsInspector({ workspace, workspacePath, active = true, openDocument }: { workspace: string; workspacePath?: string; active?: boolean; openDocument?: { name: string; id: number } | null }) {
-  const { isMaximized, toggleMaximize } = useFloatingChat();
   const handledDocument = useRef(0);
   const [files, setFiles] = useState<RootDocument[]>([]);
   const [sources, setSources] = useState<SourceDocument[]>([]);
@@ -112,7 +110,6 @@ export function WorkspaceDocumentsInspector({ workspace, workspacePath, active =
     <div className="flex items-center gap-2 border-b border-border p-2">
       <span className="text-xs font-semibold">Documents</span>
       <span className="ml-auto text-[10px] text-muted-foreground" aria-hidden="true">Alt+↑ / Alt+↓</span>
-      {!isMaximized && <Button size="xs" variant="ghost" onClick={toggleMaximize}>Expand chat</Button>}
       <Button size="xs" variant="ghost" aria-label="Refresh documents" onClick={() => setRevision(value => value + 1)}><RefreshCw className="size-3" /></Button>
     </div>
     <div className="max-h-[38%] min-h-32 space-y-2 overflow-auto border-b border-border p-2">

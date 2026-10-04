@@ -20,6 +20,8 @@ interface WorkspaceHeaderProps {
   milestones: LifecycleStep[];
   verification: VerificationGateTelemetry;
   actions?: ReactNode;
+  /** Just who this is and its actions. The chat shows where the work stands in the strip above it. */
+  compact?: boolean;
 }
 
 const STAGE_LABELS: Record<WorkGuidance['assignment']['stage'], string> = {
@@ -43,15 +45,15 @@ function Fact({ label, children, to }: { label: string; children: ReactNode; to?
  * (stage, next milestone, changes, verification). Each status fact links to
  * the destination where the user acts on it.
  */
-export function WorkspaceHeader({ workspaceId, title, branchName, brief, mode, repoCount, changedFiles, stage, milestones, verification, actions }: WorkspaceHeaderProps) {
+export function WorkspaceHeader({ workspaceId, title, branchName, brief, mode, repoCount, changedFiles, stage, milestones, verification, actions, compact = false }: WorkspaceHeaderProps) {
   const [copied, setCopied] = useState(false);
   const base = `/workspaces/${encodeURIComponent(workspaceId)}`;
   const next = nextMilestone(milestones);
   const done = milestones.length > 0 && !next;
 
   return (
-    <header className="border-b border-border bg-card/80 px-4 pt-3 pb-2 sm:px-6">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+    <header className={cn('border-b border-border bg-card/80 px-4 sm:px-6', compact ? 'py-1.5' : 'pt-3 pb-2')}>
+      <div className={cn('flex flex-wrap justify-between gap-x-4 gap-y-2', compact ? 'items-center' : 'items-start')}>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
             <h1 className="min-w-0 truncate text-lg font-semibold text-foreground" title={title}>{title}</h1>
@@ -65,12 +67,12 @@ export function WorkspaceHeader({ workspaceId, title, branchName, brief, mode, r
             </button>}
             <span className="text-xs text-muted-foreground">{mode === 'in-place' ? 'In place' : 'Worktree'} · {repoCount} {repoCount === 1 ? 'repository' : 'repositories'}</span>
           </div>
-          {brief && <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm text-muted-foreground">{brief}</p>}
+          {brief && !compact && <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm text-muted-foreground">{brief}</p>}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
       </div>
 
-      <div aria-label="Task status" role="group" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+      {!compact && <div aria-label="Task status" role="group" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         {stage && <Fact label="Stage" to={`${base}/plan`}>{STAGE_LABELS[stage]}</Fact>}
         {next ? (
           <Fact label="Next" to={`${base}/plan`}>
@@ -94,7 +96,7 @@ export function WorkspaceHeader({ workspaceId, title, branchName, brief, mode, r
                 : <Circle aria-hidden="true" size={12} />}
           {verificationText(verification)}
         </Link>
-      </div>
+      </div>}
     </header>
   );
 }

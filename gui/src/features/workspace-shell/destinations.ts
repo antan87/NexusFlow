@@ -1,26 +1,12 @@
 /**
- * The workspace navigation model: four destinations, each with one purpose.
- * Existing section ids stay the URL segment (`/workspaces/:id/:section`), so
- * every deep link from before the shell redesign still resolves.
+ * The sections of a workspace. Each id is its URL segment (`/workspaces/:id/:section`), so every deep link from before
+ * the shell redesign still resolves. A workspace with no section in its URL opens on the chat, which is where most work
+ * happens; the rest open beside it, from the rail.
  */
-export type WorkspaceSection = 'overview' | 'plan' | 'documents' | 'knowledge' | 'skills' | 'changes' | 'sessions' | 'services';
-
-export interface WorkspaceDestination {
-  id: 'overview' | 'context' | 'changes' | 'run';
-  label: string;
-  /** What the destination is for, shown as its description. */
-  purpose: string;
-  sections: WorkspaceSection[];
-}
-
-export const WORKSPACE_DESTINATIONS: WorkspaceDestination[] = [
-  { id: 'overview', label: 'Overview', purpose: 'Where the task stands and what to do next', sections: ['overview'] },
-  { id: 'context', label: 'Plan & Context', purpose: 'Brief, milestones, documents and what the assistant knows', sections: ['plan', 'documents', 'knowledge', 'skills'] },
-  { id: 'changes', label: 'Changes', purpose: 'Review, commit and finish the work', sections: ['changes'] },
-  { id: 'run', label: 'Run', purpose: 'Assistant sessions and local services', sections: ['sessions', 'services'] },
-];
+export type WorkspaceSection = 'chat' | 'overview' | 'plan' | 'documents' | 'knowledge' | 'skills' | 'changes' | 'sessions' | 'services';
 
 export const SECTION_LABELS: Record<WorkspaceSection, string> = {
+  chat: 'Chat',
   overview: 'Overview',
   plan: 'Plan',
   documents: 'Documents',
@@ -31,24 +17,15 @@ export const SECTION_LABELS: Record<WorkspaceSection, string> = {
   services: 'Services',
 };
 
-const ALL_SECTIONS = new Set<string>(WORKSPACE_DESTINATIONS.flatMap((destination) => destination.sections));
-
-/** Unknown or missing segments fall back to the overview instead of a blank page. */
-export function parseSection(segment: string | undefined | null): WorkspaceSection {
-  return segment && ALL_SECTIONS.has(segment) ? segment as WorkspaceSection : 'overview';
-}
-
-export function destinationOf(section: WorkspaceSection): WorkspaceDestination {
-  return WORKSPACE_DESTINATIONS.find((destination) => destination.sections.includes(section)) ?? WORKSPACE_DESTINATIONS[0];
-}
+const ALL_SECTIONS = new Set<string>(Object.keys(SECTION_LABELS));
 
 /**
- * Where a destination link goes: the section last used there, so returning to
- * Plan & Context reopens Documents if that is where the user was.
+ * No segment opens the chat. An unknown one (an old or mistyped link) falls back
+ * to the overview instead of a blank page.
  */
-export function entrySection(destination: WorkspaceDestination, lastVisited: Partial<Record<WorkspaceDestination['id'], WorkspaceSection>>): WorkspaceSection {
-  const remembered = lastVisited[destination.id];
-  return remembered && destination.sections.includes(remembered) ? remembered : destination.sections[0];
+export function parseSection(segment: string | undefined | null): WorkspaceSection {
+  if (!segment) return 'chat';
+  return ALL_SECTIONS.has(segment) ? segment as WorkspaceSection : 'overview';
 }
 
 /**
@@ -57,12 +34,22 @@ export function entrySection(destination: WorkspaceDestination, lastVisited: Par
  */
 export const ARCHIVED_SECTIONS: readonly WorkspaceSection[] = ['overview', 'plan', 'documents', 'knowledge'];
 
-/** The destinations to show, trimmed to the record for an archived workspace. */
-export function destinationsFor(archived: boolean): WorkspaceDestination[] {
-  if (!archived) return WORKSPACE_DESTINATIONS;
-  return WORKSPACE_DESTINATIONS
-    .map((destination) => ({ ...destination, sections: destination.sections.filter((section) => ARCHIVED_SECTIONS.includes(section)) }))
-    .filter((destination) => destination.sections.length > 0);
+/**
+ * What can open beside the chat, in the rail's order. Overview, Sessions and Knowledge keep their addresses, so old
+ * links still work, but have no place on the rail: the progress strip above the chat says where the work stands, saved
+ * conversations open from the chat itself, and knowledge is read in Docs.
+ */
+export const RAIL_SECTIONS: readonly WorkspaceSection[] = ['plan', 'changes', 'documents', 'skills', 'services'];
+
+/** The rail of an archived workspace is its record, its plan and its documents. */
+const ARCHIVED_RAIL: readonly WorkspaceSection[] = ['overview', 'plan', 'documents'];
+
+/**
+ * What the rail offers. Knowledge is read in Docs, with the other files ContextSpace keeps, so its own address still
+ * opens but it has no item of its own.
+ */
+export function railSectionsFor(archived: boolean): readonly WorkspaceSection[] {
+  return archived ? ARCHIVED_RAIL : RAIL_SECTIONS;
 }
 
 /** The section to render: an archived workspace falls back to its overview. */

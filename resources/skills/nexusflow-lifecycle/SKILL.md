@@ -74,6 +74,18 @@ reads it and it survives removing the workspace. Close finished workspaces with
 only what no one needs. Put guidance that should travel beyond one machine into
 versioned skill sources or shared project sources.
 
+## Show the user where things stand
+
+When MCP is connected, tell the screen what you did instead of describing it at length.
+`show_in_reader` opens a document, a file at a line, or a diff beside the user's chat.
+`annotate_document` leaves a note on a line. `suggest_next` offers the one next move with
+its reason, at the end of a turn. `set_milestone` reports a milestone started (`in_progress`)
+or blocked with what it waits on. These tools only show things: they edit no file and press
+no key for the user, and a repeated call is ignored. Reopening or finishing a milestone is
+only ever a proposal (`reopened`, `done`): the user decides, and a milestone must pass its own
+check to finish. Ask what the user is looking at with `get_screen_context` only if they have
+switched sharing on; if it is off, ask in the chat. Without MCP, say it in the chat.
+
 ## Execute only the current stage
 
 Read [stage outcomes](references/stage-outcomes.md) for the selected stage. Investigation

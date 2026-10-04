@@ -99,14 +99,15 @@ test.describe('keyboard-only primary journey', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Invoice speed-up' })).toBeVisible();
     const destinations = page.getByRole('navigation', { name: 'Workspace' });
 
-    // Brief: reach Plan & Context, edit the objective, save.
-    await activate(page, destinations.getByRole('link', { name: 'Plan & Context' }));
+    // Brief: reach the plan, edit the objective, save.
+    await activate(page, destinations.getByRole('link', { name: 'Plan' }));
     await expect(page).toHaveURL(/\/plan$/);
+    await activate(page, page.getByRole('button', { name: 'Edit the goal' }));
     const objective = page.getByLabel('Current objective');
     await tabTo(page, objective);
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type('Cache invoice lookups per customer');
-    await activate(page, page.getByRole('button', { name: 'Save AI assignment' }));
+    await activate(page, page.getByRole('button', { name: 'Save goal' }));
     await expect.poll(() => guidance.assignment.objective).toBe('Cache invoice lookups per customer');
 
     // Verify: run verification; the header reports the recorded result.

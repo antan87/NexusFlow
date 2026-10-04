@@ -83,18 +83,17 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       });
     });
 
-    await page.goto('/#/workspaces/feature-x');
+    // The full session history opens beside the chat from its saved conversations, and keeps its own address.
+    await page.goto('/#/workspaces/feature-x/sessions');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
-
-    // Sessions are the first section of Run
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
 
-    // Check that recorded sessions appear
-    await expect(page.getByText('Finish the Desktop handoff')).toBeVisible();
-    await expect(page.getByText('Refactor UI components')).toBeVisible();
+    // Check that recorded sessions appear on the page. The docked chat, hidden here, lists them too.
+    const content = page.getByRole('main');
+    await expect(content.getByText('Finish the Desktop handoff')).toBeVisible();
+    await expect(content.getByText('Refactor UI components')).toBeVisible();
   });
 
   test('opens transcript dialog and copies CLI resume command', async ({ page }) => {
@@ -132,8 +131,7 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
       });
     });
 
-    await page.goto('/#/workspaces/feature-x');
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Run' }).click();
+    await page.goto('/#/workspaces/feature-x/sessions');
 
     // Switch to Timeline view so all sessions are listed
     await page.getByRole('button', { name: /Timeline/i }).click();
@@ -153,9 +151,10 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     await page.goto('/#/workspaces/feature-x/sessions');
     await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-    await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
+    await expect(chat).toBeVisible();
     await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
-    await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toBeVisible();
+    // The chat opens on its tools, one click each; nothing starts by itself.
+    await expect(chat.getByRole('region', { name: 'Start a CLI session' })).toBeVisible();
   });
 
 });

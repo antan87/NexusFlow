@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
-import { FileText, ListTree, Maximize2, Minimize2 } from 'lucide-react';
+import { ListTree, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
 import { apiFetch } from '../../lib/api/client.js';
 import { CHAT_GEOMETRY } from '../chat/floatingChatStore.js';
 import { hasModifier, modifierLabel, usePaneHotkey } from './usePaneHotkey.js';
 import { WorkspaceCodePanel } from '../changes/WorkspaceCodePanel.js';
-import { TerminalPane } from './TerminalPane.js';
+import { SessionDeck } from './SessionDeck.js';
 import { WorkspaceDocumentsInspector } from './WorkspaceDocumentsInspector.js';
 import { isUnreadableDocument, workspaceDocumentName } from './documentReference.js';
-import { WorkspaceContextPeek } from './WorkspaceContextPeek.js';
+import { WhereAreWeStrip } from '../progress/WhereAreWeStrip.js';
 
 /** The inspector may never squeeze the terminal below this share of the pane. */
 const INSPECTOR_MIN_PERCENT = 28;
 const INSPECTOR_MAX_PERCENT = 80;
 const clampPercent = (value: number) => Math.max(INSPECTOR_MIN_PERCENT, Math.min(INSPECTOR_MAX_PERCENT, value));
 
-export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: ComponentProps<typeof TerminalPane> & { workspacePath: string; repoPaths?: string[] }) {
+export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<ComponentProps<typeof SessionDeck>, 'workspace' | 'active' | 'launch' | 'consumeLaunch' | 'onStatusChange' | 'onBackgroundOutput'> & { workspacePath: string; repoPaths?: string[] }) {
   const [inspector, setInspector] = useState<'code' | 'documents' | null>(null);
   const [openReference, setOpenReference] = useState<{ path: string; line?: number; id: number } | null>(null);
   const [openDocument, setOpenDocument] = useState<{ name: string; id: number } | null>(null);
@@ -25,6 +25,10 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Compon
   const [compact, setCompact] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const referenceRequest = useRef(0);
+  // How the strip above the chat types a suggestion into the prompt. The pane fills it in once connected.
+  const fillPromptRef = useRef<((text: string) => boolean) | null>(null);
+  // How the strip hears that the developer replied in the chat, so it can close the question the AI asked.
+  const replyRef = useRef<((target: string) => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -124,8 +128,9 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Compon
   const documentsPanel = <WorkspaceDocumentsInspector workspace={props.workspace} workspacePath={workspacePath} active={props.active} openDocument={openDocument} />;
   const mod = modifierLabel();
   const codeShortcut = `${mod}+Shift+E`;
-  const docsShortcut = `${mod}+Shift+D`;
 
+  // Documents have their place on the workspace rail; a document the CLI names in its output still opens here, beside
+  // the terminal, and Ctrl/Cmd+Shift+D still toggles it, so there is no second Docs button.
   // The inspector controls live in the pane toolbar rather than in a bar of
   // their own, so the chat window shows one toolbar instead of two stacked
   // rows that each held a fragment of the same job.
@@ -136,9 +141,6 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Compon
   const inspectorControls = [
     <Button key="code" size="xs" variant={inspector === 'code' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'code'} aria-keyshortcuts="Control+Shift+E Meta+Shift+E" title={`Toggle the code panel (${codeShortcut})`} onClick={() => setInspector(value => value === 'code' ? null : 'code')}>
       <ListTree className="size-3" />Code
-    </Button>,
-    <Button key="documents" size="xs" variant={inspector === 'documents' ? 'secondary' : 'ghost'} aria-pressed={inspector === 'documents'} aria-keyshortcuts="Control+Shift+D Meta+Shift+D" title={`Toggle the documents panel (${docsShortcut})`} onClick={() => setInspector(value => value === 'documents' ? null : 'documents')}>
-      <FileText className="size-3" />Docs
     </Button>,
   ];
   const inspectorExpandControl = inspector && !compact
@@ -151,13 +153,13 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Compon
     : null;
 
   return <div className="flex h-full min-h-0 flex-col">
-    <WorkspaceContextPeek workspace={props.workspace} active={props.active} />
+    <WhereAreWeStrip workspace={props.workspace} active={props.active} fillPrompt={text => fillPromptRef.current?.(text) ?? false} replyRef={replyRef} openFile={reference => { void openFile(reference); }} />
     <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-row">
       {/* The terminal stays mounted at every width. Below the compact
           breakpoint the inspector becomes a sheet over it, so opening Code or
           Docs no longer renames the control to "Back to CLI" and no longer
           costs the user their prompt. */}
-      <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} active={props.active} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
+      <div className="min-h-0 min-w-0 flex-1"><SessionDeck {...props} fillPromptRef={fillPromptRef} onReply={target => replyRef.current?.(target)} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
         {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? INSPECTOR_MAX_PERCENT : splitPercent}
           aria-valuemin={INSPECTOR_MIN_PERCENT} aria-valuemax={INSPECTOR_MAX_PERCENT} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}

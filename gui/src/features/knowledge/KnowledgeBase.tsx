@@ -4,7 +4,7 @@ import type { Feature } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { Spinner } from '../../components/ui/spinner.js';
-import { ChatMarkdown } from '../../components/ChatMarkdown.js';
+import { KnowledgeView } from './KnowledgeView.js';
 
 interface KnowledgeBaseProps {
   ws: Feature;
@@ -43,9 +43,12 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
   return (
     <div className="rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-5 shadow-xs">
       <header className="flex justify-between items-center mb-4">
-        <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-          <BookOpen size={16} className="text-primary" /> Persistent Knowledge Memory (contextspace-knowledge.md)
-        </h4>
+        <div className="min-w-0">
+          <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
+            <BookOpen size={16} className="text-primary" /> Knowledge
+          </h4>
+          <p className="mt-0.5 text-xs text-muted-foreground">What the assistants learned here: decisions with their reasons, and the gotchas that cost time.</p>
+        </div>
         <div className="flex items-center gap-2">
           {!isEditingKnowledge && knowledgeContent && (
             <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-md border border-border/60">
@@ -141,9 +144,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({
           No knowledge file generated yet.
         </div>
       ) : viewMode === 'preview' ? (
-        <div className="max-h-[550px] overflow-auto rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4">
-          <ChatMarkdown content={knowledgeContent} />
-        </div>
+        <KnowledgeView markdown={knowledgeContent} />
       ) : (
         <div className="max-h-[550px] overflow-auto whitespace-pre-wrap rounded-xl border border-border/70 bg-card/40 backdrop-blur-xs p-4 font-mono text-xs leading-relaxed text-muted-foreground">
           {knowledgeContent}

@@ -58,7 +58,11 @@ import {
 } from './utils/repo-freshness.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, saveFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
-import { latestInputRequest, type InputRequest } from './core/attention.js';
+import { acknowledgeInputRequests, latestInputRequest, type InputRequest } from './core/attention.js';
+import {
+  ScreenSharingOffError, getScreenSharing, readScreenContext, saveScreenContext, setScreenSharing,
+} from './core/screen-context.js';
+import { watchLiveEvents, type LiveEvent } from './core/screen-events.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import {
@@ -2938,6 +2942,150 @@ app.post('/api/workspace/:id/lifecycle/step', async (c) => {
     const { advanceLifecycleStep } = await import('./core/lifecycle.js');
     const lifecycle = await advanceLifecycleStep(workspacePath, body.stepId, body.action);
     return c.json({ lifecycle });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2b. Checkable progress facts: milestones (with reopened work), open questions,
+// changed files and the last verification. Cheap enough to poll: no remote queries.
+app.get('/api/workspace/:id/progress-facts', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { getProgressFacts } = await import('./core/progress-facts.js');
+    return c.json({ facts: await getProgressFacts(workspacePath) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2c. Send a finished milestone back for rework. This route is the user's own
+// action, so the reopen is recorded as theirs.
+app.post('/api/workspace/:id/lifecycle/reopen', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const body = (await c.req.json().catch(() => ({}))) as { stepId?: unknown; reason?: unknown };
+    if (typeof body.stepId !== 'string' || !body.stepId || typeof body.reason !== 'string') {
+      return c.json({ error: 'stepId and reason are required.' }, 400);
+    }
+    const { reopenLifecycleStep, LifecycleStepError } = await import('./core/lifecycle.js');
+    try {
+      const lifecycle = await reopenLifecycleStep(workspacePath, body.stepId, { reason: body.reason, by: 'user' });
+      return c.json({ lifecycle });
+    } catch (error) {
+      if (error instanceof LifecycleStepError) {
+        return c.json({ error: error.message, code: error.code }, error.code === 'not_found' ? 404 : 409);
+      }
+      // A rejected reason (empty or too long) is the caller's mistake, not a server fault.
+      if (error instanceof Error && error.name === 'ZodError') {
+        const issues = (error as Error & { issues?: Array<{ message?: string }> }).issues;
+        return c.json({ error: issues?.[0]?.message ?? 'The reason is not valid.' }, 400);
+      }
+      throw error;
+    }
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2d. Mark every question the AI has asked so far as answered. Replies typed into
+// the chat terminal never reach the ledger, so the app records this explicitly.
+app.post('/api/workspace/:id/input-requests/acknowledge', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    return c.json(await acknowledgeInputRequests(workspacePath));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2e. The live feed for a workspace's screen: what the AI told it to show, the questions the AI
+// asked, and when they were answered. A screen that reconnects sends the time of the last event it saw,
+// as `since` or as the standard Last-Event-ID header (each event's id is its timestamp).
+function liveEventId(live: LiveEvent): string {
+  return live.type === 'screen' ? live.event.timestamp : live.type === 'question' ? live.request.timestamp : live.timestamp;
+}
+app.get('/api/workspace/:id/screen-events', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const sinceText = c.req.query('since') ?? c.req.header('last-event-id');
+    const parsed = sinceText ? Date.parse(sinceText) : NaN;
+    const since = Number.isFinite(parsed) ? parsed : undefined;
+
+    c.header('Content-Type', 'text/event-stream');
+    c.header('Cache-Control', 'no-cache');
+    c.header('Connection', 'keep-alive');
+    return streamSSE(c, async (stream) => {
+      const controller = new AbortController();
+      stream.onAbort(() => controller.abort());
+      // A comment-sized event now and then keeps proxies from closing a quiet connection and lets a dead one be noticed.
+      const heartbeat = setInterval(() => {
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => controller.abort());
+      }, 15_000);
+      try {
+        for await (const live of watchLiveEvents(workspacePath, { since, signal: controller.signal })) {
+          await stream.writeSSE({ event: live.type, id: liveEventId(live), data: JSON.stringify(live) });
+        }
+      } finally {
+        clearInterval(heartbeat);
+      }
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2f. Whether the user shares what they are looking at with the AI. Off until they switch it on;
+// switching it off deletes what was stored.
+app.get('/api/workspace/:id/screen-sharing', async (c) => {
+  try {
+    const config = await loadConfig();
+    return c.json(await getScreenSharing(resolveWorkspacePath(config.workspacesDir, c.req.param('id'))));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+app.put('/api/workspace/:id/screen-sharing', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled (true or false) is required.' }, 400);
+    return c.json(await setScreenSharing(workspacePath, body.enabled));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2g. What the screen reports it is showing, and what the AI would see if it asked. Reporting is
+// refused while sharing is off, so a screen that has not been told to share cannot leak anything.
+app.get('/api/workspace/:id/screen-context', async (c) => {
+  try {
+    const config = await loadConfig();
+    return c.json(await readScreenContext(resolveWorkspacePath(config.workspacesDir, c.req.param('id'))));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+app.put('/api/workspace/:id/screen-context', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const body = await c.req.json().catch(() => undefined);
+    try {
+      return c.json({ context: await saveScreenContext(workspacePath, body ?? {}) });
+    } catch (error) {
+      if (error instanceof ScreenSharingOffError) return c.json({ error: error.message, code: 'sharing_off' }, 409);
+      throw error;
+    }
   } catch (error) {
     return errorResponse(c, error);
   }

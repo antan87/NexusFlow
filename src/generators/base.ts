@@ -281,5 +281,6 @@ If \`ctxspace\` is not on PATH, use \`./.contextspace/bin/ctxspace\` (bash) or \
 - \`contextspace-work.json\` — assignment and sources. Read live guidance with \`ctxspace flow --assignment\` or MCP \`get_work_context\`.
 - \`.agents/skills/\` — enabled playbooks; Claude copies: \`.claude/skills/\`.
 - Need the user's answer or approval? Call MCP \`request_user_input\` (one short question) so this chat is flagged, then ask in the chat and end your turn. No MCP: just ask.
+- Show your work: MCP \`show_in_reader\`, \`annotate_document\`, \`suggest_next\` and \`set_milestone\` put it beside the user's chat. They only show things. No MCP: say it in the chat.
 ${ownInstructions}${customCommands}${teamwork}${enterpriseSection}`;
 }

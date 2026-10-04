@@ -11,8 +11,8 @@ import { VsCodeShell } from './app/VsCodeShell.js';
 import { SetupPage } from './features/setup/SetupPage.js';
 import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
-import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
-import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
+import { ChatDock } from './features/chat/ChatDock.js';
+import { ChatHome } from './features/chat/ChatHome.js';
 import { ChatAttentionCards } from './features/chat/ChatAttentionCards.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
@@ -21,6 +21,7 @@ import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
 import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
 import { changesFromResponse } from './features/changes/utils/changesResponse.js';
+import { parseSection, type WorkspaceSection } from './features/workspace-shell/destinations.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -212,7 +213,7 @@ function AppInner() {
   const statusesComplete = !statusesQuery.isLoading && !statusesQuery.hasNextPage && !statusesQuery.isError;
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<WorkspaceSection>('chat');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
@@ -805,9 +806,8 @@ function AppInner() {
     if (p.startsWith('/workspaces')) {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
-      const tab = parts[2];
-      const valid = ['overview', 'plan', 'documents', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
-      setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
+      // One list of sections, shared with the workspace navigation: no section opens the chat.
+      setSubTab(parseSection(parts[2]));
     } else {
       setActiveWsId(null);
     }
@@ -1153,6 +1153,8 @@ Core Instructions:
         workspacesLoading={workspacesLoading}
         activeWsId={activeWsId}
         onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+        onCheckForUpdates={() => { void handleCheckForUpdates(); }}
+        checkingForUpdates={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
       />
 
       {/* Main Content Area */}
@@ -1164,23 +1166,19 @@ Core Instructions:
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
-              <div className="min-w-0">
-                <span className="font-semibold text-foreground">Desktop updates</span>
-                {updateCheckError ? (
-                  <p className="mt-0.5 truncate text-destructive-foreground" role="alert">{updateCheckError}</p>
-                ) : (
-                  <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
-                )}
+            {/* Checking for updates lives beside the version in the sidebar. This bar appears only when a check failed. */}
+            {updateCheckError && (
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
+                <p className="min-w-0 truncate text-destructive-foreground" role="alert">Could not check for updates: {updateCheckError}</p>
+                <button
+                  onClick={handleCheckForUpdates}
+                  disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
+                  className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  Check again
+                </button>
               </div>
-              <button
-                onClick={handleCheckForUpdates}
-                disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
-                className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                {updateCheckError ? 'Check again' : 'Check for updates'}
-              </button>
-            </div>
+            )}
             {/* Update Notification Banner. Updates are always optional: Later
                 hides the banner for this session and no native installer is
                 exposed when this dashboard is running in a browser. */}
@@ -1292,7 +1290,7 @@ Core Instructions:
               }
             >
               <Routes>
-                <Route path="/" element={dashboardPage} />
+                <Route path="/" element={<ChatHome workspaces={activeWorkspaces} loading={workspacesLoading} ready={Boolean(config)} fallback={dashboardPage} />} />
                 <Route path="/overview" element={dashboardPage} />
                 <Route path="/dashboard" element={dashboardPage} />
                 <Route path="/guide" element={guidePage} />
@@ -1354,9 +1352,8 @@ Core Instructions:
         onArchived={handleArchived}
       />
 
-      <FloatingChatModal workspaces={activeWorkspaces} />
-      <FloatingChatLauncher />
-      <ChatAttentionCards />
+      <ChatDock workspaces={activeWorkspaces} />
+      <ChatAttentionCards workspaces={activeWorkspaces} />
 
       <ToastStack
         toasts={toasts}

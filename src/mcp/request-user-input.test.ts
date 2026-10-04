@@ -323,3 +323,45 @@ describe('request_user_input', () => {
     });
   });
 });
+
+describe('request_user_input answer options', () => {
+  it('advertises options in its schema, limited to six short answers', () => {
+    const schema = tool().inputSchema as { properties: { options: { type: string; maxItems: number; items: { maxLength: number } } } };
+    expect(schema.properties.options).toMatchObject({ type: 'array', maxItems: 6, items: { maxLength: 80 } });
+    expect(tool().description).toContain('press Enter');
+  });
+
+  it('stores the options with the request, cleaned, so a button can fill the prompt', async () => {
+    const { dir, ledger } = await makeWorkspace();
+    const result = await tool().handler({ message: 'Remove the size picker?', options: ['Remove it', '  Keep it \n', '', 'Remove it', '\u0007Both'] }, ctxFor(dir));
+    expect(body(result).status).toBe('requested');
+    expect((await ledgerEntries(ledger))[0].options).toEqual(['Remove it', 'Keep it', 'Both']);
+  });
+
+  it('keeps the ledger entry as it was when no options are given', async () => {
+    const { dir, ledger } = await makeWorkspace();
+    await tool().handler({ message: 'Ready?' }, ctxFor(dir));
+    expect(await ledgerEntries(ledger)).toEqual([expect.not.objectContaining({ options: expect.anything() })]);
+  });
+
+  it('keeps no key at all when every option is blank', async () => {
+    const { dir, ledger } = await makeWorkspace();
+    await tool().handler({ message: 'Ready?', options: ['  ', '\n'] }, ctxFor(dir));
+    expect((await ledgerEntries(ledger))[0]).not.toHaveProperty('options');
+  });
+
+  it('refuses options that are not a list, and writes nothing', async () => {
+    const { dir, ledger } = await makeWorkspace();
+    const result = await tool().handler({ message: 'Ready?', options: 'Yes' }, ctxFor(dir));
+    expect(result.isError).toBe(true);
+    expect(await ledgerEntries(ledger)).toEqual([]);
+  });
+
+  it('treats the same question with different options as a new request, and the same options as a repeat', async () => {
+    const { dir, ledger } = await makeWorkspace();
+    expect(body(await tool().handler({ message: 'Which?', options: ['A', 'B'] }, ctxFor(dir))).status).toBe('requested');
+    expect(body(await tool().handler({ message: 'Which?', options: ['A', 'B'] }, ctxFor(dir))).status).toBe('already_requested');
+    expect(body(await tool().handler({ message: 'Which?', options: ['A', 'C'] }, ctxFor(dir))).status).toBe('requested');
+    expect(await ledgerEntries(ledger)).toHaveLength(2);
+  });
+});

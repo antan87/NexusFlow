@@ -11,7 +11,7 @@
       (function () {
         var stored;
         var palette = 'sunset';
-        var validPalettes = ['sunset', 'aurora', 'forest', 'nebula', 'glacier'];
+        var validPalettes = ['sunset', 'dusk', 'aurora', 'forest', 'nebula', 'glacier'];
         try {
           stored = localStorage.getItem('contextspace-theme') || localStorage.getItem('nexusflow-theme');
           var storedPalette = localStorage.getItem('contextspace-color-theme');
@@ -22,7 +22,7 @@
         var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.classList.toggle('dark', dark);
         document.documentElement.dataset.colorTheme = palette;
-        var iconHref = palette === 'sunset' ? '/favicon.svg' : '/favicon-' + palette + '.svg';
+        var iconHref = palette === 'sunset' || palette === 'dusk' ? '/favicon.svg' : '/favicon-' + palette + '.svg';
         var link = document.querySelector('link[rel="icon"]');
         if (link) link.href = iconHref;
       })();

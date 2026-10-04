@@ -12,6 +12,7 @@ import {
   ListTree,
   ExternalLink,
   Navigation,
+  ArrowDownUp,
 } from 'lucide-react';
 import type { CommitRepoResult, Feature } from '../../types.js';
 import { CommitReviewPanel } from './CommitReviewPanel.js';
@@ -19,6 +20,7 @@ import { perfMark } from '../../lib/perfMarks.js';
 import { FinishPanel } from './FinishPanel.js';
 import { API_BASE } from '../../lib/apiBase.js';
 import { Button } from '../../components/ui/button.js';
+import { IconButton } from '../../components/ui/icon-button.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
@@ -494,62 +496,44 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     <div className="animate-fade-in">
       <header className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <h4 className="flex items-center gap-2 text-sm font-bold text-foreground">
-            <FolderGit2 size={16} className="text-primary" /> Active Workspace Git Diffs
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <FolderGit2 size={14} className="text-muted-foreground" /> Active Workspace Git Diffs
           </h4>
           {reposWithChanges.length > 0 && (
             <div className="flex items-center gap-1.5 pl-2 border-l border-border/80">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={collapseAllRepos}
-                title="Collapse all repositories and file diffs"
-                className="text-xs text-muted-foreground hover:text-foreground h-7 px-2 gap-1 font-semibold"
-              >
-                <ChevronsDownUp size={12} />
-                <span>Collapse All</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={expandAllRepos}
-                title="Expand all repositories"
-                className="text-xs text-muted-foreground hover:text-foreground h-7 px-2 gap-1 font-semibold"
-              >
-                <ChevronsUpDown size={12} />
-                <span>Expand All</span>
-              </Button>
+              <IconButton label="Collapse All" icon={<ChevronsDownUp />} onClick={collapseAllRepos} className="text-muted-foreground hover:text-foreground" />
+              <IconButton label="Expand All" icon={<ChevronsUpDown />} onClick={expandAllRepos} className="text-muted-foreground hover:text-foreground" />
             </div>
           )}
         </div>
 
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
+        <div className="flex flex-wrap items-center gap-0.5">
+          <IconButton
+            label="Refresh Changes"
+            icon={<RefreshCw className={gitChangesLoading ? 'animate-spin text-primary' : ''} />}
             onClick={() => fetchGitChanges(ws.branchName)}
             disabled={gitChangesLoading}
-          >
-            <RefreshCw size={11} className={gitChangesLoading ? 'animate-spin text-primary' : ''} /> Refresh Changes
-          </Button>
+            className="text-muted-foreground hover:text-foreground"
+          />
           {ws.mode !== 'in-place' && (
-            <Button
-              variant="outline"
-              size="sm"
+            <IconButton
+              label="Sync All"
+              icon={syncLoading ? <Spinner className="size-3.5" /> : <ArrowDownUp />}
               onClick={() => handleSyncAll(ws.branchName)}
               disabled={syncLoading}
-            >
-              {syncLoading ? <Spinner className="size-3" /> : <RefreshCw size={11} />} Sync All
-            </Button>
+              className="text-muted-foreground hover:text-foreground"
+            />
           )}
           <Button
-            size="sm"
+            variant="outline"
+            size="xs"
+            className="ml-1.5 border-primary/50 text-primary hover:bg-primary/10 hover:text-primary"
             onClick={() => setShowCommitModal(true)}
             disabled={totalFilesAcrossRepos === 0 || showCommitModal}
           >
             Review & commit
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setFinishOpen(true)} disabled={finishOpen}>
+          <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-foreground" onClick={() => setFinishOpen(true)} disabled={finishOpen}>
             Finish…
           </Button>
         </div>

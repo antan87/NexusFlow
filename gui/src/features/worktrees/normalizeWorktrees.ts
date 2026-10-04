@@ -100,3 +100,11 @@ export function formatBranchTitle(branchName?: string): string {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
+
+/**
+ * Whether any repository in the workspace is still the user's own checkout and has to be prepared before it can
+ * be edited. The read-only baseline that sits beside an editable copy does not count: that repository is prepared.
+ */
+export function hasUnpreparedRepo(groups: readonly RepoWorktreeGroup[]): boolean {
+  return groups.some((group) => group.isHostRepo);
+}

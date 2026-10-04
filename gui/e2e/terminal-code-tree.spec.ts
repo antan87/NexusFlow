@@ -41,7 +41,7 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await expect(chat.getByTestId('terminal-pane')).toBeVisible();
 });
 
-test('labels the maximized CLI and exposes a disconnected session with a reconnect action', async ({ page }) => {
+test('exposes a disconnected session in the docked CLI with a reconnect action', async ({ page }) => {
   let dropConnection: (() => Promise<void>) | undefined;
   let connections = 0;
   await page.routeWebSocket('**/ws/terminal', socket => {
@@ -59,11 +59,7 @@ test('labels the maximized CLI and exposes a disconnected session with a reconne
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect(pane.getByRole('button', { name: 'Reconnect', exact: true })).toHaveCount(0);
-  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
-  // The window carries exactly one title now. The "ContextSpace / CLI chat"
-  // breadcrumb and the duplicate pane label were removed, so assert both the
-  // single label and the absence of the breadcrumb.
-  await expect(chat.getByText('CLI chat', { exact: true }).first()).toBeVisible();
+  // The docked chat carries no title or breadcrumb of its own: the workspace header above it says where you are.
   await expect(chat.getByText('ContextSpace', { exact: true })).toHaveCount(0);
   await toggleInspector(page, chat, 'Code');
   await expect(chat.getByText('ContextSpace code', { exact: true })).toBeVisible();
@@ -99,6 +95,8 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, 
   const pane = page.getByTestId('terminal-pane');
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
+  // The terminal can connect a frame before the chat has measured its place on the page; measure once it shows.
+  await expect(screen).toBeVisible();
   const bounds = await screen.boundingBox();
   expect(bounds).not.toBeNull();
   await page.mouse.move(bounds!.x + 1, bounds!.y + 10);
@@ -191,7 +189,6 @@ test('restores CLI input focus and opens terminal file references in the code tr
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))).toBe(true);
-  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
 
   const screen = pane.locator('.xterm-screen');
   const clickOutputRow = async (index: number) => {
@@ -231,7 +228,6 @@ test('opens a path even when narrowing the terminal wraps it across rows', async
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   const pane = chat.getByTestId('terminal-pane');
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
@@ -470,7 +466,6 @@ test('allows expanding code view to focused width and restoring split', async ({
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   await toggleInspector(page, chat, 'Code');
 
   const expandBtn = chat.getByRole('button', { name: 'Give the inspector the full width' });
@@ -490,7 +485,6 @@ test('supports keyboard resizing of code panel using arrow keys on separator', a
   await page.goto('/#/workspaces/feature-x/sessions');
   await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-  await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
   await toggleInspector(page, chat, 'Code');
 
   const separator = chat.getByRole('separator', { name: 'Resize code panel' });
@@ -603,7 +597,6 @@ test.describe('documents in folders of the workspace root', () => {
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
     const pane = chat.getByTestId('terminal-pane');
     await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
-    await chat.getByRole('button', { name: 'Maximize floating chat' }).click();
 
     const screen = pane.locator('.xterm-screen');
     const clickOutputRow = async (index: number) => {

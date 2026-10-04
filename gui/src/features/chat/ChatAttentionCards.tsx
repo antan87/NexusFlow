@@ -4,7 +4,9 @@ import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js'
 import { Button } from '../../components/ui/button.js';
 import { attentionStore } from './chatAttention.js';
 import { useFloatingChat } from './floatingChatStore.js';
+import { useChatVisible } from './dockPlacement.js';
 import { useChatAttention } from './useChatAttention.js';
+import type { Feature } from '../../types.js';
 
 const MAX_CARDS = 4;
 
@@ -14,12 +16,15 @@ const MAX_CARDS = 4;
  * times out would vanish while the user is in another window, which is the
  * moment they most need it.
  *
- * Shown only while the chat window is closed or minimized. With the window open
- * the cards would sit on its header and hide its tabs and controls; there the
- * amber tabs and the "waiting" chip in its header carry the signal.
+ * Shown only while the chat is off screen. With the chat in view the cards would
+ * sit on its tabs and hide them; there the amber tabs and the "waiting" chip
+ * above them carry the signal.
  */
-export function ChatAttentionCards() {
-  const { isOpen, isMinimized, openCli } = useFloatingChat();
+export function ChatAttentionCards({ workspaces = [] }: { workspaces?: readonly Feature[] }) {
+  const { openCli } = useFloatingChat();
+  // A workspace is known by its name; the branch is the fallback.
+  const nameOf = (branch: string) => workspaces.find((workspace) => workspace.branchName === branch)?.name || branch;
+  const chatVisible = useChatVisible();
   const { pending } = useChatAttention();
 
   // The count in the window title shows in a taskbar or tab strip, whatever is open.
@@ -34,7 +39,7 @@ export function ChatAttentionCards() {
     };
   }, [pending.length]);
 
-  if (pending.length === 0 || (isOpen && !isMinimized)) return null;
+  if (pending.length === 0 || chatVisible) return null;
   const shown = pending.slice(0, MAX_CARDS);
   const hidden = pending.length - shown.length;
 
@@ -53,7 +58,7 @@ export function ChatAttentionCards() {
             <BellRing className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold" title={request.workspaceId}>
-                {request.workspaceId} is waiting for you
+                {nameOf(request.workspaceId)} is waiting for you
               </p>
               <p className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
                 <HarnessIcon harness={request.harness} className="size-3" />
@@ -63,7 +68,7 @@ export function ChatAttentionCards() {
             <button
               type="button"
               onClick={() => attentionStore.markSeen(request.workspaceId, request.id)}
-              aria-label={`Dismiss the alert for ${request.workspaceId}`}
+              aria-label={`Dismiss the alert for ${nameOf(request.workspaceId)}`}
               className="shrink-0 cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
             >
               <X className="size-3.5" aria-hidden="true" />

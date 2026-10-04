@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHAT_ATTENTION_STORAGE_KEY } from '../../brand';
 import type { InputRequest } from '../../types.js';
-import { MAX_REMEMBERED_WORKSPACES, createAttentionStore, pendingRequests } from './chatAttention.js';
+import { MAX_REMEMBERED_WORKSPACES, createAttentionStore, openRequests, pendingRequests } from './chatAttention.js';
 
 const request = (workspaceId: string, id: string, minutesAgo = 1): InputRequest => ({
   workspaceId,
@@ -20,6 +20,22 @@ function memoryStorage(initial?: string) {
     setItem: (key: string, value: string) => { data.set(key, value); },
   };
 }
+
+describe('openRequests', () => {
+  it('keeps a question the user has seen but not answered', () => {
+    // Seen or not, a question is open until it is answered; only alerts stop at seen.
+    const all = [request('a', '1', 2), request('b', '2', 5)];
+    expect(openRequests(all, ['a', 'b']).map((r) => r.workspaceId)).toEqual(['b', 'a']);
+    expect(pendingRequests(all, { a: '1', b: '2' }, ['a', 'b'])).toEqual([]);
+  });
+
+  it('shows questions from chats whose CLI still runs, and none from workspaces nobody watches', () => {
+    // The caller watches open tabs and workspaces with a running CLI; c is neither.
+    expect(openRequests([request('a', '1'), request('c', '3')], ['a', 'running-only']).map((r) => r.workspaceId)).toEqual(['a']);
+    expect(openRequests([request('running-only', '4')], ['a', 'running-only']).map((r) => r.workspaceId)).toEqual(['running-only']);
+    expect(openRequests([request('a', '1')], [])).toEqual([]);
+  });
+});
 
 describe('pendingRequests', () => {
   it('returns requests for open chats that have not been seen', () => {

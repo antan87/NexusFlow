@@ -18,13 +18,14 @@ import {
   History,
   PanelLeftClose,
   PanelLeftOpen,
-  ArrowLeft,
+  GitBranch,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../components/icons/HarnessIcon.js';
+import { IconButton } from '../components/ui/icon-button.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils.js';
 import { BRAND_NAME } from '../brand.js';
 import { Sheet, SheetPopup, SheetTitle, SheetTrigger } from '../components/ui/sheet.js';
@@ -32,13 +33,18 @@ import { useIsMobile, useMediaQuery } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
+import { useChatThreads } from '../features/chat/useChatThreads.js';
+import { useChatAttention } from '../features/chat/useChatAttention.js';
+import { useLiveSessions } from '../features/chat/useLiveSessions.js';
+import { liveText, runningFirst } from '../features/chat/liveSessions.js';
+import { LiveMarker } from '../features/chat/LiveMarker.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
-import { WorktreePicker } from '../features/worktrees/WorktreePicker.js';
+import { RepositoriesList } from '../features/worktrees/RepositoriesList.js';
+import { hasUnpreparedRepo } from '../features/worktrees/normalizeWorktrees.js';
 import { normalizeWorktreeGroups } from '../features/worktrees/normalizeWorktrees.js';
 import { PrepareRepoDialog } from '../features/worktrees/PrepareRepoDialog.js';
 import { useWorkspaceRepositories } from '../lib/api/queries.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
-import { useCockpitStore } from '../features/cockpit/cockpitStore.js';
 
 export type WorkspaceSortOption =
   | 'created-desc'
@@ -72,6 +78,9 @@ export interface AppSidebarProps {
   workspacesLoading?: boolean;
   activeWsId?: string | null;
   onSelectWorkspace?: (id: string) => void;
+  /** Checks for a new version on request; updates never install without confirmation. */
+  onCheckForUpdates?: () => void;
+  checkingForUpdates?: boolean;
 }
 
 function SidebarContents({
@@ -81,11 +90,19 @@ function SidebarContents({
   workspacesLoading = false,
   activeWsId = null,
   onSelectWorkspace,
+  onCheckForUpdates,
+  checkingForUpdates = false,
 }: AppSidebarProps) {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { openCli } = useFloatingChat();
+  // Read by the chat while it is on screen; the sidebar shows what it last read and never reads on its own.
+  const chatThreads = useChatThreads(workspaces, false);
+  // Where a CLI is running. Those workspaces come first, so one is never lost further down a long list.
+  const { live: liveSessions, now: liveNow } = useLiveSessions();
+  // What each AI is waiting for: the first line of its question, until it is answered.
+  const { open: openQuestions } = useChatAttention();
+  const questions = useMemo(() => new Map(openQuestions.map((request) => [request.workspaceId, request.message.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''] as const)), [openQuestions]);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
@@ -95,7 +112,7 @@ function SidebarContents({
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Worktree & Rail State
-  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved, customTitles, updateTitle } = useWorktreeNavigationState();
+  const { isCollapsed: savedCollapsed, toggleCollapsed: toggleSaved } = useWorktreeNavigationState();
   // In a narrow window (split screen, 200% zoom) the rail is the default so the
   // task keeps the room; expanding it there is temporary and leaves the saved choice alone.
   const narrow = useMediaQuery('(min-width: 768px) and (max-width: 999px)');
@@ -106,7 +123,6 @@ function SidebarContents({
     else toggleSaved();
   }, [narrow, toggleSaved]);
   useEffect(() => { setNarrowExpanded(false); }, [pathname]);
-  const cockpit = useCockpitStore();
 
   // Detect if on a workspace route
   const workspaceRouteMatch = pathname.match(/\/workspaces\/([^/]+)/);
@@ -120,10 +136,16 @@ function SidebarContents({
 
   const liveRepositories = useWorkspaceRepositories(activeWorkspace?.branchName ?? null);
   const [preparingRepo, setPreparingRepo] = useState<string | null>(null);
+  // The active workspace's repositories are folded away until asked for. Nothing opens them by itself: when one needs
+  // preparing for editing, the icon says so with a dot.
+  const [repositoriesOpen, setRepositoriesOpen] = useState(false);
+  const activeBranch = activeWorkspace?.branchName;
+  useEffect(() => { setRepositoriesOpen(false); }, [activeBranch]);
   const repoGroups = useMemo(() => {
     if (!activeWorkspace) return [];
     return normalizeWorktreeGroups(activeWorkspace, workspaceStatuses[activeWorkspace.branchName], liveRepositories.data);
   }, [activeWorkspace, workspaceStatuses, liveRepositories.data]);
+  const needsPreparing = !activeWorkspace?.archivedAt && hasUnpreparedRepo(repoGroups);
 
   // Keyboard shortcut for toggling rail (Z or [)
   useEffect(() => {
@@ -281,41 +303,21 @@ function SidebarContents({
             {BRAND_NAME}
           </span>
         </Link>
-        <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
+        <span className="flex items-center gap-0.5">
+          <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
+          {onCheckForUpdates && (
+            <IconButton label="Check for updates" icon={<RefreshCw className={checkingForUpdates ? 'animate-spin' : undefined} />} disabled={checkingForUpdates} onClick={onCheckForUpdates} className="text-muted-foreground" />
+          )}
+        </span>
       </div>
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 flex flex-col gap-2">
-        {isWorkspaceRoute && activeWorkspace ? (
-          /* ─── WORKSPACE-IN-CONTEXT DRILL-DOWN (R1) ─────────────────────── */
-          <div className="flex flex-col gap-3 min-w-0">
-            {/* Back to all workspaces link */}
-            <button
-              type="button"
-              onClick={() => navigate('/overview')}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60 px-2 py-1 rounded transition-colors cursor-pointer"
-            >
-              <ArrowLeft size={12} />
-              <span>All workspaces</span>
-            </button>
-
-            {/* The workspace header names the workspace; here only the repository picker. */}
-            <div className="px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Repositories</div>
-            {/* Worktree Hierarchy Picker */}
-            <WorktreePicker
-              repoGroups={repoGroups}
-              activeWorktreeId={cockpit.activeWorktreeId}
-              onSelectWorktree={(wt) => cockpit.selectWorktree(wt.id)}
-              customTitles={customTitles}
-              onUpdateWorktreeTitle={(wtId, title, intent) => {
-                updateTitle(wtId, title, intent);
-              }}
-              onPrepareForEditing={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
-            />
-            <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />
-          </div>
-        ) : (
-          /* ─── GLOBAL WORKSPACE SWITCHER LIST ───────────────────────────── */
+        {(
+          /* ─── WORKSPACE LIST ─────────────────────────────────────────────
+             Always shown, on a workspace page too, so moving between workspaces never
+             means going back first. The active one is marked, and its repositories and
+             branches are one disclosure away instead of replacing the list. */
           <div className="flex flex-col gap-2 min-w-0">
             {/* QuickSwitch */}
             <QuickSwitch workspaces={workspaces} />
@@ -385,14 +387,26 @@ function SidebarContents({
                     {search.trim() ? 'No workspaces match' : showArchived ? 'No archived workspaces' : 'No active workspaces'}
                   </div>
                 ) : (
-                  filteredWorkspaces.slice(0, visibleWorkspaceCount).map((w) => {
+                  runningFirst(filteredWorkspaces, liveSessions).slice(0, visibleWorkspaceCount).map((w, index, shown) => {
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
+                    const live = liveSessions.get(w.branchName);
+                    const startsRunning = Boolean(live) && index === 0;
+                    const endsRunning = !live && index > 0 && liveSessions.has(shown[index - 1]!.branchName);
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
+                    // A workspace with an open chat or a running CLI says what the AI asks while it waits, else what the
+                    // chat is working on, and when it needs you.
+                    const thread = chatThreads.summaries.get(w.branchName);
+                    const question = questions.get(w.branchName);
+                    const needsYou = question !== undefined ? 'Waiting for you' : thread?.tone === 'needs' ? thread.label : '';
+                    const line = question || thread?.goal || '';
+                    const showRepositories = isSelected && repositoriesOpen && Boolean(activeWorkspace);
 
                     return (
+                      <div key={w.id}>
+                      {startsRunning && <p className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Running now</p>}
+                      {endsRunning && <div aria-hidden="true" className="mx-2.5 mb-2 mt-1 border-t border-border/70" />}
                       <div
-                        key={w.id}
                         className={cn(
                           'group flex items-start gap-1 rounded-md px-2.5 py-1.5 text-xs transition-colors border',
                           isSelected
@@ -403,28 +417,46 @@ function SidebarContents({
                         <Link
                           to={`/workspaces/${encodeURIComponent(w.branchName)}`}
                           onClick={() => onSelectWorkspace?.(w.branchName)}
+                          aria-current={isSelected ? 'page' : undefined}
                           className="flex min-w-0 flex-1 flex-col gap-0.5"
                         >
                           <span className="truncate font-medium text-foreground" title={w.name || w.branchName}>
                             {w.name || w.branchName}
                           </span>
-                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                            {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
-                            {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
-                            <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                          <span className="flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+                            {question ? (
+                              // The dot beside the row already says it waits, so the room goes to what it asks.
+                              <span className="truncate font-medium text-[var(--state-needs)]" title={question}><span className="sr-only">Waiting for you: </span>{question}</span>
+                            ) : line || needsYou ? (
+                              <>
+                                {needsYou && <span className="state-chip shrink-0" data-tone="needs">{needsYou}</span>}
+                                {line && <span className="truncate" title={line}>{line}</span>}
+                              </>
+                            ) : (
+                              <>
+                                {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
+                                {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
+                                <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                              </>
+                            )}
                             {w.archivedAt && <span className="font-semibold">archived</span>}
-                            {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
+                            {hasChanges && <span className="shrink-0 whitespace-nowrap text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>
+                          {live && <span className="sr-only">{liveText(live, liveNow)}</span>}
                         </Link>
                         <div className="flex items-center gap-1 shrink-0">
-                          {st?.activeAssistants && st.activeAssistants.length > 0 && (
-                            <div className="flex items-center gap-1">
-                              {st.activeAssistants.map((ast) => (
-                                <span key={ast} title={harnessName(ast)} className="inline-flex size-3.5 opacity-75">
-                                  <HarnessIcon harness={ast} className="size-3" />
-                                </span>
-                              ))}
-                            </div>
+                          {isSelected && activeWorkspace && (
+                            <button
+                              type="button"
+                              onClick={() => setRepositoriesOpen((open) => !open)}
+                              aria-expanded={repositoriesOpen}
+                              className="relative p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                              title={needsPreparing ? 'Repositories and branches: one is still your own checkout and needs preparing before it can be edited' : 'Repositories and branches'}
+                              aria-label={`${repositoriesOpen ? 'Hide' : 'Show'} repositories and branches for ${w.branchName}`}
+                            >
+                              <GitBranch size={12} aria-hidden="true" />
+                              {needsPreparing && <span aria-hidden="true" className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-amber-500" />}
+                            </button>
                           )}
                           {!w.archivedAt && (
                             <button
@@ -437,13 +469,18 @@ function SidebarContents({
                               <History size={12} aria-hidden="true" />
                             </button>
                           )}
-                          <span
-                            className={cn(
-                              'size-1.5 rounded-full shrink-0',
-                              hasChanges ? 'bg-amber-500' : 'bg-emerald-500'
-                            )}
+                          {/* Only where a CLI runs. Uncommitted changes are the ± count beside the name. */}
+                          {live && <LiveMarker live={live} now={liveNow} />}
+                        </div>
+                      </div>
+                      {showRepositories && activeWorkspace && (
+                        <div className="mt-1 mb-1 ml-2 border-l border-border/60 pl-2">
+                          <RepositoriesList
+                            groups={repoGroups}
+                            onPrepare={activeWorkspace.archivedAt ? undefined : (repoName) => setPreparingRepo(repoName)}
                           />
                         </div>
+                      )}
                       </div>
                     );
                   })
@@ -468,6 +505,8 @@ function SidebarContents({
             </div>
           </div>
         )}
+
+        {activeWorkspace && <PrepareRepoDialog wsId={activeWorkspace.branchName} repoName={preparingRepo} onClose={() => setPreparingRepo(null)} />}
 
         <div className="border-t border-border/60 pt-2">
           <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Reusable setup</p>
