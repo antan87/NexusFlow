@@ -56,7 +56,7 @@ test.describe('Knowledge and Plan failure recovery', () => {
     // Returning to the tab starts a second load without clearing the editor.
     await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Plan', exact: true })).toBeVisible();
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Knowledge', exact: true }).click();
+    await page.goto('/#/workspaces/demo/knowledge');
     await expect(page.getByRole('region', { name: 'Knowledge', exact: true })).toBeVisible();
     await expect(page.getByRole('alert')).toContainText('Existing content and your draft were kept.');
     await expect(page.getByRole('alert')).not.toContainText('secret backend details');
@@ -107,7 +107,7 @@ test.describe('Knowledge and Plan failure recovery', () => {
     await page.getByRole('button', { name: 'Markdown Plan', exact: true }).click();
     await expect(page.getByText('Keep this plan.')).toBeVisible();
 
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Knowledge', exact: true }).click();
+    await page.goto('/#/workspaces/demo/knowledge');
     await expect(page.getByRole('region', { name: 'Knowledge', exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Plan', exact: true })).toBeVisible();
@@ -198,7 +198,7 @@ test.describe('Knowledge and Plan failure recovery', () => {
     );
     await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Plan', exact: true })).toBeVisible();
-    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Knowledge', exact: true }).click();
+    await page.goto('/#/workspaces/demo/knowledge');
     await expect(page.getByRole('region', { name: 'Knowledge', exact: true })).toBeVisible();
     await delayedReload;
 

@@ -73,15 +73,21 @@ export function destinationsFor(archived: boolean): WorkspaceDestination[] {
 }
 
 /**
- * What can open beside the chat, in the rail's order. Overview and Sessions keep their addresses, so old links still
- * work, but have no place on the rail: the progress strip above the chat says where the work stands, and saved
- * conversations open from the chat itself.
+ * What can open beside the chat, in the rail's order. Overview, Sessions and Knowledge keep their addresses, so old
+ * links still work, but have no place on the rail: the progress strip above the chat says where the work stands, saved
+ * conversations open from the chat itself, and knowledge is read in Docs.
  */
-export const RAIL_SECTIONS: readonly WorkspaceSection[] = ['plan', 'changes', 'documents', 'knowledge', 'skills', 'services'];
+export const RAIL_SECTIONS: readonly WorkspaceSection[] = ['plan', 'changes', 'documents', 'skills', 'services'];
 
-/** The rail of an archived workspace is its record and what it knew. */
+/** The rail of an archived workspace is its record, its plan and its documents. */
+const ARCHIVED_RAIL: readonly WorkspaceSection[] = ['overview', 'plan', 'documents'];
+
+/**
+ * What the rail offers. Knowledge is read in Docs, with the other files ContextSpace keeps, so its own address still
+ * opens but it has no item of its own.
+ */
 export function railSectionsFor(archived: boolean): readonly WorkspaceSection[] {
-  return archived ? ARCHIVED_SECTIONS : RAIL_SECTIONS;
+  return archived ? ARCHIVED_RAIL : RAIL_SECTIONS;
 }
 
 /** The section to render: an archived workspace falls back to its overview. */

@@ -87,9 +87,9 @@ test.describe('the chat is central, with other parts beside it', () => {
   test('takes most of the width, with the part in a narrower panel beside it', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/plan');
     await expect(chatOf(page)).toBeVisible();
-    await expect(page.getByLabel('Current objective')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
     const chat = await boxOf(chatOf(page));
-    const panel = await boxOf(page.getByLabel('Current objective'));
+    const panel = await boxOf(page.getByRole('region', { name: 'Goal', exact: true }));
     const body = 1440 - BODY_LEFT;
     expect(chat.width / body).toBeGreaterThan(0.55);
     expect(chat.width).toBeGreaterThan(panel.width);
@@ -117,8 +117,8 @@ test.describe('the chat is central, with other parts beside it', () => {
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/changes$/);
     await expect(chatOf(page)).toBeVisible();
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: 'Knowledge' }).click();
-    await expect(page).toHaveURL(/#\/workspaces\/alpha\/knowledge$/);
+    await destinations(page).getByRole('link', { name: 'Docs' }).click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/documents$/);
     await expect(chatOf(page)).toBeVisible();
   });
 
@@ -148,7 +148,7 @@ test.describe('the chat is central, with other parts beside it', () => {
   test('has no room for both on a narrow window, so the part gets the screen and the cross brings the chat back', async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 800 });
     await page.goto('/#/workspaces/alpha/plan');
-    await expect(page.getByLabel('Current objective')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
     await expect(chatOf(page)).toBeHidden();
     await expect(page.getByRole('separator', { name: 'Resize the chat' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
@@ -168,7 +168,7 @@ test.describe('the chat can be hidden for a while, and given more or less room',
     await page.getByRole('button', { name: 'Hide the chat and give this the whole width' }).click();
     await expect(chatOf(page)).toBeHidden();
     await page.reload();
-    await expect(page.getByLabel('Current objective')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
     await expect(chatOf(page)).toBeHidden();
     await page.getByRole('button', { name: 'Show the chat beside this' }).click();
     await expect(chatOf(page)).toBeVisible();
@@ -214,7 +214,7 @@ test.describe('workspaces are switched from inside the chat', () => {
     await page.getByRole('menuitem', { name: /beta/ }).click();
     await expect(page).toHaveURL(/#\/workspaces\/beta\/plan$/);
     await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByLabel('Current objective')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
     await tab(page, 'Faster search').click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/plan$/);
     await expect(tab(page, 'Faster search')).toHaveAttribute('aria-selected', 'true');
@@ -231,7 +231,8 @@ test.describe('the rail beside the panel opens the parts, and the header is one 
     expect(rail.x + rail.width).toBeGreaterThan(1440 - 2);
     expect(rail.width).toBeLessThanOrEqual(RAIL + 1);
     // What can open beside the chat; the chat itself, the overview and the session history have no place on it.
-    await expect(destinations(page).getByRole('link')).toHaveText(['Plan', 'Changes', 'Docs', 'Knowledge', 'Skills', 'Services']);
+    // Knowledge is read in Docs, with the other files ContextSpace keeps.
+    await expect(destinations(page).getByRole('link')).toHaveText(['Plan', 'Changes', 'Docs', 'Skills', 'Services']);
   });
 
   test('marks the part that is open, names it above the panel, and closes it when chosen again', async ({ page }) => {

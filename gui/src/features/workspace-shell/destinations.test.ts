@@ -56,16 +56,18 @@ describe('workspace destinations', () => {
 });
 
 describe('railSectionsFor', () => {
-  it('offers what can open beside the chat, and no place for the chat, the overview or the session history', () => {
-    expect(railSectionsFor(false)).toEqual(['plan', 'changes', 'documents', 'knowledge', 'skills', 'services']);
-    for (const gone of ['chat', 'overview', 'sessions'] as const) expect(railSectionsFor(false)).not.toContain(gone);
+  it('offers what can open beside the chat, and no place for the chat, the overview, the session history or knowledge', () => {
+    expect(railSectionsFor(false)).toEqual(['plan', 'changes', 'documents', 'skills', 'services']);
+    for (const gone of ['chat', 'overview', 'sessions', 'knowledge'] as const) expect(railSectionsFor(false)).not.toContain(gone);
   });
 
   it('keeps old addresses working: every section still parses to itself', () => {
     for (const section of ['overview', 'sessions', 'services', 'plan'] as const) expect(parseSection(section)).toBe(section);
   });
 
-  it('shows an archived workspace its record and what it knew, and nothing to act on', () => {
-    expect(railSectionsFor(true)).toEqual(['overview', 'plan', 'documents', 'knowledge']);
+  it('shows an archived workspace its record, its plan and its documents, and nothing to act on', () => {
+    expect(railSectionsFor(true)).toEqual(['overview', 'plan', 'documents']);
+    // Its knowledge is still open to read, in Docs or at its old address.
+    expect(visibleSection('knowledge', true)).toBe('knowledge');
   });
 });

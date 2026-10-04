@@ -102,11 +102,12 @@ test.describe('keyboard-only primary journey', () => {
     // Brief: reach the plan, edit the objective, save.
     await activate(page, destinations.getByRole('link', { name: 'Plan' }));
     await expect(page).toHaveURL(/\/plan$/);
+    await activate(page, page.getByRole('button', { name: 'Edit the goal' }));
     const objective = page.getByLabel('Current objective');
     await tabTo(page, objective);
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type('Cache invoice lookups per customer');
-    await activate(page, page.getByRole('button', { name: 'Save AI assignment' }));
+    await activate(page, page.getByRole('button', { name: 'Save goal' }));
     await expect.poll(() => guidance.assignment.objective).toBe('Cache invoice lookups per customer');
 
     // Verify: run verification; the header reports the recorded result.

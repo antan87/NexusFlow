@@ -82,7 +82,7 @@ async function checkChatBeside(page: Page, label: string) {
   await page.goto('/#/workspaces/demo/plan');
   await expect(page.getByRole('region', { name: 'Where are we', exact: true })).toContainText('Needs you');
   await expect(page.getByRole('separator', { name: 'Resize the chat' })).toBeVisible();
-  await expect(page.getByLabel('Current objective')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
   await expectNoSeriousViolations(page, `${label} chat beside the plan`);
   await page.goto('/#/workspaces/demo/changes');
   await expect(page.getByRole('separator', { name: 'Resize the chat' })).toBeVisible();
@@ -284,7 +284,7 @@ test.describe('constrained windows', () => {
     const main = await page.getByRole('main').boundingBox();
     expect(main!.width).toBeGreaterThanOrEqual(800);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
-    for (const name of ['Plan', 'Changes', 'Docs', 'Knowledge', 'Skills', 'Services']) {
+    for (const name of ['Plan', 'Changes', 'Docs', 'Skills', 'Services']) {
       await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: new RegExp(`^${name}`) })).toBeInViewport();
     }
     // The rail still expands on request, by keyboard.

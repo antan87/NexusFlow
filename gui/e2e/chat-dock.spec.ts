@@ -68,7 +68,7 @@ test.describe('the chat is the centre of a workspace', () => {
     await expect(chatOf(page)).toBeVisible();
     await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
     // The rail offers what can open beside the chat; the chat is the page, so it has no item and none is current.
-    await expect(workspaceNav(page).getByRole('link')).toHaveCount(6);
+    await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
     await expect(workspaceNav(page).locator('[aria-current="page"]')).toHaveCount(0);
     // The address is left as it was given: no section is the chat.
     await expect(page).toHaveURL(/#\/workspaces\/alpha$/);
