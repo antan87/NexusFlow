@@ -76,10 +76,30 @@ export function factsLine(facts: ProgressFacts): string[] {
 
 // ─── The goal ───────────────────────────────────────────────────────────────
 
-/** What the work is for: the assignment's objective, else the current milestone, else nothing. */
-export function goalLine(guidance: WorkGuidance | undefined, facts: ProgressFacts | undefined): { stage?: string; text: string } {
-  const objective = guidance?.assignment.objective.trim();
-  if (objective) return { stage: guidance!.assignment.stage, text: objective };
+/** Sentences this short are not cut off: "Fix v2." is a whole goal, not the opening of one. */
+const HEADLINE_MIN = 20;
+
+/**
+ * The opening of a goal: its first line, cut after the first sentence. An objective is often a paragraph (the problem,
+ * the evidence, the plan), and a line on screen has room for what it is for, not why.
+ */
+export function headline(text: string): string {
+  const line = text.split(/\r?\n/).map((part) => part.trim()).find(Boolean) ?? '';
+  const end = /[.!?](?=\s|$)/g;
+  for (let match = end.exec(line); match; match = end.exec(line)) {
+    if (match.index + 1 >= HEADLINE_MIN && match.index + 1 < line.length) return line.slice(0, match.index + 1);
+  }
+  return line;
+}
+
+/** What the work is for: the opening of the assignment's objective, else the current milestone, else nothing. `full` is the whole objective when it says more. */
+export function goalLine(guidance: WorkGuidance | undefined, facts: ProgressFacts | undefined): { stage?: string; text: string; full?: string } {
+  // Read defensively: a server from before the fix sends no objective for a workspace without a description.
+  const objective = guidance?.assignment?.objective?.trim();
+  if (objective) {
+    const text = headline(objective);
+    return text === objective ? { stage: guidance!.assignment.stage, text } : { stage: guidance!.assignment.stage, text, full: objective };
+  }
   const current = facts?.milestones.find((milestone) => milestone.id === facts.currentMilestoneId);
   return current ? { text: current.title } : { text: '' };
 }

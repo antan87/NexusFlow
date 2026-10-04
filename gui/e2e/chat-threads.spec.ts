@@ -152,7 +152,7 @@ test.describe('a chat with no goal anywhere', () => {
     await page.goto('/#/workspaces/alpha/chat');
     await expect(tab(page, 'zeta')).toContainText('No plan yet');
     await expect(tab(page, 'zeta')).toHaveAccessibleDescription('No plan yet');
-    const heights = await chatOf(page).getByRole('tab').evaluateAll((tabs) => tabs.map((element) => Math.round(element.getBoundingClientRect().height)));
+    const heights = await chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab').evaluateAll((tabs) => tabs.map((element) => Math.round(element.getBoundingClientRect().height)));
     expect(new Set(heights).size).toBe(1);
   });
 });
@@ -193,7 +193,7 @@ test.describe('the list of chats', () => {
     await expect(finished.locator('li')).toHaveCount(1);
     await expect(finished.locator('li')).toContainText('Release notes for 2.32');
     // The tabs keep the order they were opened in.
-    await expect(chatOf(page).getByRole('tab')).toHaveText([/Faster search/, /Importer/, /gamma/]);
+    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveText([/Faster search/, /Importer/, /gamma/]);
   });
 
   test('choosing a chat shows it, keeps the part you are reading and closes the list', async ({ page }) => {
@@ -246,7 +246,7 @@ test.describe('the list of chats', () => {
     await openList(page);
     await rowOf(page, 'gamma').getByRole('button', { name: 'Close the chat of gamma' }).click();
     await expect(listOf(page)).toBeHidden();
-    await expect(chatOf(page).getByRole('tab')).toHaveCount(0);
+    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(0);
     await expect(chatOf(page).getByRole('button', { name: 'All chats', exact: true })).toHaveCount(0);
     await expect(chatOf(page).getByRole('searchbox', { name: 'Search workspaces for CLI chat' })).toBeVisible();
   });

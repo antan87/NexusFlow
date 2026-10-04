@@ -65,6 +65,7 @@ test('creation from chat returns to the new workspace in CLI mode', async ({ pag
   const chat = page.getByRole('region', { name: 'CLI Chat' });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toHaveAttribute('aria-selected', 'true');
-  await chat.getByRole('button', { name: 'Start new session', exact: true }).click();
-  await expect(chat.getByRole('button', { name: 'Start session' })).toBeDisabled();
+  // It waits on the start screen: nothing is started for the developer.
+  await expect(chat.getByRole('region', { name: 'Start a CLI session' })).toBeVisible();
+  await expect(chat.getByTestId('terminal-state')).toHaveCount(0);
 });

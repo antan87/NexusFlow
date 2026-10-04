@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { MilestoneFact, ProgressFacts, ScreenEvent, WorkGuidance } from '../../types';
 import {
   activeProposals, checkIsFailing, currentMilestoneIndex, factsLine, formatAge, goalLine, latestNext, nextAction, ringMilestones, stripState, verificationLine,
-} from './progressView';
+ headline } from './progressView';
 
 const milestone = (id: string, state: MilestoneFact['state'], extra: Partial<MilestoneFact> = {}): MilestoneFact =>
   ({ id, title: `Title ${id}`, state, verified: false, reopenCount: 0, waitingOn: [], ...extra });
@@ -112,6 +112,21 @@ describe('factsLine', () => {
   });
 });
 
+describe('headline', () => {
+  it('keeps the first sentence of a long first line', () => {
+    const text = 'Automate the workspace lifecycle so the next piece of work starts without ceremony. THE PROBLEM (verified on main) - something long.\nMore detail';
+    expect(headline(text)).toBe('Automate the workspace lifecycle so the next piece of work starts without ceremony.');
+  });
+
+  it('does not cut a short sentence, a version number or a line with one sentence', () => {
+    expect(headline('Fix v2. Then ship the cache everywhere it is used.')).toBe('Fix v2. Then ship the cache everywhere it is used.');
+    expect(headline('Upgrade to v2.31.2 before the release goes out')).toBe('Upgrade to v2.31.2 before the release goes out');
+    expect(headline('Make search answer in under 100 ms.')).toBe('Make search answer in under 100 ms.');
+    expect(headline('\n  \n  Second line is the first that says something.  ')).toBe('Second line is the first that says something.');
+    expect(headline('')).toBe('');
+  });
+});
+
 describe('goalLine', () => {
   const guidance = (objective: string): WorkGuidance => ({
     version: 1, revision: 0, workType: 'feature', size: 'standard', documents: [],
@@ -122,12 +137,24 @@ describe('goalLine', () => {
     expect(goalLine(guidance('Cache lookups'), undefined)).toEqual({ stage: 'implement', text: 'Cache lookups' });
   });
 
+  it('is the opening of a long objective, with the whole of it kept for a tooltip', () => {
+    const long = 'Cache the invoice lookups everywhere. The problem: every page reads them again, which costs seconds.';
+    expect(goalLine(guidance(long), undefined)).toEqual({ stage: 'implement', text: 'Cache the invoice lookups everywhere.', full: long });
+  });
+
   it('falls back to the current milestone, then to nothing', () => {
     const plan = facts([milestone('a', 'in_progress')], { currentMilestoneId: 'a' });
     expect(goalLine(guidance('   '), plan)).toEqual({ text: 'Title a' });
     expect(goalLine(undefined, plan)).toEqual({ text: 'Title a' });
     expect(goalLine(undefined, facts([]))).toEqual({ text: '' });
     expect(goalLine(undefined, undefined)).toEqual({ text: '' });
+  });
+
+  it('does not fail on guidance with no objective, as an older server sends for a workspace without a description', () => {
+    const partial = { ...guidance(''), assignment: { stage: 'investigate' } } as unknown as WorkGuidance;
+    const plan = facts([milestone('a', 'in_progress')], { currentMilestoneId: 'a' });
+    expect(goalLine(partial, plan)).toEqual({ text: 'Title a' });
+    expect(goalLine({ ...guidance(''), assignment: undefined } as unknown as WorkGuidance, undefined)).toEqual({ text: '' });
   });
 });
 

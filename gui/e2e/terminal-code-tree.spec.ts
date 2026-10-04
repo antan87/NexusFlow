@@ -95,6 +95,8 @@ test('uses ordinary terminal copy and paste shortcuts', async ({ page, context, 
   const pane = page.getByTestId('terminal-pane');
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const screen = pane.locator('.xterm-screen');
+  // The terminal can connect a frame before the chat has measured its place on the page; measure once it shows.
+  await expect(screen).toBeVisible();
   const bounds = await screen.boundingBox();
   expect(bounds).not.toBeNull();
   await page.mouse.move(bounds!.x + 1, bounds!.y + 10);

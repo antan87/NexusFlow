@@ -10,7 +10,11 @@ import type { TerminalStatus } from './client.js';
 import { useWorkspaceSessionSources } from './useWorkspaceSessionSources.js';
 import { perfMark } from '../../lib/perfMarks.js';
 
-export function ResumeSessions({ workspace, active, busy, status, fill, onStartNew, onResume }: { workspace: string; active: boolean; busy: boolean; status: TerminalStatus | null; fill: boolean; onStartNew: () => void; onResume: (session: AISession) => void }) {
+/**
+ * The saved conversations of a workspace, newest first, each one click from continuing. `embedded` is the start screen's
+ * form: under the tool buttons, with no frame of its own and no "start new" button, since the tools are right above.
+ */
+export function ResumeSessions({ workspace, active, busy, status, fill, embedded = false, onStartNew, onResume }: { workspace: string; active: boolean; busy: boolean; status: TerminalStatus | null; fill: boolean; embedded?: boolean; onStartNew: () => void; onResume: (session: AISession) => void }) {
   const [search, setSearch] = useState('');
   const [includeChildren, setIncludeChildren] = useState(false);
   // Each source resolves independently so slow CLI history cannot hold up the rest.
@@ -24,14 +28,14 @@ export function ResumeSessions({ workspace, active, busy, status, fill, onStartN
   const children = sessions.filter(s => s.threadKind === 'subagent').length;
   const visible = sessions.filter(s => (includeChildren || s.threadKind !== 'subagent') && `${s.title} ${harnessName(s.assistant)} ${s.id}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
-  return <section aria-label="Continue a conversation" className={`min-h-0 overflow-auto border-b border-border bg-card p-3 ${fill ? 'flex-1' : 'max-h-[45%]'}`}>
-    <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-1.5 text-xs font-semibold"><History className="size-3.5 text-muted-foreground" />Continue a conversation</h3><Button size="xs" variant="ghost" aria-label="Refresh saved sessions" onClick={() => { for (const history of histories) void history.refetch(); }}><RefreshCw className="size-3" /></Button></div>
-    <p className="mt-1 text-xs text-muted-foreground">Choose a saved conversation. It opens in the CLI tool that created it.</p>
+  return <section aria-label="Continue a conversation" className={`min-h-0 overflow-auto ${embedded ? 'px-4 pb-4 pt-2' : 'border-b border-border bg-card p-3'} ${fill ? 'flex-1' : 'max-h-[45%]'}`}>
+    <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-1.5 text-xs font-semibold"><History className="size-3.5 text-muted-foreground" />{embedded ? 'Or continue a saved conversation' : 'Continue a conversation'}</h3><Button size="xs" variant="ghost" aria-label="Refresh saved sessions" onClick={() => { for (const history of histories) void history.refetch(); }}><RefreshCw className="size-3" /></Button></div>
+    {!embedded && <p className="mt-1 text-xs text-muted-foreground">Choose a saved conversation. It opens in the CLI tool that created it.</p>}
     {includeChildren && <p className="mt-1 text-[11px] text-muted-foreground">Subagents are delegated tasks. Continue their main conversation to pick up your work.</p>}
     <div className="my-2 flex flex-wrap items-center gap-2"><input aria-label="Search saved sessions" placeholder="Search conversations or harnesses" className="min-w-40 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" value={search} onChange={e => setSearch(e.target.value)} /><label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={includeChildren} onChange={e => setIncludeChildren(e.target.checked)} />Include subagent sessions{children > 0 ? ` (${children})` : ''}</label></div>
     {active && sourcesPending > 0 && <p role="status" className="py-2 text-xs text-muted-foreground">Loading saved conversations… {sourceCount > 0 ? `${sourcesChecked} of ${sourceCount} sources checked.` : 'Finding session sources.'} Results appear as they arrive.</p>}
     {sourcesFailed > 0 && <p role="alert" className="py-2 text-xs text-destructive">Could not load {sourcesFailed} {sourcesFailed === 1 ? 'source' : 'sources'}. Other conversations are shown; use Refresh to retry.</p>}
-    {sourcesPending === 0 && sourcesFailed === 0 && visible.length === 0 && <div className="space-y-2 py-3"><p className="text-xs text-muted-foreground">{search ? 'No matching conversations.' : children && !includeChildren ? 'Only subagent sessions were found. Include them to inspect their parent links.' : 'No saved conversations found for this workspace.'}</p>{!search && <Button size="xs" variant="outline" onClick={onStartNew}>Start a new session</Button>}</div>}
+    {sourcesPending === 0 && sourcesFailed === 0 && visible.length === 0 && <div className="space-y-2 py-3"><p className="text-xs text-muted-foreground">{search ? 'No matching conversations.' : children && !includeChildren ? 'Only subagent sessions were found. Include them to inspect their parent links.' : 'No saved conversations found for this workspace.'}</p>{!search && !embedded && <Button size="xs" variant="outline" onClick={onStartNew}>Start a new session</Button>}</div>}
     <div className="max-h-72 divide-y divide-border">
       {visible.map(session => {
         const main = mainSessionFor(session, sessions);

@@ -19,8 +19,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   GitBranch,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
+import { IconButton } from '../components/ui/icon-button.js';
 import { ContextSpaceIcon } from '../components/icons/ContextSpaceIcon.js';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../components/ui/menu.js';
 import { Link, NavLink, useLocation } from 'react-router-dom';
@@ -76,6 +78,9 @@ export interface AppSidebarProps {
   workspacesLoading?: boolean;
   activeWsId?: string | null;
   onSelectWorkspace?: (id: string) => void;
+  /** Checks for a new version on request; updates never install without confirmation. */
+  onCheckForUpdates?: () => void;
+  checkingForUpdates?: boolean;
 }
 
 function SidebarContents({
@@ -85,6 +90,8 @@ function SidebarContents({
   workspacesLoading = false,
   activeWsId = null,
   onSelectWorkspace,
+  onCheckForUpdates,
+  checkingForUpdates = false,
 }: AppSidebarProps) {
   const { pathname } = useLocation();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
@@ -296,7 +303,12 @@ function SidebarContents({
             {BRAND_NAME}
           </span>
         </Link>
-        <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
+        <span className="flex items-center gap-0.5">
+          <span className="text-[10px] font-mono text-muted-foreground">v{appVersion}</span>
+          {onCheckForUpdates && (
+            <IconButton label="Check for updates" icon={<RefreshCw className={checkingForUpdates ? 'animate-spin' : undefined} />} disabled={checkingForUpdates} onClick={onCheckForUpdates} className="text-muted-foreground" />
+          )}
+        </span>
       </div>
 
       {/* Main Content Area */}

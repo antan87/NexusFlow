@@ -5,7 +5,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { CHAT_GEOMETRY } from '../chat/floatingChatStore.js';
 import { hasModifier, modifierLabel, usePaneHotkey } from './usePaneHotkey.js';
 import { WorkspaceCodePanel } from '../changes/WorkspaceCodePanel.js';
-import { TerminalPane } from './TerminalPane.js';
+import { SessionDeck } from './SessionDeck.js';
 import { WorkspaceDocumentsInspector } from './WorkspaceDocumentsInspector.js';
 import { isUnreadableDocument, workspaceDocumentName } from './documentReference.js';
 import { WhereAreWeStrip } from '../progress/WhereAreWeStrip.js';
@@ -15,7 +15,7 @@ const INSPECTOR_MIN_PERCENT = 28;
 const INSPECTOR_MAX_PERCENT = 80;
 const clampPercent = (value: number) => Math.max(INSPECTOR_MIN_PERCENT, Math.min(INSPECTOR_MAX_PERCENT, value));
 
-export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<ComponentProps<typeof TerminalPane>, 'fillPromptRef' | 'onReply'> & { workspacePath: string; repoPaths?: string[] }) {
+export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<ComponentProps<typeof SessionDeck>, 'workspace' | 'active' | 'launch' | 'consumeLaunch' | 'onStatusChange' | 'onBackgroundOutput'> & { workspacePath: string; repoPaths?: string[] }) {
   const [inspector, setInspector] = useState<'code' | 'documents' | null>(null);
   const [openReference, setOpenReference] = useState<{ path: string; line?: number; id: number } | null>(null);
   const [openDocument, setOpenDocument] = useState<{ name: string; id: number } | null>(null);
@@ -161,7 +161,7 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Omit<C
           breakpoint the inspector becomes a sheet over it, so opening Code or
           Docs no longer renames the control to "Back to CLI" and no longer
           costs the user their prompt. */}
-      <div className="min-h-0 min-w-0 flex-1"><TerminalPane {...props} active={props.active} fillPromptRef={fillPromptRef} onReply={() => replyRef.current?.()} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
+      <div className="min-h-0 min-w-0 flex-1"><SessionDeck {...props} fillPromptRef={fillPromptRef} onReply={() => replyRef.current?.()} codeVisible={inspector !== null} inspectorControls={inspectorControls} inspectorExpandControl={inspectorExpandControl} onOpenFileReference={reference => { void openFile(reference); }} /></div>
       {inspector && <>
         {!compact && <div role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={isExpanded ? INSPECTOR_MAX_PERCENT : splitPercent}
           aria-valuemin={INSPECTOR_MIN_PERCENT} aria-valuemax={INSPECTOR_MAX_PERCENT} aria-label={inspector === 'code' ? 'Resize code panel' : 'Resize documents panel'} onPointerDown={handleSplitDrag}

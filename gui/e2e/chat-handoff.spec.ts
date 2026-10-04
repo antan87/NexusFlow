@@ -156,7 +156,8 @@ test.describe('Multi-Harness Sessions and Launcher', () => {
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
     await expect(chat).toBeVisible();
     await expect(chat.getByRole('button', { name: 'Chat', exact: true })).toHaveCount(0);
-    await expect(chat.getByRole('button', { name: 'Start new session', exact: true })).toBeVisible();
+    // The chat opens on its tools, one click each; nothing starts by itself.
+    await expect(chat.getByRole('region', { name: 'Start a CLI session' })).toBeVisible();
   });
 
 });

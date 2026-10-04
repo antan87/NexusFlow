@@ -124,6 +124,25 @@ async function checkChatStrip(page: Page, label: string) {
   await expectNoSeriousViolations(page, `${label} list of chats`);
 }
 
+/** A workspace chat with no CLI yet: the tool buttons and the saved conversations under them. */
+async function checkStartScreen(page: Page, label: string) {
+  await mockWorkspace(page);
+  await mockChatStrip(page);
+  await page.route('**/api/terminals/demo/status', (route) => route.fulfill({ json: { available: true, sessions: [], targets: [
+    { id: 'claude', name: 'Claude Code', available: true, reason: null }, { id: 'codex', name: 'Codex', available: true, reason: null }, { id: 'shell', name: 'Shell', available: true, reason: null },
+  ] } }));
+  await page.route('**/api/workspace/demo/sessions*', (route) => route.fulfill({ json: { sessions: [{
+    id: '0199a213-81c0-7800-8aa1-bbab2a035a50', assistant: 'claude', title: 'Cache the invoice lookups', threadKind: 'main', workspacePath: '/dev/demo',
+    createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-02T00:00:00Z', messageCount: 12,
+  }] } }));
+  await page.goto('/#/workspaces/demo/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  await expect(chat.getByRole('group', { name: 'CLI tools' }).getByRole('button')).toHaveCount(3);
+  await expect(chat.getByRole('region', { name: 'Continue a conversation' }).getByTestId('resume-session-row')).toHaveCount(1);
+  await expectNoSeriousViolations(page, `${label} chat start screen`);
+}
+
 async function expectNoSeriousViolations(page: Page, label: string, scope?: string) {
   // Measure settled colours: a fade or an enabled/disabled transition caught
   // mid-way reports a contrast no user sees.
@@ -190,6 +209,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
     test('chat with a part open beside it', async ({ page }) => {
       await checkChatBeside(page, `${colorScheme}`);
     });
+
+    test('chat start screen', async ({ page }) => {
+      await checkStartScreen(page, `${colorScheme}`);
+    });
   });
 }
 
@@ -242,6 +265,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     test('chat with a part open beside it', async ({ page }) => {
       await checkChatBeside(page, `dusk ${colorScheme}`);
+    });
+
+    test('chat start screen', async ({ page }) => {
+      await checkStartScreen(page, `dusk ${colorScheme}`);
     });
   });
 }

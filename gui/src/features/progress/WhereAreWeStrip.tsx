@@ -41,7 +41,7 @@ export function WhereAreWeBar({ facts, guidance, action, expanded, panelId, noti
         {/* The counts are in the facts line, so the ring is left out of the accessible name. */}
         <ContextRing aria-hidden="true" size={RING_SIZE} milestones={ringMilestones(facts)} currentIndex={currentMilestoneIndex(facts)} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-medium leading-tight text-foreground" title={goal.text || undefined}>
+          <span className="block truncate text-[13px] font-medium leading-tight text-foreground" title={goal.full ?? (goal.text || undefined)}>
             {goal.stage && <span className="font-normal capitalize text-muted-foreground">{goal.stage} &middot; </span>}
             {goal.text || <span className="font-normal text-muted-foreground">No goal set yet</span>}
           </span>
