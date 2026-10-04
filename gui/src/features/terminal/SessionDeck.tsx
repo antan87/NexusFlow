@@ -10,7 +10,7 @@ import { LiveDot } from '../chat/LiveMarker.js';
 import { WORKING_WINDOW_MS } from '../chat/liveSessions.js';
 import { RUNNING_TERMINALS_KEY, useRunningTerminals } from '../chat/useRunningTerminals.js';
 import { terminalRequest, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
-import { adoptRunning, closeSlot, firstSlot, placeLaunch, slotLabels, type Slot } from './sessionDeck.js';
+import { adoptRunning, closeSlot, firstSlot, placeLaunch, slotLabels, type Slot } from './deckSlots.js';
 import { TerminalPane, type PaneStatus } from './TerminalPane.js';
 
 interface SessionDeckProps {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { chatDockSlot, sameDockRect, toDockRect } from './chatDockSlot';
+import { chatDockSlot, sameDockRect, toDockRect } from './dockPlacement';
 
 describe('toDockRect', () => {
   it('rounds to whole pixels, so a fractional layout does not make the dock chase the slot', () => {

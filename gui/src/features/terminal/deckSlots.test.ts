@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TerminalInfo } from './client.js';
-import { adoptRunning, closeSlot, firstSlot, placeLaunch, slotLabels, type Slot } from './sessionDeck.js';
+import { adoptRunning, closeSlot, firstSlot, placeLaunch, slotLabels, type Slot } from './deckSlots.js';
 
 const terminal = (id: string, target = 'claude', state: TerminalInfo['state'] = 'running'): TerminalInfo => ({ id, workspace: 'w', target, label: target, cwd: '/w', state });
 

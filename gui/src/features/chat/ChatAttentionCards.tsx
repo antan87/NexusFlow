@@ -4,7 +4,7 @@ import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js'
 import { Button } from '../../components/ui/button.js';
 import { attentionStore } from './chatAttention.js';
 import { useFloatingChat } from './floatingChatStore.js';
-import { useChatVisible } from './chatDockSlot.js';
+import { useChatVisible } from './dockPlacement.js';
 import { useChatAttention } from './useChatAttention.js';
 import type { Feature } from '../../types.js';
 

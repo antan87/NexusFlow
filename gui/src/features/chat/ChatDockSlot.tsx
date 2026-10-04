@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
-import { chatDockSlot } from './chatDockSlot.js';
+import { chatDockSlot } from './dockPlacement.js';
 import { goToWorkspace, judgeDockLanding, type DockLanding } from './chatRoute.js';
 import { floatingChatStore } from './floatingChatStore.js';
 

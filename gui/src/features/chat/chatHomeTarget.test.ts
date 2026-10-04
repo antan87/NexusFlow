@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatHomeTarget } from './chatHome';
+import { chatHomeTarget } from './chatHomeTarget';
 
 describe('chatHomeTarget', () => {
   it('is the chat in front', () => {

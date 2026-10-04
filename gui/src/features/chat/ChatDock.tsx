@@ -20,7 +20,7 @@ import { currentMilestoneIndex, ringMilestones } from '../progress/progressView.
 import { useFloatingChat, floatingChatStore, CHAT_GEOMETRY } from './floatingChatStore.js';
 import { attentionStore } from './chatAttention.js';
 import { useChatAttention, useWindowAttentive } from './useChatAttention.js';
-import { useChatDockSlot, useDockRect } from './chatDockSlot.js';
+import { useChatDockSlot, useDockRect } from './dockPlacement.js';
 import { browserPath, goToWorkspace, parseWorkspacePath, showsChatFor } from './chatRoute.js';
 import { threadNote } from './chatThreads.js';
 import { useChatThreads } from './useChatThreads.js';

@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 
 import { Spinner } from '../../components/ui/spinner.js';
 import type { Feature } from '../../types.js';
-import { chatHomeTarget } from './chatHome.js';
+import { chatHomeTarget } from './chatHomeTarget.js';
 import { chatPath } from './chatRoute.js';
 import { useFloatingChat } from './floatingChatStore.js';
 
