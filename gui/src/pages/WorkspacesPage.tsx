@@ -37,7 +37,7 @@ import { BRAND_NAME, LEGACY_BRAND_NAME } from '../brand.js';
 import { ServiceConsole } from '../features/services/ServiceConsole.js';
 import { WorkspaceHeader } from '../features/workspace-shell/WorkspaceHeader.js';
 import { WorkspaceRail } from '../features/workspace-shell/WorkspaceRail.js';
-import { SECTION_LABELS, destinationOf, visibleSection, type WorkspaceDestination, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
+import { SECTION_LABELS, visibleSection, type WorkspaceSection } from '../features/workspace-shell/destinations.js';
 import { ArchivedNotice, ArchivedWorkspaceView } from '../features/workspace-shell/ArchivedWorkspaceView.js';
 import { useCockpitStore, cockpitStore, upcastWorkspaceToCockpit } from '../features/cockpit/cockpitStore.js';
 
@@ -112,9 +112,7 @@ import { ChatMarkdown } from '../components/ChatMarkdown.js';
 
 type SubTab = WorkspaceSection;
 
-// Per workspace, the section last used in each destination and the sections
-// already opened. Module scope keeps both across route changes in a session.
-const lastVisitedByWorkspace = new Map<string, Partial<Record<WorkspaceDestination['id'], WorkspaceSection>>>();
+// Per workspace, the sections already opened. Module scope keeps them across route changes in a session.
 const visitedByWorkspace = new Map<string, Set<WorkspaceSection>>();
 function workspaceMemory<T>(store: Map<string, T>, id: string, create: () => T): T {
   let value = store.get(id);
@@ -221,8 +219,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   const { data: lifecycleData } = useWorkspaceLifecycle(selected?.branchName ?? null);
   const { data: liveRepositories } = useWorkspaceRepositories(selected?.branchName ?? null);
   const { data: workGuidance } = useWorkGuidance(selected?.branchName ?? null);
-  const lastVisited = workspaceMemory(lastVisitedByWorkspace, selected?.branchName ?? '', (): Partial<Record<WorkspaceDestination['id'], WorkspaceSection>> => ({}));
-  lastVisited[destinationOf(subTab).id] = subTab;
   const visitedSections = workspaceMemory(visitedByWorkspace, selected?.branchName ?? '', () => new Set<WorkspaceSection>());
   visitedSections.add(subTab);
 
