@@ -320,9 +320,11 @@ export async function* watchLiveEvents(
       const since = Math.max(options.since ?? 0, now - SCREEN_EVENT_MAX_AGE_MS);
       let events = await collect(workspaceRoot, since, now);
       if (first) {
-        // Replay only the newest few, so a long-running workspace does not flood a screen that just opened.
+        // Replay only the newest few, so a long-running workspace does not flood a screen that just opened. What is
+        // held back counts as seen: the next read covers the same window, and must not send it after all.
         const screens = events.filter((e) => e.event.type === 'screen');
         const drop = new Set(screens.slice(0, Math.max(0, screens.length - SCREEN_EVENT_REPLAY_LIMIT)).map((e) => e.key));
+        for (const key of drop) seen.add(key);
         events = events.filter((e) => !drop.has(e.key));
       }
       for (const entry of events) {

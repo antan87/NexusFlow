@@ -272,6 +272,21 @@ describe('watchLiveEvents', () => {
     expect((got[0] as { event: { id: string } }).event.id).toBe('n10');
   });
 
+  it('never sends the events it held back from a first replay, even after the ledger changes', async () => {
+    await fs.mkdir(ledgerDir, { recursive: true });
+    const total = SCREEN_EVENT_REPLAY_LIMIT + 10;
+    await fs.writeFile(file(), Array.from({ length: total }, (_, i) => JSON.stringify(entry({ id: `n${i}`, timestamp: new Date(Date.now() - (total - i) * 1000).toISOString(), payload: { view: 'document', path: `d${i}.md` } }))).join('\n') + '\n');
+    const controller = new AbortController();
+    const feed = new Feed(watchLiveEvents(dir, { signal: controller.signal, pollMs: 10 }));
+    expect(await feed.take(total, 800)).toHaveLength(SCREEN_EVENT_REPLAY_LIMIT);
+    // One more event: only it arrives, not the ten older ones the first replay left out.
+    await appendScreenEvent(dir, { event: 'next', payload: { title: 'New', reason: 'Just now' } });
+    const after = await feed.take(total, 800);
+    controller.abort();
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ type: 'screen', event: { event: 'next', payload: { title: 'New' } } });
+  });
+
   it('skips lines that are not usable instead of stopping', async () => {
     await fs.mkdir(ledgerDir, { recursive: true });
     await fs.writeFile(file(), 'garbage\n' + JSON.stringify(entry({ id: 'bad', payload: { view: 'file', path: '../x' } })) + '\n' + JSON.stringify(entry({ id: 'good', timestamp: new Date().toISOString() })) + '\n');
