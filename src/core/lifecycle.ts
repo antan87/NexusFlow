@@ -483,7 +483,7 @@ export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true):
     live ? 'Current progress from the workspace lifecycle.' : 'Milestone definitions from the workspace lifecycle. Run `ctxspace flow` for current progress.', ''];
   for (const [index, step] of lifecycle.steps.entries()) {
     const reopened = live && Boolean(step.reopenedAt) && step.status !== 'completed';
-    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${reopened ? 'reopened, in progress' : step.status.replaceAll('_', ' ')}` : ''}`);
+    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${reopened && step.status !== 'blocked' ? 'reopened, in progress' : step.status.replaceAll('_', ' ')}` : ''}`);
     if (live && step.status === 'blocked' && step.blockedReason) lines.push(`   Blocked: ${step.blockedReason}`);
     if (reopened) lines.push(`   Reopened${step.reopenedBy ? ` by ${step.reopenedBy === 'user' ? 'the user' : 'an agent'}` : ''}: ${step.reopenReason ?? 'no reason recorded'}`);
     if (step.description) lines.push(`   ${step.description}`);

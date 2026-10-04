@@ -52,6 +52,12 @@ describe('deriveMilestoneFacts', () => {
     expect(fact).toMatchObject({ state: 'reopened', verified: true });
   });
 
+  it('shows a reopened milestone that is then blocked as blocked, with its reason, and keeps the reopen on record', () => {
+    const facts = deriveMilestoneFacts([step('api', { status: 'blocked', blockedReason: 'Waiting on keys', reopenedAt: '2026-10-02T10:00:00.000Z', reopenReason: 'Gap', reopenedBy: 'user' })]);
+    expect(facts[0]).toMatchObject({ state: 'blocked', blockedReason: 'Waiting on keys', reopen: { reason: 'Gap', by: 'user' } });
+    expect(countMilestones(facts)).toMatchObject({ blocked: 1, reopened: 0 });
+  });
+
   it('shows a milestone done once it is completed again, and remembers it was reopened', () => {
     const [fact] = deriveMilestoneFacts([step('plan', { status: 'completed', completedAt: '2026-10-03T10:00:00.000Z', reopenCount: 2, lastVerificationStatus: 'pass' })]);
     expect(fact).toMatchObject({ state: 'done', reopenCount: 2, completedAt: '2026-10-03T10:00:00.000Z' });

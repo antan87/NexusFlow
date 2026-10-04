@@ -303,8 +303,10 @@ describe('set_milestone', () => {
   });
 
   it('refuses nonsense proposals: reopening unfinished work, completing work that never started or already finished', async () => {
-    await seed([step('a', 'in_progress'), step('b', 'pending'), step('c', 'completed')]);
+    await seed([step('a', 'in_progress'), step('b', 'pending'), step('c', 'completed'), step('d', 'verified')]);
     expect((await call('set_milestone', { id: 'a', state: 'reopened', note: 'x' })).text).toMatch(/nothing to reopen/);
+    // Passed its check but not finished: the user sees it in progress, so a reopen proposal would never show.
+    expect((await call('set_milestone', { id: 'd', state: 'reopened', note: 'x' })).text).toMatch(/nothing to reopen/);
     expect((await call('set_milestone', { id: 'b', state: 'done', note: 'x' })).text).toMatch(/cannot be proposed as done/);
     expect((await call('set_milestone', { id: 'c', state: 'done', note: 'x' })).text).toMatch(/cannot be proposed as done/);
     expect(await screenLines()).toEqual([]);

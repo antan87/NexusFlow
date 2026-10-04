@@ -95,9 +95,10 @@ export function deriveMilestoneFacts(steps: readonly LifecycleStep[]): Milestone
   const finished = new Set(steps.filter((step) => step.status === 'completed').map((step) => step.id));
   return steps.map((step): MilestoneFact => {
     const reopened = Boolean(step.reopenedAt) && step.status !== 'completed';
+    // Blocked says what stops the work now, so it wins over reopened; the reopen stays on record.
     const state: MilestoneState = step.status === 'completed' ? 'done'
-      : reopened ? 'reopened'
-        : step.status === 'blocked' ? 'blocked'
+      : step.status === 'blocked' ? 'blocked'
+        : reopened ? 'reopened'
           : step.status === 'in_progress' || step.status === 'verified' ? 'in_progress'
             : 'upcoming';
     return {

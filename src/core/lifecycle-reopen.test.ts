@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  blockLifecycleStep,
   LifecycleStepError,
   REOPEN_REASON_MAX_LENGTH,
   advanceLifecycleStep,
@@ -205,6 +206,16 @@ describe('the milestone plan the AI reads', () => {
     const lifecycle = await reopenLifecycleStep(workspacePath, 'plan', { reason: 'Tests were too narrow', by: 'agent' });
     expect(renderLifecyclePlan(lifecycle)).toContain('Reopened by an agent: Tests were too narrow');
     expect(renderLifecyclePlan(lifecycle, false)).not.toContain('Reopened');
+  });
+
+  it('says a reopened milestone that is then blocked is blocked, with why, and still says it was reopened', async () => {
+    await seed([finished('plan')]);
+    await reopenLifecycleStep(workspacePath, 'plan', { reason: 'Rework', by: 'user' });
+    const text = renderLifecyclePlan(await blockLifecycleStep(workspacePath, 'plan', { reason: 'Waiting on keys' }));
+    expect(text).toContain('1. **PLAN** — blocked');
+    expect(text).not.toContain('reopened, in progress');
+    expect(text).toContain('Blocked: Waiting on keys');
+    expect(text).toContain('Reopened by the user: Rework');
   });
 
   it('shows plain "completed" again once the rework is finished', async () => {

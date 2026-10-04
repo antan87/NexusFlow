@@ -234,8 +234,9 @@ export const screenTools: NexusFlowTool[] = [
 
       if (input.state === 'reopened') {
         needNote('what is wrong, so the user can decide');
-        if (step.status !== 'completed' && step.status !== 'verified') {
-          throw new Error(`"${step.title}" is ${step.status.replace('_', ' ')}, so there is nothing to reopen. Only a finished milestone can be reopened.`);
+        // A verified milestone passed its check but is not finished, and the user sees it as in progress.
+        if (step.status !== 'completed') {
+          throw new Error(`"${step.title}" is ${step.status.replace('_', ' ')}, so there is nothing to reopen. Only a finished milestone can be reopened; say what is wrong in the chat.`);
         }
         const { status } = await appendScreenEvent(root, { harness: input.harness, event: 'milestone_proposal', payload: { stepId: input.id, proposal: 'reopen', reason: input.note! } });
         return { status: status === 'shown' ? 'proposed' : 'already_proposed', milestone: input.id, message: 'This is a proposal. You cannot reopen a milestone yourself: the user sees your reason and decides. Carry on with other work until they do.' };
