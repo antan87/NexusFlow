@@ -32,6 +32,7 @@ import { useIsMobile, useMediaQuery } from '../components/ui/use-mobile.js';
 import { QuickSwitch } from './QuickSwitch.js';
 import { useTheme, COLOR_THEMES } from './ThemeProvider.js';
 import { useFloatingChat } from '../features/chat/floatingChatStore.js';
+import { useChatThreads } from '../features/chat/useChatThreads.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { RepositoriesList } from '../features/worktrees/RepositoriesList.js';
 import { hasUnpreparedRepo } from '../features/worktrees/normalizeWorktrees.js';
@@ -85,6 +86,8 @@ function SidebarContents({
   const { pathname } = useLocation();
   const { theme, setTheme, colorTheme, setColorTheme } = useTheme();
   const { openCli } = useFloatingChat();
+  // Read by the chat while it is on screen; the sidebar shows what it last read and never reads on its own.
+  const chatThreads = useChatThreads(workspaces, false);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<WorkspaceSortOption>('created-desc');
   const [visibleWorkspaceCount, setVisibleWorkspaceCount] = useState(30);
@@ -368,6 +371,9 @@ function SidebarContents({
                     const isSelected = activeWsId === w.branchName || activeWsId === w.id;
                     const st = workspaceStatuses[w.branchName];
                     const hasChanges = Boolean(st && st.changedFiles > 0);
+                    // A workspace with an open chat says what the chat is working on, and when it needs you.
+                    const thread = chatThreads.summaries.get(w.branchName);
+                    const needsYou = thread?.tone === 'needs' ? thread.label : '';
                     const showRepositories = isSelected && repositoriesOpen && Boolean(activeWorkspace);
 
                     return (
@@ -389,10 +395,19 @@ function SidebarContents({
                           <span className="truncate font-medium text-foreground" title={w.name || w.branchName}>
                             {w.name || w.branchName}
                           </span>
-                          <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                            {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
-                            {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
-                            <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                          <span className="flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+                            {thread && (thread.goal || needsYou) ? (
+                              <>
+                                {needsYou && <span className="state-chip shrink-0" data-tone="needs">{needsYou}</span>}
+                                {thread.goal && <span className="truncate" title={thread.goal}>{thread.goal}</span>}
+                              </>
+                            ) : (
+                              <>
+                                {w.name && <span className="truncate font-mono" title={w.branchName}>{w.branchName}</span>}
+                                {!w.name && w.description && <span className="truncate" title={w.description}>{w.description}</span>}
+                                <span>{w.repos.length} {w.repos.length === 1 ? 'repo' : 'repos'}</span>
+                              </>
+                            )}
                             {w.archivedAt && <span className="font-semibold">archived</span>}
                             {hasChanges && <span className="text-warning-foreground font-semibold">• ±{st!.changedFiles}</span>}
                           </span>

@@ -5,7 +5,7 @@ import { floatingChatStore } from '../../features/chat/floatingChatStore.js';
  * hand-rolled refetch effects.
  */
 
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './client.js';
 import type {
@@ -719,6 +719,9 @@ export function useWorkGuidance(wsId: string | null) {
 
 export const progressFactsKey = (wsId: string | null) => ['progress-facts', wsId] as const;
 
+const fetchProgressFacts = async (wsId: string, signal?: AbortSignal) =>
+  (await apiFetch<{ facts: ProgressFacts }>(`/api/workspace/${encodeURIComponent(wsId)}/progress-facts`, { signal })).facts;
+
 /**
  * Checkable progress facts: milestones (with reopened work), open questions, changed
  * files and the last check. Polled only while the workspace is on screen; the live
@@ -727,7 +730,7 @@ export const progressFactsKey = (wsId: string | null) => ['progress-facts', wsId
 export function useProgressFacts(wsId: string | null, active: boolean) {
   return useQuery({
     queryKey: progressFactsKey(wsId),
-    queryFn: async ({ signal }) => (await apiFetch<{ facts: ProgressFacts }>(`/api/workspace/${encodeURIComponent(wsId!)}/progress-facts`, { signal })).facts,
+    queryFn: ({ signal }) => fetchProgressFacts(wsId!, signal),
     enabled: Boolean(wsId) && active,
     refetchInterval: 8000,
     staleTime: 3000,
@@ -735,6 +738,37 @@ export function useProgressFacts(wsId: string | null, active: boolean) {
     retry: 1,
     retryDelay: 1000,
   });
+}
+
+/**
+ * The facts and the goal of every open chat, for the tabs and the chat list. The strip polls the chat on screen every
+ * eight seconds; these are the others, read slowly and only while the chat is on screen, because a progress read looks
+ * at every repository. Both use the strip's own cache keys, so the chat on screen is never read twice.
+ */
+export function useOpenChatFacts(workspaceIds: readonly string[], enabled: boolean) {
+  const facts = useQueries({
+    queries: workspaceIds.map((wsId) => ({
+      queryKey: progressFactsKey(wsId),
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchProgressFacts(wsId, signal),
+      enabled,
+      refetchInterval: 30_000,
+      staleTime: 10_000,
+      retry: 1,
+    })),
+  });
+  const guidance = useQueries({
+    queries: workspaceIds.map((wsId) => ({
+      queryKey: ['workspace-work', wsId],
+      queryFn: async ({ signal }: { signal: AbortSignal }) => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId)}/work`, { signal })).guidance,
+      enabled,
+      staleTime: 60_000,
+      retry: 1,
+    })),
+  });
+  return {
+    facts: new Map(workspaceIds.map((wsId, index) => [wsId, facts[index]?.data] as const)),
+    guidance: new Map(workspaceIds.map((wsId, index) => [wsId, guidance[index]?.data] as const)),
+  };
 }
 
 /** The files changed in each repository, for the strip's Touched list. Fetched only while the panel is open. */

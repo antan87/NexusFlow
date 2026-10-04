@@ -10,16 +10,20 @@ import {
   MessageSquare,
   Columns2,
 } from 'lucide-react';
-import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { Button } from '../../components/ui/button.js';
+import { ContextRing } from '../../components/ui/context-ring.js';
 import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { cn } from '../../lib/utils.js';
 import type { Feature } from '../../types.js';
+import { currentMilestoneIndex, ringMilestones } from '../progress/progressView.js';
 import { useFloatingChat, floatingChatStore, CHAT_GEOMETRY } from './floatingChatStore.js';
 import { attentionStore } from './chatAttention.js';
 import { useChatAttention, useWindowAttentive } from './useChatAttention.js';
 import { useChatDockSlot, useDockRect } from './chatDockSlot.js';
 import { browserPath, goToWorkspace, parseWorkspacePath, showsChatFor } from './chatRoute.js';
+import { threadNote } from './chatThreads.js';
+import { useChatThreads } from './useChatThreads.js';
+import { ChatList } from './ChatList.js';
 
 interface ChatDockProps {
   workspaces: Feature[];
@@ -98,6 +102,8 @@ export function ChatDock({ workspaces }: ChatDockProps) {
   // looking at. A chat left open on another monitor must keep its alert.
   const { pending, waiting } = useChatAttention();
   const attentive = useWindowAttentive();
+  // What each open chat is working on and how far it is, for its tab and for the list of chats.
+  const chatData = useChatThreads(workspaces, onScreen);
   useEffect(() => {
     if (!onScreen || !attentive) return;
     const shown = new Set([activeTab, showSplit ? splitTab : null].filter((value): value is string => Boolean(value)));
@@ -182,6 +188,15 @@ export function ChatDock({ workspaces }: ChatDockProps) {
       {/* The tabs are the open workspaces. Choosing one goes to that workspace's chat address, so the address
           always says which chat this is, and back and forward move between them. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/80 bg-muted/40 px-2.5 py-1.5">
+        {openTabs.length > 0 && (
+          <ChatList
+            activeBranch={activeTab}
+            rows={openTabs.map((branch) => ({ branch, name: workspaceMap.get(branch)?.name || branch, summary: chatData.summaries.get(branch)!, facts: chatData.facts.get(branch), harness: harnesses[branch] }))}
+            onOpen={(branch) => goToWorkspace(navigate, branch, parseWorkspacePath(browserPath())?.section ?? 'chat')}
+            onFinish={(branch) => goToWorkspace(navigate, branch, 'changes')}
+            onClose={removeTab}
+          />
+        )}
         {/* The tab strip scrolls, so a waiting chat can be out of sight; this stays put and jumps to the one waiting longest. */}
         {pending.length > 0 && (
           <button
@@ -202,11 +217,14 @@ export function ChatDock({ workspaces }: ChatDockProps) {
               const isActive = branchName === activeTab;
               // A workspace is known by its name. The branch is a detail, shown when hovering.
               const label = workspaceMap.get(branchName)?.name || branchName;
+              const summary = chatData.summaries.get(branchName)!;
+              const noteId = `chat-note-${branchName}`;
               return (
                 <div
                   key={branchName}
                   className={cn(
-                    'group flex max-w-[170px] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border py-1 pl-2 pr-1.5 text-xs font-medium transition-all duration-150',
+                    // Tabs share the strip, down to a name and a few letters of the goal, before it scrolls; the list of chats has the rest.
+                    'group flex min-w-[7.5rem] max-w-[13rem] flex-[0_1_13rem] cursor-pointer items-center gap-1.5 rounded-lg border py-1 pl-2 pr-1.5 text-xs font-medium transition-[background-color,border-color,color] duration-150',
                     isActive || splitTab === branchName
                       ? 'border-border bg-card font-semibold text-foreground shadow-xs'
                       : 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground',
@@ -215,23 +233,32 @@ export function ChatDock({ workspaces }: ChatDockProps) {
                 >
                   {/* A tab holds nothing focusable, so the tab strip is a valid tab list. The Delete key closes the focused tab;
                       the cross is the same action for the mouse, and is not announced separately. */}
-                  <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-keyshortcuts="Delete" aria-label={`Show ${label} in the left pane${waiting.has(branchName) ? ', waiting for your input' : ''}`} title={label === branchName ? branchName : `${label} (${branchName})`} data-branch={branchName}
-                    className="flex min-w-0 items-center gap-1.5" onClick={() => goToWorkspace(navigate, branchName, parseWorkspacePath(browserPath())?.section ?? 'chat')}
+                  <button type="button" role="tab" aria-selected={isActive || splitTab === branchName} aria-keyshortcuts="Delete" aria-label={`Show ${label} in the left pane${waiting.has(branchName) ? ', waiting for your input' : ''}`} aria-describedby={noteId} title={label === branchName ? branchName : `${label} (${branchName})`} data-branch={branchName}
+                    className="flex min-w-0 items-center gap-2" onClick={() => goToWorkspace(navigate, branchName, parseWorkspacePath(browserPath())?.section ?? 'chat')}
                     onKeyDown={(event) => {
                       if (event.key !== 'Delete') return;
                       event.preventDefault();
                       closeTab(branchName);
                     }}>
-                    <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{label}</span>
-                    {harnesses[branchName] && <span title={harnessName(harnesses[branchName])}><HarnessIcon harness={harnesses[branchName]} className="size-3" /></span>}
-                    {terminalStates[branchName] && terminalStates[branchName] !== 'idle' && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'running' ? 'bg-emerald-500' : terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
-                    {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
-                    {waiting.has(branchName) && <span title="Waiting for your input" className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />}
+                    {/* The ring is the chat's progress at a glance; the line under the name says what it is working on. */}
+                    <ContextRing aria-hidden="true" size={18} milestones={ringMilestones(chatData.facts.get(branchName))} currentIndex={currentMilestoneIndex(chatData.facts.get(branchName))} />
+                    <span className="flex min-w-0 flex-col text-left">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate">{label}</span>
+                        {/* A running terminal is the normal case, so only one that stopped or lost its connection is marked. */}
+                        {(terminalStates[branchName] === 'exited' || terminalStates[branchName] === 'disconnected') && <span title={`Terminal ${terminalStates[branchName]}`} className={cn('size-1.5 shrink-0 rounded-full', terminalStates[branchName] === 'disconnected' ? 'bg-amber-500' : 'bg-muted-foreground')} />}
+                        {unreadOutput[branchName] && <span title="New terminal output" className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                        {waiting.has(branchName) && <span title="Waiting for your input" className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />}
+                      </span>
+                      {/* Every tab has the second line, so they line up: the goal, else the state, else an empty line while loading. */}
+                      <span aria-hidden="true" className="truncate text-[10.5px] font-normal leading-tight text-muted-foreground">{summary.goal || summary.label || '\u00a0'}</span>
+                    </span>
+                    <span id={noteId} className="sr-only">{threadNote(summary)}</span>
                     <span
                       aria-hidden="true" data-close-tab={branchName} title={`Close ${branchName} tab`}
                       onClick={(event) => { event.stopPropagation(); closeTab(branchName); }}
-                      className="grid size-3.5 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground opacity-70 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      // Only on the tab in front, or the one pointed at or focused, so a narrow tab keeps its room for the name.
+                      className={cn('size-3.5 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-focus-within:grid group-hover:grid', isActive || splitTab === branchName ? 'grid' : 'hidden')}
                     >
                       <X className="size-2.5" />
                     </span>
@@ -243,9 +270,8 @@ export function ChatDock({ workspaces }: ChatDockProps) {
 
           {/* Plus / Add Workspace Dropdown Menu */}
           <Menu>
-            <MenuTrigger aria-label="Add workspace" className="flex shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-dashed border-border/70 px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground" title="Add workspace">
-              <Plus className="size-3" />
-              <span className="hidden sm:inline">Workspace</span>
+            <MenuTrigger aria-label="Add workspace" className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground" title="Add workspace">
+              <Plus className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup align="start" className="w-64 p-1.5">
               <MenuItem onClick={() => navigate('/new?from=chat')} className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold">

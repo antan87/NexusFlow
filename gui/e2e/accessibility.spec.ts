@@ -103,6 +103,13 @@ async function checkChatStrip(page: Page, label: string) {
   await expect(detail.getByText('The AI suggests reopening this')).toBeVisible();
   await expect(detail.getByText('Waiting for an API key').first()).toBeVisible();
   await expectNoSeriousViolations(page, `${label} strip panel`);
+  // The list of open chats: rings, state chips, goal lines and the row actions.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'All chats', exact: true }).click();
+  const list = page.getByRole('dialog');
+  await expect(list.locator('li[data-branch="demo"] .state-chip')).toHaveText('Needs you');
+  await list.locator('li[data-branch="demo"]').hover();
+  await expectNoSeriousViolations(page, `${label} list of chats`);
 }
 
 async function expectNoSeriousViolations(page: Page, label: string, scope?: string) {
