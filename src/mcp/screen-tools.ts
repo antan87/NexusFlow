@@ -18,7 +18,7 @@ import {
   SCREEN_NOTE_LIMIT, SCREEN_REASON_LIMIT, SCREEN_TEXT_LIMIT, SCREEN_TITLE_LIMIT,
   appendScreenEvent,
 } from '../core/screen-events.js';
-import { ScreenPathError, resolveScreenRepo, resolveScreenTarget, SCREEN_PATH_MAX_LENGTH } from '../core/screen-paths.js';
+import { resolveScreenRepo, resolveScreenTarget, SCREEN_PATH_MAX_LENGTH } from '../core/screen-paths.js';
 import { findWorkspaceRoot, loadFeatureConfig } from '../core/workspace.js';
 import type { NexusFlowTool } from './tools.js';
 
@@ -77,14 +77,19 @@ const DOCUMENT_EXTENSIONS = /\.(md|markdown|txt|html?|pdf|csv|json)$/i;
 
 /** Counts lines in a text file small enough to read, or returns undefined when that is not worth doing. */
 async function lineCount(absolute: string): Promise<number | undefined> {
+  let handle: fs.FileHandle | undefined;
   try {
-    const stat = await fs.stat(absolute);
+    // One open file for the check and the read, so they cannot be two different files.
+    handle = await fs.open(absolute, 'r');
+    const stat = await handle.stat();
     if (!stat.isFile() || stat.size > 2 * 1024 * 1024) return undefined;
-    const content = await fs.readFile(absolute, 'utf8');
+    const content = await handle.readFile('utf8');
     if (content.includes('\u0000')) return undefined;
     return content.split('\n').length - (content.endsWith('\n') ? 1 : 0);
   } catch {
     return undefined;
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 

@@ -196,6 +196,21 @@ function sameEvent(a: ScreenEventInput, b: ScreenEvent): boolean {
 let appendQueue: Promise<unknown> = Promise.resolve();
 
 /**
+ * Appends a line unless the file has already grown past `limit`, and says whether it did. The size is read from the
+ * open file itself, so it cannot be another file than the one written to.
+ */
+async function appendWithin(file: string, line: string, limit: number): Promise<boolean> {
+  const handle = await fs.open(file, 'a');
+  try {
+    if ((await handle.stat()).size > limit) return false;
+    await handle.appendFile(line, 'utf8');
+    return true;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Records one event. An identical event from the same agent inside
  * {@link SCREEN_EVENT_REPEAT_WINDOW_MS} is not recorded again, because an agent
  * that calls a tool twice should not make the screen jump twice.
@@ -218,14 +233,14 @@ export async function appendScreenEvent(
     if (repeat) return { status: 'already_shown' as const, event: repeat };
 
     await fs.mkdir(dir, { recursive: true });
-    const size = await fs.stat(file).then((stat) => stat.size, () => 0);
-    if (size > SCREEN_EVENTS_MAX_BYTES) {
+    const event = { id: randomUUID(), timestamp: new Date(now).toISOString(), harness, ...clean } as ScreenEvent;
+    const line = JSON.stringify({ ...event, author: 'agent', kind: SCREEN_EVENT_KIND }) + '\n';
+    if (!(await appendWithin(file, line, SCREEN_EVENTS_MAX_BYTES))) {
       // Keep one earlier file. Reading only ever needs the end, so nothing is lost that a screen could still want.
       await fs.rm(`${file}.1`, { force: true });
       await fs.rename(file, `${file}.1`).catch(() => {});
+      await fs.appendFile(file, line, 'utf8');
     }
-    const event = { id: randomUUID(), timestamp: new Date(now).toISOString(), harness, ...clean } as ScreenEvent;
-    await fs.appendFile(file, JSON.stringify({ ...event, author: 'agent', kind: SCREEN_EVENT_KIND }) + '\n', 'utf8');
     return { status: 'shown' as const, event };
   };
   const result = appendQueue.then(run, run);
