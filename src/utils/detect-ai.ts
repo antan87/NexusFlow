@@ -5,7 +5,7 @@
 
 import { probeCommand } from './probe.js';
 
-import type { AIAssistant, DetectedAI } from '../types.js';
+import type { AIAssistant, DetectedAI, SessionAssistant } from '../types.js';
 
 /**
  * Attempts to run `<command> --version` and returns `true` if the process
@@ -35,12 +35,13 @@ async function commandExists(command: string): Promise<boolean> {
  *   CLI is on PATH.
  * - **Cursor**: detected if `cursor` is on PATH; launchable only when the
  *   `cursor-agent` CLI is on PATH.
+ * - **Pi**: detected if `pi` is on PATH; launchable when the `pi` CLI is on PATH.
  *
  * @returns An array of {@link DetectedAI} results, one per assistant.
  */
 export async function detectAIAssistants(): Promise<DetectedAI[]> {
   // Run all probes concurrently.
-  const [hasClaude, hasAntigravity, hasCodex, hasCopilot, hasCursor, hasCursorAgent] =
+  const [hasClaude, hasAntigravity, hasCodex, hasCopilot, hasCursor, hasCursorAgent, hasPi] =
     await Promise.all([
       commandExists('claude'),
       commandExists('agy'),
@@ -48,6 +49,7 @@ export async function detectAIAssistants(): Promise<DetectedAI[]> {
       commandExists('copilot'),
       commandExists('cursor'),
       commandExists('cursor-agent'),
+      commandExists('pi'),
     ]);
 
   const results: DetectedAI[] = [
@@ -81,6 +83,12 @@ export async function detectAIAssistants(): Promise<DetectedAI[]> {
       detected: hasCursor,
       // `cursor` opens the GUI editor; `cursor-agent` is the terminal session CLI.
       ...(hasCursorAgent ? { command: 'cursor-agent' } : {}),
+    },
+    {
+      name: 'pi' as SessionAssistant,
+      displayName: 'Pi',
+      detected: hasPi,
+      ...(hasPi ? { command: 'pi' } : {}),
     },
   ];
 

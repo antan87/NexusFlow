@@ -729,7 +729,15 @@ function AppInner() {
     assistant: string,
   ): Promise<boolean> => {
     if (assistant !== 'codex') {
-      const cmd = assistant === 'claude' ? `claude --resume ${sessionId}` : `agy --conversation ${sessionId}`;
+      const cmd = assistant === 'claude'
+        ? `claude --resume ${sessionId}`
+        : assistant === 'copilot'
+          ? `copilot --resume ${sessionId}`
+          : assistant === 'cursor'
+            ? `cursor-agent --resume ${sessionId}`
+            : assistant === 'pi'
+              ? `pi --session ${sessionId}`
+              : `agy --conversation ${sessionId}`;
       await safeCopyToClipboard(cmd);
       showToast(`Copied ${assistant} resume command to clipboard:\n\n${cmd}`, 'info');
       return true;

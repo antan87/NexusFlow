@@ -17,6 +17,7 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../../components/icons/AntigravityIcon.js';
+import { HarnessIcon } from '../../components/icons/HarnessIcon.js';
 
 import type { AISession, Feature, TranscriptMessage } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
@@ -95,6 +96,12 @@ const renderAssistantIcon = (ast: string) => {
           <SiGithubcopilot className="size-2.5" />
         </span>
       );
+    case 'pi':
+      return (
+        <span className="grid size-5.5 place-items-center rounded-md bg-muted border border-border/80 shadow-2xs p-0.5 shrink-0" title="Pi">
+          <HarnessIcon harness="pi" className="size-3.5" />
+        </span>
+      );
     default:
       return null;
   }
@@ -121,6 +128,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
   const isClaudeDetected = Boolean(aiDetect.data?.find((a) => a.name === 'claude')?.detected);
   const isCodexDetected = Boolean(aiDetect.data?.find((a) => a.name === 'codex')?.detected);
   const isCopilotDetected = Boolean(aiDetect.data?.find((a) => a.name === 'copilot')?.command);
+  const isPiDetected = Boolean(aiDetect.data?.find((a) => a.name === 'pi')?.detected);
 
   const hasAgyIde = Boolean(launchTargets.data?.some((t) => t.id === 'antigravity' && t.available));
   const hasCodexDesktop = Boolean(launchTargets.data?.some((t) => t.id === 'codex-desktop' && t.available));
@@ -142,6 +150,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     claude: false,
     codex: false,
     copilot: false,
+    pi: false,
   });
 
   const toggleHarness = (id: string) => {
@@ -290,6 +299,10 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
     () => sortSessions(sessions.filter((s) => s.assistant === 'copilot'), sortBy),
     [sessions, sortBy]
   );
+  const piSessions = useMemo(
+    () => sortSessions(sessions.filter((s) => s.assistant === 'pi'), sortBy),
+    [sessions, sortBy]
+  );
 
   const isAssistantConfigured = useCallback((id: string) => ws.assistants?.includes(id) ?? false, [ws.assistants]);
 
@@ -358,10 +371,26 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
         </span>
       ),
     },
+    {
+      id: 'pi',
+      name: 'Pi',
+      cliCommand: 'pi',
+      isDetected: isPiDetected,
+      isConfigured: isAssistantConfigured('pi'),
+      hasApp: false,
+      appName: 'App',
+      appTargetId: 'pi',
+      sessions: piSessions,
+      icon: (
+        <span className="grid size-6 place-items-center rounded-md bg-muted border border-border/80 shadow-2xs p-0.5">
+          <HarnessIcon harness="pi" className="size-4" />
+        </span>
+      ),
+    },
   ], [
-    isAgyDetected, isClaudeDetected, isCodexDetected, isCopilotDetected,
+    isAgyDetected, isClaudeDetected, isCodexDetected, isCopilotDetected, isPiDetected,
     hasAgyIde, hasCodexDesktop, isAssistantConfigured,
-    agySessions, claudeSessions, codexSessions, copilotSessions,
+    agySessions, claudeSessions, codexSessions, copilotSessions, piSessions,
   ]);
 
   const installedHarnesses = useMemo(() => {
@@ -564,7 +593,7 @@ export const SessionHistory: React.FC<SessionHistoryProps> = ({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-0.5">
                       <span className="font-semibold capitalize text-foreground">
-                        {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : 'Copilot'}
+                        {sess.assistant === 'antigravity' ? 'Antigravity' : sess.assistant === 'claude' ? 'Claude' : sess.assistant === 'codex' ? 'Codex' : sess.assistant === 'pi' ? 'Pi' : sess.assistant === 'cursor' ? 'Cursor' : 'Copilot'}
                       </span>
                       <span>•</span>
                       <span className="font-mono text-muted-foreground">{sess.id.slice(0, 8)}</span><SessionKind session={sess} />

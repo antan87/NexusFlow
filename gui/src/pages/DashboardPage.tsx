@@ -17,6 +17,7 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { HarnessIcon } from '../components/icons/HarnessIcon.js';
 import type { Feature, WorkspaceStatus, WorkspaceLaunchTarget } from '../types.js';
 import { Button } from '../components/ui/button.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
@@ -177,6 +178,29 @@ const HARNESS_REGISTRY: HarnessConfig[] = [
         isAvailable: launchTargets.find((t) => t.id === 'vscode')?.available ?? false,
         unavailableReason: 'VS Code not detected',
         icon: <Code2 size={12} />,
+      },
+    ],
+  },
+  {
+    id: 'pi',
+    name: 'Pi',
+    shortName: 'Pi',
+    cliCommand: 'pi',
+    icon: (
+      <span className="grid size-5 place-items-center rounded bg-muted text-foreground shadow-2xs">
+        <HarnessIcon harness="pi" className="size-3" />
+      </span>
+    ),
+    getOptions: ({ aiDetected }) => [
+      {
+        id: 'pi-cli',
+        label: 'CLI in Terminal',
+        shortLabel: 'CLI',
+        type: 'cli',
+        command: 'pi',
+        isAvailable: aiDetected['pi'] ?? false,
+        unavailableReason: 'CLI "pi" not found on PATH',
+        icon: <Terminal size={12} />,
       },
     ],
   },
