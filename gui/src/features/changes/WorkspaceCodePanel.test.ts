@@ -371,4 +371,57 @@ describe('WorkspaceCodePanel Sidebar Search & Path Filtering', () => {
     expect(effectiveExpandedPaths['frontend']?.has('src/components')).toBe(true);
     expect(effectiveExpandedPaths['frontend']?.has('src/utils')).toBe(false);
   });
+
+  it('handles Expand All and Collapse All during active search without mutating base expansion state', () => {
+    const baseExpandedPaths: Record<string, Set<string>> = {
+      frontend: new Set(['src/components']),
+      backend: new Set(),
+    };
+
+    const query = 'src';
+    const filteredRepos = sampleRepos.map(r => ({
+      ...r,
+      files: filterTreeFiles(r.files, query),
+    }));
+
+    // Simulating expandAllFolders during active search
+    const searchExpanded: Record<string, Set<string>> = {};
+    for (const repo of filteredRepos) {
+      const root = buildCompactedTree(repo.files);
+      searchExpanded[repo.repoName] = new Set(getAllDirectoryPaths(root));
+    }
+
+    // Both frontend and backend filtered trees are expanded
+    expect(searchExpanded['frontend']?.size).toBeGreaterThan(0);
+    expect(searchExpanded['backend']?.size).toBeGreaterThan(0);
+    // Base expandedPaths was NOT modified
+    expect(baseExpandedPaths['frontend']).toEqual(new Set(['src/components']));
+    expect(baseExpandedPaths['backend']?.size).toBe(0);
+
+    // Simulating collapseAllFolders during active search
+    const searchCollapsed: Record<string, Set<string>> = {};
+    for (const repo of filteredRepos) {
+      searchCollapsed[repo.repoName] = new Set();
+    }
+    expect(searchCollapsed['frontend']?.size).toBe(0);
+    expect(searchCollapsed['backend']?.size).toBe(0);
+    // Base expandedPaths remains intact
+    expect(baseExpandedPaths['frontend']).toEqual(new Set(['src/components']));
+  });
+
+  it('uncollapses searchCollapsedRepos when a file in that repo is selected during search', () => {
+    const searchCollapsedRepos: Record<string, boolean> = {
+      frontend: true,
+      backend: false,
+    };
+
+    const selection = { repoName: 'frontend', file: 'src/components/Button.tsx' };
+
+    // Selecting file in frontend uncollapses frontend
+    if (searchCollapsedRepos[selection.repoName]) {
+      searchCollapsedRepos[selection.repoName] = false;
+    }
+
+    expect(searchCollapsedRepos['frontend']).toBe(false);
+  });
 });

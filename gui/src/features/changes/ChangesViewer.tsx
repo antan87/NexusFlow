@@ -296,6 +296,18 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   }, [searchFilter, filteredReposWithChanges, treeExpandedPaths, searchExpandedPaths]);
 
   const expandAllRepos = () => {
+    if (searchFilter.trim()) {
+      const nextCollapsed: Record<string, boolean> = {};
+      const nextTrees: Record<string, Set<string>> = {};
+      filteredReposWithChanges.forEach((repo) => {
+        nextCollapsed[repo.repoName] = false;
+        const root = buildCompactedTree(repo.files || []);
+        nextTrees[repo.repoName] = new Set(getAllDirectoryPaths(root));
+      });
+      setSearchCollapsedRepos(nextCollapsed);
+      setSearchExpandedPaths(nextTrees);
+      return;
+    }
     const next: Record<string, boolean> = {};
     const nextTrees: Record<string, Set<string>> = {};
     gitChanges.forEach((repo) => {
@@ -308,6 +320,18 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   };
 
   const collapseAllRepos = () => {
+    if (searchFilter.trim()) {
+      const nextCollapsed: Record<string, boolean> = {};
+      const nextTrees: Record<string, Set<string>> = {};
+      filteredReposWithChanges.forEach((repo) => {
+        nextCollapsed[repo.repoName] = true;
+        nextTrees[repo.repoName] = new Set();
+      });
+      setSearchCollapsedRepos(nextCollapsed);
+      setSearchExpandedPaths(nextTrees);
+      setExpandedFiles({});
+      return;
+    }
     const next: Record<string, boolean> = {};
     const nextTrees: Record<string, Set<string>> = {};
     gitChanges.forEach((repo) => {
@@ -494,6 +518,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
       // Ensure repo is expanded
       setCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
+      setSearchCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
 
       // Ensure ancestor folders in FileTree are expanded
       const targetRepoObj = gitChanges.find((r) => r.repoName === target.repoName);
@@ -502,6 +527,19 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         const ancestors = getAncestorPaths(root, target.file);
         if (ancestors.length > 0) {
           setTreeExpandedPaths((prev) => {
+            const current = prev[target.repoName] || new Set();
+            let changed = false;
+            const next = new Set(current);
+            for (const a of ancestors) {
+              if (!next.has(a)) {
+                next.add(a);
+                changed = true;
+              }
+            }
+            return changed ? { ...prev, [target.repoName]: next } : prev;
+          });
+          setSearchExpandedPaths((prev) => {
+            if (!prev[target.repoName]) return prev;
             const current = prev[target.repoName] || new Set();
             let changed = false;
             const next = new Set(current);
@@ -541,7 +579,25 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
   const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
-    const index = findChangedFileIndex(treeOrderedFiles, targetRepo, targetFile);
+    let filesList = treeOrderedFiles;
+    if (searchFilter.trim()) {
+      const allVisualFiles = gitChanges.flatMap((repo) =>
+        getTreeOrderedFiles(repo.files || []).map((f: any) => ({
+          repoName: repo.repoName,
+          repoPath: repo.repoPath,
+          file: f.file,
+          type: f.type || 'modified',
+          additions: f.additions || 0,
+          deletions: f.deletions || 0,
+        }))
+      );
+      const allIdx = findChangedFileIndex(allVisualFiles, targetRepo, targetFile);
+      if (allIdx !== -1) {
+        setSearchFilter('');
+        filesList = allVisualFiles;
+      }
+    }
+    const index = findChangedFileIndex(filesList, targetRepo, targetFile);
 
     if (index !== -1) {
       void jumpToFile(index, line);
@@ -914,9 +970,9 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
               const filteredRepo = filteredReposWithChanges.find(r => r.repoName === repo.repoName) || repo;
               const repoFilteredFiles = filteredRepo.files || [];
               const hasMatches = repoFilteredFiles.length > 0;
-              const totalFilesChanged = repo.files.length;
-              const repoAdditions = repo.files.reduce((acc: number, f: any) => acc + (f.additions || 0), 0);
-              const repoDeletions = repo.files.reduce((acc: number, f: any) => acc + (f.deletions || 0), 0);
+              const totalFilesChanged = repo.files?.length || 0;
+              const repoAdditions = (repo.files || []).reduce((acc: number, f: any) => acc + (f.additions || 0), 0);
+              const repoDeletions = (repo.files || []).reduce((acc: number, f: any) => acc + (f.deletions || 0), 0);
               const collapsed = searchFilter.trim()
                 ? (searchCollapsedRepos[repo.repoName] ?? !hasMatches)
                 : isRepoCollapsed(repo.repoName);
@@ -1151,6 +1207,18 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                 </div>
               );
             })
+          )}
+          {searchFilter.trim() && treeOrderedFiles.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 p-6 text-center">
+              <p className="text-xs text-muted-foreground">No changed files matching &ldquo;{searchFilter}&rdquo;</p>
+              <button
+                type="button"
+                onClick={() => setSearchFilter('')}
+                className="mt-2 inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors cursor-pointer"
+              >
+                Clear filter
+              </button>
+            </div>
           )}
         </div>
       )}

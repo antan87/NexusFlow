@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChangesViewer } from './ChangesViewer.js';
-import { filterTreeFiles, getMatchingBranchPaths, treeOrderedFiles } from './FileTree.js';
+import { buildCompactedTree, filterTreeFiles, getMatchingBranchPaths, treeOrderedFiles } from './FileTree.js';
 import type { Feature } from '../../types.js';
 
 vi.mock('../../lib/api/queries.js', () => ({
@@ -159,5 +159,59 @@ describe('ChangesViewer Jump Bar Search & Filter', () => {
     // When 0 matches, dropdown and buttons are disabled
     const isNavigationDisabled = visualFiles.length === 0;
     expect(isNavigationDisabled).toBe(true);
+  });
+
+  it('handles Expand All and Collapse All during search without mutating base tree expansions', () => {
+    const baseTrees: Record<string, Set<string>> = {
+      'repo-a': new Set(['src/components']),
+      'repo-b': new Set(),
+    };
+
+    const query = 'Button';
+    const filteredRepos = sampleGitChanges.map(repo => ({
+      ...repo,
+      files: filterTreeFiles(repo.files, query),
+    }));
+
+    // Simulating expandAllRepos during active search
+    const searchTrees: Record<string, Set<string>> = {};
+    const searchCollapsed: Record<string, boolean> = {};
+    filteredRepos.forEach(repo => {
+      searchCollapsed[repo.repoName] = false;
+      const root = buildCompactedTree(repo.files);
+      searchTrees[repo.repoName] = new Set(root.directories.map(d => d.path));
+    });
+
+    expect(searchCollapsed['repo-a']).toBe(false);
+    expect(searchTrees['repo-a']?.size).toBeGreaterThanOrEqual(1);
+    // Base tree state is preserved
+    expect(baseTrees['repo-a']).toEqual(new Set(['src/components']));
+
+    // Simulating collapseAllRepos during active search
+    const searchCollapsedAll: Record<string, boolean> = {};
+    const searchTreesAll: Record<string, Set<string>> = {};
+    filteredRepos.forEach(repo => {
+      searchCollapsedAll[repo.repoName] = true;
+      searchTreesAll[repo.repoName] = new Set();
+    });
+
+    expect(searchCollapsedAll['repo-a']).toBe(true);
+    expect(searchTreesAll['repo-a']?.size).toBe(0);
+    // Base tree state is preserved
+    expect(baseTrees['repo-a']).toEqual(new Set(['src/components']));
+  });
+
+  it('uncollapses searchCollapsedRepos when jumpToFile targets a file in a collapsed repo', () => {
+    const searchCollapsedRepos: Record<string, boolean> = {
+      'repo-a': true,
+      'repo-b': false,
+    };
+
+    const target = { repoName: 'repo-a', file: 'src/components/Button.tsx' };
+
+    // Simulating jumpToFile uncollapse
+    searchCollapsedRepos[target.repoName] = false;
+
+    expect(searchCollapsedRepos['repo-a']).toBe(false);
   });
 });

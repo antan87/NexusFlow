@@ -83,7 +83,48 @@ export function WorkspaceCodePanel({
     setSearchCollapsedRepos({});
   }, [searchQuery]);
 
+  const totalFilesCount = useMemo(
+    () => repos.reduce((sum, repo) => sum + (repo.files?.length || 0), 0),
+    [repos]
+  );
+
+  const filteredRepos = useMemo(() => {
+    if (!searchQuery.trim()) return repos;
+    return repos.map(repo => ({
+      ...repo,
+      files: filterTreeFiles(repo.files || [], searchQuery),
+    }));
+  }, [repos, searchQuery]);
+
+  const matchingFilesCount = useMemo(
+    () => filteredRepos.reduce((sum, repo) => sum + (repo.files?.length || 0), 0),
+    [filteredRepos]
+  );
+
+  const effectiveExpandedPathsByRepo = useMemo(() => {
+    if (!searchQuery.trim()) return expandedPathsByRepo;
+    const result: Record<string, Set<string>> = {};
+    for (const repo of filteredRepos) {
+      if (searchExpandedPathsByRepo[repo.repoName]) {
+        result[repo.repoName] = searchExpandedPathsByRepo[repo.repoName];
+      } else {
+        result[repo.repoName] = getMatchingBranchPaths(repo.files || [], searchQuery, { compact: true });
+      }
+    }
+    return result;
+  }, [searchQuery, filteredRepos, expandedPathsByRepo, searchExpandedPathsByRepo]);
+
   const expandAllFolders = useCallback(() => {
+    if (searchQuery.trim()) {
+      const next: Record<string, Set<string>> = {};
+      for (const repo of filteredRepos) {
+        const root = buildCompactedTree(repo.files || []);
+        next[repo.repoName] = new Set(getAllDirectoryPaths(root));
+      }
+      setSearchExpandedPathsByRepo(next);
+      setSearchCollapsedRepos({});
+      return;
+    }
     const next: Record<string, Set<string>> = {};
     for (const repo of repos) {
       const root = buildCompactedTree(repo.files || []);
@@ -91,15 +132,23 @@ export function WorkspaceCodePanel({
     }
     setExpandedPathsByRepo(next);
     setCollapsedRepos({});
-  }, [repos]);
+  }, [repos, searchQuery, filteredRepos]);
 
   const collapseAllFolders = useCallback(() => {
+    if (searchQuery.trim()) {
+      const next: Record<string, Set<string>> = {};
+      for (const repo of filteredRepos) {
+        next[repo.repoName] = new Set();
+      }
+      setSearchExpandedPathsByRepo(next);
+      return;
+    }
     const next: Record<string, Set<string>> = {};
     for (const repo of repos) {
       next[repo.repoName] = new Set();
     }
     setExpandedPathsByRepo(next);
-  }, [repos]);
+  }, [repos, searchQuery, filteredRepos]);
 
   // Smart defaults for folder expansion: apply ONLY when mode transitions between
   // 'changes' (expanded by default) and 'files' (collapsed by default).
@@ -108,6 +157,8 @@ export function WorkspaceCodePanel({
   useEffect(() => {
     if (prevMode.current === mode) return;
     prevMode.current = mode;
+    setSearchExpandedPathsByRepo({});
+    setSearchCollapsedRepos({});
     const next: Record<string, Set<string>> = {};
     for (const repo of repos) {
       if (mode === 'changes') {
@@ -151,6 +202,7 @@ export function WorkspaceCodePanel({
     lastSelectedKey.current = key;
 
     setCollapsedRepos(prev => (prev[selection.repoName] ? { ...prev, [selection.repoName]: false } : prev));
+    setSearchCollapsedRepos(prev => (prev[selection.repoName] ? { ...prev, [selection.repoName]: false } : prev));
 
     const repo = repos.find(r => r.repoName === selection.repoName);
     if (!repo) return;
@@ -175,8 +227,11 @@ export function WorkspaceCodePanel({
   useEffect(() => {
     if (openReference && openReference.id !== handledReference.current) {
       setMode('files');
+      if (searchQuery) {
+        setSearchQuery('');
+      }
     }
-  }, [openReference]);
+  }, [openReference, searchQuery]);
 
   // Refresh every 10 s while the panel is on screen. A hidden window does no
   // work at all, and catches up once as soon as it is shown again.
@@ -308,36 +363,6 @@ export function WorkspaceCodePanel({
     plainCode.current.parentElement?.scrollTo({ top: Math.max(0, (selection.line - 1) * lineHeight - 32) });
   }, [selection, diff]);
 
-  const totalFilesCount = useMemo(
-    () => repos.reduce((sum, repo) => sum + (repo.files?.length || 0), 0),
-    [repos]
-  );
-
-  const filteredRepos = useMemo(() => {
-    if (!searchQuery.trim()) return repos;
-    return repos.map(repo => ({
-      ...repo,
-      files: filterTreeFiles(repo.files || [], searchQuery),
-    }));
-  }, [repos, searchQuery]);
-
-  const matchingFilesCount = useMemo(
-    () => filteredRepos.reduce((sum, repo) => sum + repo.files.length, 0),
-    [filteredRepos]
-  );
-
-  const effectiveExpandedPathsByRepo = useMemo(() => {
-    if (!searchQuery.trim()) return expandedPathsByRepo;
-    const result: Record<string, Set<string>> = {};
-    for (const repo of filteredRepos) {
-      if (searchExpandedPathsByRepo[repo.repoName]) {
-        result[repo.repoName] = searchExpandedPathsByRepo[repo.repoName];
-      } else {
-        result[repo.repoName] = getMatchingBranchPaths(repo.files || [], searchQuery, { compact: true });
-      }
-    }
-    return result;
-  }, [searchQuery, filteredRepos, expandedPathsByRepo, searchExpandedPathsByRepo]);
 
   const treeOrderedFiles = useMemo(() => {
     return filteredRepos.flatMap(repo =>
@@ -707,7 +732,7 @@ export function WorkspaceCodePanel({
                 </Button>
               </div>
             )}
-            {!loading && !error && !searchQuery.trim() && !repos.some(repo => repo.files.length || repo.error) && (
+            {!loading && !error && !searchQuery.trim() && !repos.some(repo => repo.files?.length || repo.error) && (
               <p className="p-2 text-xs text-muted-foreground">
                 {mode === 'changes' ? 'No uncommitted changes.' : 'No repository files.'}
               </p>
