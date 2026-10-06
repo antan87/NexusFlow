@@ -437,7 +437,7 @@ export function ChatDock({ workspaces }: ChatDockProps) {
             return (
               <div
                 key={branchName}
-                className={cn('h-full min-w-0 flex-col', shown ? 'flex' : 'hidden', isSecondary && 'border-l border-border')}
+                className={cn('h-full min-h-0 min-w-0 flex-col', shown ? 'flex' : 'hidden', isSecondary && 'border-l border-border')}
                 style={shown ? { order: isPrimary ? 1 : 3, flex: showSplit ? isPrimary ? `0 0 ${splitRatio}%` : '1 1 0%' : '1 1 100%' } : undefined}
               >
                 {isSecondary && <div className="flex shrink-0 items-center justify-end gap-2 border-b border-border px-2 py-1">

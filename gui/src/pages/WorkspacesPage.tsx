@@ -605,7 +605,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     const showChat = !archived && (subTab === 'chat' || (roomBeside && !layout.hidden));
 
     return (
-      <div className="flex h-full min-w-0 flex-col w-full">
+      <div className="flex h-full min-h-0 min-w-0 flex-col w-full">
         <WorkspaceHeader
           compact={showChat}
           workspaceId={selected.branchName}
@@ -708,7 +708,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
         {/* Tab Navigation & Content Container */}
         <div ref={setBody} className="flex min-h-0 flex-1">
           {showChat && (
-            <div className="min-h-0 min-w-0" style={{ flex: showPanel ? `0 0 ${layout.percent}%` : '1 1 100%' }}>
+            <div className="h-full min-h-0 min-w-0" style={{ flex: showPanel ? `0 0 ${layout.percent}%` : '1 1 100%' }}>
               {/* The chat is not rendered here: it lives above the router and sits over this box, so it stays alive. */}
               <ChatDockSlot />
             </div>
@@ -1348,7 +1348,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
   };
 
   return (
-    <div className="flex flex-col h-full animate-fade-in w-full min-w-0 bg-transparent">
+    <div className="flex flex-col flex-1 min-h-0 animate-fade-in w-full min-w-0 bg-transparent">
       {!selected ? (
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-md w-full">
@@ -1366,8 +1366,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-w-0 h-full overflow-y-auto flex flex-col">
-          <div className="flex w-full flex-1 min-w-0 flex-col">
+        <div className="flex-1 min-h-0 min-w-0 h-full overflow-hidden flex flex-col">
+          <div className="flex w-full flex-1 min-h-0 min-w-0 flex-col">
             {renderInspector()}
           </div>
         </div>
