@@ -1,7 +1,7 @@
 {
   "name": "contextspace-desktop",
   "desktopName": "contextspace",
-  "version": "2.32.0",
+  "version": "2.32.1",
   "type": "module",
   "main": "main.js",
   "scripts": {
