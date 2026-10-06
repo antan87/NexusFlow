@@ -306,21 +306,49 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       if (data === '\r' && targetRef.current && targetRef.current !== 'shell') replyRef.current?.(targetRef.current);
     });
     term.options.disableStdin = true;
-    const resize = term.onResize(({ cols, rows }) => { if (!term.options.disableStdin) send({ type: 'resize', cols: Math.min(cols, 500), rows: Math.min(rows, 300) }); });
-    const observer = new ResizeObserver(() => { if (host.current?.clientWidth && host.current?.clientHeight) sizing.fit(); });
+    const resize = term.onResize(({ cols, rows }) => {
+      if (!term.options.disableStdin && cols >= 2 && rows >= 1) send({ type: 'resize', cols: Math.min(Math.max(cols, 2), 500), rows: Math.min(Math.max(rows, 1), 300) });
+    });
+    const observer = new ResizeObserver(() => {
+      if (host.current?.clientWidth && host.current?.clientHeight) {
+        sizing.fit();
+        if (activeRef.current) term.scrollToBottom();
+      }
+    });
     observer.observe(host.current);
     return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
   }, [send]);
   useEffect(() => {
     if (!active || !terminal) return;
+    let frameId: number;
+    let attempts = 0;
+    const maxAttempts = 10;
     // The mode switch first reveals a previously hidden terminal. Wait for that
     // layout before fitting and focusing xterm's real input textarea.
-    const frame = requestAnimationFrame(() => {
-      if (!activeRef.current || !host.current?.getClientRects().length) return;
+    const tryActivate = () => {
+      if (!activeRef.current) return;
+      if (!host.current?.getClientRects().length || !host.current?.clientWidth || !host.current?.clientHeight) {
+        attempts++;
+        if (attempts < maxAttempts) {
+          frameId = requestAnimationFrame(tryActivate);
+        }
+        return;
+      }
       fit.current?.fit();
-      if (primaryRef.current) renderer.current?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
+      const term = renderer.current;
+      if (term) {
+        term.scrollToBottom();
+        if (term.rows > 0) {
+          term.refresh(0, term.rows - 1);
+        }
+        if (!term.options.disableStdin && term.cols >= 2 && term.rows >= 1) {
+          send({ type: 'resize', cols: Math.min(Math.max(term.cols, 2), 500), rows: Math.min(Math.max(term.rows, 1), 300) });
+        }
+        if (primaryRef.current) term.focus();
+      }
+    };
+    frameId = requestAnimationFrame(tryActivate);
+    return () => cancelAnimationFrame(frameId);
     // Keyed on the session id: a status refresh replaces the session object and
     // must not pull focus back from another panel into the terminal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,7 +386,15 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
             term.options.disableStdin = ended;
             // An exit that arrived while the replay flushed keeps its code.
             setPaneState(current => ended ? (current.kind === 'exited' ? current : { kind: 'exited', code: null }) : { kind: 'running' });
-            if (!ended) { fit.current?.fit(); send({ type: 'resize', cols: Math.min(term.cols, 500), rows: Math.min(term.rows, 300) }); if (activeRef.current && primaryRef.current) term.focus(); }
+            if (!ended) {
+              fit.current?.fit();
+              if (term.cols >= 2 && term.rows >= 1) {
+                send({ type: 'resize', cols: Math.min(Math.max(term.cols, 2), 500), rows: Math.min(Math.max(term.rows, 1), 300) });
+              }
+              term.scrollToBottom();
+              if (term.rows > 0) term.refresh(0, term.rows - 1);
+              if (activeRef.current && primaryRef.current) term.focus();
+            }
           });
         } else if (message.type === 'exit') {
           const code = message.exitCode ?? null;

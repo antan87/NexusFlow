@@ -9,6 +9,11 @@
       "id": "GHSA-ch52-4w7c-c8xp",
       "expires": "2026-11-02",
       "reason": "http-cache-semantics: no patched release exists. It is reached only through electron-builder, a devDependency of desktop (got, cacheable-request, http-cache-semantics, while downloading build tooling), so none of it ships in the app. The disclosure needs a shared HTTP cache serving several users, which a build machine's download cache is not. Re-check when http-cache-semantics publishes a fix."
+    },
+    {
+      "id": "GHSA-hp3w-g68c-fv3c",
+      "expires": "2026-11-02",
+      "reason": "sprintf-js: no patched release exists (all versions affected). It is reached only through electron-builder, a devDependency of desktop (app-builder-lib -> @electron/get -> global-agent -> roarr -> sprintf-js, during packaging), so none of it ships in the app. Re-check when sprintf-js or electron-builder publishes a fix."
     }
   ]
 }

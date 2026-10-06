@@ -38,7 +38,15 @@ export interface DockRect { left: number; top: number; width: number; height: nu
 
 /** Whole pixels, so a fractional layout does not make the dock chase the slot with sub-pixel updates. */
 export function toDockRect(rect: { left: number; top: number; width: number; height: number }): DockRect {
-  return { left: Math.round(rect.left), top: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
+  const left = Math.round(rect.left);
+  const top = Math.round(rect.top);
+  const width = Math.max(0, Math.round(rect.width));
+  let height = Math.max(0, Math.round(rect.height));
+  if (typeof window !== 'undefined' && typeof window.innerHeight === 'number' && Number.isFinite(window.innerHeight)) {
+    const maxHeight = Math.max(0, window.innerHeight - top);
+    height = Math.max(0, Math.min(height, maxHeight));
+  }
+  return { left, top, width, height };
 }
 
 export function sameDockRect(a: DockRect | null, b: DockRect | null): boolean {
