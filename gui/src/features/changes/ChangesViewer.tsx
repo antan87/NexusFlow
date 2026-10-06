@@ -24,7 +24,7 @@ import { IconButton } from '../../components/ui/icon-button.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree } from './FileTree.js';
+import { FileTree, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -215,23 +215,28 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     };
   }, [gitChanges, ws.branchName]);
 
-  // Flattened list of all files across all repos for multi-file jump bar and keyboard navigation
-  const allFiles = useMemo(() => {
-    const list: { repoName: string; repoPath: string; file: string; type: string; additions: number; deletions: number }[] = [];
-    for (const repo of reposWithChanges) {
-      for (const f of repo.files || []) {
-        list.push({
-          repoName: repo.repoName,
-          repoPath: repo.repoPath,
-          file: f.file,
-          type: f.type,
-          additions: f.additions || 0,
-          deletions: f.deletions || 0,
-        });
-      }
-    }
-    return list;
+  // Flattened list of all files across all repos in deterministic visual tree order
+  // for multi-file jump bar, dropdown, and keyboard navigation
+  const treeOrderedFiles = useMemo(() => {
+    return reposWithChanges.flatMap((repo) =>
+      getTreeOrderedFiles(repo.files || []).map((f: any) => ({
+        repoName: repo.repoName,
+        repoPath: repo.repoPath,
+        file: f.file,
+        type: f.type,
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+      }))
+    );
   }, [reposWithChanges]);
+
+  useEffect(() => {
+    if (treeOrderedFiles.length === 0) {
+      if (selectedFileIndex !== 0) setSelectedFileIndex(0);
+    } else if (selectedFileIndex >= treeOrderedFiles.length) {
+      setSelectedFileIndex(treeOrderedFiles.length - 1);
+    }
+  }, [treeOrderedFiles.length, selectedFileIndex]);
 
   const isRepoCollapsed = (repoName: string): boolean => {
     return collapsedRepos[repoName] ?? true;
@@ -410,9 +415,9 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   // Jump to a specific file in the changeset and optionally reveal a line
   const jumpToFile = useCallback(
     async (index: number, line?: number) => {
-      if (index < 0 || index >= allFiles.length) return;
+      if (index < 0 || index >= treeOrderedFiles.length) return;
       setSelectedFileIndex(index);
-      const target = allFiles[index];
+      const target = treeOrderedFiles[index];
       setRevealFile(`${target.repoName}/${target.file}`);
       setRevealKey(value => value + 1);
       const cacheKey = `${target.repoName}/${target.file}`;
@@ -439,13 +444,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         }
       }, 50);
     },
-    [allFiles, expandedFiles, toggleFileExpansion]
+    [treeOrderedFiles, expandedFiles, toggleFileExpansion]
   );
 
 
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
   const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
-    const index = findChangedFileIndex(allFiles, targetRepo, targetFile);
+    const index = findChangedFileIndex(treeOrderedFiles, targetRepo, targetFile);
 
     if (index !== -1) {
       void jumpToFile(index, line);
@@ -473,24 +478,24 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       }
       if (e.altKey && (e.key === 'ArrowDown' || e.key === 'Down')) {
         e.preventDefault();
-        if (allFiles.length > 0) {
-          const nextIdx = (selectedFileIndex + 1) % allFiles.length;
+        if (treeOrderedFiles.length > 0) {
+          const nextIdx = (selectedFileIndex + 1) % treeOrderedFiles.length;
           void jumpToFile(nextIdx);
         }
       } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'Up')) {
         e.preventDefault();
-        if (allFiles.length > 0) {
-          const prevIdx = (selectedFileIndex - 1 + allFiles.length) % allFiles.length;
+        if (treeOrderedFiles.length > 0) {
+          const prevIdx = (selectedFileIndex - 1 + treeOrderedFiles.length) % treeOrderedFiles.length;
           void jumpToFile(prevIdx);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedFileIndex, allFiles, jumpToFile]);
+  }, [selectedFileIndex, treeOrderedFiles, jumpToFile]);
 
 
-  const activeSelectedFile = allFiles[selectedFileIndex] || null;
+  const activeSelectedFile = treeOrderedFiles[selectedFileIndex] || null;
 
   return (
     <div className="animate-fade-in">
@@ -540,7 +545,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       </header>
 
       {/* ─── QUICK MULTI-FILE JUMP BAR ─────────────────────────────────────────── */}
-      {allFiles.length > 0 && (
+      {treeOrderedFiles.length > 0 && (
         <div className="mb-5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/90 bg-card/75 p-2.5 px-3.5 backdrop-blur-md shadow-xs select-none">
           <div className="flex items-center gap-2 min-w-0">
             <span className="grid size-6 place-items-center rounded-md bg-primary/10 text-primary shrink-0">
@@ -551,7 +556,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
               <span className="rounded bg-primary/15 border border-primary/25 px-1.5 py-0.2 text-primary">
                 {selectedFileIndex + 1}
               </span>
-              <span className="text-muted-foreground">of {allFiles.length}</span>
+              <span className="text-muted-foreground">of {treeOrderedFiles.length}</span>
             </div>
 
             {/* Quick File Selector Dropdown */}
@@ -561,7 +566,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
               onChange={(e) => void jumpToFile(Number(e.target.value))}
               className="ml-2 max-w-[240px] sm:max-w-[360px] rounded-lg border border-border bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
             >
-              {allFiles.map((f, i) => (
+              {treeOrderedFiles.map((f, i) => (
                 <option key={`${f.repoName}/${f.file}`} value={i}>
                   [{f.type.slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
                 </option>
@@ -575,7 +580,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             <button
               type="button"
               onClick={() => {
-                const prevIdx = (selectedFileIndex - 1 + allFiles.length) % allFiles.length;
+                const prevIdx = (selectedFileIndex - 1 + treeOrderedFiles.length) % treeOrderedFiles.length;
                 void jumpToFile(prevIdx);
               }}
               className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -589,7 +594,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             <button
               type="button"
               onClick={() => {
-                const nextIdx = (selectedFileIndex + 1) % allFiles.length;
+                const nextIdx = (selectedFileIndex + 1) % treeOrderedFiles.length;
                 void jumpToFile(nextIdx);
               }}
               className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
@@ -645,8 +650,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
               handleCrossFileOpen(sym.repoName, sym.filePath, sym.lineNumber);
             }}
             onOpenInVsCode={(sym: ChangesetSymbol) => {
-              const fileObj = allFiles.find((f) => f.repoName === sym.repoName && f.file === sym.filePath)
-                || allFiles.find((f) => f.file === sym.filePath);
+              const fileObj = treeOrderedFiles.find((f) => f.repoName === sym.repoName && f.file === sym.filePath)
+                || treeOrderedFiles.find((f) => f.file === sym.filePath);
               const targetRepoPath = sym.repoPath || fileObj?.repoPath || gitChanges.find((r) => r.repoName === sym.repoName)?.repoPath || sym.repoName;
               openInVsCodeAtLine(targetRepoPath, sym.filePath, sym.lineNumber, sym.column, defaultEditor);
               showToast?.(`Opened ${sym.filePath}:${sym.lineNumber} in ${editorLabel}`, 'success');
@@ -835,8 +840,19 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                             <div
                               className="flex cursor-pointer select-none items-center justify-between px-2 py-1.5 transition-colors hover:bg-accent/50"
                               role="button" tabIndex={0} aria-expanded={isExpanded}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void toggleFileExpansion(repo.repoName, fileInfo.file); } }}
-                              onClick={() => toggleFileExpansion(repo.repoName, fileInfo.file)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  const idx = treeOrderedFiles.findIndex(f => f.repoName === repo.repoName && f.file === fileInfo.file);
+                                  if (idx !== -1) setSelectedFileIndex(idx);
+                                  void toggleFileExpansion(repo.repoName, fileInfo.file);
+                                }
+                              }}
+                              onClick={() => {
+                                const idx = treeOrderedFiles.findIndex(f => f.repoName === repo.repoName && f.file === fileInfo.file);
+                                if (idx !== -1) setSelectedFileIndex(idx);
+                                toggleFileExpansion(repo.repoName, fileInfo.file);
+                              }}
                             >
                               <div className="flex items-center gap-2.5 min-w-0">
                                 {isExpanded ? (

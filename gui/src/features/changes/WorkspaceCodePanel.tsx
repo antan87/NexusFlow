@@ -4,7 +4,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree } from './FileTree.js';
+import { FileTree, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
 import { fileTypeGlyph } from './fileTypeGlyph.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
@@ -191,9 +191,9 @@ export function WorkspaceCodePanel({
     plainCode.current.parentElement?.scrollTo({ top: Math.max(0, (selection.line - 1) * lineHeight - 32) });
   }, [selection, diff]);
 
-  const flatChangedFiles = useMemo(() => {
+  const treeOrderedFiles = useMemo(() => {
     return repos.flatMap(repo =>
-      repo.files.map(f => ({
+      getTreeOrderedFiles(repo.files || []).map(f => ({
         repoName: repo.repoName,
         repoPath: repo.repoPath,
         file: f.file,
@@ -203,14 +203,25 @@ export function WorkspaceCodePanel({
 
   const currentFileIndex = useMemo(() => {
     if (!selection) return -1;
-    return flatChangedFiles.findIndex(
+    return treeOrderedFiles.findIndex(
       f => f.repoName === selection.repoName && f.file === selection.file
     );
-  }, [flatChangedFiles, selection]);
+  }, [treeOrderedFiles, selection]);
 
   const goToNextFile = useCallback(() => {
-    if (currentFileIndex >= 0 && currentFileIndex < flatChangedFiles.length - 1) {
-      const next = flatChangedFiles[currentFileIndex + 1];
+    if (treeOrderedFiles.length === 0) return;
+    if (currentFileIndex === -1) {
+      const next = treeOrderedFiles[0];
+      if (next) {
+        setReferenceError('');
+        setDiff(null);
+        scrolledSelectionKey.current = '';
+        setSelection(next);
+      }
+      return;
+    }
+    if (currentFileIndex >= 0 && currentFileIndex < treeOrderedFiles.length - 1) {
+      const next = treeOrderedFiles[currentFileIndex + 1];
       if (next) {
         setReferenceError('');
         setDiff(null);
@@ -218,11 +229,22 @@ export function WorkspaceCodePanel({
         setSelection(next);
       }
     }
-  }, [currentFileIndex, flatChangedFiles]);
+  }, [currentFileIndex, treeOrderedFiles]);
 
   const goToPrevFile = useCallback(() => {
+    if (treeOrderedFiles.length === 0) return;
+    if (currentFileIndex === -1) {
+      const prev = treeOrderedFiles[treeOrderedFiles.length - 1];
+      if (prev) {
+        setReferenceError('');
+        setDiff(null);
+        scrolledSelectionKey.current = '';
+        setSelection(prev);
+      }
+      return;
+    }
     if (currentFileIndex > 0) {
-      const prev = flatChangedFiles[currentFileIndex - 1];
+      const prev = treeOrderedFiles[currentFileIndex - 1];
       if (prev) {
         setReferenceError('');
         setDiff(null);
@@ -230,7 +252,7 @@ export function WorkspaceCodePanel({
         setSelection(prev);
       }
     }
-  }, [currentFileIndex, flatChangedFiles]);
+  }, [currentFileIndex, treeOrderedFiles]);
 
   /**
    * Drag the sidebar edge to trade tree width against diff width. The width is
@@ -425,7 +447,7 @@ export function WorkspaceCodePanel({
               <p className="break-all font-mono text-xs font-semibold text-foreground">
                 {selection.repoName}/{selection.file}{selection.line ? `:${selection.line}` : ''}
               </p>
-              {mode === 'changes' && flatChangedFiles.length > 1 && (
+              {treeOrderedFiles.length > 1 && (
                 <div className="flex items-center gap-1 shrink-0 ml-2">
                   <Button
                     size="xs"
@@ -433,21 +455,21 @@ export function WorkspaceCodePanel({
                     disabled={currentFileIndex <= 0}
                     onClick={goToPrevFile}
                     aria-keyshortcuts="Alt+ArrowUp"
-                    title="Previous changed file (Alt+↑)"
+                    title={mode === 'changes' ? 'Previous changed file (Alt+↑)' : 'Previous file (Alt+↑)'}
                     className="h-5 px-1 text-[10px]"
                   >
                     <ChevronLeft className="size-3" />
                   </Button>
                   <span className="text-[10px] font-mono text-muted-foreground">
-                    {currentFileIndex + 1}/{flatChangedFiles.length}
+                    {currentFileIndex + 1}/{treeOrderedFiles.length}
                   </span>
                   <Button
                     size="xs"
                     variant="ghost"
-                    disabled={currentFileIndex >= flatChangedFiles.length - 1}
+                    disabled={currentFileIndex >= treeOrderedFiles.length - 1}
                     onClick={goToNextFile}
                     aria-keyshortcuts="Alt+ArrowDown"
-                    title="Next changed file (Alt+↓)"
+                    title={mode === 'changes' ? 'Next changed file (Alt+↓)' : 'Next file (Alt+↓)'}
                     className="h-5 px-1 text-[10px]"
                   >
                     <ChevronRight className="size-3" />
