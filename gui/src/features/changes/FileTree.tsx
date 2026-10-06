@@ -20,8 +20,8 @@ interface MutableTreeNode<T> {
   files: T[];
 }
 
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/+/g, '/');
+export function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^(\.\/|\/)+/, '');
 }
 
 function toTreeNode<T extends TreeFile>(mutable: MutableTreeNode<T>): TreeNode<T> {
@@ -80,8 +80,8 @@ export function buildCompactedTree<T extends TreeFile>(
 
   for (const file of files) {
     if (!file || typeof file.file !== 'string') continue;
-    const normalized = file.file.replace(/\\/g, '/').replace(/^\.?\//, '');
-    const parts = normalized.split('/').filter(Boolean);
+    const normalized = normalizePath(file.file);
+    const parts = normalized.split('/').filter(part => part && part !== '.');
 
     if (parts.length <= 1) {
       root.files.push(file);
@@ -135,15 +135,15 @@ export function treeOrderedFiles<T extends TreeFile>(
 }
 
 /** Keep the original Git path intact: the hierarchy is only a presentation. */
-export function FileTree<T extends TreeFile>({ files, renderFile, label, revealPath, revealKey }: {
-  files: T[]; renderFile: (file: T) => ReactNode; label: string; revealPath?: string; revealKey?: number;
+export function FileTree<T extends TreeFile>({ files, renderFile, label, revealPath, revealKey, compact = true }: {
+  files: T[]; renderFile: (file: T) => ReactNode; label: string; revealPath?: string; revealKey?: number; compact?: boolean;
 }) {
   const host = useRef<HTMLElement>(null);
-  const root = useMemo(() => buildCompactedTree(files), [files]);
+  const root = useMemo(() => buildCompactedTree(files, { compact }), [files, compact]);
 
   useEffect(() => {
     if (!revealPath) return;
-    const normalized = revealPath.replace(/\\/g, '/').replace(/^\.?\//, '');
+    const normalized = normalizePath(revealPath);
     for (const details of host.current?.querySelectorAll<HTMLDetailsElement>('details[data-path]') ?? []) {
       const p = details.dataset.path;
       if (p && (normalized === p || normalized.startsWith(`${p}/`))) {

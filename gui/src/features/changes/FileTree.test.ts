@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCompactedTree,
   flattenTreeFiles,
+  normalizePath,
   treeOrderedFiles,
   type TreeFile,
 } from './FileTree.js';
@@ -470,4 +471,96 @@ describe('Multi-Repo Visual Ordering & Traversal', () => {
       'src//deep///path//my file.ts',
     ]);
   });
+
+  it('does not create phantom dot folders for repeated ./ prefixes or segments', () => {
+    const files: TreeFile[] = [
+      { file: '././foo.txt' },
+      { file: 'src/./components/Button.tsx' },
+      { file: './//docs///guide.md' },
+    ];
+    const tree = buildCompactedTree(files);
+
+    // foo.txt must be directly in root.files, not in a '.' directory!
+    expect(tree.files.map((f) => f.file)).toEqual(['././foo.txt']);
+    const dirNames = tree.directories.map((d) => d.name);
+    expect(dirNames).not.toContain('.');
+    expect(dirNames).toEqual(['docs', 'src/components']);
+  });
+
+  it('sorts files in subdirectories deterministically despite differing slash formats', () => {
+    const files: TreeFile[] = [
+      { file: '//src/Button.tsx' },
+      { file: '/src/Avatar.tsx' },
+    ];
+    const tree = buildCompactedTree(files);
+    const ordered = flattenTreeFiles(tree).map((f) => f.file);
+
+    // Avatar.tsx should come before Button.tsx alphabetically
+    expect(ordered).toEqual(['/src/Avatar.tsx', '//src/Button.tsx']);
+  });
+
+  it('safely handles missing file type properties in dropdown formatting without throwing', () => {
+    const repos = [
+      {
+        repoName: 'backend',
+        files: [
+          // @ts-expect-error type missing intentionally
+          { file: 'src/index.ts', additions: 3, deletions: 1 },
+        ],
+      },
+    ];
+
+    const treeOrdered = repos.flatMap((repo) =>
+      treeOrderedFiles(repo.files).map((f: any) => ({
+        repoName: repo.repoName,
+        file: f.file,
+        type: f.type || 'modified',
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+      }))
+    );
+
+    const dropdownOptions = treeOrdered.map((f, i) => ({
+      index: i,
+      label: `[${(f.type || 'modified').slice(0, 3)}] ${f.repoName}: ${f.file} (+${f.additions} -${f.deletions})`,
+      target: f,
+    }));
+
+    expect(dropdownOptions[0]!.label).toBe('[mod] backend: src/index.ts (+3 -1)');
+  });
+
+  it('handles unselected currentFileIndex (-1) transitions', () => {
+    const files = [
+      { file: 'src/a.ts' },
+      { file: 'src/b.ts' },
+    ];
+    const ordered = treeOrderedFiles(files);
+    let currentIdx = -1;
+
+    // Next when unselected jumps to index 0
+    if (currentIdx === -1 && ordered.length > 0) {
+      currentIdx = 0;
+    }
+    expect(ordered[currentIdx]!.file).toBe('src/a.ts');
+
+    // Prev when unselected jumps to last file
+    currentIdx = -1;
+    if (currentIdx === -1 && ordered.length > 0) {
+      currentIdx = ordered.length - 1;
+    }
+    expect(ordered[currentIdx]!.file).toBe('src/b.ts');
+  });
 });
+
+describe('normalizePath utility', () => {
+  it('strips redundant leading slashes and dot prefixes', () => {
+    expect(normalizePath('//src/Button.tsx')).toBe('src/Button.tsx');
+    expect(normalizePath('///src/Button.tsx')).toBe('src/Button.tsx');
+    expect(normalizePath('././src/Button.tsx')).toBe('src/Button.tsx');
+    expect(normalizePath('.///src/Button.tsx')).toBe('src/Button.tsx');
+    expect(normalizePath('src\\\\components\\\\Button.tsx')).toBe('src/components/Button.tsx');
+    expect(normalizePath('src//utils///format.ts')).toBe('src/utils/format.ts');
+    expect(normalizePath('')).toBe('');
+  });
+});
+

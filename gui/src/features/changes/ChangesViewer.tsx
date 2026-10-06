@@ -24,7 +24,7 @@ import { IconButton } from '../../components/ui/icon-button.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
+import { FileTree, normalizePath, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -223,7 +223,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         repoName: repo.repoName,
         repoPath: repo.repoPath,
         file: f.file,
-        type: f.type,
+        type: f.type || 'modified',
         additions: f.additions || 0,
         deletions: f.deletions || 0,
       }))
@@ -235,6 +235,8 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       if (selectedFileIndex !== 0) setSelectedFileIndex(0);
     } else if (selectedFileIndex >= treeOrderedFiles.length) {
       setSelectedFileIndex(treeOrderedFiles.length - 1);
+    } else if (selectedFileIndex < 0) {
+      setSelectedFileIndex(0);
     }
   }, [treeOrderedFiles.length, selectedFileIndex]);
 
@@ -568,7 +570,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             >
               {treeOrderedFiles.map((f, i) => (
                 <option key={`${f.repoName}/${f.file}`} value={i}>
-                  [{f.type.slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
+                  [{(f.type || 'modified').slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
                 </option>
               ))}
             </select>
@@ -843,13 +845,17 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                               onKeyDown={e => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
-                                  const idx = treeOrderedFiles.findIndex(f => f.repoName === repo.repoName && f.file === fileInfo.file);
+                                  const idx = treeOrderedFiles.findIndex(
+                                    f => f.repoName === repo.repoName && (f.file === fileInfo.file || normalizePath(f.file) === normalizePath(fileInfo.file))
+                                  );
                                   if (idx !== -1) setSelectedFileIndex(idx);
                                   void toggleFileExpansion(repo.repoName, fileInfo.file);
                                 }
                               }}
                               onClick={() => {
-                                const idx = treeOrderedFiles.findIndex(f => f.repoName === repo.repoName && f.file === fileInfo.file);
+                                const idx = treeOrderedFiles.findIndex(
+                                  f => f.repoName === repo.repoName && (f.file === fileInfo.file || normalizePath(f.file) === normalizePath(fileInfo.file))
+                                );
                                 if (idx !== -1) setSelectedFileIndex(idx);
                                 toggleFileExpansion(repo.repoName, fileInfo.file);
                               }}

@@ -4,7 +4,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
+import { FileTree, normalizePath, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
 import { fileTypeGlyph } from './fileTypeGlyph.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
@@ -204,7 +204,7 @@ export function WorkspaceCodePanel({
   const currentFileIndex = useMemo(() => {
     if (!selection) return -1;
     return treeOrderedFiles.findIndex(
-      f => f.repoName === selection.repoName && f.file === selection.file
+      f => f.repoName === selection.repoName && (f.file === selection.file || normalizePath(f.file) === normalizePath(selection.file))
     );
   }, [treeOrderedFiles, selection]);
 
@@ -292,9 +292,9 @@ export function WorkspaceCodePanel({
   // viewer, so the two granularities do not collide under the same keys.
   usePaneHotkey((event) => {
     if (!event.altKey || event.metaKey || event.ctrlKey) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Down' || event.key === 'Up') {
       event.preventDefault();
-      if (event.key === 'ArrowDown') goToNextFile();
+      if (event.key === 'ArrowDown' || event.key === 'Down') goToNextFile();
       else goToPrevFile();
     }
   }, { respectTerminal: false, enabled: active });
@@ -452,7 +452,7 @@ export function WorkspaceCodePanel({
                   <Button
                     size="xs"
                     variant="ghost"
-                    disabled={currentFileIndex <= 0}
+                    disabled={currentFileIndex === 0 || (currentFileIndex === -1 && treeOrderedFiles.length === 0)}
                     onClick={goToPrevFile}
                     aria-keyshortcuts="Alt+ArrowUp"
                     title={mode === 'changes' ? 'Previous changed file (Alt+↑)' : 'Previous file (Alt+↑)'}
@@ -461,7 +461,7 @@ export function WorkspaceCodePanel({
                     <ChevronLeft className="size-3" />
                   </Button>
                   <span className="text-[10px] font-mono text-muted-foreground">
-                    {currentFileIndex + 1}/{treeOrderedFiles.length}
+                    {currentFileIndex >= 0 ? currentFileIndex + 1 : '–'}/{treeOrderedFiles.length}
                   </span>
                   <Button
                     size="xs"
