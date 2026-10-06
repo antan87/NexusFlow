@@ -195,6 +195,48 @@ export function getAncestorPaths<T extends TreeFile>(
   return Array.from(ancestors);
 }
 
+/**
+ * Case-insensitively filters a list of files by matching the search query
+ * against their file path.
+ * If query is empty or whitespace-only, returns all files.
+ */
+export function filterTreeFiles<T extends TreeFile>(
+  files: readonly T[],
+  query: string
+): T[] {
+  if (!query || !query.trim()) {
+    return [...files];
+  }
+  const q = query.trim().toLowerCase();
+  const normalizedQ = normalizePath(q);
+  return files.filter(f => {
+    if (!f || typeof f.file !== 'string') return false;
+    const raw = f.file.toLowerCase();
+    const normalized = normalizePath(f.file).toLowerCase();
+    return raw.includes(q) || normalized.includes(q) || (normalizedQ ? normalized.includes(normalizedQ) : false);
+  });
+}
+
+/**
+ * Returns all directory paths containing matching files for a given search query,
+ * based on the compacted visual tree hierarchy.
+ */
+export function getMatchingBranchPaths<T extends TreeFile>(
+  files: readonly T[],
+  query: string,
+  options?: { compact?: boolean }
+): Set<string> {
+  if (!query || !query.trim()) {
+    return new Set();
+  }
+  const matching = filterTreeFiles(files, query);
+  if (matching.length === 0) {
+    return new Set();
+  }
+  const tree = buildCompactedTree(matching, options);
+  return new Set(getAllDirectoryPaths(tree));
+}
+
 export interface FileTreeProps<T extends TreeFile> {
   files: T[];
   renderFile: (file: T) => ReactNode;
@@ -206,6 +248,7 @@ export interface FileTreeProps<T extends TreeFile> {
   expandedPaths?: Set<string>;
   onExpandedPathsChange?: (paths: Set<string>) => void;
   onTogglePath?: (path: string, isOpen: boolean) => void;
+  searchQuery?: string;
 }
 
 /** Keep the original Git path intact: the hierarchy is only a presentation. */
@@ -220,15 +263,26 @@ export function FileTree<T extends TreeFile>({
   expandedPaths: controlledExpandedPaths,
   onExpandedPathsChange,
   onTogglePath,
+  searchQuery,
 }: FileTreeProps<T>) {
   const host = useRef<HTMLElement>(null);
-  const root = useMemo(() => buildCompactedTree(files, { compact }), [files, compact]);
+  const effectiveFiles = useMemo(() => {
+    return searchQuery && searchQuery.trim() ? filterTreeFiles(files, searchQuery) : files;
+  }, [files, searchQuery]);
+  const root = useMemo(() => buildCompactedTree(effectiveFiles, { compact }), [effectiveFiles, compact]);
   const allPaths = useMemo(() => getAllDirectoryPaths(root), [root]);
 
   // Uncontrolled state when expandedPaths prop is not provided
   const [internalExpandedPaths, setInternalExpandedPaths] = useState<Set<string>>(() => {
+    if (searchQuery && searchQuery.trim()) return new Set(allPaths);
     return defaultExpanded ? new Set(allPaths) : new Set();
   });
+
+  // Auto-expand all matching branches when search query is entered in uncontrolled mode
+  useEffect(() => {
+    if (!searchQuery || !searchQuery.trim() || controlledExpandedPaths !== undefined) return;
+    setInternalExpandedPaths(new Set(allPaths));
+  }, [searchQuery, allPaths, controlledExpandedPaths]);
 
   // Track changes to allPaths when in defaultExpanded uncontrolled mode
   const prevPathsRef = useRef(allPaths.join('|'));

@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import {
   FileTree,
   buildCompactedTree,
+  filterTreeFiles,
   flattenTreeFiles,
   getAllDirectoryPaths,
   getAncestorPaths,
+  getMatchingBranchPaths,
   normalizePath,
   treeOrderedFiles,
   type TreeFile,
@@ -948,6 +950,162 @@ describe('FileTree Component Rendering & Controlled Expansion', () => {
     );
 
     expect(html).toContain(`data-file-path="${normalized}"`);
+  });
+});
+
+describe('filterTreeFiles', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'package.json' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/components/Dialog.tsx' },
+    { file: 'src/utils/format.ts' },
+    { file: 'tests/e2e/login.spec.ts' },
+  ];
+
+  it('returns all files when search query is empty or whitespace-only', () => {
+    expect(filterTreeFiles(sampleFiles, '')).toEqual(sampleFiles);
+    expect(filterTreeFiles(sampleFiles, '   ')).toEqual(sampleFiles);
+  });
+
+  it('filters files case-insensitively by filename substring', () => {
+    const results = filterTreeFiles(sampleFiles, 'button');
+    expect(results.map(f => f.file)).toEqual(['src/components/Button.tsx']);
+
+    const upperResults = filterTreeFiles(sampleFiles, 'BUTTON');
+    expect(upperResults.map(f => f.file)).toEqual(['src/components/Button.tsx']);
+  });
+
+  it('filters files by directory path substring', () => {
+    const results = filterTreeFiles(sampleFiles, 'components');
+    expect(results.map(f => f.file)).toEqual([
+      'src/components/Button.tsx',
+      'src/components/Dialog.tsx',
+    ]);
+  });
+
+  it('normalizes slashes and backslashes in search queries', () => {
+    const results = filterTreeFiles(sampleFiles, 'src\\components');
+    expect(results.map(f => f.file)).toEqual([
+      'src/components/Button.tsx',
+      'src/components/Dialog.tsx',
+    ]);
+  });
+
+  it('filters files by file extension', () => {
+    const results = filterTreeFiles(sampleFiles, '.json');
+    expect(results.map(f => f.file)).toEqual(['package.json']);
+  });
+
+  it('returns an empty array when no files match', () => {
+    const results = filterTreeFiles(sampleFiles, 'nonexistent_file_xyz');
+    expect(results).toEqual([]);
+  });
+
+  it('gracefully ignores null, undefined, or invalid file items', () => {
+    // @ts-expect-error testing invalid runtime data
+    const mixed = [null, undefined, { file: 'valid.ts' }, { other: 123 }];
+    // @ts-expect-error testing invalid runtime data
+    const results = filterTreeFiles(mixed, 'valid');
+    expect(results.map(f => f.file)).toEqual(['valid.ts']);
+  });
+});
+
+describe('getMatchingBranchPaths', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/components/Dialog.tsx' },
+    { file: 'src/utils/format.ts' },
+    { file: 'tests/e2e/login.spec.ts' },
+  ];
+
+  it('returns an empty Set when query is empty or only whitespace', () => {
+    expect(getMatchingBranchPaths(sampleFiles, '')).toEqual(new Set());
+    expect(getMatchingBranchPaths(sampleFiles, '   ')).toEqual(new Set());
+  });
+
+  it('returns an empty Set when no files match', () => {
+    expect(getMatchingBranchPaths(sampleFiles, 'nonexistent')).toEqual(new Set());
+  });
+
+  it('returns compacted directory branch paths containing matching files', () => {
+    const branches = getMatchingBranchPaths(sampleFiles, 'button', { compact: true });
+    // In compacted mode, single-child chains are combined
+    expect(branches.has('src/components')).toBe(true);
+    expect(branches.has('src/utils')).toBe(false);
+  });
+
+  it('returns all ancestor directory paths when compact option is false', () => {
+    const branches = getMatchingBranchPaths(sampleFiles, 'button', { compact: false });
+    expect(branches.has('src')).toBe(true);
+    expect(branches.has('src/components')).toBe(true);
+    expect(branches.has('src/utils')).toBe(false);
+  });
+
+  it('auto-expands multiple branches when matches span multiple directories', () => {
+    const branches = getMatchingBranchPaths(sampleFiles, 'ts', { compact: true });
+    expect(branches.has('src/components')).toBe(true);
+    expect(branches.has('src/utils')).toBe(true);
+    expect(branches.has('tests/e2e')).toBe(true);
+  });
+});
+
+describe('FileTree Search Filtering & Branch Auto-Expansion', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/components/Dialog.tsx' },
+    { file: 'src/utils/format.ts' },
+  ];
+
+  const renderFileMock = (f: TreeFile) => createElement('span', null, f.file.split('/').at(-1));
+
+  it('renders only matching files when searchQuery prop is provided', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Search filtering test',
+        searchQuery: 'Button',
+      })
+    );
+
+    expect(html).toContain('Button.tsx');
+    expect(html).not.toContain('Dialog.tsx');
+    expect(html).not.toContain('format.ts');
+    expect(html).not.toContain('README.md');
+  });
+
+  it('automatically expands directory branches containing matching files in uncontrolled mode', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Auto-expansion test',
+        searchQuery: 'format',
+        defaultExpanded: false, // would normally be collapsed
+      })
+    );
+
+    // Matching directory 'src/utils' MUST be automatically expanded (<details open=...>)
+    expect(html).toContain('<details open="" data-path="src/utils"');
+    expect(html).toContain('format.ts');
+  });
+
+  it('renders empty tree when search query has no matches', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'No matches test',
+        searchQuery: 'notfound_query',
+      })
+    );
+
+    expect(html).not.toContain('Button.tsx');
+    expect(html).not.toContain('Dialog.tsx');
+    expect(html).not.toContain('format.ts');
+    expect(html).not.toContain('README.md');
   });
 });
 

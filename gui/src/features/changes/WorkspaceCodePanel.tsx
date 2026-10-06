@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, X } from 'lucide-react';
+import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, X, Search } from 'lucide-react';
 import { apiFetch } from '../../lib/api/client.js';
 import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
@@ -7,8 +7,10 @@ import { cn } from '../../lib/utils.js';
 import {
   FileTree,
   buildCompactedTree,
+  filterTreeFiles,
   getAllDirectoryPaths,
   getAncestorPaths,
+  getMatchingBranchPaths,
   normalizePath,
   treeOrderedFiles as getTreeOrderedFiles,
 } from './FileTree.js';
@@ -70,6 +72,16 @@ export function WorkspaceCodePanel({
   const [expandedPathsByRepo, setExpandedPathsByRepo] = useState<Record<string, Set<string>>>({});
   const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
   const [revealKey, setRevealKey] = useState(0);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchExpandedPathsByRepo, setSearchExpandedPathsByRepo] = useState<Record<string, Set<string>>>({});
+  const [searchCollapsedRepos, setSearchCollapsedRepos] = useState<Record<string, boolean>>({});
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSearchExpandedPathsByRepo({});
+    setSearchCollapsedRepos({});
+  }, [searchQuery]);
 
   const expandAllFolders = useCallback(() => {
     const next: Record<string, Set<string>> = {};
@@ -296,15 +308,46 @@ export function WorkspaceCodePanel({
     plainCode.current.parentElement?.scrollTo({ top: Math.max(0, (selection.line - 1) * lineHeight - 32) });
   }, [selection, diff]);
 
+  const totalFilesCount = useMemo(
+    () => repos.reduce((sum, repo) => sum + (repo.files?.length || 0), 0),
+    [repos]
+  );
+
+  const filteredRepos = useMemo(() => {
+    if (!searchQuery.trim()) return repos;
+    return repos.map(repo => ({
+      ...repo,
+      files: filterTreeFiles(repo.files || [], searchQuery),
+    }));
+  }, [repos, searchQuery]);
+
+  const matchingFilesCount = useMemo(
+    () => filteredRepos.reduce((sum, repo) => sum + repo.files.length, 0),
+    [filteredRepos]
+  );
+
+  const effectiveExpandedPathsByRepo = useMemo(() => {
+    if (!searchQuery.trim()) return expandedPathsByRepo;
+    const result: Record<string, Set<string>> = {};
+    for (const repo of filteredRepos) {
+      if (searchExpandedPathsByRepo[repo.repoName]) {
+        result[repo.repoName] = searchExpandedPathsByRepo[repo.repoName];
+      } else {
+        result[repo.repoName] = getMatchingBranchPaths(repo.files || [], searchQuery, { compact: true });
+      }
+    }
+    return result;
+  }, [searchQuery, filteredRepos, expandedPathsByRepo, searchExpandedPathsByRepo]);
+
   const treeOrderedFiles = useMemo(() => {
-    return repos.flatMap(repo =>
+    return filteredRepos.flatMap(repo =>
       getTreeOrderedFiles(repo.files || []).map(f => ({
         repoName: repo.repoName,
         repoPath: repo.repoPath,
         file: f.file,
       }))
     );
-  }, [repos]);
+  }, [filteredRepos]);
 
   const currentFileIndex = useMemo(() => {
     if (!selection) return -1;
@@ -414,6 +457,21 @@ export function WorkspaceCodePanel({
     }
   }, { respectTerminal: false, enabled: active });
 
+  // / focuses search, Esc clears search
+  usePaneHotkey((event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === '/') {
+      event.preventDefault();
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    } else if (event.key === 'Escape') {
+      if (searchQuery) {
+        event.preventDefault();
+        setSearchQuery('');
+      }
+    }
+  }, { respectTerminal: true, enabled: active });
+
   return (
     <section aria-label="Workspace code" className="flex h-full min-h-0 min-w-0 flex-col bg-background overflow-hidden">
       {/* ─── FULL-WIDTH HEADER ───────────────────────────────────────────── */}
@@ -452,7 +510,13 @@ export function WorkspaceCodePanel({
         >
           <ChevronsDownUp className="size-3.5 text-muted-foreground" />
         </Button>
-        <span className="ml-auto text-xs text-muted-foreground font-mono shrink-0">{loading ? 'Refreshing…' : `${repos.reduce((sum, repo) => sum + repo.files.length, 0)} files`}</span>
+        <span className="ml-auto text-xs text-muted-foreground font-mono shrink-0">
+          {loading
+            ? 'Refreshing…'
+            : searchQuery.trim()
+              ? `${matchingFilesCount} / ${totalFilesCount} files`
+              : `${totalFilesCount} files`}
+        </span>
         {onClose && (
           <Button
             size="xs"
@@ -479,88 +543,171 @@ export function WorkspaceCodePanel({
           )}
           style={treeCollapsed ? undefined : { width: treeWidth }}
         >
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 [scrollbar-gutter:stable]">
-            {repos.map(repo => (
-              <details
-                open={!collapsedRepos[repo.repoName]}
-                key={repo.repoName}
-                onToggle={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  const isOpen = (e.currentTarget as HTMLDetailsElement).open;
-                  setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !isOpen }));
-                }}
-              >
-                <summary
-                  className="cursor-pointer py-1 text-xs font-semibold select-none truncate"
-                  onClick={(e) => {
+          {/* Sticky search input header at the top of the sidebar */}
+          <div className="sticky top-0 z-10 p-2 border-b border-border bg-background/95 backdrop-blur-xs flex flex-col gap-1.5 shrink-0">
+            <div className="relative flex items-center">
+              <Search className="absolute left-2 size-3 text-muted-foreground pointer-events-none" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
                     e.preventDefault();
-                    setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !prev[repo.repoName] }));
+                    setSearchQuery('');
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder="Filter files… (/)"
+                aria-label="Filter files"
+                className="w-full h-7 pl-6 pr-6 rounded border border-border bg-background px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary font-sans"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear filter"
+                  title="Clear filter (Esc)"
+                  className="absolute right-1 p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="size-3" />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground px-0.5">
+              <span>
+                {searchQuery.trim()
+                  ? `${matchingFilesCount} / ${totalFilesCount} files`
+                  : `${totalFilesCount} files`}
+              </span>
+              {searchQuery.trim() && matchingFilesCount === 0 && (
+                <span className="text-destructive font-medium">0 matches</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 [scrollbar-gutter:stable]">
+            {filteredRepos.map(repo => {
+              const hasMatches = repo.files.length > 0;
+              const isCollapsed = searchQuery.trim()
+                ? (searchCollapsedRepos[repo.repoName] ?? !hasMatches)
+                : !!collapsedRepos[repo.repoName];
+
+              return (
+                <details
+                  open={!isCollapsed}
+                  key={repo.repoName}
+                  onToggle={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+                    if (searchQuery.trim()) {
+                      setSearchCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !isOpen }));
+                    } else {
+                      setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !isOpen }));
+                    }
                   }}
                 >
-                  {repo.repoName}
-                </summary>
-                {repo.error ? (
-                  <p role="alert" className="text-xs text-destructive">{repo.error}</p>
-                ) : (
-                  <FileTree
-                    label={`${repo.repoName} ${mode}`}
-                    files={repo.files}
-                    revealPath={selection?.repoName === repo.repoName ? selection.file : undefined}
-                    revealKey={revealKey}
-                    defaultExpanded={mode === 'changes'}
-                    expandedPaths={expandedPathsByRepo[repo.repoName]}
-                    onExpandedPathsChange={(paths) => {
-                      setExpandedPathsByRepo(prev => ({ ...prev, [repo.repoName]: paths }));
+                  <summary
+                    className="flex items-center justify-between cursor-pointer py-1 text-xs font-semibold select-none truncate"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (searchQuery.trim()) {
+                        setSearchCollapsedRepos(prev => ({
+                          ...prev,
+                          [repo.repoName]: !(prev[repo.repoName] ?? !hasMatches),
+                        }));
+                      } else {
+                        setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !prev[repo.repoName] }));
+                      }
                     }}
-                    renderFile={file => {
-                      const glyph = fileTypeGlyph(file.file);
-                      const Glyph = glyph.icon;
-                      const changed = file.type !== 'unchanged';
-                      return (
-                        <button
-                          className={cn(
-                            'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent transition-colors cursor-pointer',
-                            selection?.repoName === repo.repoName && selection.file === file.file && 'bg-accent font-medium text-foreground'
-                          )}
-                          aria-pressed={selection?.repoName === repo.repoName && selection.file === file.file}
-                          title={`${file.file}${changed ? ` · ${file.type}` : ''}`}
-                          onClick={() => {
-                            if (selection?.repoName === repo.repoName && selection.file === file.file && !selection.line) {
-                              return;
-                            }
-                            setReferenceError('');
-                            setDiff(null);
-                            scrolledSelectionKey.current = '';
-                            setRevealKey(k => k + 1);
-                            setSelection({ repoName: repo.repoName, repoPath: repo.repoPath, file: file.file });
-                          }}
-                        >
-                          <Glyph className={cn('size-3.5 shrink-0', glyph.className)} aria-hidden="true" />
-                          <span className="truncate">{file.file.split('/').at(-1)}</span>
-                          <span className="sr-only">{glyph.label}</span>
-                          {changed && (
-                            /* A dot and a hue carry the status, so the name keeps
-                               the horizontal space instead of a type label. */
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                'ml-auto size-1.5 shrink-0 rounded-full',
-                                file.type === 'added' ? 'bg-emerald-500'
-                                  : file.type === 'deleted' ? 'bg-destructive'
-                                    : file.type === 'renamed' ? 'bg-sky-400'
-                                      : file.type === 'untracked' ? 'bg-emerald-400'
-                                        : 'bg-amber-500'
-                              )}
-                            />
-                          )}
-                        </button>
-                      );
-                    }}
-                  />
-                )}
-              </details>
-            ))}
-            {!loading && !error && !repos.some(repo => repo.files.length || repo.error) && (
+                  >
+                    <span className="truncate">{repo.repoName}</span>
+                    {searchQuery.trim() && (
+                      <span className="ml-1 text-[10px] font-mono text-muted-foreground shrink-0 font-normal">
+                        {repo.files.length} match{repo.files.length === 1 ? '' : 'es'}
+                      </span>
+                    )}
+                  </summary>
+                  {repo.error ? (
+                    <p role="alert" className="text-xs text-destructive">{repo.error}</p>
+                  ) : (
+                    <FileTree
+                      label={`${repo.repoName} ${mode}`}
+                      files={repo.files}
+                      searchQuery={searchQuery}
+                      revealPath={selection?.repoName === repo.repoName ? selection.file : undefined}
+                      revealKey={revealKey}
+                      defaultExpanded={mode === 'changes' || !!searchQuery.trim()}
+                      expandedPaths={effectiveExpandedPathsByRepo[repo.repoName]}
+                      onExpandedPathsChange={(paths) => {
+                        if (searchQuery.trim()) {
+                          setSearchExpandedPathsByRepo(prev => ({ ...prev, [repo.repoName]: paths }));
+                        } else {
+                          setExpandedPathsByRepo(prev => ({ ...prev, [repo.repoName]: paths }));
+                        }
+                      }}
+                      renderFile={file => {
+                        const glyph = fileTypeGlyph(file.file);
+                        const Glyph = glyph.icon;
+                        const changed = file.type !== 'unchanged';
+                        return (
+                          <button
+                            className={cn(
+                              'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent transition-colors cursor-pointer',
+                              selection?.repoName === repo.repoName && selection.file === file.file && 'bg-accent font-medium text-foreground'
+                            )}
+                            aria-pressed={selection?.repoName === repo.repoName && selection.file === file.file}
+                            title={`${file.file}${changed ? ` · ${file.type}` : ''}`}
+                            onClick={() => {
+                              if (selection?.repoName === repo.repoName && selection.file === file.file && !selection.line) {
+                                return;
+                              }
+                              setReferenceError('');
+                              setDiff(null);
+                              scrolledSelectionKey.current = '';
+                              setRevealKey(k => k + 1);
+                              setSelection({ repoName: repo.repoName, repoPath: repo.repoPath, file: file.file });
+                            }}
+                          >
+                            <Glyph className={cn('size-3.5 shrink-0', glyph.className)} aria-hidden="true" />
+                            <span className="truncate">{file.file.split('/').at(-1)}</span>
+                            <span className="sr-only">{glyph.label}</span>
+                            {changed && (
+                              /* A dot and a hue carry the status, so the name keeps
+                                 the horizontal space instead of a type label. */
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  'ml-auto size-1.5 shrink-0 rounded-full',
+                                  file.type === 'added' ? 'bg-emerald-500'
+                                    : file.type === 'deleted' ? 'bg-destructive'
+                                      : file.type === 'renamed' ? 'bg-sky-400'
+                                        : file.type === 'untracked' ? 'bg-emerald-400'
+                                          : 'bg-amber-500'
+                                )}
+                              />
+                            )}
+                          </button>
+                        );
+                      }}
+                    />
+                  )}
+                </details>
+              );
+            })}
+            {searchQuery.trim() && matchingFilesCount === 0 && (
+              <div className="p-3 text-center text-xs text-muted-foreground space-y-2">
+                <p>No matching files for &ldquo;{searchQuery}&rdquo;</p>
+                <Button size="xs" variant="outline" onClick={() => setSearchQuery('')}>
+                  Clear filter
+                </Button>
+              </div>
+            )}
+            {!loading && !error && !searchQuery.trim() && !repos.some(repo => repo.files.length || repo.error) && (
               <p className="p-2 text-xs text-muted-foreground">
                 {mode === 'changes' ? 'No uncommitted changes.' : 'No repository files.'}
               </p>

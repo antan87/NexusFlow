@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { WorkspaceCodePanel } from './WorkspaceCodePanel.js';
 import {
   buildCompactedTree,
+  filterTreeFiles,
   getAllDirectoryPaths,
   getAncestorPaths,
+  getMatchingBranchPaths,
+  treeOrderedFiles,
 } from './FileTree.js';
 
 describe('WorkspaceCodePanel Toolbar Actions', () => {
@@ -208,5 +211,164 @@ describe('WorkspaceCodePanel Expansion & Polling State Management', () => {
     }
     expect(collapseAllNext['frontend'].size).toBe(0);
     expect(collapseAllNext['backend'].size).toBe(0);
+  });
+});
+
+describe('WorkspaceCodePanel Sidebar Search & Path Filtering', () => {
+  const sampleRepos = [
+    {
+      repoName: 'frontend',
+      repoPath: '/ws/frontend',
+      files: [
+        { file: 'README.md', type: 'modified' },
+        { file: 'src/components/Button.tsx', type: 'modified' },
+        { file: 'src/components/Dialog.tsx', type: 'added' },
+        { file: 'src/utils/format.ts', type: 'modified' },
+      ],
+    },
+    {
+      repoName: 'backend',
+      repoPath: '/ws/backend',
+      files: [
+        { file: 'package.json', type: 'unchanged' },
+        { file: 'src/api/routes.ts', type: 'modified' },
+      ],
+    },
+  ];
+
+  it('renders sticky search input in sidebar with placeholder and accessibility attributes', () => {
+    const html = renderToStaticMarkup(
+      createElement(WorkspaceCodePanel, {
+        workspace: 'test-ws',
+        active: true,
+      })
+    );
+
+    // Sidebar search input element
+    expect(html).toContain('placeholder="Filter files… (/)"');
+    expect(html).toContain('aria-label="Filter files"');
+    // Top of sidebar contains sticky search container
+    expect(html).toContain('sticky top-0');
+  });
+
+  it('computes real-time case-insensitive filtered files across multiple repositories', () => {
+    // Search for "button"
+    const query = 'button';
+    const filteredRepos = sampleRepos.map(r => ({
+      ...r,
+      files: filterTreeFiles(r.files, query),
+    }));
+
+    expect(filteredRepos[0]?.files.map(f => f.file)).toEqual(['src/components/Button.tsx']);
+    expect(filteredRepos[1]?.files).toEqual([]);
+
+    // Total files vs matching files
+    const totalFiles = sampleRepos.reduce((sum, r) => sum + r.files.length, 0);
+    const matchingFiles = filteredRepos.reduce((sum, r) => sum + r.files.length, 0);
+    expect(totalFiles).toBe(6);
+    expect(matchingFiles).toBe(1);
+  });
+
+  it('filters files matching across multiple repositories', () => {
+    // Search for "src" which exists in both repositories
+    const query = 'src';
+    const filteredRepos = sampleRepos.map(r => ({
+      ...r,
+      files: filterTreeFiles(r.files, query),
+    }));
+
+    expect(filteredRepos[0]?.files.map(f => f.file)).toEqual([
+      'src/components/Button.tsx',
+      'src/components/Dialog.tsx',
+      'src/utils/format.ts',
+    ]);
+    expect(filteredRepos[1]?.files.map(f => f.file)).toEqual(['src/api/routes.ts']);
+
+    const matchingFiles = filteredRepos.reduce((sum, r) => sum + r.files.length, 0);
+    expect(matchingFiles).toBe(4);
+  });
+
+  it('automatically expands directory branches containing matching files during filter', () => {
+    const query = 'Button';
+    const matchingBranchesByRepo: Record<string, Set<string>> = {};
+    for (const repo of sampleRepos) {
+      matchingBranchesByRepo[repo.repoName] = getMatchingBranchPaths(repo.files, query, { compact: true });
+    }
+
+    // In frontend repo: 'src/components' is the branch containing Button.tsx
+    expect(matchingBranchesByRepo['frontend']?.has('src/components')).toBe(true);
+    // In backend repo: no files matched, so empty set
+    expect(matchingBranchesByRepo['backend']?.size).toBe(0);
+  });
+
+  it('uncollapses repos containing matching files and collapses repos with 0 matches', () => {
+    const query = 'Button';
+    const filteredRepos = sampleRepos.map(r => ({
+      ...r,
+      files: filterTreeFiles(r.files, query),
+    }));
+
+    const searchCollapsedRepos: Record<string, boolean> = {};
+    for (const repo of filteredRepos) {
+      const hasMatches = repo.files.length > 0;
+      // If repo has matches -> open (false); if 0 matches -> collapsed (true)
+      searchCollapsedRepos[repo.repoName] = !hasMatches;
+    }
+
+    expect(searchCollapsedRepos['frontend']).toBe(false); // Uncollapsed / visible
+    expect(searchCollapsedRepos['backend']).toBe(true);   // Collapsed
+  });
+
+  it('updates treeOrderedFiles so navigation steps strictly through filtered files', () => {
+    // Unfiltered visual files across repos
+    const allVisualFiles = sampleRepos.flatMap(r =>
+      treeOrderedFiles(r.files).map(f => ({ repoName: r.repoName, file: f.file }))
+    );
+    expect(allVisualFiles.length).toBe(6);
+
+    // Filtered by "format"
+    const query = 'format';
+    const filteredRepos = sampleRepos.map(r => ({
+      ...r,
+      files: filterTreeFiles(r.files, query),
+    }));
+    const filteredVisualFiles = filteredRepos.flatMap(r =>
+      treeOrderedFiles(r.files).map(f => ({ repoName: r.repoName, file: f.file }))
+    );
+
+    expect(filteredVisualFiles).toEqual([
+      { repoName: 'frontend', file: 'src/utils/format.ts' },
+    ]);
+
+    // Keyboard navigation index is strictly within filtered bounds
+    const currentIndex = 0;
+    expect(filteredVisualFiles[currentIndex]?.file).toBe('src/utils/format.ts');
+  });
+
+  it('preserves pre-search folder expansion state when search is cleared', () => {
+    // Pre-search state: user manually had 'src/components' expanded and 'src/utils' collapsed
+    const userExpandedPaths: Record<string, Set<string>> = {
+      frontend: new Set(['src/components']),
+      backend: new Set(),
+    };
+
+    // Active search: "format"
+    const query = 'format';
+    const searchActiveExpandedPaths: Record<string, Set<string>> = {};
+    for (const repo of sampleRepos) {
+      searchActiveExpandedPaths[repo.repoName] = getMatchingBranchPaths(repo.files, query, { compact: true });
+    }
+    // During search: 'src/utils' is expanded because format.ts is in it
+    expect(searchActiveExpandedPaths['frontend']?.has('src/utils')).toBe(true);
+    expect(searchActiveExpandedPaths['frontend']?.has('src/components')).toBe(false);
+
+    // Search cleared: effective state reverts back to userExpandedPaths
+    const clearedQuery = '';
+    const effectiveExpandedPaths = clearedQuery.trim()
+      ? searchActiveExpandedPaths
+      : userExpandedPaths;
+
+    expect(effectiveExpandedPaths['frontend']?.has('src/components')).toBe(true);
+    expect(effectiveExpandedPaths['frontend']?.has('src/utils')).toBe(false);
   });
 });

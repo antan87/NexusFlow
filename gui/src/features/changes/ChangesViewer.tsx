@@ -13,6 +13,8 @@ import {
   ExternalLink,
   Navigation,
   ArrowDownUp,
+  Search,
+  X,
 } from 'lucide-react';
 import type { CommitRepoResult, Feature } from '../../types.js';
 import { CommitReviewPanel } from './CommitReviewPanel.js';
@@ -27,8 +29,10 @@ import { cn } from '../../lib/utils.js';
 import {
   FileTree,
   buildCompactedTree,
+  filterTreeFiles,
   getAllDirectoryPaths,
   getAncestorPaths,
+  getMatchingBranchPaths,
   normalizePath,
   treeOrderedFiles as getTreeOrderedFiles,
 } from './FileTree.js';
@@ -118,6 +122,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   const [targetLineMap, setTargetLineMap] = useState<Record<string, number>>({});
   const [globalSymbolsOpen, setGlobalSymbolsOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [searchExpandedPaths, setSearchExpandedPaths] = useState<Record<string, Set<string>>>({});
+  const [searchCollapsedRepos, setSearchCollapsedRepos] = useState<Record<string, boolean>>({});
+  const searchFilterInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSearchExpandedPaths({});
+    setSearchCollapsedRepos({});
+  }, [searchFilter]);
   // What was fetched for each file, and at which version. Bookkeeping only:
   // nothing renders from it, so it lives in a ref.
   const fetchedFiles = useRef<Record<string, FetchedFile>>({});
@@ -223,10 +236,18 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     };
   }, [gitChanges, ws.branchName]);
 
+  const filteredReposWithChanges = useMemo(() => {
+    if (!searchFilter.trim()) return reposWithChanges;
+    return reposWithChanges.map((repo) => ({
+      ...repo,
+      files: filterTreeFiles(repo.files || [], searchFilter),
+    }));
+  }, [reposWithChanges, searchFilter]);
+
   // Flattened list of all files across all repos in deterministic visual tree order
   // for multi-file jump bar, dropdown, and keyboard navigation
   const treeOrderedFiles = useMemo(() => {
-    return reposWithChanges.flatMap((repo) =>
+    return filteredReposWithChanges.flatMap((repo) =>
       getTreeOrderedFiles(repo.files || []).map((f: any) => ({
         repoName: repo.repoName,
         repoPath: repo.repoPath,
@@ -236,7 +257,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         deletions: f.deletions || 0,
       }))
     );
-  }, [reposWithChanges]);
+  }, [filteredReposWithChanges]);
 
   useEffect(() => {
     if (treeOrderedFiles.length === 0) {
@@ -260,6 +281,19 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
   };
 
   const [treeExpandedPaths, setTreeExpandedPaths] = useState<Record<string, Set<string>>>({});
+
+  const effectiveTreeExpandedPaths = useMemo(() => {
+    if (!searchFilter.trim()) return treeExpandedPaths;
+    const result: Record<string, Set<string>> = {};
+    for (const repo of filteredReposWithChanges) {
+      if (searchExpandedPaths[repo.repoName]) {
+        result[repo.repoName] = searchExpandedPaths[repo.repoName];
+      } else {
+        result[repo.repoName] = getMatchingBranchPaths(repo.files || [], searchFilter, { compact: true });
+      }
+    }
+    return result;
+  }, [searchFilter, filteredReposWithChanges, treeExpandedPaths, searchExpandedPaths]);
 
   const expandAllRepos = () => {
     const next: Record<string, boolean> = {};
@@ -533,6 +567,19 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        searchFilterInputRef.current?.focus();
+        searchFilterInputRef.current?.select();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (searchFilter) {
+          e.preventDefault();
+          setSearchFilter('');
+          return;
+        }
+      }
       if (e.altKey && (e.key === 'ArrowDown' || e.key === 'Down')) {
         e.preventDefault();
         if (treeOrderedFiles.length > 0) {
@@ -549,7 +596,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedFileIndex, treeOrderedFiles, jumpToFile]);
+  }, [selectedFileIndex, treeOrderedFiles, jumpToFile, searchFilter]);
 
 
   const activeSelectedFile = treeOrderedFiles[selectedFileIndex] || null;
@@ -602,32 +649,79 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       </header>
 
       {/* ─── QUICK MULTI-FILE JUMP BAR ─────────────────────────────────────────── */}
-      {treeOrderedFiles.length > 0 && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/90 bg-card/75 p-2.5 px-3.5 backdrop-blur-md shadow-xs select-none">
-          <div className="flex items-center gap-2 min-w-0">
+      {(totalFilesAcrossRepos > 0 || searchFilter.length > 0) && (
+        <div className="sticky top-14 z-10 mb-5 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/90 bg-card/95 p-2.5 px-3.5 backdrop-blur-md shadow-xs select-none">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
             <span className="grid size-6 place-items-center rounded-md bg-primary/10 text-primary shrink-0">
               <Navigation size={12} />
             </span>
-            <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-foreground">
+            <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-foreground shrink-0">
               <span>File</span>
               <span className="rounded bg-primary/15 border border-primary/25 px-1.5 py-0.2 text-primary">
-                {selectedFileIndex + 1}
+                {treeOrderedFiles.length > 0 ? selectedFileIndex + 1 : 0}
               </span>
               <span className="text-muted-foreground">of {treeOrderedFiles.length}</span>
             </div>
 
+            {/* Quick Filter Input in Jump Bar */}
+            <div className="relative flex items-center shrink-0">
+              <Search className="absolute left-2 size-3 text-muted-foreground pointer-events-none" />
+              <input
+                ref={searchFilterInputRef}
+                type="text"
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setSearchFilter('');
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder="Filter files… (/)"
+                aria-label="Filter files"
+                className="h-7 w-32 sm:w-48 pl-6 pr-6 rounded-lg border border-border bg-background/80 px-2 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
+              />
+              {searchFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchFilter('');
+                    searchFilterInputRef.current?.focus();
+                  }}
+                  aria-label="Clear filter"
+                  title="Clear filter (Esc)"
+                  className="absolute right-1 p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Match counter indicator */}
+            {searchFilter.trim() && (
+              <span className="font-mono text-[10px] text-muted-foreground shrink-0 font-medium">
+                {treeOrderedFiles.length} / {totalFilesAcrossRepos} files
+              </span>
+            )}
+
             {/* Quick File Selector Dropdown */}
             <select
               aria-label="Jump to changed file"
-              value={selectedFileIndex}
+              value={treeOrderedFiles.length > 0 ? selectedFileIndex : -1}
               onChange={(e) => void jumpToFile(Number(e.target.value))}
-              className="ml-2 max-w-[240px] sm:max-w-[360px] rounded-lg border border-border bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
+              disabled={treeOrderedFiles.length === 0}
+              className="ml-1 max-w-[200px] sm:max-w-[320px] rounded-lg border border-border bg-background/80 px-2 py-1 font-mono text-[11px] text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
             >
-              {treeOrderedFiles.map((f, i) => (
-                <option key={`${f.repoName}/${f.file}`} value={i}>
-                  [{(f.type || 'modified').slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
-                </option>
-              ))}
+              {treeOrderedFiles.length === 0 ? (
+                <option value={-1}>No matching files</option>
+              ) : (
+                treeOrderedFiles.map((f, i) => (
+                  <option key={`${f.repoName}/${f.file}`} value={i}>
+                    [{(f.type || 'modified').slice(0, 3)}] {f.repoName}: {f.file} (+{f.additions} -{f.deletions})
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -636,11 +730,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             {/* Prev File Button (Alt+Up) */}
             <button
               type="button"
+              disabled={treeOrderedFiles.length === 0}
               onClick={() => {
+                if (treeOrderedFiles.length === 0) return;
                 const prevIdx = (selectedFileIndex - 1 + treeOrderedFiles.length) % treeOrderedFiles.length;
                 void jumpToFile(prevIdx);
               }}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent disabled:opacity-40 disabled:pointer-events-none font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               title="Jump to previous modified file (Shortcut: Alt+Up)"
             >
               <ChevronUp size={12} />
@@ -650,11 +746,13 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             {/* Next File Button (Alt+Down) */}
             <button
               type="button"
+              disabled={treeOrderedFiles.length === 0}
               onClick={() => {
+                if (treeOrderedFiles.length === 0) return;
                 const nextIdx = (selectedFileIndex + 1) % treeOrderedFiles.length;
                 void jumpToFile(nextIdx);
               }}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-card hover:bg-accent disabled:opacity-40 disabled:pointer-events-none font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
               title="Jump to next modified file (Shortcut: Alt+Down)"
             >
               <ChevronDown size={12} />
@@ -813,10 +911,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
             </div>
           ) : (
             reposWithChanges.map((repo) => {
+              const filteredRepo = filteredReposWithChanges.find(r => r.repoName === repo.repoName) || repo;
+              const repoFilteredFiles = filteredRepo.files || [];
+              const hasMatches = repoFilteredFiles.length > 0;
               const totalFilesChanged = repo.files.length;
               const repoAdditions = repo.files.reduce((acc: number, f: any) => acc + (f.additions || 0), 0);
               const repoDeletions = repo.files.reduce((acc: number, f: any) => acc + (f.deletions || 0), 0);
-              const collapsed = isRepoCollapsed(repo.repoName);
+              const collapsed = searchFilter.trim()
+                ? (searchCollapsedRepos[repo.repoName] ?? !hasMatches)
+                : isRepoCollapsed(repo.repoName);
 
               return (
                 <div
@@ -827,11 +930,27 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => toggleRepoCollapse(repo.repoName)}
+                    onClick={() => {
+                      if (searchFilter.trim()) {
+                        setSearchCollapsedRepos(prev => ({
+                          ...prev,
+                          [repo.repoName]: !(prev[repo.repoName] ?? !hasMatches),
+                        }));
+                      } else {
+                        toggleRepoCollapse(repo.repoName);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        toggleRepoCollapse(repo.repoName);
+                        if (searchFilter.trim()) {
+                          setSearchCollapsedRepos(prev => ({
+                            ...prev,
+                            [repo.repoName]: !(prev[repo.repoName] ?? !hasMatches),
+                          }));
+                        } else {
+                          toggleRepoCollapse(repo.repoName);
+                        }
                       }
                     }}
                     className={cn(
@@ -850,9 +969,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                         )}
                       </span>
                       <h5 className="font-mono text-sm font-bold text-foreground truncate">{repo.repoName}</h5>
-                      <StatusBadge tone="warning" dot={false}>
-                        {totalFilesChanged} file{totalFilesChanged === 1 ? '' : 's'} changed
-                      </StatusBadge>
+                      {searchFilter.trim() ? (
+                        <StatusBadge tone={hasMatches ? 'warning' : 'neutral'} dot={false}>
+                          {repoFilteredFiles.length} / {totalFilesChanged} match{repoFilteredFiles.length === 1 ? '' : 'es'}
+                        </StatusBadge>
+                      ) : (
+                        <StatusBadge tone="warning" dot={false}>
+                          {totalFilesChanged} file{totalFilesChanged === 1 ? '' : 's'} changed
+                        </StatusBadge>
+                      )}
                       {(repoAdditions > 0 || repoDeletions > 0) && (
                         <span className="rounded-md border border-border bg-muted/60 px-2 py-0.5 font-mono text-[10px] font-bold">
                           <span className="font-bold text-success-foreground">+{repoAdditions}</span>{' '}
@@ -879,12 +1004,19 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                     <div className="p-5 flex flex-col gap-3 bg-card/40">
                       <FileTree
                         label={`${repo.repoName} changed files`}
-                        files={repo.files}
+                        files={repoFilteredFiles}
+                        searchQuery={searchFilter}
                         revealPath={revealFile.startsWith(`${repo.repoName}/`) ? revealFile.slice(repo.repoName.length + 1) : undefined}
                         revealKey={revealKey}
                         defaultExpanded={true}
-                        expandedPaths={treeExpandedPaths[repo.repoName]}
-                        onExpandedPathsChange={(paths) => setTreeExpandedPaths(prev => ({ ...prev, [repo.repoName]: paths }))}
+                        expandedPaths={effectiveTreeExpandedPaths[repo.repoName]}
+                        onExpandedPathsChange={(paths) => {
+                          if (searchFilter.trim()) {
+                            setSearchExpandedPaths(prev => ({ ...prev, [repo.repoName]: paths }));
+                          } else {
+                            setTreeExpandedPaths(prev => ({ ...prev, [repo.repoName]: paths }));
+                          }
+                        }}
                         renderFile={(fileInfo: any) => {
                         const cacheKey = `${repo.repoName}/${fileInfo.file}`;
                         const isExpanded = !!expandedFiles[cacheKey];

@@ -41,6 +41,41 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await expect(chat.getByTestId('terminal-pane')).toBeVisible();
 });
 
+test('filters files in code sidebar via search input and clears filter', async ({ page }) => {
+  const repo = {
+    repoName: 'repo',
+    repoPath: 'C:/repo',
+    files: [
+      { file: 'src/components/Button.tsx', type: 'modified', additions: 1, deletions: 0 },
+      { file: 'src/utils/format.ts', type: 'modified', additions: 1, deletions: 0 },
+    ],
+  };
+  await page.route('**/api/workspace/feature-x/changes', route => route.fulfill({ json: { changes: [repo] } }));
+  await page.route('**/api/workspace/feature-x/changes/diff?*', route => route.fulfill({ json: { diff: '', fileContent: 'export const x = 1;\n', originalContent: '' } }));
+  await page.goto('/#/workspaces/feature-x/sessions');
+  await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
+  const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
+  await toggleInspector(page, chat, 'Code');
+  const code = chat.getByRole('region', { name: 'Workspace code' });
+
+  const searchInput = code.getByRole('textbox', { name: 'Filter files' });
+  await expect(searchInput).toBeVisible();
+  await expect(code.getByText('2 files')).toBeVisible();
+
+  // Type filter query "Button"
+  await searchInput.fill('Button');
+  await expect(code.getByText('1 / 2 files')).toBeVisible();
+  await expect(code.getByRole('button', { name: /Button\.tsx/ })).toBeVisible();
+  await expect(code.getByRole('button', { name: /format\.ts/ })).toHaveCount(0);
+
+  // Clear button is visible and clicking it resets filter
+  const clearBtn = code.getByRole('button', { name: 'Clear filter' });
+  await expect(clearBtn).toBeVisible();
+  await clearBtn.click();
+  await expect(code.getByText('2 files')).toBeVisible();
+  await expect(code.getByRole('button', { name: /format\.ts/ })).toBeVisible();
+});
+
 test('exposes a disconnected session in the docked CLI with a reconnect action', async ({ page }) => {
   let dropConnection: (() => Promise<void>) | undefined;
   let connections = 0;
