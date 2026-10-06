@@ -28,6 +28,7 @@ import {
   FileTree,
   buildCompactedTree,
   getAllDirectoryPaths,
+  getAncestorPaths,
   normalizePath,
   treeOrderedFiles as getTreeOrderedFiles,
 } from './FileTree.js';
@@ -142,6 +143,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setExpandedFiles({});
     setDiffErrors({});
     setTargetLineMap({});
+    setTreeExpandedPaths({});
     fetchedFiles.current = {};
     globalChangesetSymbolIndex.clear();
   }, [ws.branchName]);
@@ -282,6 +284,23 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     setExpandedFiles({});
     setTreeExpandedPaths(nextTrees);
   };
+
+  // Smart defaults for changes mode: expanded by default for repos when gitChanges loads
+  useEffect(() => {
+    if (!gitChanges || gitChanges.length === 0) return;
+    setTreeExpandedPaths((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const repo of gitChanges) {
+        if (!next[repo.repoName]) {
+          changed = true;
+          const root = buildCompactedTree(repo.files || []);
+          next[repo.repoName] = new Set(getAllDirectoryPaths(root));
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [gitChanges]);
 
   /** The version of a file's change as the current change list describes it. */
   const versionOf = useCallback(
@@ -442,6 +461,27 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       // Ensure repo is expanded
       setCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
 
+      // Ensure ancestor folders in FileTree are expanded
+      const targetRepoObj = gitChanges.find((r) => r.repoName === target.repoName);
+      if (targetRepoObj) {
+        const root = buildCompactedTree(targetRepoObj.files || []);
+        const ancestors = getAncestorPaths(root, target.file);
+        if (ancestors.length > 0) {
+          setTreeExpandedPaths((prev) => {
+            const current = prev[target.repoName] || new Set();
+            let changed = false;
+            const next = new Set(current);
+            for (const a of ancestors) {
+              if (!next.has(a)) {
+                next.add(a);
+                changed = true;
+              }
+            }
+            return changed ? { ...prev, [target.repoName]: next } : prev;
+          });
+        }
+      }
+
       // Set target line BEFORE expansion so PluggableDiffViewer receives initialTargetLine immediately
       if (line !== undefined) {
         setTargetLineMap((prev) => ({ ...prev, [cacheKey]: line }));
@@ -461,7 +501,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         }
       }, 50);
     },
-    [treeOrderedFiles, expandedFiles, toggleFileExpansion]
+    [treeOrderedFiles, expandedFiles, toggleFileExpansion, gitChanges]
   );
 
 

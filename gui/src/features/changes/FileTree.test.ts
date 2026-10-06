@@ -899,5 +899,56 @@ describe('FileTree Component Rendering & Controlled Expansion', () => {
     expect(html).toContain('<details open="" data-path="src/components"');
     expect(html).toContain('Button.tsx');
   });
+
+  it('preserves collapsed state in uncontrolled mode when new directories are added dynamically', () => {
+    // Initial directories: 'src/components', 'src/utils'
+    const initialPaths = ['src/components', 'src/utils'];
+    const prevKey = initialPaths.join('|');
+
+    // User had manually collapsed 'src/components', keeping 'src/utils'
+    const userState = new Set(['src/utils']);
+
+    // Dynamically added directory 'docs/guide'
+    const updatedPaths = ['docs/guide', 'src/components', 'src/utils'];
+
+    const oldPaths = new Set(prevKey.split('|').filter(Boolean));
+    const nextState = new Set(userState);
+    for (const p of updatedPaths) {
+      if (!oldPaths.has(p)) {
+        nextState.add(p);
+      }
+    }
+    const allSet = new Set(updatedPaths);
+    for (const p of nextState) {
+      if (!allSet.has(p)) {
+        nextState.delete(p);
+      }
+    }
+
+    // Newly added directory is expanded
+    expect(nextState.has('docs/guide')).toBe(true);
+    // User collapsed directory did NOT snap back open
+    expect(nextState.has('src/components')).toBe(false);
+    // Previously open directory remains open
+    expect(nextState.has('src/utils')).toBe(true);
+  });
+
+  it('normalizes target file paths for scrollIntoView targeting', () => {
+    const rawTarget = './/src\\components\\\\Button.tsx';
+    const normalized = normalizePath(rawTarget);
+    expect(normalized).toBe('src/components/Button.tsx');
+
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Normalization targeting',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain(`data-file-path="${normalized}"`);
+  });
 });
+
 

@@ -69,6 +69,7 @@ export function WorkspaceCodePanel({
 
   const [expandedPathsByRepo, setExpandedPathsByRepo] = useState<Record<string, Set<string>>>({});
   const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
+  const [revealKey, setRevealKey] = useState(0);
 
   const expandAllFolders = useCallback(() => {
     const next: Record<string, Set<string>> = {};
@@ -88,15 +89,24 @@ export function WorkspaceCodePanel({
     setExpandedPathsByRepo(next);
   }, [repos]);
 
-  // Smart defaults for folder expansion: collapsed by default for repository 'files' mode,
-  // expanded by default for 'changes' mode.
+  // Smart defaults for folder expansion: apply ONLY when mode transitions between
+  // 'changes' (expanded by default) and 'files' (collapsed by default).
+  // Crucially, this must NOT re-run on polling re-renders when repos update.
+  const prevMode = useRef(mode);
   useEffect(() => {
-    if (mode === 'changes') {
-      expandAllFolders();
-    } else {
-      collapseAllFolders();
+    if (prevMode.current === mode) return;
+    prevMode.current = mode;
+    const next: Record<string, Set<string>> = {};
+    for (const repo of repos) {
+      if (mode === 'changes') {
+        const root = buildCompactedTree(repo.files || []);
+        next[repo.repoName] = new Set(getAllDirectoryPaths(root));
+      } else {
+        next[repo.repoName] = new Set();
+      }
     }
-  }, [mode, expandAllFolders, collapseAllFolders]);
+    setExpandedPathsByRepo(next);
+  }, [mode, repos]);
 
   // When repos load initially, populate default expansion for repos not yet tracked
   useEffect(() => {
@@ -119,12 +129,17 @@ export function WorkspaceCodePanel({
     });
   }, [repos, mode]);
 
-  // When a file is selected, ensure its repo is not collapsed and its ancestors are auto-expanded
+  // When a file is selected or revealed, ensure its repo is not collapsed and its ancestors are auto-expanded.
+  // Note: we track lastSelectedKey so manual collapses of the repo do NOT get snapped back open.
+  const lastSelectedKey = useRef<string>('');
   useEffect(() => {
     if (!selection) return;
-    if (collapsedRepos[selection.repoName]) {
-      setCollapsedRepos(prev => ({ ...prev, [selection.repoName]: false }));
-    }
+    const key = `${selection.repoName}:${selection.file}:${revealKey}`;
+    if (key === lastSelectedKey.current) return;
+    lastSelectedKey.current = key;
+
+    setCollapsedRepos(prev => (prev[selection.repoName] ? { ...prev, [selection.repoName]: false } : prev));
+
     const repo = repos.find(r => r.repoName === selection.repoName);
     if (!repo) return;
     const root = buildCompactedTree(repo.files || []);
@@ -143,7 +158,7 @@ export function WorkspaceCodePanel({
         return changed ? { ...prev, [selection.repoName]: next } : prev;
       });
     }
-  }, [selection, repos, collapsedRepos]);
+  }, [selection, repos, revealKey]);
 
   useEffect(() => {
     if (openReference && openReference.id !== handledReference.current) {
@@ -211,6 +226,7 @@ export function WorkspaceCodePanel({
           setReferenceError(resolved.error ?? '');
           setDiff(null);
           scrolledSelectionKey.current = '';
+          setRevealKey(k => k + 1);
           setSelection(resolved.file ? { ...resolved.file, line: openReference.line } : null);
         } else {
           setSelection(current =>
@@ -305,6 +321,7 @@ export function WorkspaceCodePanel({
         setReferenceError('');
         setDiff(null);
         scrolledSelectionKey.current = '';
+        setRevealKey(k => k + 1);
         setSelection(next);
       }
       return;
@@ -315,6 +332,7 @@ export function WorkspaceCodePanel({
         setReferenceError('');
         setDiff(null);
         scrolledSelectionKey.current = '';
+        setRevealKey(k => k + 1);
         setSelection(next);
       }
     }
@@ -328,6 +346,7 @@ export function WorkspaceCodePanel({
         setReferenceError('');
         setDiff(null);
         scrolledSelectionKey.current = '';
+        setRevealKey(k => k + 1);
         setSelection(prev);
       }
       return;
@@ -338,6 +357,7 @@ export function WorkspaceCodePanel({
         setReferenceError('');
         setDiff(null);
         scrolledSelectionKey.current = '';
+        setRevealKey(k => k + 1);
         setSelection(prev);
       }
     }
@@ -486,6 +506,7 @@ export function WorkspaceCodePanel({
                     label={`${repo.repoName} ${mode}`}
                     files={repo.files}
                     revealPath={selection?.repoName === repo.repoName ? selection.file : undefined}
+                    revealKey={revealKey}
                     defaultExpanded={mode === 'changes'}
                     expandedPaths={expandedPathsByRepo[repo.repoName]}
                     onExpandedPathsChange={(paths) => {
@@ -510,6 +531,7 @@ export function WorkspaceCodePanel({
                             setReferenceError('');
                             setDiff(null);
                             scrolledSelectionKey.current = '';
+                            setRevealKey(k => k + 1);
                             setSelection({ repoName: repo.repoName, repoPath: repo.repoPath, file: file.file });
                           }}
                         >

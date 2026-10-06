@@ -235,11 +235,25 @@ export function FileTree<T extends TreeFile>({
   useEffect(() => {
     const key = allPaths.join('|');
     if (key !== prevPathsRef.current) {
+      const prevKey = prevPathsRef.current;
       prevPathsRef.current = key;
       if (defaultExpanded && controlledExpandedPaths === undefined) {
+        const oldPaths = new Set(prevKey.split('|').filter(Boolean));
         setInternalExpandedPaths(prev => {
           const next = new Set(prev);
-          for (const p of allPaths) next.add(p);
+          for (const p of allPaths) {
+            // Only add brand-new directories; do not re-expand folders the user manually collapsed
+            if (!oldPaths.has(p)) {
+              next.add(p);
+            }
+          }
+          // Remove directories that no longer exist in the tree
+          const allSet = new Set(allPaths);
+          for (const p of next) {
+            if (!allSet.has(p)) {
+              next.delete(p);
+            }
+          }
           return next;
         });
       }
@@ -309,7 +323,10 @@ export function FileTree<T extends TreeFile>({
     const items = host.current?.querySelectorAll<HTMLElement>('[data-file-path]');
     for (const item of items ?? []) {
       if (item.dataset.filePath === normalized) {
-        if (typeof item.scrollIntoView === 'function') {
+        const target = item.querySelector<HTMLElement>('button, [role="button"]') ?? item;
+        if (typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else if (typeof item.scrollIntoView === 'function') {
           item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
         break;
