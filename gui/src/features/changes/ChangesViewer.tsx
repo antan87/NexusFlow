@@ -24,7 +24,13 @@ import { IconButton } from '../../components/ui/icon-button.js';
 import { Spinner } from '../../components/ui/spinner.js';
 import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree, normalizePath, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
+import {
+  FileTree,
+  buildCompactedTree,
+  getAllDirectoryPaths,
+  normalizePath,
+  treeOrderedFiles as getTreeOrderedFiles,
+} from './FileTree.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -251,21 +257,30 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     }));
   };
 
+  const [treeExpandedPaths, setTreeExpandedPaths] = useState<Record<string, Set<string>>>({});
+
   const expandAllRepos = () => {
     const next: Record<string, boolean> = {};
+    const nextTrees: Record<string, Set<string>> = {};
     gitChanges.forEach((repo) => {
       next[repo.repoName] = false;
+      const root = buildCompactedTree(repo.files || []);
+      nextTrees[repo.repoName] = new Set(getAllDirectoryPaths(root));
     });
     setCollapsedRepos(next);
+    setTreeExpandedPaths(nextTrees);
   };
 
   const collapseAllRepos = () => {
     const next: Record<string, boolean> = {};
+    const nextTrees: Record<string, Set<string>> = {};
     gitChanges.forEach((repo) => {
       next[repo.repoName] = true;
+      nextTrees[repo.repoName] = new Set();
     });
     setCollapsedRepos(next);
     setExpandedFiles({});
+    setTreeExpandedPaths(nextTrees);
   };
 
   /** The version of a file's change as the current change list describes it. */
@@ -822,7 +837,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                   {/* Collapsible File List Body */}
                   {!collapsed && (
                     <div className="p-5 flex flex-col gap-3 bg-card/40">
-                      <FileTree label={`${repo.repoName} changed files`} files={repo.files} revealPath={revealFile.startsWith(`${repo.repoName}/`) ? revealFile.slice(repo.repoName.length + 1) : undefined} revealKey={revealKey} renderFile={(fileInfo: any) => {
+                      <FileTree
+                        label={`${repo.repoName} changed files`}
+                        files={repo.files}
+                        revealPath={revealFile.startsWith(`${repo.repoName}/`) ? revealFile.slice(repo.repoName.length + 1) : undefined}
+                        revealKey={revealKey}
+                        defaultExpanded={true}
+                        expandedPaths={treeExpandedPaths[repo.repoName]}
+                        onExpandedPathsChange={(paths) => setTreeExpandedPaths(prev => ({ ...prev, [repo.repoName]: paths }))}
+                        renderFile={(fileInfo: any) => {
                         const cacheKey = `${repo.repoName}/${fileInfo.file}`;
                         const isExpanded = !!expandedFiles[cacheKey];
                         const isLoading = !!diffLoading[cacheKey];

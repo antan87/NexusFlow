@@ -1,7 +1,12 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  FileTree,
   buildCompactedTree,
   flattenTreeFiles,
+  getAllDirectoryPaths,
+  getAncestorPaths,
   normalizePath,
   treeOrderedFiles,
   type TreeFile,
@@ -561,6 +566,338 @@ describe('normalizePath utility', () => {
     expect(normalizePath('src\\\\components\\\\Button.tsx')).toBe('src/components/Button.tsx');
     expect(normalizePath('src//utils///format.ts')).toBe('src/utils/format.ts');
     expect(normalizePath('')).toBe('');
+  });
+});
+
+describe('getAllDirectoryPaths', () => {
+  it('returns an empty array for an empty tree or root files only', () => {
+    const emptyTree = buildCompactedTree([]);
+    expect(getAllDirectoryPaths(emptyTree)).toEqual([]);
+
+    const rootFilesTree = buildCompactedTree([
+      { file: 'README.md' },
+      { file: 'package.json' },
+    ]);
+    expect(getAllDirectoryPaths(rootFilesTree)).toEqual([]);
+  });
+
+  it('collects all directory paths in a compacted tree', () => {
+    const files: TreeFile[] = [
+      { file: 'src/features/changes/FileTree.tsx' },
+      { file: 'src/features/changes/FileTree.test.ts' },
+      { file: 'docs/guide.md' },
+    ];
+    const tree = buildCompactedTree(files, { compact: true });
+    const paths = getAllDirectoryPaths(tree);
+    expect(paths).toEqual(['docs', 'src/features/changes']);
+  });
+
+  it('collects all nested directory paths in an uncompacted tree', () => {
+    const files: TreeFile[] = [
+      { file: 'src/features/changes/FileTree.tsx' },
+      { file: 'docs/guide.md' },
+    ];
+    const tree = buildCompactedTree(files, { compact: false });
+    const paths = getAllDirectoryPaths(tree);
+    expect(paths).toEqual(['docs', 'src', 'src/features', 'src/features/changes']);
+  });
+
+  it('collects directories across branched hierarchies in depth-first order', () => {
+    const files: TreeFile[] = [
+      { file: 'src/components/ui/Button.tsx' },
+      { file: 'src/components/ui/Dialog.tsx' },
+      { file: 'src/lib/format.ts' },
+      { file: 'tests/unit.test.ts' },
+    ];
+    const tree = buildCompactedTree(files, { compact: true });
+    const paths = getAllDirectoryPaths(tree);
+    expect(paths).toEqual([
+      'src',
+      'src/components/ui',
+      'src/lib',
+      'tests',
+    ]);
+  });
+});
+
+describe('getAncestorPaths', () => {
+  it('returns empty array for empty inputs or root files', () => {
+    const tree = buildCompactedTree([{ file: 'README.md' }]);
+    expect(getAncestorPaths(tree, '')).toEqual([]);
+    expect(getAncestorPaths(tree, 'README.md')).toEqual([]);
+    expect(getAncestorPaths(tree, 'unknown.ts')).toEqual([]);
+  });
+
+  it('returns compacted ancestor path for a nested file', () => {
+    const files: TreeFile[] = [
+      { file: 'src/features/changes/FileTree.tsx' },
+      { file: 'package.json' },
+    ];
+    const tree = buildCompactedTree(files, { compact: true });
+    const ancestors = getAncestorPaths(tree, 'src/features/changes/FileTree.tsx');
+    expect(ancestors).toEqual(['src/features/changes']);
+  });
+
+  it('returns all ancestor directory paths in an uncompacted tree', () => {
+    const files: TreeFile[] = [
+      { file: 'src/features/changes/FileTree.tsx' },
+    ];
+    const tree = buildCompactedTree(files, { compact: false });
+    const ancestors = getAncestorPaths(tree, 'src/features/changes/FileTree.tsx');
+    expect(ancestors.slice().sort()).toEqual(['src', 'src/features', 'src/features/changes'].sort());
+  });
+
+  it('handles paths with Windows backslashes and redundant prefixes', () => {
+    const files: TreeFile[] = [
+      { file: 'src/components/Button.tsx' },
+    ];
+    const tree = buildCompactedTree(files);
+    const winAncestors = getAncestorPaths(tree, 'src\\components\\Button.tsx');
+    expect(winAncestors).toEqual(['src/components']);
+
+    const dotAncestors = getAncestorPaths(tree, './src/components/Button.tsx');
+    expect(dotAncestors).toEqual(['src/components']);
+
+    const slashAncestors = getAncestorPaths(tree, '//src/components/Button.tsx');
+    expect(slashAncestors).toEqual(['src/components']);
+  });
+
+  it('returns ancestors when target is a directory path itself', () => {
+    const files: TreeFile[] = [
+      { file: 'src/components/ui/Button.tsx' },
+    ];
+    const tree = buildCompactedTree(files, { compact: false });
+    const ancestors = getAncestorPaths(tree, 'src/components/ui');
+    expect(ancestors.slice().sort()).toEqual(['src', 'src/components', 'src/components/ui'].sort());
+  });
+});
+
+describe('FileTree Component Rendering & Controlled Expansion', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/components/Dialog.tsx' },
+    { file: 'src/utils/format.ts' },
+  ];
+
+  const renderFileMock = (f: TreeFile) =>
+    createElement('button', { type: 'button', 'data-name': f.file }, f.file);
+
+  it('implements smart default: collapsed for files mode (reducing initial DOM from 5,000+ nodes to root level only)', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Workspace files',
+        defaultExpanded: false,
+      })
+    );
+
+    // Root file is rendered
+    expect(html).toContain('README.md');
+
+    // Root directory summary is rendered with folder name
+    expect(html).toContain('<span class="truncate">src</span>');
+
+    // No details elements have the open attribute
+    expect(html).not.toContain('<details open');
+    expect(html).toContain('<details');
+
+    // Crucially: nested file buttons are NOT in the DOM markup!
+    expect(html).not.toContain('Button.tsx');
+    expect(html).not.toContain('Dialog.tsx');
+    expect(html).not.toContain('format.ts');
+  });
+
+  it('implements smart default: expanded by default for changes mode', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Workspace changes',
+        defaultExpanded: true,
+      })
+    );
+
+    // Directory details are open
+    expect(html).toContain('<details open=""');
+
+    // All files, including deeply nested files, are rendered
+    expect(html).toContain('Button.tsx');
+    expect(html).toContain('Dialog.tsx');
+    expect(html).toContain('format.ts');
+    expect(html).toContain('README.md');
+  });
+
+  it('supports controlled expandedPaths state with precise branch expansion', () => {
+    // Expand 'src' and 'src/components', keeping 'src/utils' collapsed
+    const expanded = new Set(['src', 'src/components']);
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Workspace code',
+        expandedPaths: expanded,
+      })
+    );
+
+    // src/components is open and contains its files
+    expect(html).toContain('<details open="" data-path="src/components"');
+    expect(html).toContain('Button.tsx');
+    expect(html).toContain('Dialog.tsx');
+
+    // src/utils is closed and does NOT contain its files
+    expect(html).toContain('<details data-path="src/utils"');
+    expect(html).not.toContain('format.ts');
+  });
+
+  it('reduces sidebar indentation margin from 20px (ml-3 pl-2) to 14px (ml-2 pl-1.5)', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Indentation check',
+        defaultExpanded: true,
+      })
+    );
+
+    // New compact indentation
+    expect(html).toContain('class="ml-2 border-l border-border pl-1.5"');
+    // Does not use the old wide indentation
+    expect(html).not.toContain('ml-3 border-l border-border pl-2');
+  });
+
+  it('attaches data-file-path attributes for smooth scrollIntoView targeting', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Scroll check',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('data-file-path="src/utils/format.ts"');
+    expect(html).toContain('data-file-path="README.md"');
+  });
+
+  it('simulates Expand All action by expanding all directory paths', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const allPaths = getAllDirectoryPaths(root);
+    const allExpandedSet = new Set(allPaths);
+
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Expand All test',
+        expandedPaths: allExpandedSet,
+      })
+    );
+
+    // All directory details have open=""
+    const detailsMatches = html.match(/<details[^>]*open=""/g) || [];
+    expect(detailsMatches).toHaveLength(allPaths.length);
+
+    // All nested files are in the DOM
+    expect(html).toContain('Button.tsx');
+    expect(html).toContain('Dialog.tsx');
+    expect(html).toContain('format.ts');
+  });
+
+  it('simulates Collapse All action by providing an empty Set', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Collapse All test',
+        expandedPaths: new Set(),
+      })
+    );
+
+    // 0 details elements have open=""
+    expect(html).not.toContain('open=""');
+
+    // 0 nested files are in the DOM
+    expect(html).not.toContain('Button.tsx');
+    expect(html).not.toContain('Dialog.tsx');
+    expect(html).not.toContain('format.ts');
+
+    // Root file is still visible
+    expect(html).toContain('README.md');
+  });
+
+  it('preserves manual collapse state across simulated polling re-renders', () => {
+    // Initial state: user had manually collapsed 'src/components', keeping 'src' and 'src/utils' open
+    const userState = new Set(['src', 'src/utils']);
+
+    // First render (e.g. before polling)
+    const render1 = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Polling test',
+        expandedPaths: userState,
+      })
+    );
+    expect(render1).not.toContain('Button.tsx');
+    expect(render1).toContain('format.ts');
+
+    // Simulate polling update 10 seconds later: updated file items with new references
+    const updatedFiles: TreeFile[] = [
+      { file: 'README.md' },
+      { file: 'src/components/Button.tsx' },
+      { file: 'src/components/Dialog.tsx' },
+      { file: 'src/utils/format.ts' },
+      { file: 'src/utils/newHelper.ts' },
+    ];
+
+    // Second render after poll using the preserved user state
+    const render2 = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: updatedFiles,
+        renderFile: renderFileMock,
+        label: 'Polling test',
+        expandedPaths: userState,
+      })
+    );
+
+    // Manual collapse did NOT snap back open!
+    expect(render2).not.toContain('Button.tsx');
+    // Open folder correctly reflects newly polled file
+    expect(render2).toContain('format.ts');
+    expect(render2).toContain('newHelper.ts');
+  });
+
+  it('auto-expands ancestor branches when revealing a selected file', () => {
+    const root = buildCompactedTree(sampleFiles);
+    // User selects 'src/components/Button.tsx'
+    const targetFile = 'src/components/Button.tsx';
+    const ancestors = getAncestorPaths(root, targetFile);
+
+    // Initially collapsed
+    const collapsedPaths = new Set<string>();
+
+    // Simulating auto-expansion on selection: add ancestors to expandedPaths
+    const afterSelectionPaths = new Set(collapsedPaths);
+    for (const a of ancestors) {
+      afterSelectionPaths.add(a);
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Selection reveal test',
+        expandedPaths: afterSelectionPaths,
+        revealPath: targetFile,
+      })
+    );
+
+    // Ancestor 'src/components' is now expanded!
+    expect(html).toContain('<details open="" data-path="src/components"');
+    expect(html).toContain('Button.tsx');
   });
 });
 

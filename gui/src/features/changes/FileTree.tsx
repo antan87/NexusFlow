@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
 
 export interface TreeFile {
@@ -134,46 +134,260 @@ export function treeOrderedFiles<T extends TreeFile>(
   return flattenTreeFiles(buildCompactedTree(files, options));
 }
 
+/**
+ * Collects all directory paths present in the tree.
+ */
+export function getAllDirectoryPaths<T extends TreeFile>(root: TreeNode<T>): string[] {
+  const result: string[] = [];
+  const walk = (node: TreeNode<T>) => {
+    for (const dir of node.directories) {
+      result.push(dir.path);
+      walk(dir);
+    }
+  };
+  walk(root);
+  return result;
+}
+
+/**
+ * Returns all ancestor directory paths for a target file or path within the given tree.
+ */
+export function getAncestorPaths<T extends TreeFile>(
+  root: TreeNode<T>,
+  targetPath: string
+): string[] {
+  if (!targetPath) return [];
+  const normalized = normalizePath(targetPath);
+  const ancestors = new Set<string>();
+
+  const walk = (node: TreeNode<T>): boolean => {
+    let containsTarget = false;
+
+    // Check if target directly matches this directory
+    if (node.path && (normalized === node.path || normalized.startsWith(`${node.path}/`))) {
+      ancestors.add(node.path);
+      containsTarget = true;
+    }
+
+    // Check files in this directory
+    for (const file of node.files) {
+      if (!file?.file) continue;
+      const fNorm = normalizePath(file.file);
+      if (fNorm === normalized || fNorm.startsWith(`${normalized}/`)) {
+        containsTarget = true;
+      }
+    }
+
+    // Check subdirectories
+    for (const dir of node.directories) {
+      if (walk(dir)) {
+        containsTarget = true;
+      }
+    }
+
+    if (containsTarget && node.path) {
+      ancestors.add(node.path);
+    }
+    return containsTarget;
+  };
+
+  walk(root);
+  return Array.from(ancestors);
+}
+
+export interface FileTreeProps<T extends TreeFile> {
+  files: T[];
+  renderFile: (file: T) => ReactNode;
+  label: string;
+  revealPath?: string;
+  revealKey?: number;
+  compact?: boolean;
+  defaultExpanded?: boolean;
+  expandedPaths?: Set<string>;
+  onExpandedPathsChange?: (paths: Set<string>) => void;
+  onTogglePath?: (path: string, isOpen: boolean) => void;
+}
+
 /** Keep the original Git path intact: the hierarchy is only a presentation. */
-export function FileTree<T extends TreeFile>({ files, renderFile, label, revealPath, revealKey, compact = true }: {
-  files: T[]; renderFile: (file: T) => ReactNode; label: string; revealPath?: string; revealKey?: number; compact?: boolean;
-}) {
+export function FileTree<T extends TreeFile>({
+  files,
+  renderFile,
+  label,
+  revealPath,
+  revealKey,
+  compact = true,
+  defaultExpanded = true,
+  expandedPaths: controlledExpandedPaths,
+  onExpandedPathsChange,
+  onTogglePath,
+}: FileTreeProps<T>) {
   const host = useRef<HTMLElement>(null);
   const root = useMemo(() => buildCompactedTree(files, { compact }), [files, compact]);
+  const allPaths = useMemo(() => getAllDirectoryPaths(root), [root]);
 
+  // Uncontrolled state when expandedPaths prop is not provided
+  const [internalExpandedPaths, setInternalExpandedPaths] = useState<Set<string>>(() => {
+    return defaultExpanded ? new Set(allPaths) : new Set();
+  });
+
+  // Track changes to allPaths when in defaultExpanded uncontrolled mode
+  const prevPathsRef = useRef(allPaths.join('|'));
+  useEffect(() => {
+    const key = allPaths.join('|');
+    if (key !== prevPathsRef.current) {
+      prevPathsRef.current = key;
+      if (defaultExpanded && controlledExpandedPaths === undefined) {
+        setInternalExpandedPaths(prev => {
+          const next = new Set(prev);
+          for (const p of allPaths) next.add(p);
+          return next;
+        });
+      }
+    }
+  }, [allPaths, defaultExpanded, controlledExpandedPaths]);
+
+  const isControlled = controlledExpandedPaths !== undefined;
+  const currentExpandedPaths = isControlled ? controlledExpandedPaths : internalExpandedPaths;
+
+  const setExpandedPaths = useCallback(
+    (updater: (prev: Set<string>) => Set<string>) => {
+      if (isControlled) {
+        const next = updater(controlledExpandedPaths);
+        onExpandedPathsChange?.(next);
+      } else {
+        setInternalExpandedPaths(prev => {
+          const next = updater(prev);
+          onExpandedPathsChange?.(next);
+          return next;
+        });
+      }
+    },
+    [isControlled, controlledExpandedPaths, onExpandedPathsChange]
+  );
+
+  const togglePath = useCallback(
+    (path: string) => {
+      const currentlyOpen = currentExpandedPaths.has(path);
+      const nextOpen = !currentlyOpen;
+      setExpandedPaths(prev => {
+        const next = new Set(prev);
+        if (nextOpen) {
+          next.add(path);
+        } else {
+          next.delete(path);
+        }
+        return next;
+      });
+      onTogglePath?.(path, nextOpen);
+    },
+    [currentExpandedPaths, setExpandedPaths, onTogglePath]
+  );
+
+  // Auto-expand parent/ancestor folders when a file is revealed or selected
+  useEffect(() => {
+    if (!revealPath) return;
+    const ancestors = getAncestorPaths(root, revealPath);
+    if (ancestors.length > 0) {
+      setExpandedPaths(prev => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const p of ancestors) {
+          if (!next.has(p)) {
+            next.add(p);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [revealPath, revealKey, root, setExpandedPaths]);
+
+  // Smoothly scroll the selected/revealed file button into view in the sidebar
   useEffect(() => {
     if (!revealPath) return;
     const normalized = normalizePath(revealPath);
-    for (const details of host.current?.querySelectorAll<HTMLDetailsElement>('details[data-path]') ?? []) {
-      const p = details.dataset.path;
-      if (p && (normalized === p || normalized.startsWith(`${p}/`))) {
-        details.open = true;
+    const items = host.current?.querySelectorAll<HTMLElement>('[data-file-path]');
+    for (const item of items ?? []) {
+      if (item.dataset.filePath === normalized) {
+        if (typeof item.scrollIntoView === 'function') {
+          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        break;
       }
     }
-  }, [revealPath, revealKey]);
+  }, [revealPath, revealKey, currentExpandedPaths]);
 
   const render = (node: TreeNode<T>): ReactNode => (
     <ul className="min-w-0 space-y-0.5">
-      {node.directories.map((child) => (
-        <li key={`dir:${child.path}`}>
-          <details open data-path={child.path} className="min-w-0 group/dir">
-            {/* A native disclosure triangle plus a closed/open folder pair reads as
-                a tree far faster than a single static folder glyph. */}
-            <summary className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-primary">
-              <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform group-open/dir:rotate-90" aria-hidden="true" />
-              <Folder className="size-3.5 shrink-0 text-warning-foreground/80 group-open/dir:hidden" aria-hidden="true" />
-              <FolderOpen className="hidden size-3.5 shrink-0 text-warning-foreground group-open/dir:block" aria-hidden="true" />
-              <span className="truncate">{child.name}</span>
-            </summary>
-            <div className="ml-3 border-l border-border pl-2">{render(child)}</div>
-          </details>
-        </li>
-      ))}
+      {node.directories.map((child) => {
+        const isExpanded = currentExpandedPaths.has(child.path);
+        return (
+          <li key={`dir:${child.path}`}>
+            <details
+              open={isExpanded}
+              data-path={child.path}
+              className="min-w-0 group/dir"
+              onToggle={(e) => {
+                if (e.target !== e.currentTarget) return;
+                const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+                if (isOpen !== isExpanded) {
+                  setExpandedPaths(prev => {
+                    const next = new Set(prev);
+                    if (isOpen) next.add(child.path);
+                    else next.delete(child.path);
+                    return next;
+                  });
+                  onTogglePath?.(child.path, isOpen);
+                }
+              }}
+            >
+              {/* A native disclosure triangle plus a closed/open folder pair reads as
+                  a tree far faster than a single static folder glyph. */}
+              <summary
+                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-primary select-none"
+                onClick={(e) => {
+                  e.preventDefault();
+                  togglePath(child.path);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    togglePath(child.path);
+                  }
+                }}
+              >
+                <ChevronRight
+                  className="size-3 shrink-0 text-muted-foreground transition-transform group-open/dir:rotate-90"
+                  aria-hidden="true"
+                />
+                <Folder
+                  className="size-3.5 shrink-0 text-warning-foreground/80 group-open/dir:hidden"
+                  aria-hidden="true"
+                />
+                <FolderOpen
+                  className="hidden size-3.5 shrink-0 text-warning-foreground group-open/dir:block"
+                  aria-hidden="true"
+                />
+                <span className="truncate">{child.name}</span>
+              </summary>
+              {isExpanded && (
+                <div className="ml-2 border-l border-border pl-1.5">{render(child)}</div>
+              )}
+            </details>
+          </li>
+        );
+      })}
       {node.files.map((file) => (
-        <li key={`file:${file.file}`}>{renderFile(file)}</li>
+        <li key={`file:${file.file}`} data-file-path={normalizePath(file.file)}>
+          {renderFile(file)}
+        </li>
       ))}
     </ul>
   );
 
-  return <nav ref={host} aria-label={label}>{render(root)}</nav>;
+  return (
+    <nav ref={host} aria-label={label}>
+      {render(root)}
+    </nav>
+  );
 }

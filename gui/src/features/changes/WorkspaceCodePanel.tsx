@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { FileCode, RefreshCw, PanelLeft, PanelLeftClose, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, X } from 'lucide-react';
 import { apiFetch } from '../../lib/api/client.js';
 import { perfMark } from '../../lib/perfMarks.js';
 import { Button } from '../../components/ui/button.js';
 import { cn } from '../../lib/utils.js';
-import { FileTree, normalizePath, treeOrderedFiles as getTreeOrderedFiles } from './FileTree.js';
+import {
+  FileTree,
+  buildCompactedTree,
+  getAllDirectoryPaths,
+  getAncestorPaths,
+  normalizePath,
+  treeOrderedFiles as getTreeOrderedFiles,
+} from './FileTree.js';
 import { fileTypeGlyph } from './fileTypeGlyph.js';
 import { DiffErrorBoundary } from './DiffErrorBoundary.js';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
@@ -47,14 +54,96 @@ export function WorkspaceCodePanel({
   const [revision, setRevision] = useState(0);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [treeWidth, setTreeWidth] = useState(() => {
-    const stored = Number.parseInt(localStorage.getItem(TREE_WIDTH_KEY) ?? '', 10);
-    return Number.isFinite(stored) ? Math.min(TREE_MAX_PX, Math.max(TREE_MIN_PX, stored)) : TREE_DEFAULT_PX;
+    try {
+      const stored = typeof localStorage !== 'undefined' ? Number.parseInt(localStorage.getItem(TREE_WIDTH_KEY) ?? '', 10) : Number.NaN;
+      return Number.isFinite(stored) ? Math.min(TREE_MAX_PX, Math.max(TREE_MIN_PX, stored)) : TREE_DEFAULT_PX;
+    } catch {
+      return TREE_DEFAULT_PX;
+    }
   });
   const [draggingTree, setDraggingTree] = useState(false);
   const handledReference = useRef(0);
   const plainCode = useRef<HTMLPreElement>(null);
   const scrolledSelectionKey = useRef<string>('');
   const base = `/api/workspace/${encodeURIComponent(workspace)}`;
+
+  const [expandedPathsByRepo, setExpandedPathsByRepo] = useState<Record<string, Set<string>>>({});
+  const [collapsedRepos, setCollapsedRepos] = useState<Record<string, boolean>>({});
+
+  const expandAllFolders = useCallback(() => {
+    const next: Record<string, Set<string>> = {};
+    for (const repo of repos) {
+      const root = buildCompactedTree(repo.files || []);
+      next[repo.repoName] = new Set(getAllDirectoryPaths(root));
+    }
+    setExpandedPathsByRepo(next);
+    setCollapsedRepos({});
+  }, [repos]);
+
+  const collapseAllFolders = useCallback(() => {
+    const next: Record<string, Set<string>> = {};
+    for (const repo of repos) {
+      next[repo.repoName] = new Set();
+    }
+    setExpandedPathsByRepo(next);
+  }, [repos]);
+
+  // Smart defaults for folder expansion: collapsed by default for repository 'files' mode,
+  // expanded by default for 'changes' mode.
+  useEffect(() => {
+    if (mode === 'changes') {
+      expandAllFolders();
+    } else {
+      collapseAllFolders();
+    }
+  }, [mode, expandAllFolders, collapseAllFolders]);
+
+  // When repos load initially, populate default expansion for repos not yet tracked
+  useEffect(() => {
+    if (repos.length === 0) return;
+    setExpandedPathsByRepo(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const repo of repos) {
+        if (!next[repo.repoName]) {
+          changed = true;
+          if (mode === 'changes') {
+            const root = buildCompactedTree(repo.files || []);
+            next[repo.repoName] = new Set(getAllDirectoryPaths(root));
+          } else {
+            next[repo.repoName] = new Set();
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [repos, mode]);
+
+  // When a file is selected, ensure its repo is not collapsed and its ancestors are auto-expanded
+  useEffect(() => {
+    if (!selection) return;
+    if (collapsedRepos[selection.repoName]) {
+      setCollapsedRepos(prev => ({ ...prev, [selection.repoName]: false }));
+    }
+    const repo = repos.find(r => r.repoName === selection.repoName);
+    if (!repo) return;
+    const root = buildCompactedTree(repo.files || []);
+    const ancestors = getAncestorPaths(root, selection.file);
+    if (ancestors.length > 0) {
+      setExpandedPathsByRepo(prev => {
+        const current = prev[selection.repoName] || new Set();
+        let changed = false;
+        const next = new Set(current);
+        for (const a of ancestors) {
+          if (!next.has(a)) {
+            next.add(a);
+            changed = true;
+          }
+        }
+        return changed ? { ...prev, [selection.repoName]: next } : prev;
+      });
+    }
+  }, [selection, repos, collapsedRepos]);
 
   useEffect(() => {
     if (openReference && openReference.id !== handledReference.current) {
@@ -262,7 +351,13 @@ export function WorkspaceCodePanel({
   const setTreeWidthPx = useCallback((value: number) => {
     const width = Math.round(Math.min(TREE_MAX_PX, Math.max(TREE_MIN_PX, value)));
     setTreeWidth(width);
-    localStorage.setItem(TREE_WIDTH_KEY, String(width));
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(TREE_WIDTH_KEY, String(width));
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
   const startTreeDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -317,6 +412,26 @@ export function WorkspaceCodePanel({
         >
           {treeCollapsed ? <PanelLeft className="size-3.5 text-muted-foreground" /> : <PanelLeftClose className="size-3.5 text-muted-foreground" />}
         </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="p-1 size-6 shrink-0"
+          title="Expand All"
+          aria-label="Expand All"
+          onClick={expandAllFolders}
+        >
+          <ChevronsUpDown className="size-3.5 text-muted-foreground" />
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="p-1 size-6 shrink-0"
+          title="Collapse All"
+          aria-label="Collapse All"
+          onClick={collapseAllFolders}
+        >
+          <ChevronsDownUp className="size-3.5 text-muted-foreground" />
+        </Button>
         <span className="ml-auto text-xs text-muted-foreground font-mono shrink-0">{loading ? 'Refreshing…' : `${repos.reduce((sum, repo) => sum + repo.files.length, 0)} files`}</span>
         {onClose && (
           <Button
@@ -346,8 +461,24 @@ export function WorkspaceCodePanel({
         >
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 [scrollbar-gutter:stable]">
             {repos.map(repo => (
-              <details open key={repo.repoName}>
-                <summary className="cursor-pointer py-1 text-xs font-semibold select-none truncate">{repo.repoName}</summary>
+              <details
+                open={!collapsedRepos[repo.repoName]}
+                key={repo.repoName}
+                onToggle={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+                  setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !isOpen }));
+                }}
+              >
+                <summary
+                  className="cursor-pointer py-1 text-xs font-semibold select-none truncate"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setCollapsedRepos(prev => ({ ...prev, [repo.repoName]: !prev[repo.repoName] }));
+                  }}
+                >
+                  {repo.repoName}
+                </summary>
                 {repo.error ? (
                   <p role="alert" className="text-xs text-destructive">{repo.error}</p>
                 ) : (
@@ -355,6 +486,11 @@ export function WorkspaceCodePanel({
                     label={`${repo.repoName} ${mode}`}
                     files={repo.files}
                     revealPath={selection?.repoName === repo.repoName ? selection.file : undefined}
+                    defaultExpanded={mode === 'changes'}
+                    expandedPaths={expandedPathsByRepo[repo.repoName]}
+                    onExpandedPathsChange={(paths) => {
+                      setExpandedPathsByRepo(prev => ({ ...prev, [repo.repoName]: paths }));
+                    }}
                     renderFile={file => {
                       const glyph = fileTypeGlyph(file.file);
                       const Glyph = glyph.icon;
