@@ -3,7 +3,7 @@ import { generateWorkspaceTools } from '../core/workspace-tools.js';
 import chalk from 'chalk';
 import path from 'node:path';
 import fse from 'fs-extra';
-import type { AIAssistant, WorkspaceContext } from '../types.js';
+import type { AIAssistant, SessionAssistant, WorkspaceContext } from '../types.js';
 import { generateClaudeConfig } from './claude.js';
 import { generateAntigravityConfig } from './antigravity.js';
 import { generateCodexConfig } from './codex.js';
@@ -189,7 +189,7 @@ export function buildBaseKnowledgeContent(repoName: string): string {
  */
 export async function generateContextFiles(
   ctx: WorkspaceContext,
-  assistants: AIAssistant[],
+  assistants: (SessionAssistant | string)[],
   workspacePath: string,
 ): Promise<void> {
   const generation = await captureGenerationSnapshot(ctx.repos);
@@ -200,7 +200,8 @@ export async function generateContextFiles(
     location: 'workspace' | 'local';
   }> = [];
 
-  for (const output of await generateWorkspaceTools(workspacePath, assistants)) {
+  const resourceAssistants = assistants.filter((a): a is AIAssistant => a !== 'pi');
+  for (const output of await generateWorkspaceTools(workspacePath, resourceAssistants)) {
     generatedOutputs.push({ path: output, source: 'workspace tool access', location: 'local' });
   }
 
@@ -254,8 +255,9 @@ export async function generateContextFiles(
 
   // Generate configuration for each selected assistant
   for (const assistant of assistants) {
-    if (assistant === 'codex' || assistant === 'antigravity') continue;
-    const entry = GENERATORS[assistant];
+    if (assistant === 'codex' || assistant === 'antigravity' || assistant === 'pi') continue;
+    const entry = GENERATORS[assistant as AIAssistant];
+    if (!entry) continue;
 
     try {
       await entry.generate(renderCtx, workspacePath);
@@ -295,7 +297,7 @@ export async function generateContextFiles(
   }
 
   // Resource materialization
-  await generateSkills(renderCtx, assistants, workspacePath);
+  await generateSkills(renderCtx, resourceAssistants, workspacePath);
 
   try {
     const resourceLockPath = await resolveResourceLockPath(workspacePath);

@@ -16,7 +16,7 @@ export const configPatchSchema = z
   .object({
     devDir: absDir.optional(),
     workspacesDir: absDir.optional(),
-    defaultAssistant: z.enum(['claude', 'antigravity', 'codex', 'copilot', 'cursor']).nullable().optional(),
+    defaultAssistant: z.enum(['claude', 'antigravity', 'codex', 'copilot', 'cursor', 'pi']).nullable().optional(),
     defaultEditor: z.string().nullable().optional(),
     scanDepth: z.number().int().min(1).max(10).optional(),
     storageProvider: z.string().min(1).optional(),

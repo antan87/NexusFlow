@@ -5,7 +5,7 @@
  * shown are its own suggestions and questions, labelled as such by the caller.
  */
 
-import type { AIAssistant, MilestoneFact, OpenQuestion, ProgressFacts, ScreenEvent, WorkGuidance } from '../../types';
+import type { MilestoneFact, OpenQuestion, ProgressFacts, ScreenEvent, SessionAssistant, WorkGuidance } from '../../types';
 import type { RingMilestone } from './ringGeometry';
 
 export type NextEvent = Extract<ScreenEvent, { event: 'next' }>;
@@ -106,7 +106,7 @@ export function goalLine(guidance: WorkGuidance | undefined, facts: ProgressFact
 
 // ─── Replies ────────────────────────────────────────────────────────────────
 
-const ASSISTANTS: readonly AIAssistant[] = ['claude', 'antigravity', 'codex', 'copilot', 'cursor'];
+const ASSISTANTS: readonly SessionAssistant[] = ['claude', 'antigravity', 'codex', 'copilot', 'cursor', 'pi'];
 
 /**
  * Whether a line sent to the CLI running `target` (claude, codex, antigravity-cli...) answers an open question. A
@@ -116,7 +116,7 @@ export function answersQuestion(target: string, questions: readonly Pick<OpenQue
   if (target === 'shell') return false;
   return questions.some(({ harness }) => {
     const name = harness.trim().toLowerCase();
-    return !ASSISTANTS.includes(name as AIAssistant) || target === name || target.startsWith(`${name}-`);
+    return !ASSISTANTS.includes(name as SessionAssistant) || target === name || target.startsWith(`${name}-`);
   });
 }
 

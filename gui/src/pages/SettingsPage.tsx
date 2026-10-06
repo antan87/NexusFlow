@@ -174,7 +174,9 @@ export function SettingsPage({
                           ? 'GitHub Copilot'
                           : config.defaultAssistant === 'cursor'
                             ? 'Cursor'
-                            : 'None (Prompt me)'}
+                            : config.defaultAssistant === 'pi'
+                              ? 'Pi'
+                              : 'None (Prompt me)'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup alignItemWithTrigger={false}>
@@ -184,6 +186,7 @@ export function SettingsPage({
                 <SelectItem value="codex">Codex</SelectItem>
                 <SelectItem value="copilot">GitHub Copilot</SelectItem>
                 <SelectItem value="cursor">Cursor</SelectItem>
+                <SelectItem value="pi">Pi</SelectItem>
               </SelectPopup>
             </Select>
             <span className="text-xs text-muted-foreground">Your preferred workspace context manager.</span>

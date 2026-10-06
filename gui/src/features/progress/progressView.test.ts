@@ -164,10 +164,12 @@ describe('answersQuestion', () => {
   it('is answered by the CLI that asked, under its terminal name too', () => {
     expect(answersQuestion('claude', [{ harness: 'claude' }])).toBe(true);
     expect(answersQuestion('antigravity-cli', [{ harness: 'Antigravity' }])).toBe(true);
+    expect(answersQuestion('pi', [{ harness: 'pi' }])).toBe(true);
   });
 
   it('waits for the assistant it names, and is never answered from a plain shell', () => {
     expect(answersQuestion('codex', [{ harness: 'claude' }])).toBe(false);
+    expect(answersQuestion('pi', [{ harness: 'claude' }])).toBe(false);
     expect(answersQuestion('shell', [{ harness: 'agent' }])).toBe(false);
     expect(answersQuestion('claude', [])).toBe(false);
   });

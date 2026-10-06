@@ -34,7 +34,7 @@ export interface NexusFlowConfig {
   workspacesDir: string;
 
   /** The user's preferred AI assistant, or null if none chosen yet. */
-  defaultAssistant: AIAssistant | null;
+  defaultAssistant: SessionAssistant | null;
 
   /** The user's preferred editor command, or null if none chosen yet. */
   defaultEditor?: string | null;
@@ -67,7 +67,7 @@ export interface NexusFlowConfig {
 /** Result of probing for an AI assistant on the system. */
 export interface DetectedAI {
   /** Canonical assistant identifier. */
-  name: AIAssistant;
+  name: SessionAssistant;
 
   /** Human-readable label shown in prompts. */
   displayName: string;
@@ -293,7 +293,7 @@ export interface Feature {
   createdBranches?: Record<string, string>;
 
   /** AI assistants enabled for this feature workspace. */
-  assistants: AIAssistant[];
+  assistants: SessionAssistant[];
 
   /** Absolute path to the workspace directory on disk. */
   workspacePath: string;

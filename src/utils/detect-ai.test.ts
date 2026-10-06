@@ -25,6 +25,7 @@ describe('detectAIAssistants', () => {
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      { name: 'pi', displayName: 'Pi', detected: false },
     ]);
   });
 
@@ -39,6 +40,7 @@ describe('detectAIAssistants', () => {
       { name: 'codex', displayName: 'OpenAI Codex', detected: false },
       { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
       { name: 'cursor', displayName: 'Cursor', detected: false },
+      { name: 'pi', displayName: 'Pi', detected: false },
     ]);
   });
 
@@ -80,5 +82,17 @@ describe('detectAIAssistants', () => {
 
     const cursor = result.find((r) => r.name === 'cursor');
     expect(cursor).toEqual({ name: 'cursor', displayName: 'Cursor', detected: true, command: 'cursor-agent' });
+  });
+
+  it('detects pi and provides its launch command', async () => {
+    vi.mocked(execa).mockImplementation((command: any): any => {
+      if (command === 'pi') return Promise.resolve({ exitCode: 0 } as any);
+      return Promise.resolve({ exitCode: 1 } as any);
+    });
+
+    const result = await detectAIAssistants();
+
+    const pi = result.find((r) => r.name === 'pi');
+    expect(pi).toEqual({ name: 'pi', displayName: 'Pi', detected: true, command: 'pi' });
   });
 });
