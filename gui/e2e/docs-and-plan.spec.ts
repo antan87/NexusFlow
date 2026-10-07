@@ -95,22 +95,23 @@ test.describe('Docs', () => {
     await expect(docs(page).getByRole('list', { name: 'Knowledge entries' })).toHaveCount(0);
   });
 
-  test('beside the chat, the list stays above the open document, so the next one is one click away', async ({ page }) => {
+  test('beside the chat, opening a document defaults to dedicated reader with quick-switch', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 62 })));
     await mockDocuments(page);
     await page.goto('/#/workspaces/demo/documents');
     await docs(page).getByRole('button', { name: /^Delivery plan/ }).click();
     await expect(docs(page).getByRole('heading', { name: 'Delivery plan (contextspace-milestones.md)', exact: true })).toBeVisible();
-    // Still there, compact: names only, and above the document.
+    // In dedicated reader mode, list is not stacked above it
     const list = docs(page).getByRole('complementary', { name: 'Documents to open' });
-    await expect(list).toBeVisible();
-    await expect(list.getByText('Delivery order, open questions, decisions put off')).toBeHidden();
-    const [listBox, documentBox] = [await list.boundingBox(), await docs(page).getByRole('article', { name: 'Document preview' }).boundingBox()];
-    expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(documentBox!.y + 1);
-    // The next document opens straight from it.
-    await list.getByRole('button', { name: /^Assistant instructions/ }).click();
-    await expect(list.getByRole('button', { name: /^Assistant instructions/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(list).toBeHidden();
+    // Quick-switch moves to next document in 1 click
+    await docs(page).getByRole('button', { name: 'Next document' }).click();
     await expect(docs(page).getByRole('heading', { name: 'Assistant instructions (AGENTS.md)', exact: true })).toBeVisible();
+    // Split view can be toggled to show the list side by side
+    await docs(page).getByRole('button', { name: 'Split view' }).click();
+    await expect(list).toBeVisible();
+    const [listBox, documentBox] = [await list.boundingBox(), await docs(page).getByRole('article', { name: 'Document preview' }).boundingBox()];
+    expect(documentBox!.x).toBeGreaterThan(listBox!.x);
   });
 });
 
