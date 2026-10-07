@@ -53,20 +53,21 @@ test('the lightweight fallback diff reports real original and modified line numb
   const lines = await rows.evaluateAll(nodes => nodes.map(node => ({
     orig: node.getAttribute('data-orig-line') ?? '',
     mod: node.getAttribute('data-mod-line') ?? '',
-    text: (node.querySelectorAll('span')[2]?.textContent ?? '').trim(),
+    marker: (node.querySelectorAll('span')[2]?.textContent ?? '').trim(),
+    text: (node.querySelectorAll('span')[3]?.textContent ?? '').trim(),
   })));
 
   // Hunk header says -10,4 +10,4, so:
   expect(lines).toEqual([
-    { orig: '', mod: '', text: 'diff --git a/src/calc.ts b/src/calc.ts' },
-    { orig: '', mod: '', text: 'index 1111111..2222222 100644' },
-    { orig: '', mod: '', text: '--- a/src/calc.ts' },
-    { orig: '', mod: '', text: '+++ b/src/calc.ts' },
-    { orig: '10', mod: '10', text: '@@ -10,4 +10,4 @@ export function total(values) {' },
-    { orig: '10', mod: '10', text: 'const sum = 0;' },
-    { orig: '11', mod: '', text: '-  return sum + 1;' },
-    { orig: '', mod: '11', text: '+  return sum + 2;' },
-    { orig: '12', mod: '12', text: '}' },
+    { orig: '', mod: '', marker: '', text: 'diff --git a/src/calc.ts b/src/calc.ts' },
+    { orig: '', mod: '', marker: '', text: 'index 1111111..2222222 100644' },
+    { orig: '', mod: '', marker: '', text: '--- a/src/calc.ts' },
+    { orig: '', mod: '', marker: '', text: '+++ b/src/calc.ts' },
+    { orig: '10', mod: '10', marker: '', text: '@@ -10,4 +10,4 @@ export function total(values) {' },
+    { orig: '10', mod: '10', marker: '', text: 'const sum = 0;' },
+    { orig: '11', mod: '', marker: '-', text: 'return sum + 1;' },
+    { orig: '', mod: '11', marker: '+', text: 'return sum + 2;' },
+    { orig: '12', mod: '12', marker: '', text: '}' },
   ]);
 });
 

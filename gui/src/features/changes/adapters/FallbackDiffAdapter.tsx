@@ -25,6 +25,7 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
     lastJumpKeyRef.current = jumpKey;
 
     const el = containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`) ||
+      containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetLine}"]`) ||
       containerRef.current.querySelector<HTMLElement>('[data-is-target="true"]');
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [targetLine, jumpNonce]);
@@ -44,6 +45,8 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
       let textClass = 'text-muted-foreground';
       let lineOrigNum: number | undefined;
       let lineModNum: number | undefined;
+      let marker = ' ';
+      let content = line;
 
       if (line.startsWith('@@')) {
         bgClass = 'bg-sky-500/15';
@@ -58,28 +61,41 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
           currentModLine = parseInt(mod[1], 10) - 1;
           lineModNum = currentModLine + 1;
         }
+        marker = ' ';
+        content = line;
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
         bgClass = 'bg-emerald-500/15';
         textClass = 'text-success-foreground font-semibold';
         currentModLine++;
         lineModNum = currentModLine;
+        marker = '+';
+        content = line.slice(1);
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         bgClass = 'bg-rose-500/15';
         textClass = 'text-destructive-foreground font-semibold';
         currentOrigLine++;
         lineOrigNum = currentOrigLine;
+        marker = '-';
+        content = line.slice(1);
       } else if (line.startsWith(' ')) {
         currentOrigLine++;
         currentModLine++;
         lineOrigNum = currentOrigLine;
         lineModNum = currentModLine;
+        marker = ' ';
+        content = line.slice(1);
       }
 
-      const isTarget = targetLine !== undefined && lineModNum === targetLine;
+      const isTarget = targetLine !== undefined && (
+        lineModNum === targetLine ||
+        (lineModNum === undefined && lineOrigNum === targetLine)
+      );
 
       return {
         idx,
         line,
+        content,
+        marker,
         lineOrigNum,
         lineModNum,
         isTarget,
@@ -111,15 +127,31 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
           data-orig-line={item.lineOrigNum}
           data-mod-line={item.lineModNum}
           data-is-target={item.isTarget ? 'true' : undefined}
-          className={`flex px-3 py-0.5 hover:bg-accent/40 ${item.isTarget ? 'bg-primary/25 border-l-2 border-primary font-bold' : item.bgClass}`}
+          className={`flex py-0.5 border-l-2 transition-colors hover:bg-accent/40 ${
+            item.isTarget
+              ? 'bg-primary/25 border-primary font-bold'
+              : 'border-transparent ' + item.bgClass
+          }`}
         >
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
+          <span className="w-12 shrink-0 select-none text-right pr-2 text-[10px] font-mono text-muted-foreground/70 border-r border-border/40">
             {item.lineOrigNum ?? ''}
           </span>
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
+          <span className="w-12 shrink-0 select-none text-right pr-2 text-[10px] font-mono text-muted-foreground/70 border-r border-border/40">
             {item.lineModNum ?? ''}
           </span>
-          <span className={`whitespace-pre flex-1 ${item.textClass}`}>{item.line}</span>
+          <span
+            data-diff-marker={item.marker.trim() || undefined}
+            className={`w-5 shrink-0 select-none text-center font-bold font-mono text-xs border-r border-border/40 ${
+              item.marker === '+'
+                ? 'text-success-foreground'
+                : item.marker === '-'
+                  ? 'text-destructive-foreground'
+                  : 'text-muted-foreground/40'
+            }`}
+          >
+            {item.marker}
+          </span>
+          <span className={`pl-2 pr-3 whitespace-pre flex-1 ${item.textClass}`}>{item.content}</span>
         </div>
       ))}
     </div>

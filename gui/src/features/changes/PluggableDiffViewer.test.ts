@@ -70,7 +70,7 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
     expect(getHunkSnippetLine(1, parsed.hunks)).toBe(5);
   });
 
-  it('FallbackDiffAdapter renders lines with data-mod-line attributes corresponding to real modified lines', () => {
+  it('FallbackDiffAdapter renders lines with well-spaced gutter columns, vertical dividers, and dedicated diff markers', () => {
     const html = renderToStaticMarkup(
       createElement(FallbackDiffAdapter, {
         filePath: 'src/index.ts',
@@ -90,6 +90,35 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
 
     // Target line has data-is-target="true"
     expect(html).toContain('data-is-target="true"');
+
+    // Gutter columns have dedicated widths and vertical dividers
+    expect(html).toContain('w-12 shrink-0 select-none text-right pr-2 text-[10px] font-mono text-muted-foreground/70 border-r border-border/40');
+    // Diff marker column has dedicated width w-5 and right border
+    expect(html).toContain('w-5 shrink-0 select-none text-center font-bold font-mono text-xs border-r border-border/40');
+    // Added marker '+' and deleted marker '-' are present
+    expect(html).toContain('data-diff-marker="+"');
+    expect(html).toContain('data-diff-marker="-"');
+  });
+
+  it('renders section tabs and editor button targeting first changed line instead of unchanged context line', () => {
+    const html = renderToStaticMarkup(
+      createElement(PluggableDiffViewer, {
+        filePath: 'src/index.ts',
+        repoName: 'nexusflow',
+        patchText: samplePatch,
+        defaultEditor: 'vscode',
+      })
+    );
+
+    // In samplePatch:
+    // Hunk 1 starts with context at line 10, first change is line 11 added.
+    // Hunk 2 starts with context at line 51, first change is line 52 (old line 51 -> new line 52).
+    // Section tabs should target first changed line
+    expect(html).toContain('title="Jump to change section #1: line 11"');
+    expect(html).toContain('title="Jump to change section #2: line 52"');
+
+    // External editor button should target line 11 (the actual change) rather than line 10 (unchanged context)
+    expect(html).toContain(':L11');
   });
 
   it('renders external editor button with configured defaultEditor label', () => {

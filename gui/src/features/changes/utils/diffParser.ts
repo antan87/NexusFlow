@@ -101,6 +101,11 @@ export function parseUnifiedDiff(patchText: string): ParsedDiffResult {
     hunks.push(currentHunk);
   }
 
+  let runningSnippetLine = 1;
+  for (const hunk of hunks) {
+    runningSnippetLine = finalizeHunk(hunk, runningSnippetLine);
+  }
+
   return {
     originalContent: originalLines.join('\n'),
     modifiedContent: modifiedLines.join('\n'),
@@ -108,6 +113,60 @@ export function parseUnifiedDiff(patchText: string): ParsedDiffResult {
     isNewFile,
     isDeletedFile,
   };
+}
+
+/**
+ * Calculates first actual changed line positions for both modified and original streams,
+ * as well as the 1-based snippet line index. Returns next hunk's snippet line start.
+ */
+function finalizeHunk(hunk: DiffHunkAction, startSnippetLine: number): number {
+  let curOrig = hunk.startLineOriginal;
+  let curMod = hunk.startLineModified;
+  let curSnippet = startSnippetLine;
+
+  let firstChangedMod: number | undefined;
+  let firstChangedOrig: number | undefined;
+  let firstChangedSnippet: number | undefined;
+
+  for (const line of hunk.lines || []) {
+    if (line.startsWith('\\')) {
+      continue;
+    }
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      if (firstChangedMod === undefined) {
+        firstChangedMod = curMod;
+      }
+      if (firstChangedOrig === undefined) {
+        firstChangedOrig = curOrig;
+      }
+      if (firstChangedSnippet === undefined) {
+        firstChangedSnippet = curSnippet;
+      }
+      curMod++;
+      curSnippet++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      if (firstChangedMod === undefined) {
+        firstChangedMod = Math.max(1, curMod);
+      }
+      if (firstChangedOrig === undefined) {
+        firstChangedOrig = curOrig;
+      }
+      if (firstChangedSnippet === undefined) {
+        firstChangedSnippet = Math.max(1, curSnippet);
+      }
+      curOrig++;
+    } else if (line.startsWith(' ')) {
+      curOrig++;
+      curMod++;
+      curSnippet++;
+    }
+  }
+
+  hunk.firstChangedLineModified = firstChangedMod ?? hunk.startLineModified;
+  hunk.firstChangedLineOriginal = firstChangedOrig ?? hunk.startLineOriginal;
+  hunk.firstChangedSnippetLine = firstChangedSnippet ?? startSnippetLine;
+
+  return curSnippet;
 }
 
 /**
@@ -146,4 +205,57 @@ export function getHunkSnippetLine(hunkIndex: number, hunks: DiffHunkAction[]): 
   }
   return snippetPos;
 }
+
+/**
+ * Computes the 1-based snippet line of the first changed (added/deleted) line
+ * for the hunk at index `hunkIndex`. Falls back to the hunk start snippet line.
+ */
+export function getHunkFirstChangedSnippetLine(hunkIndex: number, hunks: DiffHunkAction[]): number {
+  const hunk = hunks[hunkIndex];
+  if (!hunk) return 1;
+  if (hunk.firstChangedSnippetLine !== undefined) {
+    return hunk.firstChangedSnippetLine;
+  }
+  const snippetPos = getHunkSnippetLine(hunkIndex, hunks);
+  let currentSnippet = snippetPos;
+  for (const line of hunk.lines || []) {
+    if (line.startsWith('\\')) continue;
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      return currentSnippet;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      return currentSnippet;
+    }
+    if (line.startsWith(' ')) {
+      currentSnippet++;
+    }
+  }
+  return snippetPos;
+}
+
+export const getFirstChangedSnippetLine = getHunkFirstChangedSnippetLine;
+
+/**
+ * Returns the first changed modified line number for a hunk.
+ * Falls back to startLineModified if no changes are detected.
+ */
+export function getHunkFirstChangedLineModified(hunk: DiffHunkAction): number {
+  if (hunk.firstChangedLineModified !== undefined) {
+    return hunk.firstChangedLineModified;
+  }
+  let curMod = hunk.startLineModified;
+  for (const line of hunk.lines || []) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      return curMod;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      return Math.max(1, curMod);
+    }
+    if (line.startsWith(' ')) {
+      curMod++;
+    }
+  }
+  return hunk.startLineModified;
+}
+
 

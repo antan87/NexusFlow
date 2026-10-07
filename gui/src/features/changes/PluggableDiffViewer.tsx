@@ -20,7 +20,13 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
-import { parseUnifiedDiff, mapRealLineToSnippetLine, getHunkSnippetLine } from './utils/diffParser.js';
+import {
+  parseUnifiedDiff,
+  mapRealLineToSnippetLine,
+  getHunkSnippetLine,
+  getHunkFirstChangedSnippetLine,
+  getHunkFirstChangedLineModified,
+} from './utils/diffParser.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
 import { openFileInEditor, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -174,10 +180,14 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
 
   const handleSelectHunk = useCallback((index: number) => {
     if (index >= 0 && index < hunks.length && hunks[index]) {
+      const hunk = hunks[index];
+      const targetModified = hunk.firstChangedLineModified ?? getHunkFirstChangedLineModified(hunk);
+      const targetSnippet = hunk.firstChangedSnippetLine ?? getHunkFirstChangedSnippetLine(index, hunks);
+
       setActiveHunkIndex(index);
-      setRealTargetLine(Math.max(1, hunks[index].startLineModified));
+      setRealTargetLine(Math.max(1, targetModified));
       if (!fullFileContent) {
-        setExplicitSnippetTargetLine(getHunkSnippetLine(index, hunks));
+        setExplicitSnippetTargetLine(targetSnippet);
       } else {
         setExplicitSnippetTargetLine(undefined);
       }
@@ -458,6 +468,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
               const adds = h.lines ? h.lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length : 0;
               const dels = h.lines ? h.lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length : 0;
               const isSelected = i === activeHunkIndex;
+              const targetLine = h.firstChangedLineModified ?? h.startLineModified;
               return (
                 <button
                   key={h.id}
@@ -472,7 +483,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
                       ? 'bg-primary text-primary-foreground border-primary font-semibold shadow-xs'
                       : 'bg-card/70 text-muted-foreground hover:text-foreground hover:bg-accent border-border/60'
                   )}
-                  title={`Jump to change section #${i + 1}: line ${h.startLineModified}${h.enclosingDeclaration ? ` (${h.enclosingDeclaration})` : ''}`}
+                  title={`Jump to change section #${i + 1}: line ${targetLine}${h.enclosingDeclaration ? ` (${h.enclosingDeclaration})` : ''}`}
                 >
                   <span>Section {i + 1}</span>
                   {(adds > 0 || dels > 0) && (
@@ -624,14 +635,15 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  openInVsCodeAtLine(repoPath, filePath, currentHunk.startLineModified, 1, defaultEditor);
-                  showToast?.(`Opened ${filePath}:${currentHunk.startLineModified} in ${editorLabel}`, 'success');
+                  const targetLine = currentHunk.firstChangedLineModified ?? currentHunk.startLineModified;
+                  openInVsCodeAtLine(repoPath, filePath, targetLine, 1, defaultEditor);
+                  showToast?.(`Opened ${filePath}:${targetLine} in ${editorLabel}`, 'success');
                 }}
                 className="inline-flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                title={`Open in desktop ${editorLabel} at modified line ${currentHunk.startLineModified}`}
+                title={`Open in desktop ${editorLabel} at modified line ${currentHunk.firstChangedLineModified ?? currentHunk.startLineModified}`}
               >
                 <ExternalLink size={11} />
-                <span>{editorLabel} :L{currentHunk.startLineModified}</span>
+                <span>{editorLabel} :L{currentHunk.firstChangedLineModified ?? currentHunk.startLineModified}</span>
               </button>
             )}
 

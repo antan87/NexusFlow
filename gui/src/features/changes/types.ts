@@ -19,6 +19,9 @@ export interface DiffHunkAction {
   patchHeader: string;
   enclosingDeclaration?: string;
   lines: string[];
+  firstChangedLineModified?: number;
+  firstChangedLineOriginal?: number;
+  firstChangedSnippetLine?: number;
 }
 
 export interface DiffReviewComment {
