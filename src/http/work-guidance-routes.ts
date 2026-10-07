@@ -21,7 +21,11 @@ export function registerWorkGuidanceRoutes(app: Hono, resolveWorkspace: (id: str
     }
   };
   app.get('/api/workspace/:id/planning-notes', handle((root) => readPlanningNotes(root)));
-  app.get('/api/workspace/:id/documents', handle((root) => listRootDocuments(root)));
+  app.get('/api/workspace/:id/documents', handle((root, c) => {
+    const folder = c.req.query('folder') ?? '';
+    const recursive = c.req.query('recursive') === '1';
+    return listRootDocuments(root, folder, recursive);
+  }));
   app.get('/api/workspace/:id/documents/preview', handle(async (root, c) => {
     const { bytes: _bytes, ...document } = await readRootDocument(root, c.req.query('name') ?? '');
     return document;

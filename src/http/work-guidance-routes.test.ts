@@ -75,6 +75,14 @@ it('lists and previews root documents without registering sources, and serves sa
   expect(download.headers.get('content-disposition')).toContain('attachment;');
   expect((await app.request('/api/workspace/test/documents/preview?name=..%2Fescape.md')).status).toBe(400);
   expect((await app.request('/api/workspace/missing/documents')).status).toBe(404);
+
+  await fs.mkdir(path.join(root, 'sub'));
+  await fs.writeFile(path.join(root, 'sub', 'nested.md'), '# Nested');
+  const subList = await (await app.request('/api/workspace/test/documents?folder=sub')).json();
+  expect(subList.documents.map((doc: { name: string }) => doc.name)).toEqual(['sub/nested.md']);
+
+  const subListTrailing = await (await app.request('/api/workspace/test/documents?folder=sub/')).json();
+  expect(subListTrailing.documents.map((doc: { name: string }) => doc.name)).toEqual(['sub/nested.md']);
 });
 
 it('keeps HTML locked down unless it is explicitly opened in a browser', async () => {
