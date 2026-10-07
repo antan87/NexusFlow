@@ -98,12 +98,38 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
   }, []);
 
   const openFile = async (reference: { path: string; line?: number }) => {
-    const cleanPath = reference.path.replace(/^<+|>+$/g, '').trim();
+    let cleanPath = reference.path.replace(/^<+|>+$/g, '').trim();
     if (!cleanPath) return;
+
+    const mdMatch = /^\[([^\]]*)\]\((<[^>]+>|[^)]+)\)$/.exec(cleanPath);
+    if (mdMatch) {
+      cleanPath = mdMatch[2].trim();
+      while (cleanPath.startsWith('<') && cleanPath.endsWith('>')) {
+        cleanPath = cleanPath.slice(1, -1).trim();
+      }
+    }
 
     if (isWebOrDomain(cleanPath)) {
       window.open(normalizeWebUrl(cleanPath), '_blank', 'noopener,noreferrer');
       return;
+    }
+
+    if (/^file:\/\//i.test(cleanPath)) {
+      try {
+        cleanPath = decodeURIComponent(new URL(cleanPath).pathname).replace(/^\/([a-z]:\/)/i, '$1');
+      } catch {
+        cleanPath = cleanPath.replace(/^file:\/\//i, '');
+      }
+    }
+
+    let line = reference.line;
+    const location = cleanPath.match(/:(\d+)(?::\d+)?$/) ?? cleanPath.match(/\((\d+)(?:,\d+)?\)$/);
+    if (location) {
+      cleanPath = cleanPath.slice(0, -location[0].length);
+      const lineNumber = Number(location[1]);
+      if (Number.isSafeInteger(lineNumber) && lineNumber > 0 && !line) {
+        line = lineNumber;
+      }
     }
 
     if (!isPathInsideWorkspace(cleanPath, workspacePath, repoPaths)) {
@@ -111,7 +137,7 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
     }
 
     const request = ++referenceRequest.current;
-    const cleanRef = { ...reference, path: cleanPath };
+    const cleanRef = { path: cleanPath, line };
     const name = workspaceDocumentName(cleanRef, workspacePath, repoPaths);
     if (name) {
       const nested = name.includes('/');
@@ -141,11 +167,12 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
       );
       if (request !== referenceRequest.current) return;
       const repos = changesRes?.changes;
-      if (repos && repos.length > 0) {
-        const resolved = resolveFileReference(cleanPath, repos);
-        if (!resolved.file) {
-          return;
-        }
+      if (!repos || repos.length === 0) {
+        return;
+      }
+      const resolved = resolveFileReference(cleanPath, repos);
+      if (!resolved.file) {
+        return;
       }
     } catch {
       return;

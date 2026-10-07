@@ -51,4 +51,25 @@ describe('terminal file references', () => {
       { path: 'README.md', line: 5 },
     ]);
   });
+
+  it('detects files with multiple dots and unusual extensions', () => {
+    const found = findFileReferences('errors at index.test.ts:42 and app.spec.js:10 in vite.config.ts:5 plus build.log:99 nginx.conf:15 Main.kt:20 schema.graphql:30');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: 'index.test.ts', line: 42 },
+      { path: 'app.spec.js', line: 10 },
+      { path: 'vite.config.ts', line: 5 },
+      { path: 'build.log', line: 99 },
+      { path: 'nginx.conf', line: 15 },
+      { path: 'Main.kt', line: 20 },
+      { path: 'schema.graphql', line: 30 },
+    ]);
+  });
+
+  it('detects file:// scheme links in markdown and plaintext', () => {
+    const found = findFileReferences('see [button](file:///home/user/repo/src/Button.tsx:10) and file:///home/user/repo/src/App.tsx:25');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: '/home/user/repo/src/Button.tsx', line: 10 },
+      { path: '/home/user/repo/src/App.tsx', line: 25 },
+    ]);
+  });
 });

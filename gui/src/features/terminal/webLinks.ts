@@ -14,19 +14,20 @@ const FILE_EXTS = new Set([
   'css', 'scss', 'html', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'ico',
   'go', 'rs', 'py', 'rb', 'php', 'java', 'c', 'cpp', 'h', 'hpp', 'cs',
   'sh', 'bash', 'zsh', 'sql', 'txt', 'lock', 'env', 'wasm', 'pdf', 'xml',
-  'vue', 'svelte', 'astro', 'md', 'in', 'it', 'to', 'so', 'pl', 'pm'
+  'vue', 'svelte', 'astro', 'md', 'in', 'it', 'to', 'so', 'pl', 'pm',
+  'log', 'conf', 'cfg', 'ini', 'proto', 'graphql', 'gql', 'swift', 'kt',
+  'kts', 'scala', 'zig', 'nim', 'lua', 'dart', 'ex', 'exs', 'erl', 'clj',
+  'hs', 'diff', 'patch', 'tar', 'gz', 'zip', 'csv', 'tsv'
 ]);
 
-const WEB_SCHEME = /^(?:[a-z][a-z\d+.-]*:\/\/|mailto:)/i;
-const IP_ADDRESS = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/;
-const LOCALHOST = /^localhost(?::\d+)?(?:[/?#]|$)/i;
-const WWW_DOMAIN = /^www\.[a-z\d.-]+/i;
-const WEB_TLD = /\.(?:com|org|net|edu|gov|mil|int|info|biz|xyz|site|online|tech|store|blog|link|cloud)(?::\d+)?(?:[/?#]|$)/i;
-
 export function normalizeWebUrl(raw: string): string {
-  const trimmed = raw.trim();
+  let trimmed = raw.trim();
+  while (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
   if (/^mailto:/i.test(trimmed)) return trimmed;
-  if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^\/\//.test(trimmed)) return `https:${trimmed}`;
   if (/^(?:localhost|\d{1,3}\.\d{1,3})/i.test(trimmed)) {
     return `http://${trimmed}`;
   }
@@ -39,32 +40,70 @@ export function isWebOrDomain(raw: string): boolean {
     trimmed = trimmed.slice(1, -1).trim();
   }
   if (!trimmed) return false;
-  if (WEB_SCHEME.test(trimmed)) return true;
-  if (/^\/\//.test(trimmed)) return true;
-  if (LOCALHOST.test(trimmed)) return true;
-  if (IP_ADDRESS.test(trimmed)) return true;
-  if (WWW_DOMAIN.test(trimmed)) return true;
-  if (WEB_TLD.test(trimmed)) return true;
 
-  const firstSegment = trimmed.split(/[/\\]/)[0];
-  const host = firstSegment.split(':')[0].toLowerCase();
-  if (host === 'localhost') return true;
-  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return true;
-  if (host.startsWith('www.')) return true;
-  if (/\.(?:com|org|net|edu|gov|mil|int|info|biz|xyz|site|online|tech|store|blog|link|cloud)$/i.test(host)) return true;
+  // Local file schemes are never web domains
+  if (/^file:\/\//i.test(trimmed)) return false;
 
+  // Relative or absolute filesystem path navigations are never web domains
+  if (trimmed.startsWith('./') || trimmed.startsWith('../') || trimmed.startsWith('/') || /^[a-z]:[\\/]/i.test(trimmed)) {
+    return false;
+  }
+
+  // Explicit web schemes or protocol-relative
+  if (/^(?:https?:\/\/|mailto:|\/\/)/i.test(trimmed)) return true;
+
+  // Localhost with optional port/path
+  if (/^localhost(?::\d+)?(?:[/?#]|$)/i.test(trimmed)) return true;
+
+  // IPv4 with optional port/path
+  if (/^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/.test(trimmed)) return true;
+
+  // Starts with www.
+  if (/^www\.[a-z\d.-]+/i.test(trimmed)) return true;
+
+  // Use linkify to test against real IANA TLDs
+  const matches = linkify.match(trimmed);
+  if (!matches || matches.length === 0) return false;
+
+  const first = matches[0];
+  if (first.index !== 0) return false;
+
+  if (first.schema === 'http:' || first.schema === 'https:' || first.schema === 'mailto:') {
+    return true;
+  }
+
+  // Bare domain matching (fuzzy match, e.g. github.com/foo, example.com:8080)
+  const host = first.raw.split(/[:/?#]/)[0].toLowerCase();
   const parts = host.split('.');
   if (parts.length >= 2) {
     const tld = parts[parts.length - 1];
-    if (!FILE_EXTS.has(tld)) return true;
-    if (parts.length >= 3 && !trimmed.includes('/')) return true;
+    // If the TLD is also a known file extension (like .md, .sh, .py, .rs),
+    // it is only a web link if it has a trailing path or port (e.g. docs.rs/tokio)
+    const hasPathOrPort = /[:/?#]/.test(first.raw);
+    if (FILE_EXTS.has(tld) && !hasPathOrPort) {
+      return false;
+    }
+    return true;
   }
+
   return false;
 }
 
 export function isPathInsideWorkspace(filePath: string, workspacePath: string, repoPaths?: string[]): boolean {
-  const target = filePath.replace(/\\/g, '/').trim();
+  let target = filePath.replace(/\\/g, '/').trim();
+  while (target.startsWith('<') && target.endsWith('>')) {
+    target = target.slice(1, -1).trim();
+  }
   if (!target) return false;
+
+  if (/^file:\/\//i.test(target)) {
+    try {
+      target = decodeURIComponent(new URL(target).pathname).replace(/^\/([a-z]:\/)/i, '$1');
+    } catch {
+      target = target.replace(/^file:\/\//i, '');
+    }
+  }
+
   const isAbsolute = target.startsWith('/') || /^[a-z]:\//i.test(target);
   if (!isAbsolute) {
     const segments = target.split('/');
@@ -141,7 +180,7 @@ export function findWebLinks(row: string): WebLink[] {
   while ((lh = localhostRegex.exec(row)) !== null) {
     const start = lh.index;
     const end = start + lh[0].length;
-    if (covered.some(([s, e]) => (start >= s && start < e) || (end > s && end <= e))) continue;
+    if (covered.some(([s, e]) => start < e && end > s)) continue;
     const text = lh[0];
     const url = normalizeWebUrl(text);
     result.push({ text, url, start, end });

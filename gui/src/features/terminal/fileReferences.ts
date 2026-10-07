@@ -28,9 +28,16 @@ export function findFileReferences(row: string): FileReference[] {
     const location = text.match(/:(\d+)(?::\d+)?$/) ?? text.match(/\((\d+)(?:,\d+)?\)$/);
     const lineNumber = Number(location?.[1]);
     const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
-    const path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
+    let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
+    if (/^file:\/\//i.test(path)) {
+      try {
+        path = decodeURIComponent(new URL(path).pathname).replace(/^\/([a-z]:\/)/i, '$1');
+      } catch {
+        path = path.replace(/^file:\/\//i, '');
+      }
+    }
     if (!path || isWebOrDomain(path)) continue;
-    if (!/[/\\]/.test(path) && !/^[^.:]+\.[a-z\d]{1,12}$/i.test(path)) continue;
+    if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
     if (/^(?:\.\.?[/\\])?$/.test(path)) continue;
 
     const targetOffset = match[0].indexOf(match[2]) + (unwrapped ? 1 : 0);
@@ -59,9 +66,16 @@ export function findFileReferences(row: string): FileReference[] {
     const location = text.match(/:(\d+)(?::\d+)?$/) ?? text.match(/\((\d+)(?:,\d+)?\)$/);
     const lineNumber = Number(location?.[1]);
     const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
-    const path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
+    let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
+    if (/^file:\/\//i.test(path)) {
+      try {
+        path = decodeURIComponent(new URL(path).pathname).replace(/^\/([a-z]:\/)/i, '$1');
+      } catch {
+        path = path.replace(/^file:\/\//i, '');
+      }
+    }
     if (!path || isWebOrDomain(path)) continue;
-    if (!/[/\\]/.test(path) && !/^[^.:]+\.[a-z\d]{1,12}$/i.test(path)) continue;
+    if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
     if (/^(?:\.\.?[/\\])?$/.test(path)) continue;
     const start = tokenStart + leading;
     result.push({ text, path, line, start, end: start + text.length });

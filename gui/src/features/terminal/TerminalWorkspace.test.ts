@@ -61,12 +61,14 @@ describe('TerminalWorkspace link routing guards and inspector control', () => {
 
   it('guards against external paths outside the workspace and repositories', () => {
     expect(isPathInsideWorkspace('/etc/passwd', workspacePath, repoPaths)).toBe(false);
+    expect(isPathInsideWorkspace('file:///etc/passwd', workspacePath, repoPaths)).toBe(false);
     expect(isPathInsideWorkspace('/tmp/scratch.log', workspacePath, repoPaths)).toBe(false);
     expect(isPathInsideWorkspace('/home/otheruser/project/file.ts', workspacePath, repoPaths)).toBe(false);
     expect(isPathInsideWorkspace('../../escape.txt', workspacePath, repoPaths)).toBe(false);
 
     // Valid paths inside workspace or repos
     expect(isPathInsideWorkspace('/home/user/workspace/nexusflow/src/index.ts', workspacePath, repoPaths)).toBe(true);
+    expect(isPathInsideWorkspace('file:///home/user/workspace/nexusflow/src/index.ts', workspacePath, repoPaths)).toBe(true);
     expect(isPathInsideWorkspace('/home/user/workspace/other-repo/README.md', workspacePath, repoPaths)).toBe(true);
     expect(isPathInsideWorkspace('src/index.ts', workspacePath, repoPaths)).toBe(true);
     expect(isPathInsideWorkspace('./README.md', workspacePath, repoPaths)).toBe(true);
@@ -96,6 +98,12 @@ describe('TerminalWorkspace link routing guards and inspector control', () => {
     expect(valid.file).toBeDefined();
     expect(valid.file?.file).toBe('src/index.ts');
     expect(valid.file?.repoName).toBe('nexusflow');
+
+    // Valid file with angle brackets and file:// scheme
+    const validWrapped = resolveFileReference('<src/index.ts>', repos);
+    expect(validWrapped.file?.file).toBe('src/index.ts');
+    const validFileUri = resolveFileReference('file:///home/user/workspace/nexusflow/src/index.ts', repos);
+    expect(validFileUri.file?.file).toBe('src/index.ts');
 
     // Valid file in other-repo
     const validOther = resolveFileReference('README.md', repos);
