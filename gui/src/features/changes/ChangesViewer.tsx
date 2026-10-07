@@ -1064,6 +1064,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                         searchQuery={searchFilter}
                         revealPath={revealFile.startsWith(`${repo.repoName}/`) ? revealFile.slice(repo.repoName.length + 1) : undefined}
                         revealKey={revealKey}
+                        selectedPath={activeSelectedFile?.repoName === repo.repoName ? activeSelectedFile.file : undefined}
                         defaultExpanded={true}
                         expandedPaths={effectiveTreeExpandedPaths[repo.repoName]}
                         onExpandedPathsChange={(paths) => {
@@ -1073,7 +1074,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                             setTreeExpandedPaths(prev => ({ ...prev, [repo.repoName]: paths }));
                           }
                         }}
-                        renderFile={(fileInfo: any) => {
+                        renderFile={(fileInfo: any, meta?: { isSelected: boolean; tabIndex: number }) => {
                         const cacheKey = `${repo.repoName}/${fileInfo.file}`;
                         const isExpanded = !!expandedFiles[cacheKey];
                         const isLoading = !!diffLoading[cacheKey];
@@ -1092,7 +1093,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                             {/* File Header Row */}
                             <div
                               className="flex cursor-pointer select-none items-center justify-between px-2 py-1.5 transition-colors hover:bg-accent/50"
-                              role="button" tabIndex={0} aria-expanded={isExpanded}
+                              role="button" tabIndex={meta?.tabIndex ?? 0} aria-expanded={isExpanded}
                               onKeyDown={e => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();

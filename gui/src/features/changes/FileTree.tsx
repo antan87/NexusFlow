@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
 
 export interface TreeFile {
@@ -237,12 +237,162 @@ export function getMatchingBranchPaths<T extends TreeFile>(
   return new Set(getAllDirectoryPaths(tree));
 }
 
+export interface VisibleTreeRow {
+  type: 'folder' | 'file';
+  id: string;
+  path: string;
+  name: string;
+  parentPath: string | null;
+  isExpanded?: boolean;
+}
+
+/**
+ * Returns all currently visible rows (folders and files) in visual tree order,
+ * respecting the current folder expansion set.
+ */
+export function getVisibleTreeRows<T extends TreeFile>(
+  root: TreeNode<T>,
+  expandedPaths: Set<string>
+): VisibleTreeRow[] {
+  const result: VisibleTreeRow[] = [];
+
+  const walk = (node: TreeNode<T>, parentPath: string | null) => {
+    for (const dir of node.directories) {
+      const isExpanded = expandedPaths.has(dir.path);
+      result.push({
+        type: 'folder',
+        id: `dir:${dir.path}`,
+        path: dir.path,
+        name: dir.name,
+        parentPath,
+        isExpanded,
+      });
+      if (isExpanded) {
+        walk(dir, dir.path);
+      }
+    }
+    for (const file of node.files) {
+      const norm = normalizePath(file.file);
+      result.push({
+        type: 'file',
+        id: `file:${norm}`,
+        path: norm,
+        name: file.file.split('/').filter(Boolean).at(-1) ?? file.file,
+        parentPath,
+      });
+    }
+  };
+
+  walk(root, null);
+  return result;
+}
+
+export type TreeNavAction =
+  | { type: 'focus'; targetRow: VisibleTreeRow }
+  | { type: 'toggle'; path: string }
+  | { type: 'activate'; path: string }
+  | { type: 'none' };
+
+/**
+ * Computes the next navigation action (focus, toggle, activate, or none) for a keyboard event
+ * within a WAI-ARIA Treeview based on current active row and visible rows.
+ */
+export function computeTreeKeyNavigation(
+  key: string,
+  currentRow: VisibleTreeRow | undefined,
+  visibleRows: readonly VisibleTreeRow[]
+): TreeNavAction {
+  if (!currentRow || visibleRows.length === 0) {
+    return { type: 'none' };
+  }
+
+  const currentIndex = visibleRows.findIndex(r => r.id === currentRow.id);
+  if (currentIndex === -1) {
+    return { type: 'none' };
+  }
+
+  switch (key) {
+    case 'ArrowDown': {
+      if (currentIndex < visibleRows.length - 1) {
+        return { type: 'focus', targetRow: visibleRows[currentIndex + 1]! };
+      }
+      return { type: 'none' };
+    }
+    case 'ArrowUp': {
+      if (currentIndex > 0) {
+        return { type: 'focus', targetRow: visibleRows[currentIndex - 1]! };
+      }
+      return { type: 'none' };
+    }
+    case 'ArrowRight': {
+      if (currentRow.type === 'folder') {
+        if (!currentRow.isExpanded) {
+          return { type: 'toggle', path: currentRow.path };
+        }
+        const nextRow = visibleRows[currentIndex + 1];
+        if (nextRow && nextRow.parentPath === currentRow.path) {
+          return { type: 'focus', targetRow: nextRow };
+        }
+      }
+      return { type: 'none' };
+    }
+    case 'ArrowLeft': {
+      if (currentRow.type === 'folder' && currentRow.isExpanded) {
+        return { type: 'toggle', path: currentRow.path };
+      }
+      if (currentRow.parentPath) {
+        const parentRow = visibleRows.find(r => r.type === 'folder' && r.path === currentRow.parentPath);
+        if (parentRow) {
+          return { type: 'focus', targetRow: parentRow };
+        }
+      }
+      return { type: 'none' };
+    }
+    case 'Home': {
+      return { type: 'focus', targetRow: visibleRows[0]! };
+    }
+    case 'End': {
+      return { type: 'focus', targetRow: visibleRows[visibleRows.length - 1]! };
+    }
+    case 'Enter':
+    case ' ': {
+      if (currentRow.type === 'folder') {
+        return { type: 'toggle', path: currentRow.path };
+      }
+      return { type: 'activate', path: currentRow.path };
+    }
+    default:
+      return { type: 'none' };
+  }
+}
+
+function findFolderSummary(container: HTMLElement | null, path: string): HTMLElement | null {
+  if (!container) return null;
+  const summaries = container.querySelectorAll<HTMLElement>('summary[data-path]');
+  for (const s of summaries) {
+    if (s.dataset.path === path) return s;
+  }
+  return null;
+}
+
+function findFileTarget(container: HTMLElement | null, normalizedPath: string): HTMLElement | null {
+  if (!container) return null;
+  const items = container.querySelectorAll<HTMLElement>('[data-file-path]');
+  for (const item of items) {
+    if (item.dataset.filePath === normalizedPath) {
+      return item.querySelector<HTMLElement>('button, [data-tree-row="file"], [role="button"]') ?? item;
+    }
+  }
+  return null;
+}
+
 export interface FileTreeProps<T extends TreeFile> {
   files: T[];
-  renderFile: (file: T) => ReactNode;
+  renderFile: (file: T, meta?: { isSelected: boolean; tabIndex: number }) => ReactNode;
   label: string;
   revealPath?: string;
   revealKey?: number;
+  selectedPath?: string;
   compact?: boolean;
   defaultExpanded?: boolean;
   expandedPaths?: Set<string>;
@@ -258,6 +408,7 @@ export function FileTree<T extends TreeFile>({
   label,
   revealPath,
   revealKey,
+  selectedPath,
   compact = true,
   defaultExpanded = true,
   expandedPaths: controlledExpandedPaths,
@@ -388,77 +539,264 @@ export function FileTree<T extends TreeFile>({
     }
   }, [revealPath, revealKey, currentExpandedPaths]);
 
-  const render = (node: TreeNode<T>): ReactNode => (
-    <ul className="min-w-0 space-y-0.5">
-      {node.directories.map((child) => {
-        const isExpanded = currentExpandedPaths.has(child.path);
-        return (
-          <li key={`dir:${child.path}`}>
-            <details
-              open={isExpanded}
-              data-path={child.path}
-              className="min-w-0 group/dir"
-              onToggle={(e) => {
-                if (e.target !== e.currentTarget) return;
-                const isOpen = (e.currentTarget as HTMLDetailsElement).open;
-                if (isOpen !== isExpanded) {
-                  setExpandedPaths(prev => {
-                    const next = new Set(prev);
-                    if (isOpen) next.add(child.path);
-                    else next.delete(child.path);
-                    return next;
-                  });
-                  onTogglePath?.(child.path, isOpen);
+  // Track focused row for roving tabindex
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!revealPath) return;
+    setFocusedRowId(`file:${normalizePath(revealPath)}`);
+  }, [revealPath, revealKey]);
+
+  const visibleRows = useMemo(
+    () => getVisibleTreeRows(root, currentExpandedPaths),
+    [root, currentExpandedPaths]
+  );
+
+  const visibleRowIds = useMemo(() => new Set(visibleRows.map(r => r.id)), [visibleRows]);
+  const effectiveSelectedPath = selectedPath ?? revealPath;
+
+  const activeRowId = useMemo(() => {
+    if (focusedRowId && visibleRowIds.has(focusedRowId)) {
+      return focusedRowId;
+    }
+    if (effectiveSelectedPath) {
+      const selId = `file:${normalizePath(effectiveSelectedPath)}`;
+      if (visibleRowIds.has(selId)) {
+        return selId;
+      }
+    }
+    return visibleRows[0]?.id ?? null;
+  }, [focusedRowId, visibleRowIds, effectiveSelectedPath, visibleRows]);
+
+  const focusRow = useCallback(
+    (row: VisibleTreeRow) => {
+      setFocusedRowId(row.id);
+      if (row.type === 'folder') {
+        const summaryEl = findFolderSummary(host.current, row.path);
+        summaryEl?.focus();
+      } else {
+        const fileTarget = findFileTarget(host.current, row.path);
+        fileTarget?.focus();
+      }
+    },
+    []
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const key = e.key;
+      if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'Enter', ' '].includes(key)) {
+        return;
+      }
+
+      let currentIndex = visibleRows.findIndex(r => r.id === activeRowId);
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (activeEl) {
+        const summary = activeEl.closest('summary[data-path]');
+        if (summary) {
+          const p = summary.getAttribute('data-path');
+          const idx = visibleRows.findIndex(r => r.id === `dir:${p}`);
+          if (idx !== -1) currentIndex = idx;
+        } else {
+          const fileLi = activeEl.closest('[data-file-path]');
+          if (fileLi) {
+            const p = fileLi.getAttribute('data-file-path');
+            const idx = visibleRows.findIndex(r => r.id === `file:${p}`);
+            if (idx !== -1) currentIndex = idx;
+          }
+        }
+      }
+
+      if (currentIndex === -1 && visibleRows.length > 0) {
+        currentIndex = 0;
+      }
+      const currentRow = visibleRows[currentIndex];
+      if (!currentRow) return;
+
+      const action = computeTreeKeyNavigation(key, currentRow, visibleRows);
+      if (action.type !== 'none') {
+        e.preventDefault();
+      }
+
+      if (action.type === 'focus') {
+        focusRow(action.targetRow);
+      } else if (action.type === 'toggle') {
+        togglePath(action.path);
+      } else if (action.type === 'activate') {
+        const target = findFileTarget(host.current, action.path);
+        target?.click();
+      }
+    },
+    [visibleRows, activeRowId, focusRow, togglePath]
+  );
+
+  const renderFileRow = (
+    file: T,
+    meta: { isSelected: boolean; tabIndex: number }
+  ) => {
+    const rendered = renderFile(file, meta);
+    const normalizedFilePath = normalizePath(file.file);
+    if (isValidElement(rendered)) {
+      const props = rendered.props as Record<string, any>;
+      return cloneElement(rendered as React.ReactElement<any>, {
+        tabIndex: meta.tabIndex,
+        'data-tree-row': 'file',
+        'data-file-path': normalizedFilePath,
+        ...(props['aria-selected'] === undefined
+          ? { 'aria-selected': meta.isSelected }
+          : {}),
+        onFocus: (e: React.FocusEvent) => {
+          props.onFocus?.(e);
+          setFocusedRowId(`file:${normalizedFilePath}`);
+        },
+      });
+    }
+    return rendered;
+  };
+
+  const renderTree = (node: TreeNode<T>, isRoot: boolean): ReactNode => {
+    const content = (
+      <>
+        {node.directories.map((child) => {
+          const isExpanded = currentExpandedPaths.has(child.path);
+          const isRowActive = activeRowId === `dir:${child.path}`;
+          const folderTabIndex = isRowActive ? 0 : -1;
+
+          return (
+            <li
+              key={`dir:${child.path}`}
+              role="treeitem"
+              aria-expanded={isExpanded}
+              tabIndex={folderTabIndex}
+              className="tree-row-wrapper min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_28px]"
+              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 28px' }}
+              onFocus={(e) => {
+                if (e.target === e.currentTarget) {
+                  if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) {
+                    return;
+                  }
+                  const summary = findFolderSummary(e.currentTarget, child.path);
+                  summary?.focus();
                 }
               }}
             >
-              {/* A native disclosure triangle plus a closed/open folder pair reads as
-                  a tree far faster than a single static folder glyph. */}
-              <summary
-                className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-primary select-none"
-                onClick={(e) => {
-                  e.preventDefault();
-                  togglePath(child.path);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    togglePath(child.path);
+              <details
+                open={isExpanded}
+                data-path={child.path}
+                className="min-w-0 group/dir"
+                onToggle={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  const isOpen = (e.currentTarget as HTMLDetailsElement).open;
+                  if (isOpen !== isExpanded) {
+                    setExpandedPaths(prev => {
+                      const next = new Set(prev);
+                      if (isOpen) next.add(child.path);
+                      else next.delete(child.path);
+                      return next;
+                    });
+                    onTogglePath?.(child.path, isOpen);
                   }
                 }}
               >
-                <ChevronRight
-                  className="size-3 shrink-0 text-muted-foreground transition-transform group-open/dir:rotate-90"
-                  aria-hidden="true"
-                />
-                <Folder
-                  className="size-3.5 shrink-0 text-warning-foreground/80 group-open/dir:hidden"
-                  aria-hidden="true"
-                />
-                <FolderOpen
-                  className="hidden size-3.5 shrink-0 text-warning-foreground group-open/dir:block"
-                  aria-hidden="true"
-                />
-                <span className="truncate">{child.name}</span>
-              </summary>
-              {isExpanded && (
-                <div className="ml-2 border-l border-border pl-1.5">{render(child)}</div>
-              )}
-            </details>
-          </li>
-        );
-      })}
-      {node.files.map((file) => (
-        <li key={`file:${file.file}`} data-file-path={normalizePath(file.file)}>
-          {renderFile(file)}
-        </li>
-      ))}
-    </ul>
-  );
+                {/* A native disclosure triangle plus a closed/open folder pair reads as
+                    a tree far faster than a single static folder glyph. */}
+                <summary
+                  data-tree-row="folder"
+                  data-path={child.path}
+                  tabIndex={folderTabIndex}
+                  aria-expanded={isExpanded}
+                  className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-primary select-none"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    togglePath(child.path);
+                    setFocusedRowId(`dir:${child.path}`);
+                  }}
+                  onFocus={() => {
+                    setFocusedRowId(`dir:${child.path}`);
+                  }}
+                >
+                  <ChevronRight
+                    className="size-3 shrink-0 text-muted-foreground transition-transform group-open/dir:rotate-90"
+                    aria-hidden="true"
+                  />
+                  <Folder
+                    className="size-3.5 shrink-0 text-warning-foreground/80 group-open/dir:hidden"
+                    aria-hidden="true"
+                  />
+                  <FolderOpen
+                    className="hidden size-3.5 shrink-0 text-warning-foreground group-open/dir:block"
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{child.name}</span>
+                </summary>
+                {isExpanded && (
+                  <div className="ml-2 border-l border-border pl-1.5">
+                    {renderTree(child, false)}
+                  </div>
+                )}
+              </details>
+            </li>
+          );
+        })}
+        {node.files.map((file) => {
+          const normalizedFilePath = normalizePath(file.file);
+          const isSelected = effectiveSelectedPath !== undefined && normalizedFilePath === normalizePath(effectiveSelectedPath);
+          const isRowActive = activeRowId === `file:${normalizedFilePath}`;
+          const fileTabIndex = isRowActive ? 0 : -1;
+
+          return (
+            <li
+              key={`file:${file.file}`}
+              role="treeitem"
+              aria-selected={isSelected}
+              tabIndex={fileTabIndex}
+              data-file-path={normalizedFilePath}
+              className="tree-row-wrapper min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_28px]"
+              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 28px' }}
+              onFocus={(e) => {
+                if (e.target === e.currentTarget) {
+                  if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) {
+                    return;
+                  }
+                  const target = findFileTarget(e.currentTarget, normalizedFilePath);
+                  if (target && target !== e.currentTarget) {
+                    target.focus();
+                  }
+                }
+              }}
+            >
+              {renderFileRow(file, { isSelected, tabIndex: fileTabIndex })}
+            </li>
+          );
+        })}
+      </>
+    );
+
+    if (isRoot) {
+      return (
+        <ul
+          role="tree"
+          aria-label={label}
+          className="min-w-0 space-y-0.5 outline-none"
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+        >
+          {content}
+        </ul>
+      );
+    }
+
+    return (
+      <ul role="group" className="min-w-0 space-y-0.5">
+        {content}
+      </ul>
+    );
+  };
 
   return (
     <nav ref={host} aria-label={label}>
-      {render(root)}
+      {renderTree(root, true)}
     </nav>
   );
 }
+

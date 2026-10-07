@@ -634,3 +634,9 @@
   --ring-b: var(--brand-middle);
   --ring-c: var(--brand-last);
 }
+
+/* Treeview rendering optimization for large directories */
+.tree-row-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}

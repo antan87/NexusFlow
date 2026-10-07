@@ -9,9 +9,13 @@ import {
   getAllDirectoryPaths,
   getAncestorPaths,
   getMatchingBranchPaths,
+  getVisibleTreeRows,
   normalizePath,
   treeOrderedFiles,
+  computeTreeKeyNavigation,
   type TreeFile,
+  type VisibleTreeRow,
+  type TreeNavAction,
 } from './FileTree.js';
 
 interface CustomFile extends TreeFile {
@@ -1108,5 +1112,430 @@ describe('FileTree Search Filtering & Branch Auto-Expansion', () => {
     expect(html).not.toContain('README.md');
   });
 });
+
+describe('getVisibleTreeRows', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/components/Dialog.tsx' },
+    { file: 'src/utils/format.ts' },
+  ];
+
+  it('returns only root files and top-level collapsed folders when expandedPaths is empty', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const visible = getVisibleTreeRows(root, new Set());
+
+    expect(visible).toEqual([
+      {
+        type: 'folder',
+        id: 'dir:src',
+        path: 'src',
+        name: 'src',
+        parentPath: null,
+        isExpanded: false,
+      },
+      {
+        type: 'file',
+        id: 'file:README.md',
+        path: 'README.md',
+        name: 'README.md',
+        parentPath: null,
+      },
+    ]);
+  });
+
+  it('includes child folders and files when parent folder is expanded', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const visible = getVisibleTreeRows(root, new Set(['src']));
+
+    expect(visible).toEqual([
+      {
+        type: 'folder',
+        id: 'dir:src',
+        path: 'src',
+        name: 'src',
+        parentPath: null,
+        isExpanded: true,
+      },
+      {
+        type: 'folder',
+        id: 'dir:src/components',
+        path: 'src/components',
+        name: 'components',
+        parentPath: 'src',
+        isExpanded: false,
+      },
+      {
+        type: 'folder',
+        id: 'dir:src/utils',
+        path: 'src/utils',
+        name: 'utils',
+        parentPath: 'src',
+        isExpanded: false,
+      },
+      {
+        type: 'file',
+        id: 'file:README.md',
+        path: 'README.md',
+        name: 'README.md',
+        parentPath: null,
+      },
+    ]);
+  });
+
+  it('includes nested files when all ancestor branches are expanded', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const visible = getVisibleTreeRows(root, new Set(['src', 'src/components', 'src/utils']));
+
+    expect(visible.map(r => ({ type: r.type, path: r.path, parentPath: r.parentPath }))).toEqual([
+      { type: 'folder', path: 'src', parentPath: null },
+      { type: 'folder', path: 'src/components', parentPath: 'src' },
+      { type: 'file', path: 'src/components/Button.tsx', parentPath: 'src/components' },
+      { type: 'file', path: 'src/components/Dialog.tsx', parentPath: 'src/components' },
+      { type: 'folder', path: 'src/utils', parentPath: 'src' },
+      { type: 'file', path: 'src/utils/format.ts', parentPath: 'src/utils' },
+      { type: 'file', path: 'README.md', parentPath: null },
+    ]);
+  });
+
+  it('handles empty trees gracefully', () => {
+    const root = buildCompactedTree([]);
+    const visible = getVisibleTreeRows(root, new Set());
+    expect(visible).toEqual([]);
+  });
+});
+
+describe('computeTreeKeyNavigation (Arrow Key Navigation & Keyboard Model)', () => {
+  const visibleRows: VisibleTreeRow[] = [
+    { type: 'folder', id: 'dir:src', path: 'src', name: 'src', parentPath: null, isExpanded: true },
+    { type: 'folder', id: 'dir:src/components', path: 'src/components', name: 'components', parentPath: 'src', isExpanded: false },
+    { type: 'folder', id: 'dir:src/utils', path: 'src/utils', name: 'utils', parentPath: 'src', isExpanded: true },
+    { type: 'file', id: 'file:src/utils/format.ts', path: 'src/utils/format.ts', name: 'format.ts', parentPath: 'src/utils' },
+    { type: 'file', id: 'file:README.md', path: 'README.md', name: 'README.md', parentPath: null },
+  ];
+
+  it('advances focus to next row on ArrowDown', () => {
+    const action = computeTreeKeyNavigation('ArrowDown', visibleRows[0], visibleRows);
+    expect(action).toEqual({ type: 'focus', targetRow: visibleRows[1] });
+
+    const nextAction = computeTreeKeyNavigation('ArrowDown', visibleRows[1], visibleRows);
+    expect(nextAction).toEqual({ type: 'focus', targetRow: visibleRows[2] });
+  });
+
+  it('stops at last row on ArrowDown', () => {
+    const lastRow = visibleRows[visibleRows.length - 1];
+    const action = computeTreeKeyNavigation('ArrowDown', lastRow, visibleRows);
+    expect(action).toEqual({ type: 'none' });
+  });
+
+  it('moves focus to previous row on ArrowUp', () => {
+    const action = computeTreeKeyNavigation('ArrowUp', visibleRows[2], visibleRows);
+    expect(action).toEqual({ type: 'focus', targetRow: visibleRows[1] });
+  });
+
+  it('stops at first row on ArrowUp', () => {
+    const firstRow = visibleRows[0];
+    const action = computeTreeKeyNavigation('ArrowUp', firstRow, visibleRows);
+    expect(action).toEqual({ type: 'none' });
+  });
+
+  it('expands collapsed folder on ArrowRight', () => {
+    const action = computeTreeKeyNavigation('ArrowRight', visibleRows[1], visibleRows);
+    expect(action).toEqual({ type: 'toggle', path: 'src/components' });
+  });
+
+  it('moves focus into first child on ArrowRight when folder is already expanded', () => {
+    const action = computeTreeKeyNavigation('ArrowRight', visibleRows[0], visibleRows);
+    expect(action).toEqual({ type: 'focus', targetRow: visibleRows[1] });
+  });
+
+  it('does nothing on ArrowRight for a file', () => {
+    const fileRow = visibleRows[3];
+    const action = computeTreeKeyNavigation('ArrowRight', fileRow, visibleRows);
+    expect(action).toEqual({ type: 'none' });
+  });
+
+  it('collapses expanded folder on ArrowLeft', () => {
+    const action = computeTreeKeyNavigation('ArrowLeft', visibleRows[2], visibleRows);
+    expect(action).toEqual({ type: 'toggle', path: 'src/utils' });
+  });
+
+  it('moves focus to parent folder on ArrowLeft when on a collapsed subfolder or child file', () => {
+    const actionSubfolder = computeTreeKeyNavigation('ArrowLeft', visibleRows[1], visibleRows);
+    expect(actionSubfolder).toEqual({ type: 'focus', targetRow: visibleRows[0] });
+
+    const actionFile = computeTreeKeyNavigation('ArrowLeft', visibleRows[3], visibleRows);
+    expect(actionFile).toEqual({ type: 'focus', targetRow: visibleRows[2] });
+  });
+
+  it('does nothing on ArrowLeft for a root-level item that has no parent and is not expanded', () => {
+    const action = computeTreeKeyNavigation('ArrowLeft', visibleRows[4], visibleRows);
+    expect(action).toEqual({ type: 'none' });
+  });
+
+  it('jumps directly to first row on Home', () => {
+    const action = computeTreeKeyNavigation('Home', visibleRows[3], visibleRows);
+    expect(action).toEqual({ type: 'focus', targetRow: visibleRows[0] });
+  });
+
+  it('jumps directly to last row on End', () => {
+    const action = computeTreeKeyNavigation('End', visibleRows[1], visibleRows);
+    expect(action).toEqual({ type: 'focus', targetRow: visibleRows[visibleRows.length - 1] });
+  });
+
+  it('toggles folder on Enter and Space', () => {
+    const enterAction = computeTreeKeyNavigation('Enter', visibleRows[0], visibleRows);
+    expect(enterAction).toEqual({ type: 'toggle', path: 'src' });
+
+    const spaceAction = computeTreeKeyNavigation(' ', visibleRows[1], visibleRows);
+    expect(spaceAction).toEqual({ type: 'toggle', path: 'src/components' });
+  });
+
+  it('activates file on Enter and Space', () => {
+    const enterAction = computeTreeKeyNavigation('Enter', visibleRows[3], visibleRows);
+    expect(enterAction).toEqual({ type: 'activate', path: 'src/utils/format.ts' });
+
+    const spaceAction = computeTreeKeyNavigation(' ', visibleRows[3], visibleRows);
+    expect(spaceAction).toEqual({ type: 'activate', path: 'src/utils/format.ts' });
+  });
+
+  it('returns none for non-navigational keys or invalid inputs', () => {
+    const dummyAction: TreeNavAction = computeTreeKeyNavigation('Tab', visibleRows[0], visibleRows);
+    expect(dummyAction).toEqual({ type: 'none' });
+    expect(computeTreeKeyNavigation('Escape', visibleRows[0], visibleRows)).toEqual({ type: 'none' });
+    expect(computeTreeKeyNavigation('ArrowDown', undefined, visibleRows)).toEqual({ type: 'none' });
+    expect(computeTreeKeyNavigation('ArrowDown', visibleRows[0], [])).toEqual({ type: 'none' });
+  });
+});
+
+describe('WAI-ARIA Treeview Markup & Semantic Accessibility', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/utils/format.ts' },
+  ];
+  const renderFileMock = (f: TreeFile) =>
+    createElement('button', { type: 'button', 'data-name': f.file }, f.file);
+
+  it('renders root ul with role="tree" and accessible aria-label', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Source files tree',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('role="tree"');
+    expect(html).toContain('aria-label="Source files tree"');
+  });
+
+  it('renders directory items with role="treeitem" and correct aria-expanded state', () => {
+    const expandedHtml = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Expanded tree',
+        expandedPaths: new Set(['src', 'src/components', 'src/utils']),
+      })
+    );
+
+    expect(expandedHtml).toContain('role="treeitem" aria-expanded="true"');
+    expect(expandedHtml).toContain('data-tree-row="folder"');
+
+    const collapsedHtml = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Collapsed tree',
+        expandedPaths: new Set(),
+      })
+    );
+
+    expect(collapsedHtml).toContain('role="treeitem" aria-expanded="false"');
+  });
+
+  it('renders subdirectories inside nested ul with role="group"', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Group check',
+        expandedPaths: new Set(['src']),
+      })
+    );
+
+    expect(html).toContain('role="group"');
+  });
+
+  it('renders file items with role="treeitem" and aria-selected state', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Selected check',
+        selectedPath: 'README.md',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('data-file-path="README.md"');
+    expect(html).toContain('role="treeitem" aria-selected="true"');
+    expect(html).toContain('data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('aria-selected="false"');
+  });
+
+  it('applies performance rendering optimizations: tree-row-wrapper class and content-visibility styling', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Performance check',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('tree-row-wrapper');
+    expect(html).toContain('content-visibility:auto');
+    expect(html).toContain('contain-intrinsic-size:auto 28px');
+  });
+});
+
+describe('Roving Tabindex Behavior', () => {
+  const sampleFiles: TreeFile[] = [
+    { file: 'README.md' },
+    { file: 'src/components/Button.tsx' },
+    { file: 'src/utils/format.ts' },
+  ];
+  const renderFileMock = (f: TreeFile, meta?: { isSelected: boolean; tabIndex: number }) =>
+    createElement('button', { type: 'button', tabIndex: meta?.tabIndex }, f.file);
+
+  it('assigns tabIndex=0 to first row and tabIndex=-1 to all subsequent rows when unselected', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Roving tabindex unselected',
+        defaultExpanded: false,
+      })
+    );
+
+    // In visual tree order, 'src' folder comes first: it should have tabindex="0"
+    expect(html).toContain('data-path="src" tabindex="0"');
+    // README.md file comes second: it should have tabindex="-1"
+    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
+  });
+
+  it('assigns tabIndex=0 to selected file and tabIndex=-1 to all other rows', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Roving tabindex with selection',
+        selectedPath: 'README.md',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('tabindex="0" data-file-path="README.md"');
+    expect(html).toContain('data-path="src" tabindex="-1"');
+    expect(html).toContain('tabindex="-1" data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('tabindex="-1" data-file-path="src/utils/format.ts"');
+  });
+
+  it('assigns tabIndex=0 to nested selected file when expanded', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Nested selection roving tabindex',
+        selectedPath: 'src/components/Button.tsx',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('data-path="src" tabindex="-1"');
+    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
+  });
+
+  it('clones tabIndex and aria-selected onto custom renderFile element', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: (f, meta) =>
+          createElement('span', { className: 'custom-file-row', 'data-tab': meta?.tabIndex }, f.file),
+        label: 'Cloned props test',
+        selectedPath: 'README.md',
+        defaultExpanded: true,
+      })
+    );
+
+    expect(html).toContain('data-tree-row="file"');
+    expect(html).toContain('data-file-path="README.md"');
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('aria-selected="true"');
+  });
+
+  it('falls back to tabIndex=0 on the first visible folder when selected file is in a collapsed directory', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Collapsed selection fallback',
+        selectedPath: 'src/components/Button.tsx',
+        expandedPaths: new Set(),
+      })
+    );
+
+    // src folder is the first visible row -> has tabindex="0"
+    expect(html).toContain('data-path="src" tabindex="0"');
+    // README.md is visible second row -> tabindex="-1"
+    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
+    // Button.tsx is inside collapsed folder, so not in the rendered DOM
+    expect(html).not.toContain('data-file-path="src/components/Button.tsx"');
+  });
+
+  it('climbs directory hierarchy step-by-step with ArrowLeft', () => {
+    const deepRows: VisibleTreeRow[] = [
+      { type: 'folder', id: 'dir:src', path: 'src', name: 'src', parentPath: null, isExpanded: true },
+      { type: 'folder', id: 'dir:src/components', path: 'src/components', name: 'components', parentPath: 'src', isExpanded: true },
+      { type: 'folder', id: 'dir:src/components/ui', path: 'src/components/ui', name: 'ui', parentPath: 'src/components', isExpanded: false },
+      { type: 'file', id: 'file:src/components/ui/Button.tsx', path: 'src/components/ui/Button.tsx', name: 'Button.tsx', parentPath: 'src/components/ui' },
+    ];
+
+    // From child file: ArrowLeft moves focus to parent folder
+    const action1 = computeTreeKeyNavigation('ArrowLeft', deepRows[3], deepRows);
+    expect(action1).toEqual({ type: 'focus', targetRow: deepRows[2] });
+
+    // From collapsed folder with parent: ArrowLeft moves focus to parent folder
+    const action2 = computeTreeKeyNavigation('ArrowLeft', deepRows[2], deepRows);
+    expect(action2).toEqual({ type: 'focus', targetRow: deepRows[1] });
+
+    // From expanded folder: ArrowLeft collapses it
+    const action3 = computeTreeKeyNavigation('ArrowLeft', deepRows[1], deepRows);
+    expect(action3).toEqual({ type: 'toggle', path: 'src/components' });
+  });
+
+  it('computes visible rows and keyboard actions correctly with filtered search results', () => {
+    const query = 'format';
+    const filteredFiles = filterTreeFiles(sampleFiles, query);
+    const root = buildCompactedTree(filteredFiles);
+    const visible = getVisibleTreeRows(root, new Set(['src/utils']));
+    expect(visible).toEqual([
+      { type: 'folder', id: 'dir:src/utils', path: 'src/utils', name: 'src/utils', parentPath: null, isExpanded: true },
+      { type: 'file', id: 'file:src/utils/format.ts', path: 'src/utils/format.ts', name: 'format.ts', parentPath: 'src/utils' },
+    ]);
+
+    const downAction = computeTreeKeyNavigation('ArrowDown', visible[0], visible);
+    expect(downAction).toEqual({ type: 'focus', targetRow: visible[1] });
+
+    const upAction = computeTreeKeyNavigation('ArrowUp', visible[1], visible);
+    expect(upAction).toEqual({ type: 'focus', targetRow: visible[0] });
+  });
+});
+
+
 
 

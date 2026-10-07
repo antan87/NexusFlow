@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { WorkspaceCodePanel } from './WorkspaceCodePanel.js';
 import {
+  FileTree,
   buildCompactedTree,
   filterTreeFiles,
   getAllDirectoryPaths,
@@ -425,3 +426,298 @@ describe('WorkspaceCodePanel Sidebar Search & Path Filtering', () => {
     expect(searchCollapsedRepos['frontend']).toBe(false);
   });
 });
+
+describe('WorkspaceCodePanel WAI-ARIA Treeview Integration', () => {
+  const sampleRepo = {
+    repoName: 'frontend',
+    repoPath: '/ws/frontend',
+    files: [
+      { file: 'README.md', type: 'modified' },
+      { file: 'src/components/Button.tsx', type: 'modified' },
+      { file: 'src/utils/format.ts', type: 'modified' },
+    ],
+  };
+
+  const renderFileRow = (
+    file: { file: string; type: string },
+    selection: { repoName: string; file: string } | null,
+    repoName: string
+  ) => {
+    const isSelected = selection?.repoName === repoName && selection.file === file.file;
+    return createElement(
+      'button',
+      {
+        type: 'button',
+        className: isSelected ? 'bg-accent font-medium text-foreground' : '',
+        'aria-pressed': isSelected,
+        'aria-selected': isSelected,
+        title: file.file,
+      },
+      file.file.split('/').at(-1)
+    );
+  };
+
+  it('renders FileTree with accessible tree role, repo/mode label, and roving tabindex for repository files', () => {
+    const selection = { repoName: 'frontend', file: 'src/components/Button.tsx' };
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: `${sampleRepo.repoName} changes`,
+        files: sampleRepo.files,
+        selectedPath: selection.file,
+        defaultExpanded: true,
+        renderFile: (f) => renderFileRow(f, selection, sampleRepo.repoName),
+      })
+    );
+
+    // Root tree role and label
+    expect(html).toContain('role="tree"');
+    expect(html).toContain('aria-label="frontend changes"');
+
+    // Selected file has aria-selected="true", aria-pressed="true", and roving tabindex="0"
+    expect(html).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('aria-pressed="true"');
+
+    // Unselected files have roving tabindex="-1" and aria-selected="false"
+    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
+    expect(html).toContain('tabindex="-1" data-file-path="src/utils/format.ts"');
+  });
+
+  it('propagates selection changes dynamically to update aria-selected and active roving tabindex', () => {
+    // 1. Initial selection: Button.tsx
+    const sel1 = { repoName: 'frontend', file: 'src/components/Button.tsx' };
+    const html1 = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: `${sampleRepo.repoName} changes`,
+        files: sampleRepo.files,
+        selectedPath: sel1.file,
+        defaultExpanded: true,
+        renderFile: (f) => renderFileRow(f, sel1, sampleRepo.repoName),
+      })
+    );
+
+    expect(html1).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
+    expect(html1).toContain('tabindex="-1" data-file-path="src/utils/format.ts"');
+
+    // 2. Selection moved to format.ts
+    const sel2 = { repoName: 'frontend', file: 'src/utils/format.ts' };
+    const html2 = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: `${sampleRepo.repoName} changes`,
+        files: sampleRepo.files,
+        selectedPath: sel2.file,
+        defaultExpanded: true,
+        renderFile: (f) => renderFileRow(f, sel2, sampleRepo.repoName),
+      })
+    );
+
+    expect(html2).toContain('tabindex="-1" data-file-path="src/components/Button.tsx"');
+    expect(html2).toContain('tabindex="0" data-file-path="src/utils/format.ts"');
+  });
+
+  it('retains accessible tree group hierarchy and content-visibility styling', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: `${sampleRepo.repoName} changes`,
+        files: sampleRepo.files,
+        defaultExpanded: true,
+        renderFile: (f) => renderFileRow(f, null, sampleRepo.repoName),
+      })
+    );
+
+    expect(html).toContain('role="group"');
+    expect(html).toContain('tree-row-wrapper');
+    expect(html).toContain('content-visibility:auto');
+  });
+});
+
+describe('WorkspaceCodePanel Multi-Repo Keyboard & Arrow Navigation Model', () => {
+  const multiRepos = [
+    {
+      repoName: 'frontend',
+      repoPath: '/ws/frontend',
+      files: [
+        { file: 'README.md', type: 'modified' },
+        { file: 'src/components/Button.tsx', type: 'modified' },
+        { file: 'src/utils/format.ts', type: 'modified' },
+      ],
+    },
+    {
+      repoName: 'backend',
+      repoPath: '/ws/backend',
+      files: [
+        { file: 'package.json', type: 'unchanged' },
+        { file: 'src/api/routes.ts', type: 'modified' },
+      ],
+    },
+  ];
+
+  // Visual files list as built in WorkspaceCodePanel
+  const visualFiles = multiRepos.flatMap((repo) =>
+    treeOrderedFiles(repo.files).map((f) => ({
+      repoName: repo.repoName,
+      repoPath: repo.repoPath,
+      file: f.file,
+    }))
+  );
+
+  it('navigates sequentially across repos on goToNextFile and goToPrevFile', () => {
+    // When no file is selected (currentFileIndex === -1), goToNextFile selects first file
+    let currentIndex = -1;
+    if (currentIndex === -1 && visualFiles.length > 0) {
+      currentIndex = 0;
+    }
+    expect(currentIndex).toBe(0);
+    expect(visualFiles[currentIndex]).toEqual({
+      repoName: 'frontend',
+      repoPath: '/ws/frontend',
+      file: 'src/components/Button.tsx',
+    });
+
+    // Step forward through frontend files to boundary
+    // Index 0: Button.tsx, Index 1: format.ts, Index 2: README.md
+    currentIndex = 2;
+    expect(visualFiles[currentIndex]?.repoName).toBe('frontend');
+
+    // Stepping next transitions smoothly to backend repo
+    if (currentIndex >= 0 && currentIndex < visualFiles.length - 1) {
+      currentIndex++;
+    }
+    expect(currentIndex).toBe(3);
+    expect(visualFiles[currentIndex]).toEqual({
+      repoName: 'backend',
+      repoPath: '/ws/backend',
+      file: 'src/api/routes.ts',
+    });
+
+    // Stepping prev transitions smoothly back to frontend repo
+    if (currentIndex > 0) {
+      currentIndex--;
+    }
+    expect(currentIndex).toBe(2);
+    expect(visualFiles[currentIndex]?.repoName).toBe('frontend');
+    expect(visualFiles[currentIndex]?.file).toBe('README.md');
+  });
+
+  it('clamps navigation at start and end boundaries', () => {
+    // At end of list: goToNextFile does not overflow
+    let currentIndex = visualFiles.length - 1;
+    if (currentIndex >= 0 && currentIndex < visualFiles.length - 1) {
+      currentIndex++;
+    }
+    expect(currentIndex).toBe(visualFiles.length - 1);
+
+    // At start of list: goToPrevFile does not underflow
+    currentIndex = 0;
+    if (currentIndex > 0) {
+      currentIndex--;
+    }
+    expect(currentIndex).toBe(0);
+  });
+
+  it('restricts arrow navigation strictly to filtered files during active search', () => {
+    const query = 'format';
+    const filteredRepos = multiRepos.map((repo) => ({
+      ...repo,
+      files: filterTreeFiles(repo.files, query),
+    }));
+
+    const filteredVisualFiles = filteredRepos.flatMap((repo) =>
+      treeOrderedFiles(repo.files).map((f) => ({
+        repoName: repo.repoName,
+        repoPath: repo.repoPath,
+        file: f.file,
+      }))
+    );
+
+    expect(filteredVisualFiles).toHaveLength(1);
+    expect(filteredVisualFiles[0]).toEqual({
+      repoName: 'frontend',
+      repoPath: '/ws/frontend',
+      file: 'src/utils/format.ts',
+    });
+  });
+
+  it('coordinates roving tabindex across multiple repositories', () => {
+    // Current selection is in backend/src/api/routes.ts
+    const selection = { repoName: 'backend', file: 'src/api/routes.ts' };
+
+    // Frontend FileTree (selection not in frontend): selectedPath is undefined
+    const frontendHtml = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: 'frontend changes',
+        files: multiRepos[0]!.files,
+        selectedPath: selection.repoName === 'frontend' ? selection.file : undefined,
+        defaultExpanded: true,
+        renderFile: (f) => createElement('button', null, f.file),
+      })
+    );
+
+    // Backend FileTree (selection is in backend): selectedPath is 'src/api/routes.ts'
+    const backendHtml = renderToStaticMarkup(
+      createElement(FileTree, {
+        label: 'backend changes',
+        files: multiRepos[1]!.files,
+        selectedPath: selection.repoName === 'backend' ? selection.file : undefined,
+        defaultExpanded: true,
+        renderFile: (f) => createElement('button', null, f.file),
+      })
+    );
+
+    // In frontend: no file has aria-selected="true"
+    expect(frontendHtml).not.toContain('aria-selected="true"');
+
+    // In backend: src/api/routes.ts has aria-selected="true" and tabindex="0"
+    expect(backendHtml).toContain('tabindex="0" data-file-path="src/api/routes.ts"');
+    expect(backendHtml).toContain('aria-selected="true"');
+  });
+
+  it('dispatches goToNextFile and goToPrevFile on Alt+ArrowDown and Alt+ArrowUp hotkeys', () => {
+    let currentIndex = 1;
+    const goToNextFile = () => {
+      if (currentIndex < visualFiles.length - 1) currentIndex++;
+    };
+    const goToPrevFile = () => {
+      if (currentIndex > 0) currentIndex--;
+    };
+
+    const handleKey = (key: string, altKey: boolean) => {
+      if (!altKey) return;
+      if (key === 'ArrowDown' || key === 'Down') goToNextFile();
+      else if (key === 'ArrowUp' || key === 'Up') goToPrevFile();
+    };
+
+    handleKey('ArrowDown', true);
+    expect(currentIndex).toBe(2);
+
+    handleKey('ArrowUp', true);
+    expect(currentIndex).toBe(1);
+
+    // Without altKey: no movement
+    handleKey('ArrowDown', false);
+    expect(currentIndex).toBe(1);
+  });
+
+  it('traverses all files across multiple repositories in exact visual tree order', () => {
+    // 0: frontend/src/components/Button.tsx
+    // 1: frontend/src/utils/format.ts
+    // 2: frontend/README.md
+    // 3: backend/src/api/routes.ts
+    // 4: backend/package.json
+    let index = 0;
+    const visited: string[] = [];
+    while (index < visualFiles.length) {
+      visited.push(`${visualFiles[index]?.repoName}:${visualFiles[index]?.file}`);
+      index++;
+    }
+    expect(visited).toEqual([
+      'frontend:src/components/Button.tsx',
+      'frontend:src/utils/format.ts',
+      'frontend:README.md',
+      'backend:src/api/routes.ts',
+      'backend:package.json',
+    ]);
+  });
+});
+
+

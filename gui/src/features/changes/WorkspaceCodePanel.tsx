@@ -666,6 +666,7 @@ export function WorkspaceCodePanel({
                       searchQuery={searchQuery}
                       revealPath={selection?.repoName === repo.repoName ? selection.file : undefined}
                       revealKey={revealKey}
+                      selectedPath={selection?.repoName === repo.repoName ? selection.file : undefined}
                       defaultExpanded={mode === 'changes' || !!searchQuery.trim()}
                       expandedPaths={effectiveExpandedPathsByRepo[repo.repoName]}
                       onExpandedPathsChange={(paths) => {
@@ -679,16 +680,18 @@ export function WorkspaceCodePanel({
                         const glyph = fileTypeGlyph(file.file);
                         const Glyph = glyph.icon;
                         const changed = file.type !== 'unchanged';
+                        const isSelected = selection?.repoName === repo.repoName && selection.file === file.file;
                         return (
                           <button
                             className={cn(
                               'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-accent transition-colors cursor-pointer',
-                              selection?.repoName === repo.repoName && selection.file === file.file && 'bg-accent font-medium text-foreground'
+                              isSelected && 'bg-accent font-medium text-foreground'
                             )}
-                            aria-pressed={selection?.repoName === repo.repoName && selection.file === file.file}
+                            aria-pressed={isSelected}
+                            aria-selected={isSelected}
                             title={`${file.file}${changed ? ` · ${file.type}` : ''}`}
                             onClick={() => {
-                              if (selection?.repoName === repo.repoName && selection.file === file.file && !selection.line) {
+                              if (isSelected && !selection.line) {
                                 return;
                               }
                               setReferenceError('');
