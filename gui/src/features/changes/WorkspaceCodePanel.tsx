@@ -609,7 +609,7 @@ export function WorkspaceCodePanel({
               )}
             </div>
             <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground px-0.5">
-              <span>
+              <span data-testid="search-match-count">
                 {searchQuery.trim()
                   ? `${matchingFilesCount} / ${totalFilesCount} files`
                   : `${totalFilesCount} files`}

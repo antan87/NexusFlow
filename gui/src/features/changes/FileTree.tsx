@@ -476,20 +476,33 @@ export function FileTree<T extends TreeFile>({
   const isControlled = controlledExpandedPaths !== undefined;
   const currentExpandedPaths = isControlled ? controlledExpandedPaths : internalExpandedPaths;
 
+  const onExpandedPathsChangeRef = useRef(onExpandedPathsChange);
+  const controlledPathsRef = useRef(controlledExpandedPaths);
+
+  useEffect(() => {
+    onExpandedPathsChangeRef.current = onExpandedPathsChange;
+    controlledPathsRef.current = controlledExpandedPaths;
+  });
+
   const setExpandedPaths = useCallback(
     (updater: (prev: Set<string>) => Set<string>) => {
-      if (isControlled) {
-        const next = updater(controlledExpandedPaths);
-        onExpandedPathsChange?.(next);
+      if (controlledPathsRef.current !== undefined) {
+        const current = controlledPathsRef.current;
+        const next = updater(current);
+        if (next !== current && (next.size !== current.size || [...next].some(p => !current.has(p)))) {
+          onExpandedPathsChangeRef.current?.(next);
+        }
       } else {
         setInternalExpandedPaths(prev => {
           const next = updater(prev);
-          onExpandedPathsChange?.(next);
+          if (next !== prev && (next.size !== prev.size || [...next].some(p => !prev.has(p)))) {
+            onExpandedPathsChangeRef.current?.(next);
+          }
           return next;
         });
       }
     },
-    [isControlled, controlledExpandedPaths, onExpandedPathsChange]
+    []
   );
 
   const togglePath = useCallback(
@@ -708,19 +721,6 @@ export function FileTree<T extends TreeFile>({
                 open={isExpanded}
                 data-path={child.path}
                 className="min-w-0 group/dir"
-                onToggle={(e) => {
-                  if (e.target !== e.currentTarget) return;
-                  const isOpen = (e.currentTarget as HTMLDetailsElement).open;
-                  if (isOpen !== isExpanded) {
-                    setExpandedPaths(prev => {
-                      const next = new Set(prev);
-                      if (isOpen) next.add(child.path);
-                      else next.delete(child.path);
-                      return next;
-                    });
-                    onTogglePath?.(child.path, isOpen);
-                  }
-                }}
               >
                 {/* A native disclosure triangle plus a closed/open folder pair reads as
                     a tree far faster than a single static folder glyph. */}

@@ -30,7 +30,7 @@ test('shows expandable changed and repository file trees beside the CLI terminal
   await toggleInspector(page, chat, 'Code');
   const code = chat.getByRole('region', { name: 'Workspace code' });
   await expect(code.getByRole('navigation', { name: 'repo changes' })).toBeVisible();
-  await expect(code.getByText('src', { exact: true })).toBeVisible();
+  await expect(code.getByText('src/nested', { exact: true })).toBeVisible();
   await code.getByRole('button', { name: /changed\.ts/ }).click();
   await expect(code.getByText('repo/src/nested/changed.ts')).toBeVisible();
   await code.getByRole('button', { name: 'Files', exact: true }).click();
@@ -60,11 +60,11 @@ test('filters files in code sidebar via search input and clears filter', async (
 
   const searchInput = code.getByRole('textbox', { name: 'Filter files' });
   await expect(searchInput).toBeVisible();
-  await expect(code.getByText('2 files')).toBeVisible();
+  await expect(code.getByTestId('search-match-count')).toHaveText('2 files');
 
   // Type filter query "Button"
   await searchInput.fill('Button');
-  await expect(code.getByText('1 / 2 files')).toBeVisible();
+  await expect(code.getByTestId('search-match-count')).toHaveText('1 / 2 files');
   await expect(code.getByRole('button', { name: /Button\.tsx/ })).toBeVisible();
   await expect(code.getByRole('button', { name: /format\.ts/ })).toHaveCount(0);
 
@@ -72,7 +72,7 @@ test('filters files in code sidebar via search input and clears filter', async (
   const clearBtn = code.getByRole('button', { name: 'Clear filter' });
   await expect(clearBtn).toBeVisible();
   await clearBtn.click();
-  await expect(code.getByText('2 files')).toBeVisible();
+  await expect(code.getByTestId('search-match-count')).toHaveText('2 files');
   await expect(code.getByRole('button', { name: /format\.ts/ })).toBeVisible();
 });
 

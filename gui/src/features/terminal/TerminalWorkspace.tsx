@@ -191,6 +191,9 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
       }
       const resolved = resolveFileReference(cleanPath, repos);
       if (!resolved.file) {
+        if (inspector === 'code') {
+          setOpenReference(current => ({ ...cleanRef, id: (current?.id ?? 0) + 1 }));
+        }
         return;
       }
     } catch {
