@@ -132,3 +132,18 @@ export function mapRealLineToSnippetLine(realLine: number, hunks: DiffHunkAction
   return null;
 }
 
+/**
+ * Computes the 1-based snippet line where hunk at index `hunkIndex` starts in modified snippet buffer.
+ */
+export function getHunkSnippetLine(hunkIndex: number, hunks: DiffHunkAction[]): number {
+  let snippetPos = 1;
+  for (let i = 0; i < hunkIndex && i < hunks.length; i++) {
+    for (const l of hunks[i]?.lines || []) {
+      if (!l.startsWith('-') && !l.startsWith('\\')) {
+        snippetPos++;
+      }
+    }
+  }
+  return snippetPos;
+}
+

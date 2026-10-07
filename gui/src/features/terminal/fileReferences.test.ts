@@ -98,4 +98,18 @@ describe('terminal file references', () => {
       { path: 'README.md', line: undefined },
     ]);
   });
+
+  it('handles trailing colons, periods, parentheses, lowercase anchors, and #L10-20 format', () => {
+    const found = findFileReferences(
+      'at file.ts#L42: found bug, and file.ts:15: error, in file.ts#l99, see file.ts#L10-20. also [link](src/Header.tsx#L30-L40): and [nav](src/Nav.tsx#L50).'
+    );
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: 'file.ts', line: 42 },
+      { path: 'file.ts', line: 15 },
+      { path: 'file.ts', line: 99 },
+      { path: 'file.ts', line: 10 },
+      { path: 'src/Header.tsx', line: 30 },
+      { path: 'src/Nav.tsx', line: 50 },
+    ]);
+  });
 });

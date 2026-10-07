@@ -4,6 +4,17 @@ export interface FileReference { text: string; path: string; line?: number; star
 
 const MARKDOWN_LINK = /\[([^\]]*)\]\((<[^>]+>|[^)]+)\)/g;
 
+function trimTrailingPunctuation(str: string): string {
+  let text = str;
+  while (
+    (/[,'"`\]};.!?)}>]$/.test(text) || (text.endsWith(':') && !/^[a-zA-Z]:$/.test(text)))
+    && !/\(\d+(?:,\d+)?\)$/.test(text)
+  ) {
+    text = text.slice(0, -1);
+  }
+  return text;
+}
+
 /** Find file paths in terminal output, retaining spaces inside quoted paths and stripping markdown/angle wrapper syntax. */
 export function findFileReferences(row: string): FileReference[] {
   const result: FileReference[] = [];
@@ -23,8 +34,7 @@ export function findFileReferences(row: string): FileReference[] {
     }
     if (isWebOrDomain(raw)) continue;
 
-    let text = raw;
-    while (/[,'"`\]};.!?)}>]$/.test(text) && !/\(\d+(?:,\d+)?\)$/.test(text)) text = text.slice(0, -1);
+    const text = trimTrailingPunctuation(raw);
     const location = text.match(/:(\d+)(?::\d+)?$/)
       ?? text.match(/\((\d+)(?:,\d+)?\)$/)
       ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);
@@ -64,8 +74,7 @@ export function findFileReferences(row: string): FileReference[] {
     }
     const token = row.slice(tokenStart, index);
     const leading = token.match(/^[('"`[{<]*/)?.[0].length ?? 0;
-    let text = token.slice(leading);
-    while (/[,'"`\]};.!?)}>]$/.test(text) && !/\(\d+(?:,\d+)?\)$/.test(text)) text = text.slice(0, -1);
+    const text = trimTrailingPunctuation(token.slice(leading));
     const location = text.match(/:(\d+)(?::\d+)?$/)
       ?? text.match(/\((\d+)(?:,\d+)?\)$/)
       ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);

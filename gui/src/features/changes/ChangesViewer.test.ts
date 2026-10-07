@@ -267,4 +267,19 @@ describe('ChangesViewer Jump Bar Search & Filter', () => {
     expect(matchIdx).not.toBe(-1);
     expect(allVisualFiles[matchIdx]?.file).toBe('api/server.ts');
   });
+
+  it('normalizes Windows backslashes in getFileDomId without differing DOM IDs', () => {
+    const unixId = getFileDomId('my-repo', 'src/components/Button.tsx');
+    const winId = getFileDomId('my-repo', 'src\\components\\Button.tsx');
+    expect(unixId).toBe(winId);
+  });
+
+  it('resolves files with repoName prefix in findChangedFileIndex', () => {
+    const allVisualFiles = [
+      { repoName: 'repo-a', file: 'src/Button.tsx' },
+      { repoName: 'repo-b', file: 'api/server.ts' },
+    ];
+    expect(findChangedFileIndex(allVisualFiles, 'repo-b', 'repo-b/api/server.ts')).toBe(1);
+    expect(findChangedFileIndex(allVisualFiles, undefined, 'repo-a/src/Button.tsx')).toBe(0);
+  });
 });

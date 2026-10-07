@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { parseUnifiedDiff, mapRealLineToSnippetLine } from './diffParser.ts';
+import { parseUnifiedDiff, mapRealLineToSnippetLine, getHunkSnippetLine } from './diffParser.ts';
 
 const SAMPLE_PATCH = `--- a/src/calc.ts
 +++ b/src/calc.ts
@@ -86,4 +86,8 @@ test('mapRealLineToSnippetLine maps modified lines to 1-based snippet buffer ind
   assert.equal(mapRealLineToSnippetLine(1, result.hunks), null);
   assert.equal(mapRealLineToSnippetLine(30, result.hunks), null);
   assert.equal(mapRealLineToSnippetLine(100, result.hunks), null);
+
+  // getHunkSnippetLine returns 1-based start line of each hunk in snippet buffer
+  assert.equal(getHunkSnippetLine(0, result.hunks), 1);
+  assert.equal(getHunkSnippetLine(1, result.hunks), 5);
 });

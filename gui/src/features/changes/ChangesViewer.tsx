@@ -520,7 +520,9 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       if (pendingScrollIdRef.current !== domId) return;
       const elem = document.getElementById(domId);
       if (elem) {
-        elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (typeof elem.scrollIntoView === 'function') {
+          elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
         pendingScrollIdRef.current = null;
         return;
       }
@@ -611,8 +613,16 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
 
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
   const handleCrossFileOpen = useCallback((targetRepo: string, rawTargetFile: string, rawLine?: number) => {
-    let targetFile = rawTargetFile;
+    let targetFile = rawTargetFile.replace(/^<+|>+$/g, '').trim();
     let line = rawLine;
+
+    // Strip trailing punctuation before anchor
+    while (
+      (/[,'"`\]};.!?)}>]$/.test(targetFile) || (targetFile.endsWith(':') && !/^[a-zA-Z]:$/.test(targetFile)))
+      && !/\(\d+(?:,\d+)?\)$/.test(targetFile)
+    ) {
+      targetFile = targetFile.slice(0, -1).trim();
+    }
 
     // Extract #L<line> or :<line> if present in targetFile
     const lineAnchor = targetFile.match(/#L(\d+)(?:-L?\d+)?$/i)
@@ -624,6 +634,15 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         if (Number.isSafeInteger(parsed) && parsed > 0) line = parsed;
       }
       targetFile = targetFile.slice(0, -lineAnchor[0].length);
+    }
+    targetFile = targetFile.replace(/#.*$/, '');
+
+    if (/^file:\/\//i.test(targetFile)) {
+      try {
+        targetFile = decodeURIComponent(new URL(targetFile).pathname).replace(/^\/([a-z]:\/)/i, '$1');
+      } catch {
+        targetFile = targetFile.replace(/^file:\/\//i, '');
+      }
     }
     targetFile = targetFile.replace(/#.*$/, '');
 

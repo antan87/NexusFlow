@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
-import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
+import { parseUnifiedDiff, mapRealLineToSnippetLine, getHunkSnippetLine } from './utils/diffParser.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
 import { openFileInEditor, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
@@ -89,6 +89,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const [refineFeedback, setRefineFeedback] = useState('');
   const [symbolsOpen, setSymbolsOpen] = useState(false);
   const [realTargetLine, setRealTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [explicitSnippetTargetLine, setExplicitSnippetTargetLine] = useState<number | undefined>(undefined);
   const [jumpNonce, setJumpNonce] = useState(0);
   const editorLabel = getEditorLabel(defaultEditor);
 
@@ -120,6 +121,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       lastTargetLineJumpRef.current = jumpKey;
 
       setRealTargetLine(initialTargetLine);
+      setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
       const matchingIndex = hunks.findIndex(
         (h) =>
@@ -135,6 +137,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   // When !fullFileContent, map real line numbers to snippet lines for MonacoDiffAdapter,
   // while FallbackDiffAdapter receives real line numbers (matching its data-mod-line attributes).
   const monacoTargetLine = useMemo(() => {
+    if (!fullFileContent && explicitSnippetTargetLine !== undefined) {
+      return explicitSnippetTargetLine;
+    }
     if (!realTargetLine || realTargetLine <= 0) return undefined;
     if (fullFileContent) return realTargetLine;
     const snippetLine = mapRealLineToSnippetLine(realTargetLine, hunks);
@@ -149,16 +154,10 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         realTargetLine <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
     );
     if (hunkIdx !== -1) {
-      let snippetPos = 1;
-      for (let i = 0; i < hunkIdx; i++) {
-        for (const l of hunks[i].lines || []) {
-          if (l.startsWith(' ') || l.startsWith('+')) snippetPos++;
-        }
-      }
-      return snippetPos;
+      return getHunkSnippetLine(hunkIdx, hunks);
     }
     return undefined;
-  }, [realTargetLine, fullFileContent, hunks]);
+  }, [explicitSnippetTargetLine, realTargetLine, fullFileContent, hunks]);
 
   const fallbackTargetLine = realTargetLine;
 
@@ -177,9 +176,14 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     if (index >= 0 && index < hunks.length && hunks[index]) {
       setActiveHunkIndex(index);
       setRealTargetLine(Math.max(1, hunks[index].startLineModified));
+      if (!fullFileContent) {
+        setExplicitSnippetTargetLine(getHunkSnippetLine(index, hunks));
+      } else {
+        setExplicitSnippetTargetLine(undefined);
+      }
       setJumpNonce((n) => n + 1);
     }
-  }, [hunks]);
+  }, [hunks, fullFileContent]);
 
   const handleNextHunk = useCallback(() => {
     if (activeHunkIndex < hunks.length - 1) {
@@ -240,6 +244,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         }
       }
       setRealTargetLine(symbol.lineNumber);
+      setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
 
       // Synchronize active hunk with target symbol

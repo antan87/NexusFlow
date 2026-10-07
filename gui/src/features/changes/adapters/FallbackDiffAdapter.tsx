@@ -16,12 +16,13 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
   jumpNonce,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastJumpNonceRef = useRef<number | undefined>(undefined);
+  const lastJumpKeyRef = useRef<string>('');
 
   useEffect(() => {
     if (!containerRef.current || !targetLine || targetLine <= 0) return;
-    if (lastJumpNonceRef.current === jumpNonce) return;
-    lastJumpNonceRef.current = jumpNonce;
+    const jumpKey = `${targetLine}:${jumpNonce ?? 0}`;
+    if (lastJumpKeyRef.current === jumpKey) return;
+    lastJumpKeyRef.current = jumpKey;
 
     const el = containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`) ||
       containerRef.current.querySelector<HTMLElement>('[data-is-target="true"]');

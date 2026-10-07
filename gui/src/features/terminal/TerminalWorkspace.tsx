@@ -101,12 +101,27 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
     let cleanPath = reference.path.replace(/^<+|>+$/g, '').trim();
     if (!cleanPath) return;
 
+    while (
+      (/[,'"`\]};.!?)}>]$/.test(cleanPath) || (cleanPath.endsWith(':') && !/^[a-zA-Z]:$/.test(cleanPath)))
+      && !/\(\d+(?:,\d+)?\)$/.test(cleanPath)
+      && !/\]\([^)]+\)$/.test(cleanPath)
+    ) {
+      cleanPath = cleanPath.slice(0, -1).trim();
+    }
+
     const mdMatch = /^\[([^\]]*)\]\((<[^>]+>|[^)]+)\)$/.exec(cleanPath);
     if (mdMatch) {
       cleanPath = mdMatch[2].trim();
       while (cleanPath.startsWith('<') && cleanPath.endsWith('>')) {
         cleanPath = cleanPath.slice(1, -1).trim();
       }
+    }
+
+    while (
+      (/[,'"`\]};.!?)}>]$/.test(cleanPath) || (cleanPath.endsWith(':') && !/^[a-zA-Z]:$/.test(cleanPath)))
+      && !/\(\d+(?:,\d+)?\)$/.test(cleanPath)
+    ) {
+      cleanPath = cleanPath.slice(0, -1).trim();
     }
 
     if (isWebOrDomain(cleanPath)) {

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { PluggableDiffViewer } from './PluggableDiffViewer.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
-import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
+import { parseUnifiedDiff, mapRealLineToSnippetLine, getHunkSnippetLine } from './utils/diffParser.js';
 
 describe('PluggableDiffViewer & Diff Adapters', () => {
   const samplePatch = [
@@ -64,6 +64,10 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
     // Outside hunks returns null
     expect(mapRealLineToSnippetLine(1, parsed.hunks)).toBeNull();
     expect(mapRealLineToSnippetLine(30, parsed.hunks)).toBeNull();
+
+    // Hunk navigation maps directly to start snippet line of each hunk
+    expect(getHunkSnippetLine(0, parsed.hunks)).toBe(1);
+    expect(getHunkSnippetLine(1, parsed.hunks)).toBe(5);
   });
 
   it('FallbackDiffAdapter renders lines with data-mod-line attributes corresponding to real modified lines', () => {

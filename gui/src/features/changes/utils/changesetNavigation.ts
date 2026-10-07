@@ -41,8 +41,13 @@ export function findChangedFileIndex(
   const anyRepo = !targetRepo || targetRepo === WILDCARD_REPO;
   const byRelativePath = (): number[] => {
     const wanted = relativePath(targetFile);
-    return files.flatMap((candidate, index) =>
-      (anyRepo || candidate.repoName === targetRepo) && relativePath(candidate.file) === wanted ? [index] : []);
+    return files.flatMap((candidate, index) => {
+      const candRel = relativePath(candidate.file);
+      const candWithRepo = `${candidate.repoName}/${candRel}`;
+      const repoMatches = anyRepo || candidate.repoName === targetRepo;
+      const pathMatches = candRel === wanted || candWithRepo === wanted;
+      return repoMatches && pathMatches ? [index] : [];
+    });
   };
 
   let matches: number[];
@@ -74,7 +79,7 @@ export function repoDirName(repoPath: string): string {
  */
 export function getFileDomId(repoName: string, filePath: string): string {
   const sanitize = (str: string) =>
-    str.replace(/[^a-zA-Z0-9_./-]/g, (ch) => `_${ch.charCodeAt(0).toString(16)}_`);
+    toSlashes(str).replace(/[^a-zA-Z0-9_./-]/g, (ch) => `_${ch.charCodeAt(0).toString(16)}_`);
   return `file-diff--${sanitize(repoName)}--${sanitize(filePath)}`;
 }
 

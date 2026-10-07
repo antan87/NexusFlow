@@ -86,7 +86,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
   });
 
   const lastDiffLayoutKeyRef = useRef<string>('');
-  const lastJumpNonceRef = useRef<number | undefined>(undefined);
+  const lastJumpKeyRef = useRef<string>('');
 
   // Dynamically update viewMode without recreating editor
   useEffect(() => {
@@ -120,8 +120,9 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
   // Track targetLine jumps in modified buffer (only on intentional jump requests)
   useEffect(() => {
     if (!editorInstanceRef.current || !targetLine || targetLine <= 0) return;
-    if (lastJumpNonceRef.current === jumpNonce) return;
-    lastJumpNonceRef.current = jumpNonce;
+    const jumpKey = `${targetLine}:${jumpNonce ?? 0}`;
+    if (lastJumpKeyRef.current === jumpKey) return;
+    lastJumpKeyRef.current = jumpKey;
 
     const modifiedEditor = editorInstanceRef.current.getModifiedEditor();
     modifiedEditor.revealLineInCenter(targetLine);
